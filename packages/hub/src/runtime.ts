@@ -1,3 +1,4 @@
+import type { SourceIcon } from '@switchboard/core';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -99,7 +100,7 @@ export interface RuntimeDeps {
   /** Builds a polling source from its settings, or says why it cannot. Null for a source Switchboard does not know. */
   makeSource(name: string, settings: SourceSettings): { source: Source } | { error: string } | null;
   /** The source kind's plugin label; undefined for a kind with no plugin. */
-  kindInfo?(kind: string): { label: string } | undefined;
+  kindInfo?(kind: string): { label: string; icon?: SourceIcon } | undefined;
   now(): number;
   sleep(ms: number): Promise<void>;
   newSessionId(): string;

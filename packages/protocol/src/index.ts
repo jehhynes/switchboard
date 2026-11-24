@@ -4,6 +4,7 @@
  * (`packages/hub/src/protocol.ts`), so a change on either side that breaks the other fails the build.
  */
 
+import type { SourceIcon } from '@switchboard/core';
 import type { BackgroundCounts, Mark } from '@switchboard/core/group';
 import type { ContextView } from '@switchboard/conversation/contextMeter';
 import type { LedgerQuestion } from '@switchboard/conversation/questions';
@@ -297,6 +298,7 @@ export interface HistoryView {
 export interface SourceGroup {
   kind: string;
   label?: string;
+  icon?: SourceIcon;
   /** Whether any source of the kind is polled. */
   enabled: boolean;
   /** The icon's tooltip: each source and whether it is polled, then what a click does. */

@@ -87,6 +87,17 @@ describe('PluginRegistry', () => {
 });
 
 describe('pluginError', () => {
+  it('accepts filled path icons and rejects malformed icon metadata', () => {
+    const check = (icon: unknown) => pluginError({ kind: 'forum', label: 'Forum', icon, optionsError: () => null, create: () => null });
+    const icon = { viewBox: '0 0 24 24', path: 'M0 0H24V24H0Z' };
+
+    expect(check(icon)).toBeNull();
+    expect(check({ ...icon, color: '#357a', width: 24, fillRule: 'evenodd' })).toBeNull();
+    for (const value of [null, {}, { ...icon, viewBox: '0 0 0 24' }, { ...icon, viewBox: '0 0 0x10 24' }, { ...icon, viewBox: '0 0 Infinity 24' }, { ...icon, path: '' }, { ...icon, color: 'url(https://example.test/icon)' }, { ...icon, width: 0 }, { ...icon, width: 65 }, { ...icon, width: NaN }, { ...icon, fillRule: 'other' }]) {
+      expect(check(value)).toMatch(/^its icon needs/);
+    }
+  });
+
   it('names what a default export lacks', () => {
     expect(pluginError(undefined)).toBe('its default export is not a source plugin.');
     expect(pluginError({ kind: 'forum', label: '', optionsError: () => null, create: () => null })).toBe('it needs a label, optionsError and create.');

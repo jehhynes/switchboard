@@ -6,6 +6,7 @@ import { mount } from './island.js';
 import { HubLog } from './hubLog.js';
 import { AppShortcut } from './appShortcut.js';
 import { trusted } from './trusted.js';
+import type { SourceIcon } from '@switchboard/core';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
 import type { PhoneVoiceState } from './phoneVoice.js';
 import { ConnectionDot } from './connectionView.js';
@@ -172,8 +173,8 @@ const LOGOS: Record<string, { viewBox: string; path: string; stroke: boolean; ev
 };
 
 /** A source kind's logo, grey while off, with `extra` classes; a kind without one shows a plug, so its button is never blank. */
-export function SourceLogo({ kind, enabled, extra = '' }: { kind: string; enabled: boolean; extra?: string }) {
-  const logo = LOGOS[kind];
+export function SourceLogo({ kind, enabled, icon, extra = '' }: { kind: string; enabled: boolean; icon?: SourceIcon | undefined; extra?: string }) {
+  const logo = icon === undefined ? LOGOS[kind] : { ...icon, stroke: false, evenOdd: icon.fillRule === 'evenodd' };
   const state = `${enabled ? '' : ' off'}${extra === '' ? '' : ` ${extra}`}`;
 
   if (logo === undefined) {
@@ -185,7 +186,7 @@ export function SourceLogo({ kind, enabled, extra = '' }: { kind: string; enable
     : { fill: 'currentColor', ...(logo.evenOdd ? { 'fill-rule': 'evenodd' } : {}) };
 
   return (
-    <svg class={`source-logo ${kind}${state}`} viewBox={logo.viewBox} aria-hidden="true" focusable="false">
+    <svg class={`source-logo ${kind}${icon === undefined ? '' : ' custom'}${state}`} style={icon === undefined ? undefined : { '--source-icon-color': icon.color ?? 'currentColor', '--source-icon-width': `${icon.width ?? 16}px` }} viewBox={logo.viewBox} aria-hidden="true" focusable="false">
       <path {...(paint as Record<string, string>)} d={logo.path} />
     </svg>
   );
@@ -368,7 +369,7 @@ function SourceButton({ group, view }: { group: SourceGroup; view: HeaderView })
   return (
     <div class="menu-anchor" data-key={`source-${group.kind}`}>
       <button type="button" class="icon source-toggle" data-action="list-source" data-kind={group.kind} {...state} title={group.title} aria-label={name}>
-        <SourceLogo kind={group.kind} enabled={group.enabled} />
+        <SourceLogo kind={group.kind} enabled={group.enabled} icon={group.icon} />
       </button>
       {several && open ? (
         <ul class="glass menu source-menu" role="menu" aria-label={`${group.label ?? group.kind} sources`}>
@@ -495,7 +496,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
       <li role="none" class="more-source">
         <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={one.enabled} data-action="list-source-entry" data-source={one.name}>
           <Gutter checked={one.enabled} />
-          <SourceLogo kind={group.kind} enabled={one.enabled} />
+          <SourceLogo kind={group.kind} enabled={one.enabled} icon={group.icon} />
           <span class="title">{one.name}</span>
         </button>
       </li>

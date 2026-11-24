@@ -223,7 +223,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     kindInfo: (kind) => {
       const plugin = plugins.current.get(kind);
 
-      return plugin === undefined ? undefined : { label: plugin.label };
+      return plugin === undefined ? undefined : { label: plugin.label, ...(plugin.icon === undefined ? {} : { icon: plugin.icon }) };
     },
     now: Date.now,
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),

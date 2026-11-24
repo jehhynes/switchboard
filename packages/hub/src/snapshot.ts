@@ -1,3 +1,4 @@
+import type { SourceIcon } from '@switchboard/core';
 /**
  * The snapshot every window and the list view are built from (architecture.md § Hub lifecycle): a pure projection of the store and the runtime's
  * inputs, so the hub can build it in a worker thread with its own read-only connection and keep its main thread free.
@@ -30,7 +31,7 @@ export interface SnapshotInputs {
   /** The pull requests of open work items, by URL, as their sources last read them (PRD R92). */
   pullRequests: Record<string, PullRequestStatus>;
   /** Each source kind's plugin label. */
-  kinds: Record<string, { label: string }>;
+  kinds: Record<string, { label: string; icon?: SourceIcon }>;
   now: number;
   configDir: string;
 }
@@ -93,7 +94,7 @@ export interface Snapshot {
   /** Sources being polled. */
   sources: string[];
   /** Every configured source but ad-hoc with its plugin, for the operator's source filter. */
-  sourceStates: { name: string; kind: string; label: string; enabled: boolean }[];
+  sourceStates: { name: string; kind: string; label: string; icon?: SourceIcon; enabled: boolean }[];
   /** Each configured source's playbook namespace, which names a triage in progress, such as `dev:triage`. */
   namespaces: Record<string, string>;
   /** The folder holding settings.json. */
@@ -218,7 +219,7 @@ export function buildSnapshot(store: Store, inputs: SnapshotInputs): Snapshot {
     sources: [...sources],
     sourceStates: Object.entries(settings.sources)
       .filter(([name]) => name !== ADHOC_SOURCE)
-      .map(([name, source]) => ({ name, kind: source.kind, label: inputs.kinds[source.kind]?.label ?? source.kind, enabled: enabled.has(name) })),
+      .map(([name, source]) => ({ name, kind: source.kind, label: inputs.kinds[source.kind]?.label ?? source.kind, ...(inputs.kinds[source.kind]?.icon === undefined ? {} : { icon: inputs.kinds[source.kind]!.icon }), enabled: enabled.has(name) })),
     namespaces: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, source.namespace])),
     configDir: inputs.configDir,
     errors: {

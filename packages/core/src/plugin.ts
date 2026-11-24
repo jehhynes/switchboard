@@ -1,6 +1,16 @@
 import type { SourceSettings } from './settings.js';
 import type { Source } from './source.js';
 
+/** A filled SVG path for a source kind. */
+export interface SourceIcon {
+  viewBox: string;
+  path: string;
+  color?: string;
+  /** Width in pixels; height stays 16 pixels. */
+  width?: number;
+  fillRule?: 'nonzero' | 'evenodd';
+}
+
 /** A source setting the Settings editor shows as a field. */
 export interface SourceField {
   /** The option key, with `.` for a nested key, such as `project.owner`. */
@@ -29,6 +39,7 @@ export interface SourcePlugin {
   kind: string;
   /** The name the page shows, such as `GitHub`. */
   label: string;
+  icon?: SourceIcon;
   fields?: SourceField[];
   /** Null when the source's own keys are valid. */
   optionsError(options: Record<string, unknown>, name: string): string | null;

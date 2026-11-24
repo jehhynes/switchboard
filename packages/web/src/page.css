@@ -111,6 +111,7 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .source-logo { display: block; width: 16px; height: 16px; }
 svg.source-logo.github { color: var(--sb-github); }
 svg.source-logo.zoho { color: #089949; }
+svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-icon-width); }
 .source-logo.off, svg.source-logo.off { color: var(--sb-source-off); }
 .header-separator { flex: none; width: 1px; height: 16px; margin: 0 4px; background: var(--vscode-panel-border); }
 /* The search box and its range under the title row while the search is open (PRD R63). */

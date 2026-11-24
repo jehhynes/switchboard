@@ -556,7 +556,7 @@ describe('createHubApp', () => {
     const plugins = join(temp.home, 'plugins');
     mkdirSync(plugins, { recursive: true });
     const module = (kind: string) =>
-      `export default { kind: '${kind}', label: 'Forum ${kind}', fields: [{ key: 'userId', label: 'User ID', type: 'text' }], ` +
+      `export default { kind: '${kind}', label: 'Forum ${kind}', icon: { viewBox: '0 0 24 24', path: 'M0 0H24V24H0Z' }, fields: [{ key: 'userId', label: 'User ID', type: 'text' }], ` +
       `optionsError: (options, name) => (typeof options.userId === 'string' ? null : 'sources.' + name + '.userId must be set.'), ` +
       `create: (name) => ({ source: { name, keyOfBranch: () => null, context: async () => ({ context: '' }), ` +
       `poll: async () => ({ tickets: [{ sourceKey: '7', ref: 'T7', sourceId: null, title: 'Topic 7', url: 'https://forum.example/t/7', assigned: false, pool: true, sortAt: null, repo: '' }] }) } }) };`;
@@ -569,7 +569,11 @@ describe('createHubApp', () => {
     expect(read.sourceKinds).toEqual(['github', 'zoho', 'forum']);
     expect(read.sourceLabels['forum']).toBe('Forum forum');
     expect(read.sourceFields).toEqual({ forum: [{ key: 'userId', label: 'User ID', type: 'text' }] });
-    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'forum', kind: 'forum', label: 'Forum forum', enabled: false }]);
+    expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'forum', kind: 'forum', label: 'Forum forum', icon: { viewBox: '0 0 24 24', path: 'M0 0H24V24H0Z' }, enabled: false }]);
+    const frames: string[] = [];
+    app.conversation!(app.page!.opened(false), (frame) => frames.push(frame));
+    const hello = frames.find((frame) => frame.includes('event: hello\n'))!;
+    expect(JSON.parse(hello.slice(hello.indexOf('data: ') + 6)).header.sources[0].icon).toEqual({ viewBox: '0 0 24 24', path: 'M0 0H24V24H0Z' });
 
     expect(await toggleSource(app, { name: 'forum', enabled: true })).toEqual({ status: 200, body: { done: true } });
     await until(() => ((app.snapshot() as { pool: { ticket: { title: string } }[] }).pool.find((entry) => entry.ticket.title === 'Topic 7') ?? null));

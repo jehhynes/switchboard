@@ -28,11 +28,28 @@ export function pluginError(value: unknown): string | null {
     return 'it needs a label, optionsError and create.';
   }
 
+  if (plugin.icon !== undefined && !isIcon(plugin.icon)) {
+    return 'its icon needs a numeric viewBox with positive dimensions, a path, and optional hex color, width from 1 to 64 and fillRule of nonzero or evenodd.';
+  }
+
   if (plugin.fields !== undefined && (!Array.isArray(plugin.fields) || !plugin.fields.every(isField))) {
     return 'its fields must each have a key, a label, a type of text, integer, boolean or list, and optional string help and placeholder and boolean advanced.';
   }
 
   return null;
+}
+
+function isIcon(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const icon = value as Record<string, unknown>;
+  const parts = typeof icon['viewBox'] === 'string' ? icon['viewBox'].trim().split(/[ ,]+/) : [];
+  const box = parts.map(Number);
+
+  return box.length === 4 && parts.every((part) => /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(part)) && box.every(Number.isFinite) && box[2]! > 0 && box[3]! > 0 &&
+    typeof icon['path'] === 'string' && icon['path'].trim() !== '' &&
+    (icon['color'] === undefined || (typeof icon['color'] === 'string' && /^#(?:[a-f0-9]{3}|[a-f0-9]{4}|[a-f0-9]{6}|[a-f0-9]{8})$/i.test(icon['color']))) &&
+    (icon['width'] === undefined || (typeof icon['width'] === 'number' && Number.isFinite(icon['width']) && icon['width'] >= 1 && icon['width'] <= 64)) &&
+    (icon['fillRule'] === undefined || icon['fillRule'] === 'nonzero' || icon['fillRule'] === 'evenodd');
 }
 
 const FIELD_TYPES = new Set(['text', 'integer', 'boolean', 'list']);

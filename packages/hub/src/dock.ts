@@ -1,3 +1,4 @@
+import type { SourceIcon } from '@switchboard/core';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
@@ -415,6 +416,7 @@ export interface DockSourceGroup {
   kind: string;
   /** The plugin's name for the kind, such as `GitHub`. */
   label: string;
+  icon?: SourceIcon;
   enabled: boolean;
   /** The icon's tooltip: each source and whether it is polled, then what a click does. */
   title: string;
@@ -432,7 +434,7 @@ export function sourceGroups(states: Snapshot['sourceStates']): DockSourceGroup[
 
     const first = states.find((state) => state.kind === kind)!;
 
-    return { kind, label: first.label, enabled: sources.some((source) => source.enabled), title: [...lines, action].join('\n'), sources };
+    return { kind, label: first.label, ...(first.icon === undefined ? {} : { icon: first.icon }), enabled: sources.some((source) => source.enabled), title: [...lines, action].join('\n'), sources };
   });
 }
 

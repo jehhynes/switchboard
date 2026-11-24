@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startPage } from '../src/main.js';
-import { bareKey, filterGroups, FOLDER_CHECK_MS, isKey, OTHER_MODEL, rangeSince, renderListHeader, RUN_AS_KEY, SEARCH_DELAY_MS } from '../src/listHeader.js';
+import { bareKey, filterGroups, FOLDER_CHECK_MS, isKey, OTHER_MODEL, rangeSince, renderListHeader, renderMoreMenu, RUN_AS_KEY, SEARCH_DELAY_MS } from '../src/listHeader.js';
 import { html } from './html.js';
 import type { SearchView } from '../src/listHeader.js';
 import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
@@ -96,6 +96,27 @@ describe('the list header (architecture.md § Web page)', () => {
     // No sources, no icons.
     host.innerHTML = html(renderListHeader(header({ sources: [] }), { menu: null, sheet: null, search: closed() }));
     expect(host.querySelector('.header-sources')).toBeNull();
+  });
+
+  it('draws a plugin path with its color and width in the header and phone menu, and grays disabled icons', () => {
+    const icon = { viewBox: '0 0 24 24', path: 'M0 0H24V24H0Z', color: '#357abc', width: 24, fillRule: 'evenodd' as const };
+    const sources = [{ kind: 'forum', label: 'Community', icon, enabled: true, title: 'forum', sources: [{ name: 'forum', enabled: true }] }];
+    const host = document.createElement('div');
+
+    host.innerHTML = html(renderListHeader(header({ sources }), { menu: null, sheet: null, search: closed() }));
+    const svg = host.querySelector<SVGElement>('svg.source-logo.custom')!;
+    expect(svg.getAttribute('viewBox')).toBe(icon.viewBox);
+    expect(svg.querySelector('path')?.getAttribute('d')).toBe(icon.path);
+    expect(svg.querySelector('path')?.getAttribute('fill-rule')).toBe('evenodd');
+    expect(svg.style.getPropertyValue('--source-icon-color')).toBe(icon.color);
+    expect(svg.style.getPropertyValue('--source-icon-width')).toBe('24px');
+    expect(svg.classList.contains('off')).toBe(false);
+
+    host.innerHTML = html(renderListHeader(header({ sources: [{ ...sources[0]!, enabled: false }] }), { menu: null, sheet: null, search: closed() }));
+    expect(host.querySelector('svg.source-logo.custom.off path')?.getAttribute('d')).toBe(icon.path);
+
+    host.innerHTML = html(renderMoreMenu(header({ sources: [{ ...sources[0]!, sources: [{ name: 'forum', enabled: false }] }] })));
+    expect(host.querySelector('svg.source-logo.custom.off path')?.getAttribute('d')).toBe(icon.path);
   });
 
   it("turns a kind's one source on or off with a click, opens a check menu for several that stays open, and shows a refusal in the toast", async () => {
