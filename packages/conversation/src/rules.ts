@@ -10,7 +10,7 @@ import { ARTIFACTS_ENV } from '@switchboard/core';
  */
 export function conversationRules(artifactsDir: string, voice = false, provider: 'claude' | 'codex' = 'claude'): string {
   return `## Conversation view
-The operator reads this session in a conversation view beside the terminal. It shows the operator's messages and your replies, not your tool calls, which the terminal shows. These rules only explain the tags the view reads; they do not change how you write, except where you put a \`[details]\` line and how you ask the operator a question, below. Keep the length, format and verbosity you would use without them.
+The operator reads this session in the conversation view of Switchboard's web page, beside the terminal. It shows the operator's messages and your replies, not your tool calls, which the terminal shows. These rules only explain the tags the view reads; they do not change how you write, except where you put a \`[details]\` line and how you ask the operator a question, below. Keep the length, format and verbosity you would use without them.
 
 - Write each reply as you normally would, then put a \`[details]\` line of its own before the part the operator can skip and still act correctly: evidence, how you checked, test counts, file and commit lists, alternatives you ruled out, background. Anything they need to decide or act on, such as a result, a change, a decision, a question or a risk, stays above the line, links, paths and code included. Don't restate or summarise the details; if nothing can be skipped, leave the \`[details]\` line out. The view shows the text above the line first and can fold the details behind Show more; a reply with no \`[details]\` line shows whole. A question card still goes at the end of the reply, after any details: the card shows it either way.
 
@@ -66,10 +66,10 @@ A message from the operator that starts with \`[voice]\` was dictated: its words
 /** Where and how to write an artifact, from claude-collab's `instructions/artifacts.md`, without its rules on when to write one or how to reply. */
 function artifactRules(dir: string): string {
   return `## Artifacts
-An artifact is a document the operator opens from the conversation view in VS Code: a plan, a report, a comparison, research notes, a diagram, and also a page, a picture, a recording or a video. The view lists every file in this session's artifact folder, \`${dir}\` (also in the \`${ARTIFACTS_ENV}\` environment variable), as soon as it is written, and opens it in VS Code's own editors and previews. These rules only explain where and how to write one; they do not say when to write one.
+An artifact is a document the operator opens from the conversation view on Switchboard's web page: a plan, a report, a comparison, research notes, a diagram, and also a page, a picture, a recording or a video. The view lists every file in this session's artifact folder, \`${dir}\` (also in the \`${ARTIFACTS_ENV}\` environment variable), as soon as it is written, and opens it in a tab beside the conversation. These rules only explain where and how to write one; they do not say when to write one.
 
 - Write an artifact to \`<owner>/<kind>.md\` in that folder, or \`<owner>/<kind>-<slug>.md\` when the owner keeps more than one of a kind. \`<owner>\` is the skill that asked for it, such as \`sb-plan\`, or \`chat\` when the operator asked; \`<kind>\` is a word such as \`plan\`, \`implementation\`, \`review\`, \`research\`, \`comparison\` or \`report\`; \`<slug>\` is a few lowercase words joined by hyphens, as in \`chat/comparison-speech-engines.md\`. A skill that names its artifact's file uses that name. Never write into another owner's folder.
-- The extension picks how it opens: \`.md\` in the Markdown preview; \`.html\` as a self-contained page in its own panel, which runs its scripts but has no network, so inline its scripts and styles; \`.png\`, \`.jpg\`, \`.gif\`, \`.webp\` or \`.svg\` as a picture; \`.mp3\`, \`.wav\` or \`.ogg\` as audio; \`.mp4\` or \`.webm\` as video; anything else in an editor. Put files an artifact uses, such as a page's pictures or a report's screenshots, in a folder beside it named after it (\`chat/comparison-voices.html\` uses \`chat/comparison-voices/a.wav\`), and refer to them by that relative path.
+- The view picks how it shows it: \`.md\` or \`.markdown\` drawn as Markdown; \`.html\`, \`.htm\` or \`.svg\` as a self-contained page in a sandboxed frame, which runs its scripts but has no network, so inline its scripts and styles; \`.png\`, \`.jpg\`, \`.jpeg\`, \`.gif\` or \`.webp\` as a picture; \`.mp3\`, \`.wav\`, \`.ogg\`, \`.m4a\` or \`.flac\` as audio; \`.mp4\`, \`.webm\` or \`.mov\` as video; \`.pdf\` in the browser's PDF viewer; plain text, data and code as text; anything else as a download. Put files an artifact uses, such as a page's pictures or a report's screenshots, in a folder beside it named after it (\`chat/comparison-voices.html\` uses \`chat/comparison-voices/a.wav\`), and refer to them by that relative path.
 - A Markdown artifact starts with front matter naming its kind and title; an HTML page's title is its \`<title>\`:
 
   \`\`\`
@@ -79,7 +79,7 @@ An artifact is a document the operator opens from the conversation view in VS Co
   ---
   \`\`\`
 
-- To update an artifact, rewrite the same file; the view marks it as changed, and an open preview follows the file.
+- To update an artifact, rewrite the same file; the view marks it as changed, and an open tab follows the file.
 - A file written elsewhere, such as a report a skill keeps in its own folder or a plan file, becomes an artifact without a copy: put \`[artifact: <path>]\` on a line of its own in a reply, with the file's absolute path or a path relative to your working folder, and optionally \` | title: <title>\` and \` | kind: <kind>\` before the \`]\`, as in \`[artifact: D:/research/speech/report.md | title: Speech engines | kind: research]\`. Give each file its own tag. The Switchboard web page then lists it with this folder's artifacts and follows its changes; the line is not shown, and a file that does not exist when the reply is written is not listed. Don't copy such a file into the artifact folder to list it.
-- The Markdown preview draws a \`\`\`mermaid code block as a diagram.`;
+- The view draws a \`\`\`mermaid code block in Markdown as a diagram.`;
 }

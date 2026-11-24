@@ -583,7 +583,7 @@ const SUPERVISE_USAGE = `Usage: hub.js supervise [--config=<dir>] [--grace-ms=<m
 /**
  * Runs the supervisor that the autostart task or unit starts: it starts the installed hub again, with this runtime and the config folder `--config`
  * names, else the one config.json names (architecture.md § Config folder), when the hub has gone without `hub.js --stop` (architecture.md § Hub lifecycle), passing on the serving flags as `hub.js start` does. It logs to the hub log. Exit codes: 0 asked to stop or another
- * supervisor runs, 1 usage or VS Code's runtime.
+ * supervisor runs, 1 usage or an Electron runtime.
  */
 async function supervise(home: string, rest: readonly string[]): Promise<number> {
   const known = [...START_FLAGS, 'grace-ms', 'check-ms'];
@@ -601,7 +601,7 @@ async function supervise(home: string, rest: readonly string[]): Promise<number>
   }
 
   if (process.versions['electron'] !== undefined) {
-    process.stderr.write("Run hub.js supervise with Node.js, so the hubs it starts do not run on VS Code's runtime.\n");
+    process.stderr.write('Run hub.js supervise with Node.js, so the hubs it starts do not run on an Electron runtime such as VS Code\'s.\n');
     return 1;
   }
 

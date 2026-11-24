@@ -271,11 +271,10 @@ export interface NewSessionSheet {
 }
 
 /**
- * A sheet the header opens over the page: the New session form, or a More Actions window the page does not have yet (`LATER`).
+ * A sheet the header opens over the page: the New session form, or one of More Actions' sheets.
  */
 export type HeaderSheet =
   | NewSessionSheet
-  | { kind: 'later'; title: string }
   | { kind: 'log' }
   | { kind: 'held'; rows: HeldRow[] | null; busy: boolean; refreshing: boolean; listError: string | null; error: string | null; result: string | null; stopping: HeldRow | null }
   | { kind: 'extension'; remote: boolean }
@@ -549,9 +548,6 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
   );
 }
 
-/** The windows More Actions opens that the page does not have yet, by their row's action; none now. */
-export const LATER: Record<string, string> = {};
-
 /** A QR code of `text` as an SVG of dark modules on a light square with a quiet zone of 4 modules, which phone cameras read in either theme. */
 export function QrCode({ text }: { text: string }) {
   const qr = qrcode(0, 'M');
@@ -747,8 +743,8 @@ function ExtensionSheet({ remote }: { remote: boolean }) {
 
 /**
  * A sheet of the header (architecture.md § Web page), drawn as the page's other sheets: the New session form and its folder browser, Pair a
- * device, Get the browser extension, Restart the terminal holder, or a window the page does not have yet (`LATER`). `local`: whether the page is
- * this computer's.
+ * device, Get the browser extension, Restart the terminal holder, the hub log, the held sessions or the app shortcut. `local`: whether the page
+ * is this computer's.
  */
 export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null, now = Date.now(), read = globalThis.fetch, local = true): VNode | null {
   if (sheet === null) {
@@ -769,21 +765,6 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
   }
   if (sheet.kind === 'shortcut') {
     return <AppShortcut />;
-  }
-
-  if (sheet.kind === 'later') {
-    return (
-      <Frame
-        title={sheet.title}
-        buttons={
-          <button type="button" class="sheet-button primary" data-action="list-sheet-cancel">
-            Close
-          </button>
-        }
-      >
-        <p class="sheet-detail">{sheet.title} is not on the web page yet. Use it from the dock.</p>
-      </Frame>
-    );
   }
 
   const cancel = (
@@ -1509,7 +1490,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     await refreshHeld(sheet);
   };
   const closeSheet = (): void => {
-    if (view.sheet !== null && view.sheet.kind !== 'log' && view.sheet.kind !== 'later' && view.sheet.kind !== 'extension' && view.sheet.kind !== 'shortcut' && view.sheet.kind !== 'devices' && view.sheet.kind !== 'held' && view.sheet.busy) {
+    if (view.sheet !== null && view.sheet.kind !== 'log' && view.sheet.kind !== 'extension' && view.sheet.kind !== 'shortcut' && view.sheet.kind !== 'devices' && view.sheet.kind !== 'held' && view.sheet.busy) {
       return;
     }
 
@@ -1522,7 +1503,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   const sheetGo = async (): Promise<void> => {
     const sheet = view.sheet;
 
-    if (sheet === null || sheet.kind === 'log' || sheet.kind === 'later' || sheet.kind === 'extension' || sheet.kind === 'shortcut' || sheet.kind === 'held' || sheet.busy) {
+    if (sheet === null || sheet.kind === 'log' || sheet.kind === 'extension' || sheet.kind === 'shortcut' || sheet.kind === 'held' || sheet.busy) {
       return;
     }
 
@@ -1859,16 +1840,6 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         deps.phoneVoice?.toggle();
         redraw();
         break;
-      default: {
-        const later = LATER[button?.dataset['action'] ?? ''];
-
-        if (later !== undefined) {
-          view.menu = null;
-          view.sheet = { kind: 'later', title: later };
-          redraw();
-          sheetHost.querySelector<HTMLElement>('.sheet-button')?.focus();
-        }
-      }
     }
   };
 

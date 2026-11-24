@@ -638,7 +638,7 @@ export function personaFields(state: EditorState, index: number): Section[] {
     {
       heading: 'Persona',
       fields: [
-        { path: `${path}.name`, label: 'Name', kind: 'text', help: '1 to 40 characters. The Conversation view’s header shows it.' },
+        { path: `${path}.name`, label: 'Name', kind: 'text', help: '1 to 40 characters. The Persona row of the conversation’s View options menu shows it.' },
         { path: `${path}.voice`, label: 'Voice', kind: 'select', help: '', options: withCurrent([{ value: '', label: `Voice setting (${capitalized(voice)})` }, ...choices(TTS_VOICES)], getAt(value, `${path}.voice`)) },
         { path: `${path}.style`, label: 'Style', kind: 'select', help: '', options: withCurrent([{ value: '', label: `Voice setting (${capitalized(style)})` }, ...choices(SPEECH_STYLES)], getAt(value, `${path}.style`)) },
         { path: `${path}.personality`, label: 'Personality', kind: 'prompt', help: 'At most 600 characters. How its spoken replies sound, and a tone section in its sessions’ prompts; it never changes how they work.' },
