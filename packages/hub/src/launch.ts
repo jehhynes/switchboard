@@ -7,8 +7,8 @@ import type { DockTerminal } from './dock.js';
 export interface Launcher {
   /** Opens an http or https URL in the default browser. */
   openUrl(url: string): void;
-  /** Opens a workspace file or a folder in VS Code, which brings forward the window already on it. */
-  openCode(target: string): void;
+  /** Opens a workspace file or a folder in VS Code, which brings forward the window already on it; rejects when VS Code does not start. */
+  openCode(target: string): void | Promise<void>;
   /** Opens the held session's attach client in the terminal app. */
   openTerminal?(terminal: DockTerminal): void | Promise<void>;
 }
@@ -16,8 +16,8 @@ export interface Launcher {
 /** How a launcher starts a program: detached, with no shell, so no argument is read by one. */
 export type Start = (file: string, args: string[], env: NodeJS.ProcessEnv) => void;
 
-/** Waits for the terminal app to start, so a missing program returns its error to the page. */
-const startTerminal = (file: string, args: string[], env: NodeJS.ProcessEnv): Promise<void> => new Promise((resolve, reject) => {
+/** Waits for a program to start, so one that cannot start returns its error to the page. */
+const startAndWait = (file: string, args: string[], env: NodeJS.ProcessEnv): Promise<void> => new Promise((resolve, reject) => {
   const child = spawn(file, args, { detached: true, stdio: 'ignore', env, shell: false });
   child.once('spawn', () => resolve());
   child.once('error', reject);
@@ -96,11 +96,15 @@ export function launcher(run: Start = start, platform: NodeJS.Platform = process
       const app = platform === 'win32' ? 'wt.exe' : 'ptyxis';
       // wt splits every argument at unescaped semicolons, even without a shell.
       const command = [...args, executable, ...terminal.args].map((arg) => platform === 'win32' ? arg.replaceAll(';', '\\;') : arg);
-      if (run === start) await startTerminal(app, command, clean);
+      if (run === start) await startAndWait(app, command, clean);
       else run(app, command, clean);
     },
-    openCode(target) {
-      run(codeExecutable(platform, env, exists), [target], launchEnvironment(env));
+    async openCode(target) {
+      const executable = codeExecutable(platform, env, exists);
+
+      // A Code.exe that is found but cannot run fails only after spawn returns, so the real launcher waits for it to start.
+      if (run === start) await startAndWait(executable, [target], launchEnvironment(env));
+      else run(executable, [target], launchEnvironment(env));
     },
     openUrl(url) {
       if (!/^https?:\/\//i.test(url)) {

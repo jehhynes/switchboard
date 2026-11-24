@@ -1863,7 +1863,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       },
       rowPaste: async (_workItemId, label) => (label === 'Reply' ? 'Dear Ana' : null),
       uploads: join(dir, 'uploads'),
-      rowCommand: (workItemId, label) => {
+      rowCommand: async (workItemId, label) => {
         commands.push([workItemId, label]);
         return label === 'Open report' ? null : 'The work item no longer offers this.';
       },
@@ -2257,21 +2257,21 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.pageUpload(page.key, 1, 'b.txt', Buffer.from('b'))).toMatchObject({ status: 409 });
   });
 
-  it("runs a VS Code control only on the page's selected work item, for its scope generation, once per opId", () => {
+  it("runs a VS Code control only on the page's selected work item, for its scope generation, once per opId", async () => {
     const { scopes, service, openPage, view, commands } = setup();
     const page = openPage();
     const window = 'forged';
 
-    expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open report' }).status).toBe(403);
+    expect((await service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open report' })).status).toBe(403);
     service.select({ window: page.key, opId: 'o', workItemId: 3 });
-    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Open report' }).status).toBe(403);
-    expect(service.rowCommand({ window, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Open report' }).status).toBe(403);
-    expect(service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open report' }).status).toBe(409);
-    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3 }).status).toBe(400);
+    expect((await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Open report' })).status).toBe(403);
+    expect((await service.rowCommand({ window, scopeGen: 1, opId: 'a', workItemId: 2, label: 'Open report' })).status).toBe(403);
+    expect((await service.rowCommand({ window: page.key, scopeGen: 0, opId: 'a', workItemId: 3, label: 'Open report' })).status).toBe(409);
+    expect((await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3 })).status).toBe(400);
     expect(commands).toEqual([]);
-    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
-    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
-    expect(service.rowCommand({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'History' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
+    expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
+    expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'History' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
     expect(commands).toEqual([[3, 'Open report'], [3, 'History']]);
   });
 

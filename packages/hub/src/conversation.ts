@@ -329,7 +329,7 @@ export interface ConversationServiceDeps {
   /** The folder the files a page attaches are written to; `UPLOAD_DIR` by default. */
   uploads?: string;
   /** Runs the page's Open in VS Code for a work item's row by its label, after checking its row offers it now: why not, or null. */
-  rowCommand?(workItemId: number, label: string): string | null;
+  rowCommand?(workItemId: number, label: string): Promise<string | null>;
   /**
    * Opens a row's ticket URL or link in the default browser, the row named by its dock key (`item:<id>` or a pool ticket's `ticket:<id>`), after
    * checking that it holds the URL now: why not, or null.
@@ -1205,6 +1205,8 @@ export class ConversationService {
 
   /** Each `row-action`'s answer, by page key and `opId`, so a retried one runs once; the last 100. */
   readonly #rowActions = new Map<string, { status: number; body: unknown }>();
+  /** Open in VS Code answers still waiting for VS Code to start, by page key and opId. */
+  readonly #rowCommands = new Map<string, Promise<{ status: number; body: unknown }>>();
 
   /**
    * `row-action {window, scopeGen, opId, workItemId, label, until?, comment?, text?, choice?}` (architecture.md § Web page): one of the dock's controls on the
@@ -1343,7 +1345,7 @@ export class ConversationService {
    * `row-command {window, scopeGen, opId, workItemId, label}` (architecture.md § Web page): Open in VS Code on the page's selected work item,
    * which the hub starts VS Code for; refused as `row-action` is. A repeated `opId` answers the first result.
    */
-  rowCommand(body: Record<string, unknown>): { status: number; body: unknown } {
+  async rowCommand(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
     const { window, scopeGen, opId, workItemId, label } = body;
 
     if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || !Number.isInteger(workItemId) || typeof label !== 'string') {
@@ -1368,8 +1370,22 @@ export class ConversationService {
       return done;
     }
 
-    const why = this.deps.rowCommand === undefined ? 'This hub opens no VS Code window for the page.' : this.deps.rowCommand(workItemId as number, label);
-    const answer = why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
+    const pending = this.#rowCommands.get(`${window} ${opId}`);
+
+    if (pending !== undefined) {
+      return pending;
+    }
+
+    // VS Code is waited for until it starts, so a repeat of the opId meanwhile waits for the same answer instead of starting it again.
+    const answering = (async () => {
+      const why = this.deps.rowCommand === undefined ? 'This hub opens no VS Code window for the page.' : await this.deps.rowCommand!(workItemId as number, label);
+
+      return why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
+    })();
+
+    this.#rowCommands.set(`${window} ${opId}`, answering);
+
+    const answer = await answering.finally(() => this.#rowCommands.delete(`${window} ${opId}`));
 
     this.#rowActions.set(`${window} ${opId}`, answer);
 

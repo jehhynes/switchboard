@@ -821,7 +821,7 @@ describe('createHubApp', () => {
   it("opens a listed row's link, runs a pool ticket's control and a VS Code control for the page only as each row offers it now (architecture.md § Web page)", async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const opened: string[] = [];
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, launch: { openUrl: (url) => opened.push(url), openCode: (target) => opened.push(`code ${target}`) } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, launch: { openUrl: (url) => opened.push(url), openCode: (target) => { opened.push(`code ${target}`); } } });
 
     closers.push(() => app.close());
     app.runtime.send({ type: 'adhoc', prompt: 'Fix the badge', repoRoot: 'D:/scratch', start: false });
@@ -854,7 +854,18 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const opened: string[] = [];
     let fail: string | null = null;
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, launch: { openUrl: () => { throw new Error('must not open a URL'); }, openCode: (target) => { if (fail !== null) throw new Error(fail); opened.push(target); } } });
+    let late: string | null = null;
+    let held: Promise<void> | null = null;
+    const openCode = (target: string): void | Promise<void> => {
+      if (fail !== null) throw new Error(fail);
+      if (late !== null) return Promise.reject(new Error(late));
+      if (held !== null) {
+        opened.push(target);
+        return held;
+      }
+      opened.push(target);
+    };
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, launch: { openUrl: () => { throw new Error('must not open a URL'); }, openCode } });
 
     closers.push(() => app.close());
     app.runtime.send({ type: 'adhoc', prompt: 'Fix the $5 badge', repoRoot: 'D:/scratch', start: false });
@@ -917,12 +928,37 @@ describe('createHubApp', () => {
     // A VS Code that does not start says why.
     fail = 'Code.exe was not found beside code on PATH.';
     expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId: 'c3', workItemId: 1, label: 'Open in VS Code' })).toEqual({ status: 409, body: { error: 'VS Code did not start: Code.exe was not found beside code on PATH.' } });
+
+    // Nor does one that is found but fails once it has been started, which answers 409 with the reason, not 200.
+    fail = null;
+    late = 'spawn C:\\VS Code\\Code.exe EACCES';
+    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId: 'c4', workItemId: 1, label: 'Open in VS Code' })).toEqual({ status: 409, body: { error: 'VS Code did not start: spawn C:\\VS Code\\Code.exe EACCES' } });
+
+    // A repeat of an opId while VS Code is still starting waits for the same answer and starts it once, whether it starts or fails.
+    late = null;
+    for (const [opId, outcome] of [['c5', null], ['c6', 'spawn Code.exe EPERM']] as const) {
+      let settle!: (error: Error | null) => void;
+      held = new Promise<void>((resolve, reject) => { settle = (error) => (error === null ? resolve() : reject(error)); });
+      const before = opened.length;
+      const first = app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId, workItemId: 1, label: 'Open in VS Code' });
+      const second = app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId, workItemId: 1, label: 'Open in VS Code' });
+      await until(() => (opened.length > before ? true : null));
+      settle(outcome === null ? null : new Error(outcome));
+      const answers = await Promise.all([first, second]);
+      expect(answers[0]).toEqual(outcome === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: `VS Code did not start: ${outcome}` } });
+      expect(answers[1]).toEqual(answers[0]);
+      expect(opened.length - before).toBe(1);
+      // Once answered, the opId keeps its answer and starts nothing.
+      expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId, workItemId: 1, label: 'Open in VS Code' })).toEqual(answers[0]);
+      expect(opened.length - before).toBe(1);
+    }
+    held = null;
   });
 
   it("opens a hosted conversation's Open in VS Code in its host's window, writing the host row's workspace file first, else in its own folder", async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const opened: string[] = [];
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, launch: { openUrl: () => {}, openCode: (target) => opened.push(target) } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, launch: { openUrl: () => {}, openCode: (target) => { opened.push(target); } } });
 
     closers.push(() => app.close());
     app.runtime.send({ type: 'adhoc', prompt: 'The host', repoRoot: 'D:/scratch', start: false });

@@ -531,7 +531,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
    * conversation's folder, after checking the row offers it now; why not, or null. VS Code runs without the Switchboard extension, so the hub
    * leaves no command for the window.
    */
-  const commandInWindow = (workItemId: number, label: string): string | null => {
+  const commandInWindow = async (workItemId: number, label: string): Promise<string | null> => {
     const row = dockRowOf(views().dock, workItemId);
     const built = row === null ? { refused: 'The work item is gone.' } : pageCommandOf(row, label);
 
@@ -568,7 +568,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     }
 
     try {
-      launch.openCode(destination);
+      await launch.openCode(destination);
     } catch (error) {
       return `VS Code did not start: ${(error as Error).message}`;
     }

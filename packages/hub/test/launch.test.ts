@@ -59,4 +59,11 @@ describe('launcher (architecture.md § Web page)', () => {
     launcher((file, args, env) => runs.push({ file, args, env }), 'linux', { PATH: '/snap/bin', ELECTRON_RUN_AS_NODE: '1' }, has('/snap/bin/code')).openCode('/w/sb.code-workspace');
     expect(runs).toEqual([{ file: '/snap/bin/code', args: ['/w/sb.code-workspace'], env: { PATH: '/snap/bin' } }]);
   });
+
+  it('rejects when the VS Code it found fails after it was started, so Open in VS Code reports it', async () => {
+    // A Code.exe that the lookup finds but that cannot run fails only once spawn has returned.
+    const env = process.platform === 'win32' ? { PATH: 'C:\\switchboard-missing\\bin' } : { PATH: '/switchboard-missing/bin' };
+
+    await expect(launcher(undefined, process.platform, env, () => true).openCode('/w/sb.code-workspace')).rejects.toThrow(/ENOENT/);
+  });
 });
