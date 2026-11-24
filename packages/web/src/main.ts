@@ -4,7 +4,7 @@ import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 import type { PageState } from './model.js';
 import { MENU_MAX_WIDTH, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
-import { ARTIFACTS_SEEN, artifactShow, artifactTabsFit, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
+import { ARTIFACTS_SEEN, ARTIFACT_TABS_MAX, artifactShow, artifactTabsFit, artifactTabWidth, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, NewDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -2560,9 +2560,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }, (menu) => parseFloat(getComputedStyle(menu as unknown as Element).maxWidth) || MENU_MAX_WIDTH);
   };
   /**
-   * How many artifact tabs the shown strip fits (`artifactTabsFit`), measured after a draw: its other tabs and the Artifacts button as drawn, and a
-   * fixed width per artifact tab. True when that changes which tabs show, so the strip is drawn once more; a change of the strip's width draws again
-   * (`stripWidth`).
+   * How many artifact tabs the shown strip fits (`artifactTabsFit`), measured after a draw: its other tabs and the Artifacts button as drawn, and
+   * each artifact tab at its most width as page.css draws it (`artifactTabWidth`), read from the strip's own custom properties. A strip that can
+   * keep its labels readable, at least `--sb-tab-least` for each of its tabs and the Artifacts button, shows no more tabs than keep it so; one that
+   * cannot shows its tabs as icons (page.css), and fits as many icon tabs as it has room for. True when that changes which tabs show, so the strip
+   * is drawn again; a change of the strip's width draws again (`stripWidth`).
    */
   const fitArtifactTabs = (): boolean => {
     const strip = (wide() ? detailHead : head).querySelector<HTMLElement>('.tabs');
@@ -2571,10 +2573,34 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return false;
     }
 
-    const fixed = [...strip.querySelectorAll<HTMLElement>(':scope > .tab:not(.artifact-tab), :scope > .link-tabs')].reduce((sum, tab) => sum + tab.getBoundingClientRect().width, 0);
-    const menu = strip.querySelector<HTMLElement>('.artifact-menu-button')?.getBoundingClientRect().width;
+    // Each other tab at its whole width, as drawn plus whatever its label lost to the ellipsis, since a crowded strip shrinks every tab (page.css).
+    // A label grows no wider than its own max-width (--sb-tab-label-max), however long its text.
+    const whole = (tab: HTMLElement): number =>
+      [...tab.querySelectorAll<HTMLElement>('.tab-label')].reduce((sum, label) => sum + Math.max(0, Math.min(label.scrollWidth, parseFloat(getComputedStyle(label).maxWidth) || Infinity) - label.clientWidth), tab.getBoundingClientRect().width);
+    const others = [...strip.querySelectorAll<HTMLElement>(':scope > .tab:not(.artifact-tab), :scope > .link-tab')];
+    const fixed = others.reduce((sum, tab) => sum + whole(tab), 0);
+    const button = strip.querySelector<HTMLElement>('.artifact-menu-button');
+    const menu = button === null ? undefined : whole(button);
     const count = state.artifacts.length;
-    const fit = artifactTabsFit(strip.getBoundingClientRect().width, fixed, count, menu || undefined);
+    const width = strip.getBoundingClientRect().width;
+    // The sizing rule's own numbers; a page without its stylesheet, as under test, has none and fits labelled tabs at their most width.
+    const read = (node: Element | undefined, name: string): string => {
+      const style = node === undefined ? null : (getComputedStyle(node) as Partial<CSSStyleDeclaration> | null);
+
+      return typeof style?.getPropertyValue === 'function' ? style.getPropertyValue(name).trim() : '';
+    };
+    const least = parseFloat(read(strip, '--sb-tab-least'));
+    const labelMax = parseFloat(read(strip, '--sb-tab-label-max')) || 100;
+    const pad = parseFloat(read(others[0], '--sb-tab-pad')) || 14;
+    const iconsNow = read(others[0], '--sb-tab-icons') === '1';
+    // The tabs page.css counts beside the artifact tabs, the Artifacts button and the maximize button with them.
+    const counted = others.length + 1;
+    const readable = Number.isNaN(least) ? Infinity : Math.floor(width / least) - counted;
+    const labelled = Number.isNaN(least) || (width > 600 && readable >= 0);
+    // Drawn as icons, the other tabs measured narrower than they are with labels, so their labelled fit waits for the draw that shows them.
+    const fit = labelled
+      ? Math.max(0, Math.min(iconsNow ? Math.min(count, ARTIFACT_TABS_MAX) : artifactTabsFit(width, fixed, count, menu || undefined, artifactTabWidth(pad, labelMax, false)), readable))
+      : artifactTabsFit(width, fixed, count, menu || undefined, artifactTabWidth(pad, labelMax, true));
     const changed = Math.min(fit, count) !== Math.min(view.artifactFit, count);
 
     view.artifactFit = fit;
@@ -2689,7 +2715,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     restoreCardFocus(focus);
 
     // Measured again after a draw that changed the tabs, since the Artifacts button may have come or gone; twice at most.
-    for (let again = 0; again < 2 && fitArtifactTabs(); again++) {
+    for (let again = 0; again < 3 && fitArtifactTabs(); again++) {
       drawRegions();
     }
 

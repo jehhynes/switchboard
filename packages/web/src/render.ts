@@ -31,8 +31,17 @@ export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console', 
 
 /** The most artifact tabs a strip shows, whatever its width (PRD R109): the rest are in the Artifacts menu at its end. */
 export const ARTIFACT_TABS_MAX = 5;
-/** The width each artifact tab takes, as `.tab.artifact-tab` in page.css sets it, and the room the Artifacts menu's button takes. */
-export const ARTIFACT_TAB_WIDTH = 168;
+/**
+ * The most width an artifact tab takes, as page.css draws it with its sides' padding `pad` (`--sb-tab-pad`): with its label, its 16 px icon, the
+ * label at `labelMax` (`--sb-tab-label-max`) and its close mark, each 6 px apart, the mark 6 px from its end, and its 1 px border; as an icon
+ * alone, its icon in its padding and its border.
+ */
+export function artifactTabWidth(pad: number, labelMax: number, icons: boolean): number {
+  return icons ? 2 * pad + 17 : pad + 55 + labelMax;
+}
+
+/** An artifact tab's most width with its label at page.css's padding and label cap, and the room the Artifacts menu's button takes. */
+export const ARTIFACT_TAB_WIDTH = artifactTabWidth(14, 100, false);
 export const ARTIFACT_MENU_WIDTH = 132;
 
 /**
@@ -40,16 +49,16 @@ export const ARTIFACT_MENU_WIDTH = 132;
  * else as many as fit beside the menu, `menuWidth` wide as drawn, none when even one does not, and at most {@link ARTIFACT_TABS_MAX}. An
  * unmeasured strip, 0 wide, shows the most.
  */
-export function artifactTabsFit(stripWidth: number, fixedWidth: number, count: number, menuWidth = ARTIFACT_MENU_WIDTH): number {
+export function artifactTabsFit(stripWidth: number, fixedWidth: number, count: number, menuWidth = ARTIFACT_MENU_WIDTH, tabWidth = ARTIFACT_TAB_WIDTH): number {
   if (stripWidth <= 0) {
     return Math.min(count, ARTIFACT_TABS_MAX);
   }
 
-  if (count <= ARTIFACT_TABS_MAX && fixedWidth + count * ARTIFACT_TAB_WIDTH <= stripWidth) {
+  if (count <= ARTIFACT_TABS_MAX && fixedWidth + count * tabWidth <= stripWidth) {
     return count;
   }
 
-  return Math.max(0, Math.min(ARTIFACT_TABS_MAX, count, Math.floor((stripWidth - fixedWidth - menuWidth) / ARTIFACT_TAB_WIDTH)));
+  return Math.max(0, Math.min(ARTIFACT_TABS_MAX, count, Math.floor((stripWidth - fixedWidth - menuWidth) / tabWidth)));
 }
 
 /**

@@ -3,7 +3,7 @@
    Modern's. */
 :root { --sb-git-added: #81b88b; --sb-git-modified: #e2c08d; --sb-git-deleted: #c74e39; --sb-git-untracked: #73c991; --sb-git-renamed: #73c991; --sb-git-conflict: #e4676b; }
 @media (prefers-color-scheme: light) { :root { --sb-git-added: #587c0c; --sb-git-modified: #895503; --sb-git-deleted: #ad0707; --sb-git-untracked: #007100; --sb-git-renamed: #007100; --sb-git-conflict: #ad0707; } }
-.tab.changes-tab { flex: none; border-right: none; border-left: 1px solid var(--vscode-panel-border); }
+.tab.changes-tab { border-right: none; border-left: 1px solid var(--vscode-panel-border); }
 /* The file tabs and the Changes tab sit at the strip's end, after the Artifacts menu where it shows. A tab pushed there has a left border
    of its own, as the Changes tab has, since the tab before it is not beside it. */
 .tab.push { margin-left: auto; border-left: 1px solid var(--vscode-panel-border); }
@@ -69,8 +69,8 @@
 @media (hover: none), (pointer: coarse) { .change-row { height: 44px; } .changes-bar button.icon { width: 44px; height: 44px; } .changes-files { height: 44px; padding: 0 10px; } }
 /* In a bar under 600 px, as on a phone or in the side column, Files is its icon and chevron, so the note keeps the bar's room. */
 @container (max-width: 599px) { .changes-files-label { display: none; } }
-/* A file tab, drawn as an artifact's tab: its name and a close mark. */
-.tab.diff-tab { box-sizing: border-box; max-width: 200px; padding: 0 6px 0 0; }
+/* A file tab, drawn as an artifact's tab: its icon, its name and a close mark. */
+.tab.diff-tab { box-sizing: border-box; }
 .tab.diff-tab .tab-label { overflow: hidden; text-overflow: ellipsis; }
 .changes-rows button.change-row { width: 100%; border: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .changes-rows button.change-row:hover, .changes-rows button.change-row:focus-visible { background: var(--vscode-list-hoverBackground); outline: none; }

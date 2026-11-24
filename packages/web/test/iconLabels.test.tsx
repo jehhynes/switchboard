@@ -123,16 +123,52 @@ describe('the tab strips', () => {
     expect(chosen).toContain('border-bottom-color: var(--sb-tab-surface);');
   });
 
+  it('TabStrip_EveryTab_GrowsEvenlyToItsContentWithNoMinimumOfItsOwn', () => {
+    // One rule for every tab and the Artifacts button's cell: grown evenly from nothing, never past the tab's own content, never held wider.
+    expect(css).toContain('.tab, .artifact-more { --sb-tab-pad: 14px; flex: 1 1 0; min-width: 0; max-width: max-content; }');
+    expect(css).toMatch(/\n\.tab \{[^}]*overflow: hidden;[^}]*padding: 0 var\(--sb-tab-pad\);/);
+    // A label is cut with an ellipsis, at most as wide as the artifact tab's cap.
+    expect(css).toContain('.tab .tab-label { min-width: 0; max-width: var(--sb-tab-label-max); overflow: hidden; text-overflow: ellipsis; }');
+    // Link tabs are the strip's own tabs, not a scroller of fixed-width tabs that crowds the rest.
+    expect(css).not.toContain('.link-tabs');
+    expect(css).not.toMatch(/\.link-tab[^{]*\{[^}]*width:/);
+    // No tab has a width, a minimum or a maximum of its own, but the maximize button, which is no tab, and Artifacts inside its cell.
+    const own = [...css.matchAll(/(?:^|\n|\})\s*([^{}@]*\.(?:tab|artifact-tab|link-tab|history-tab|diff-tab|changes-tab|artifact-menu-button)\b[^{}@]*)\{([^}]*)\}/g)]
+      .filter(([, selector, body]) => !/panel-max|tab-(?:label|open|close|badge)|\.tabs\b|artifact-menu\b|\.codicon/.test(selector!) && /(?:^|[ ;])(?:min-|max-)?width:|flex:/.test(body!))
+      .map(([, selector]) => selector!.trim());
+
+    expect(own).toEqual(['.tab, .artifact-more', '.artifact-more > .tab']);
+  });
+
   it('NarrowStrip_Under600px_ShowsTheFixedTabsAsTheirIcons', () => {
-    const narrow = /@container \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
-
-    expect(narrow).toContain('.tab:is([data-tab], [data-side]) .tab-label, .tab.history-tab .tab-label { display: none; }');
-    // With Browser or History as well, under 760 px, every fixed tab's, Console's in the right-hand group too.
-    const crowded = /@container \(max-width: 760px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
-
-    expect(crowded).toContain('.tabs:has(> :is([data-tab="browser"], [data-side="browser"], .history-tab)) > :is(.tab:is([data-tab], [data-side]), .history-tab) .tab-label { display: none; }');
+    // One switch for every tab: their labels, the fixed tabs', the link, History, artifact and file tabs' and Artifacts' alike, and every close mark
+    // but the chosen tab's.
+    expect(css).toContain('@container (max-width: 600px) { .tabs > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }');
+    expect(css).toContain('.tab .tab-label, .tab.diff-tab .tab-badge { display: var(--sb-tab-label-display, block); }');
+    expect(css).toContain('.tab:not(.selected) > .tab-close { display: var(--sb-tab-close-other, flex); }');
+    expect(css).not.toContain('@container (max-width: 760px)');
     // No rule hides a tab's icon.
-    expect(narrow).not.toMatch(/codicon(?!-chevron-down)[^{]*\{[^}]*display: none/);
+    expect(css).not.toMatch(/\.tab[^{]*codicon(?!-chevron-down)[^{]*\{[^}]*display: (?:none|var)/);
+  });
+
+  it('TabStrip_TooNarrowForFiveCharactersALabel_ShowsEveryTabAsItsIcon', () => {
+    // 116 px a tab (--sb-tab-least) keeps a cut label at five characters and the ellipsis, even beside a close mark; a strip narrower than that
+    // for each of its tabs, the maximize button among them, shows them all as icons, and one with 17 or more always does.
+    expect(css).toContain('.tabs { --sb-tab-label-max: 100px; --sb-tab-least: 116px; }');
+    const counted = ':is(.tab, .artifact-more)';
+
+    for (let n = 6; n <= 16; n++) {
+      expect(css).toContain(`@container (width < ${n * 116}px) { .tabs:has(> :nth-child(${n} of ${counted})) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }`);
+    }
+    expect(css).toContain(`.tabs:has(> :nth-child(17 of ${counted})) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; }`);
+    // Five tabs or fewer need no more than 580 px, which the 600 px rule already covers.
+    expect(5 * 116).toBeLessThan(600);
+  });
+
+  it('LinkTabs_InTheStrip_AreItsOwnChildrenSoTheyAreCounted', () => {
+    const strip = draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { open: null, fit: 0, menu: false, now: 0, links: [{ url: 'https://github.com/o/r/issues/1', label: 'Ticket' }, { url: 'https://github.com/o/r/pull/2', label: 'PR #2' }], link: 'https://github.com/o/r/pull/2' }));
+
+    expect([...strip.querySelectorAll(':scope .tabs > .link-tab')].map((tab) => tab.textContent)).toEqual(['Ticket', 'PR #2']);
   });
 });
 

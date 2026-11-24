@@ -442,15 +442,24 @@ button.picker > .codicon-chevron-down { order: 2; }
    border under itself, over the strip's own, so the line runs the whole strip and only the chosen tab breaks it. 13 px sentence-case labels, 35 px tall. */
 /* A size container is a stacking context, so the strip stands above the pane after it, and the Artifacts menu inside it with it. */
 .tabs { position: relative; z-index: 3; display: flex; flex-wrap: nowrap; container-type: inline-size; align-items: stretch; gap: 0; padding: 0; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-strip); user-select: none; }
-.tab { position: relative; display: flex; flex: none; align-items: center; gap: 6px; height: 35px; margin-bottom: -1px; padding: 0 14px; border: none; border-top: 1px solid transparent; border-right: 1px solid var(--vscode-panel-border); border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-strip); color: var(--vscode-panelTitle-inactiveForeground); font-size: 13px; cursor: pointer; white-space: nowrap; }
+/* One sizing rule for every tab, fixed, link, History, artifact and file tabs and Artifacts alike: each starts from nothing and grows evenly, up to
+   its own content (max-content), so a strip with room draws each tab whole, and a crowded one takes room from the widest tabs first until all are
+   as wide, then shrinks them all alike, cutting their labels with an ellipsis. No tab keeps a minimum of its own, so none pushes the others out.
+   Every tab has the same padding, --sb-tab-pad, at its sides, and a tab of two buttons (an artifact's, a link's, History, a file's) reaches its
+   open button and close mark into it, so the tabs grow from the same width. A label is cut at --sb-tab-label-max, which keeps an artifact's tab
+   at most ARTIFACT_TAB_WIDTH (render.ts) wide. */
+.tabs { --sb-tab-label-max: 100px; --sb-tab-least: 116px; }
+.tab, .artifact-more { --sb-tab-pad: 14px; flex: 1 1 0; min-width: 0; max-width: max-content; }
+.tab { position: relative; display: flex; align-items: center; gap: 6px; overflow: hidden; height: 35px; margin-bottom: -1px; padding: 0 var(--sb-tab-pad); border: none; border-top: 1px solid transparent; border-right: 1px solid var(--vscode-panel-border); border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-strip); color: var(--vscode-panelTitle-inactiveForeground); font-size: 13px; cursor: pointer; white-space: nowrap; }
 .tab:hover { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
 .tab.selected { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); border-top-color: var(--vscode-panelTitle-activeBorder); border-bottom-color: var(--sb-tab-surface); }
 .main { --sb-tab-surface: var(--sb-chat-background); }
 .detail { --sb-tab-surface: var(--vscode-sideBar-background); }
 .main, .detail { --sb-tab-strip: color-mix(in srgb, var(--sb-tab-surface), #000 var(--sb-tab-shade)); }
-/* An artifact's tab has a fixed width (ARTIFACT_TAB_WIDTH in render.ts), its kind's icon, its title cut with an ellipsis, and, while open, a close mark. */
-.tab.artifact-tab { box-sizing: border-box; width: 168px; padding: 0 6px 0 0; }.tab-open { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 0 0 12px; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.tab .tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* An artifact's tab has its kind's icon, its title cut with an ellipsis, and a close mark. */
+.tab.artifact-tab { box-sizing: border-box; }
+.tab-open { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; height: 100%; margin-left: calc(-1 * var(--sb-tab-pad)); padding: 0 0 0 var(--sb-tab-pad); border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.tab .tab-label { min-width: 0; max-width: var(--sb-tab-label-max); overflow: hidden; text-overflow: ellipsis; }
 .tab-open .tab-label { flex: 1 1 auto; }
 .tab .codicon { flex: none; font-size: 14px; }
 /* A tab's unread dot sits in its end padding, level with the label's top, so it changes neither the tab's width nor where its label sits. */
@@ -458,49 +467,56 @@ button.picker > .codicon-chevron-down { order: 2; }
 /* A file's type icon (fileIcons.tsx): its Seti character at 150% of the text, centred in a 16-pixel box, as VS Code's Explorer and tabs draw it. */
 .file-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; }
 .file-icon::before { font-family: seti; font-size: 150%; font-style: normal; font-weight: normal; line-height: 1; -webkit-font-smoothing: antialiased; }
-.tab-close { display: flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.tab-close { display: flex; flex: none; align-items: center; margin-right: calc(6px - var(--sb-tab-pad)); justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .tab-close:hover { background: color-mix(in srgb, var(--vscode-foreground) 15%, transparent); }
 /* History, once opened from an actions menu, has a close mark as a file tab has. */
-.tab.history-tab { box-sizing: border-box; padding: 0 6px 0 0; }
+.tab.history-tab { box-sizing: border-box; }
 /* Console sits in the strip's right-hand group, after Changes, so it takes that group's left border. */
 .tab:is([data-tab="console"], [data-side="console"]) { border-right: none; border-left: 1px solid var(--vscode-panel-border); }
 /* Artifacts and its count, at the strip's end after the artifact tabs that fit, opening a menu of every artifact. */
 .artifact-more { position: relative; display: flex; margin-left: auto; }
-.tab.artifact-menu-button { border-right: none; border-left: 1px solid var(--vscode-panel-border); padding: 0 10px; }
+.artifact-more { padding-inline: var(--sb-tab-pad); }
+.artifact-more > .tab { flex: 1 1 auto; max-width: none; margin-inline: calc(-1 * var(--sb-tab-pad)); }
+.tab.artifact-menu-button { border-right: none; border-left: 1px solid var(--vscode-panel-border); }
 /* Its count carries the unread dot on its top-right corner, as a notification badge; the button has no caret, its menu named by aria-haspopup. */
 .tab.artifact-menu-button .tab-badge { position: relative; }
 .tab.artifact-menu-button .tab-badge > .unread-dot { position: absolute; top: -3px; right: -3px; box-shadow: 0 0 0 1.5px var(--sb-tab-strip); }
 .tab.artifact-menu-button.open .tab-badge > .unread-dot { box-shadow: 0 0 0 1.5px var(--sb-tab-surface); }
 .tab.artifact-menu-button.open { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
 .tab-badge.muted { color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
-/* The strip never wraps. Narrower than 600 px it keeps its own tabs whole, shows Artifacts as its icon with its count, still opening its list,
-   the Changes tab as its icon with how many files are viewed of all, and a file tab only while chosen. Under 360 px its tabs' padding shrinks. */
+/* The strip never wraps, and its labels are whole or readable, cut to no fewer than five characters and the ellipsis, about 44 px, or gone. A
+   labelled tab needs 116 px for that (--sb-tab-least: its padding, icon, those 44 px, its close mark and border, with a little to spare), so the
+   strip shows every tab's icon alone, named by its tooltip and accessible name, while it is narrower than 116 px for each of its tabs (counted by
+   :nth-child of the tabs, the Artifacts button and the maximize button among them), and always under 600 px, as on a phone or a narrow column:
+   all labels or none. Icons alone, Artifacts and Changes keep their counts, only the chosen tab shows its close mark, and each tab is 44 px wide
+   while the strip has room, 14 px each side of its 16 px icon. The rules read the custom properties these set, so one switch turns every tab. */
+.tab .tab-label, .tab.diff-tab .tab-badge { display: var(--sb-tab-label-display, block); }
+.tab, .tab-open { justify-content: var(--sb-tab-justify, normal); }
+.tab:not(.selected) > .tab-close { display: var(--sb-tab-close-other, flex); }
+.tab:not(.selected) > .tab-open { margin-right: calc(-1 * var(--sb-tab-icons, 0) * var(--sb-tab-pad)); padding-right: calc(var(--sb-tab-icons, 0) * var(--sb-tab-pad)); }
+@container (max-width: 600px) { .tabs > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 696px) { .tabs:has(> :nth-child(6 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 812px) { .tabs:has(> :nth-child(7 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 928px) { .tabs:has(> :nth-child(8 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 1044px) { .tabs:has(> :nth-child(9 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 1160px) { .tabs:has(> :nth-child(10 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 1276px) { .tabs:has(> :nth-child(11 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 1392px) { .tabs:has(> :nth-child(12 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 1508px) { .tabs:has(> :nth-child(13 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 1624px) { .tabs:has(> :nth-child(14 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 1740px) { .tabs:has(> :nth-child(15 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+@container (width < 1856px) { .tabs:has(> :nth-child(16 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
+.tabs:has(> :nth-child(17 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; }
+/* Under 600 px, a file tab shows only while chosen, at the strip's end. Under 360 px the tabs' padding shrinks. */
 @container (max-width: 600px) {
-  /* Conversation, Status, Console and Browser show their icons alone, named by their tooltips: with their labels, the four and the icons of
-     Artifacts and Changes take over 500 px. */
-  .tab:is([data-tab], [data-side]) .tab-label, .tab.history-tab .tab-label { display: none; }
-  .tab:is([data-tab], [data-side]) { justify-content: center; min-width: 44px; padding: 0 12px; }
-  .tab.artifact-menu-button .tab-label, .tab.changes-tab .tab-label, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }
-  .tab.artifact-menu-button, .tab.changes-tab { padding: 0 10px; }
   .tab.diff-tab:not(.selected) { display: none; }
-  .tab.diff-tab.selected { flex: none; border-left: 1px solid var(--vscode-panel-border); }
+  .tab.diff-tab.selected { border-left: 1px solid var(--vscode-panel-border); }
   .tab.diff-tab.selected, .tab.changes-tab { margin-left: auto; }
   .tab.diff-tab.selected ~ .tab.changes-tab, .artifact-more ~ .tab.diff-tab.selected, .artifact-more ~ .tab.changes-tab { margin-left: 0; }
-  /* A file tab keeps its name, cut to the room left. */
-  .tab.local-tab .tab-label { display: inline; }
-  .tab.local-tab.selected { flex: 0 1 auto; min-width: 0; }
-}
-@media (hover: none), (pointer: coarse) { .tab.artifact-menu-button, .tab.changes-tab { min-width: 44px; justify-content: center; } }
-/* With Browser or History too, the fixed tabs' labels need about 740 px beside Artifacts and Changes, so they show their icons alone under
-   760 px. */
-@container (max-width: 760px) {
-  .tabs:has(> :is([data-tab="browser"], [data-side="browser"], .history-tab)) > :is(.tab:is([data-tab], [data-side]), .history-tab) .tab-label { display: none; }
-  .tabs:has(> :is([data-tab="browser"], [data-side="browser"], .history-tab)) > .tab:is([data-tab], [data-side]) { justify-content: center; min-width: 44px; padding: 0 12px; }
 }
 @container (max-width: 360px) {
-  .tab { padding: 0 9px; }
+  .tab, .artifact-more { --sb-tab-pad: 9px; }
   .tab > .unread-dot { top: 8px; right: 0; }
-  .tab.artifact-menu-button, .tab.changes-tab { padding: 0 8px; }
 }
 /* The Artifacts menu's rows share its columns, so each artifact's kind lines up under the one above: the title takes the room left and is cut
    first, and a kind longer than a word is cut at 14 characters so it cannot crowd the title out. The menu may reach past its strip, up to 480 px and the viewport's width, so on a viewport under 520 px, as on a phone, it leaves the kind
@@ -1220,9 +1236,6 @@ button.picker.opening-title { background: transparent; cursor: default; font-wei
 .iframe-browser iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--vscode-editor-background); }
 .iframe-browser .iframe-slot { flex: 1; min-height: 0; width: 100%; }
 
-/* Link tabs scroll inside the strip, leaving fixed tabs and artifact menus accessible. */
-.link-tabs { display: flex; flex: 0 1 auto; min-width: 0; max-width: 50%; margin-bottom: -1px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
-.link-tabs .link-tab { width: 120px; }
 
 /* Its tabs, dimmed and inert, and the composer and the note above it kept in their places but hidden, so nothing moves when the work item comes. */
 .opening-tabs { pointer-events: none; }

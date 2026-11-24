@@ -409,13 +409,14 @@ function artifactTabs(state: PageState, strip: ArtifactStrip): ComponentChildren
   ];
 }
 
+/** One tab per embedded link, each a tab of the strip itself, so the strip counts and sizes it as any other (page.css). */
 function linkTabs(strip: ArtifactStrip, selected: boolean): ComponentChildren {
-  return strip.links === undefined || strip.links.length === 0 ? null : <span class="link-tabs" role="presentation">{strip.links.map((link) => (
+  return strip.links === undefined ? null : strip.links.map((link) => (
     <span class={`tab artifact-tab link-tab${selected && strip.link === link.url ? ' selected' : ''}`} role="presentation">
       <button class="tab-open" type="button" role="tab" data-action="iframe-open" data-url={link.url} title={link.url} aria-selected={selected && strip.link === link.url} tabindex={selected && strip.link === link.url ? 0 : -1}><span class="codicon codicon-globe" aria-hidden="true" /><span class="tab-label">{link.label}</span></button>
       <button class="tab-close" type="button" data-action="iframe-close" data-url={link.url} aria-label={`Close ${link.label}`} title="Close"><span class="codicon codicon-close" aria-hidden="true" /></button>
     </span>
-  ))}</span>;
+  ));
 }
 
 /**

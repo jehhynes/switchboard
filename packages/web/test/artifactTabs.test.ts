@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
-import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactUrl, artifactTabsFit, closedArtifacts, newView, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts } from '../src/render.js';
+import { ARTIFACT_MENU_WIDTH, ARTIFACT_TAB_WIDTH, ARTIFACT_TABS_MAX, artifactBar, artifactTabWidth, artifactUrl, artifactTabsFit, closedArtifacts, newView, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts } from '../src/render.js';
 import { EMPTY } from '../src/model.js';
 import type { ArtifactView } from '@switchboard/protocol';
 import { html } from './html.js';
@@ -12,6 +12,20 @@ const eight = [0, 1, 2, 3, 4, 5, 6, 7].map(artifact);
 const paths = (markup: string, attribute: string) => [...markup.matchAll(new RegExp(`${attribute}="([^"]+)"`, 'g'))].map((match) => match[1]);
 /** The artifact tabs' paths, from each tab's cell. */
 const tabPaths = (markup: string) => [...markup.matchAll(/role="presentation" data-action="artifact" data-path="([^"]+)"/g)].map((match) => match[1]);
+
+describe('artifactTabWidth', () => {
+  it('ArtifactTabWidth_LabelledOrIcons_IsTheWidthPageCssDrawsItAtMost', () => {
+    // 14 px padding, 16 px icon, 6 px gap, the 100 px label, 6 px gap, the 20 px close mark 6 px from the end, and the 1 px border.
+    expect(artifactTabWidth(14, 100, false)).toBe(169);
+    expect(ARTIFACT_TAB_WIDTH).toBe(169);
+    // As an icon: the icon in its padding and the border, as wide as a fixed tab's icon.
+    expect(artifactTabWidth(14, 100, true)).toBe(45);
+    expect(artifactTabWidth(9, 100, true)).toBe(35);
+    // Icons fit many more tabs into the same room.
+    expect(artifactTabsFit(600, 300, 8, 60, artifactTabWidth(14, 100, true))).toBe(5);
+    expect(artifactTabsFit(600, 300, 8, 60)).toBe(1);
+  });
+});
 
 describe('artifactTabsFit', () => {
   it('shows every tab when they fit without the menu, else as many as fit beside it, at least one and at most the cap', () => {
@@ -191,20 +205,22 @@ describe("an artifact view's head", () => {
 
 describe('the tab strip on a narrow screen', () => {
   const css = PAGE_ASSETS['page.css']!.body;
-  const narrow = /@container \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+  const narrow = /@container \(max-width: 600px\) \{\n([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
   it('never wraps, and under 600 px shows Artifacts and the Changes tab as their icons and counts, and a file tab only while chosen', () => {
     // A size container is a stacking context: the strip stands above the pane after it, so the Artifacts menu inside it does too.
     expect(css).toMatch(/\.tabs \{ position: relative; z-index: 3; display: flex; flex-wrap: nowrap; container-type: inline-size;/);
-    expect(narrow).toContain('.tab.artifact-menu-button .tab-label, .tab.changes-tab .tab-label, .tab.diff-tab .tab-label, .tab.diff-tab .tab-badge { display: none; }');
+    expect(css).toContain('@container (max-width: 600px) { .tabs > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }');
+    expect(css).toContain('.tab .tab-label, .tab.diff-tab .tab-badge { display: var(--sb-tab-label-display, block); }');
     // The Changes tab is never hidden; a file tab keeps its icon and close mark whole.
     expect(narrow).not.toMatch(/\.changes-tab(?![^{]*\.tab-label)[^{]*\{[^}]*display: none/);
-    expect(narrow).toContain('.tab.diff-tab.selected { flex: none;');
+    expect(narrow).toContain('.tab.diff-tab.selected { border-left: 1px solid var(--vscode-panel-border); }');
     expect(narrow).toContain('.tab.diff-tab:not(.selected) { display: none; }');
     // Conversation, Status, Console and Browser are never hidden.
     expect(narrow).not.toMatch(/\.tab(\[data-tab|\.selected|:not\(\.diff-tab)[^{]*\{[^}]*display: none/);
-    expect(css).toMatch(/@container \(max-width: 360px\) \{\n  \.tab \{ padding: 0 9px; \}/);
-    expect(css).toMatch(/@media \(hover: none\), \(pointer: coarse\) \{ \.tab\.artifact-menu-button, \.tab\.changes-tab \{ min-width: 44px;/);
+    expect(css).toMatch(/@container \(max-width: 360px\) \{\n  \.tab, \.artifact-more \{ --sb-tab-pad: 9px; \}/);
+    // An icon tab is 44 px wide, by its padding rather than a minimum width of its own.
+    expect(css).not.toMatch(/@container[^{]*\{[^@]*--sb-tab-pad: (?!9px)/);
   });
 
   it('ChangesBar_OnATouchScreenUnder480px_PutsTheNoteOnARowOfItsOwn', () => {
