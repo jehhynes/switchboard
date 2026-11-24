@@ -4321,13 +4321,66 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('EmbeddedTabs_BrowserThatCannotInstallTheExtension_MakesNoBrowserTabsNorAsksForItAndOpensLinksOutside', async () => {
+    window.innerWidth = 1920;
+    const opened = vi.fn();
+    const sent: Record<string, unknown>[] = [];
+    // An iPhone's browser, say: no extension answers, and none can be installed.
+    const page = startPage(root, {
+      fetch: (async (url: string, init?: { body?: string }) => { posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} }); return { status: 200, ok: true, json: async () => ({}) }; }) as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false, openUrl: opened,
+      extensionInstallable: () => false, toExtension: async (_id, message) => { sent.push(message); return null; },
+    });
+    const pr = { label: 'PR #7', url: 'https://github.com/o/r/pull/7', kind: 'pr' as const, badge: '7', glyph: null, mentioned: false };
+
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1', links: [pr] }), listRow(2, { url: 'https://github.com/o/r/issues/2' })])] }); await flush();
+    expect(root.querySelector('[data-action="iframe-open"]')).toBeNull();
+    expect(root.querySelector('[data-side="browser"], [data-tab="browser"]')).toBeNull();
+    expect(root.textContent).not.toContain('extension');
+    // The work item's links open as ordinary links, in a new tab, its own row's and another row's alike.
+    posts = [];
+    click('#list [data-work-item="1"] .pill.ticket'); await flush();
+    click('#list [data-work-item="2"] .pill.ticket'); await flush();
+    expect(opened.mock.calls).toEqual([['https://github.com/o/r/issues/1'], ['https://github.com/o/r/issues/2']]);
+    expect(sent.filter((message) => message['type'] === 'iframe-launch')).toEqual([]);
+    expect(posts.filter((post) => post.url.endsWith('/select'))).toEqual([]);
+    page.close();
+  });
+
+  it('EmbeddedTabs_DesktopChromiumWithoutTheExtension_KeepsTheLinkTabsAndTheInstallNote', async () => {
+    window.innerWidth = 1920;
+    const page = startPage(root, {
+      fetch: (async () => ({ status: 200, ok: true, json: async () => ({}) })) as unknown as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false,
+      extensionInstallable: () => true, toExtension: async () => null,
+    });
+
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1' })])] }); await flush();
+    click('#detail [data-action="iframe-open"]'); await flush();
+    expect(root.querySelector('#detail')!.textContent).toContain('Load the experimental Switchboard Chrome/Edge extension in this browser, then select Retry.');
+    page.close();
+  });
+
+  it('EmbeddedTabs_ExtensionAnswersWhereItCouldNotBeTold_ShowsTheLinkTabs', async () => {
+    window.innerWidth = 1920;
+    const page = startPage(root, {
+      fetch: (async () => ({ status: 200, ok: true, json: async () => ({}) })) as unknown as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false,
+      extensionInstallable: () => false, toExtension: async () => ({ ok: true }),
+    });
+
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1' })])] }); await flush();
+    expect(root.querySelector('#detail [data-action="iframe-open"]')?.getAttribute('data-url')).toBe('https://github.com/o/r/issues/1');
+    page.close();
+  });
+
   it('shows the experimental GitHub frame on a remote page only after extension confirmation and removes it when disabled', async () => {
     window.innerWidth = 1920;
     const sent: unknown[] = [];
     let resolve!: (reply: unknown) => void;
     const page = startPage(root, {
       fetch: (async (url: string, init?: { body?: string }) => { posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} }); return { status: 200, ok: true, json: async () => ({}) } as Response; }) as typeof globalThis.fetch,
-      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false, extensionInstallable: () => true,
       toExtension: async (_id, message) => { sent.push(message); return message['type'] === 'iframe-check' ? new Promise((done) => { resolve = done; }) : { ok: true }; },
     });
     const source = FakeSource.last!;

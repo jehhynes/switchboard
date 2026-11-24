@@ -54,7 +54,8 @@ import { LocalFilesController, localTabs } from './localFiles.js';
 import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
-import { IframeBrowser, frameUrl, frameLinks, IFRAME_EXTENSION_ID, IFRAME_RENEW_MS } from './iframeBrowser.js';
+import { IframeBrowser, canInstallExtension, frameUrl, frameLinks, IFRAME_EXTENSION_ID, IFRAME_RENEW_MS } from './iframeBrowser.js';
+import type { BrowserIdentity } from './iframeBrowser.js';
 
 /** The Actions menu's control that starts VS Code on the work item (`OPEN_IN_VSCODE` in the hub's page.ts); History's folder links run it too. */
 const OPEN_IN_VSCODE = 'Open in VS Code';
@@ -145,6 +146,8 @@ export interface PageDeps {
    * answer, or null when the browser has no such extension. Read from `chrome.runtime` when left out.
    */
   toExtension?(extensionId: string, message: Record<string, unknown>): Promise<unknown>;
+  /** Whether this browser can install the Switchboard extension (`canInstallExtension`); read from `navigator` when left out. */
+  extensionInstallable?(): boolean;
   /** Runs a draw before the next repaint; `requestAnimationFrame` when left out. */
   frame?(run: () => void): void;
 }
@@ -306,7 +309,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   relayout();
   const localPage = (): boolean => deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
-  const browserTab = (): boolean => state.iframeBrowser === true;
+  /** Whether this browser can install the extension embedded link tabs need, as desktop Chrome and Edge can, and a phone's or Safari's cannot. */
+  const installable =
+    deps.extensionInstallable?.() ??
+    canInstallExtension({
+      userAgent: navigator.userAgent,
+      userAgentData: (navigator as Navigator & BrowserIdentity).userAgentData,
+      ...(typeof window.matchMedia === 'function' ? { finePointer: window.matchMedia('(any-pointer: fine)').matches } : {}),
+    });
+  /** Whether the extension answered that it embeds this page's links, kept as the embedded browser reports it (`changed`). */
+  let embedReady = false;
+  /**
+   * Whether this page shows embedded link tabs: they are enabled, and this browser can install the extension or has it answering. Where it can
+   * do neither, as on an iPhone, the page makes no Browser tabs and never asks for the extension; its links open as ordinary links do.
+   */
+  const browserTab = (): boolean => state.iframeBrowser === true && (installable || embedReady);
   /** Opens a link in a new browser tab, through `deps.openUrl` when given. */
   const openNewTab = (url: string): void => (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url);
   /** Whether this browser's Switchboard extension answered that it opens the page's links in its Switchboard tab group (architecture.md § Browser extension). */
@@ -2396,7 +2413,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       artifactsOpened([shownArtifact]);
     }
 
-    const strip = { ...(state.iframeBrowser === true ? { links: iframe.tabs, link: iframe.selected } : {}), open: shownArtifact, fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen) };
+    const strip = { ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), open: shownArtifact, fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen) };
 
     // The file tabs, then the one Changes tab, last so it keeps its place as file tabs come and go.
     const changeTabs = (shown: Tab): ComponentChild[] => [localTabs(localFiles.view, shown === 'file', true), changesTab(changes.view, shown === 'diff', localFiles.view.tabs.length === 0)];
@@ -5135,7 +5152,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   const iframe = new IframeBrowser({
     send: (message) => toExtension(IFRAME_EXTENSION_ID, message),
-    changed: (becameReady) => { if (becameReady && !tabChosen) openTabs(); applyHostSelection(); draw(); },
+    changed: (becameReady) => { embedReady = iframe.ready; if (becameReady && !tabChosen) openTabs(); applyHostSelection(); draw(); },
     external: (url) => { if (frameUrl(url)) (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url); },
   });
   const iframeRenew = setInterval(() => void iframe.renew(), IFRAME_RENEW_MS);
@@ -5197,7 +5214,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (listening.signal.aborted) return;
     if (frame !== null) draw();
     const covered = framesCovered();
-    iframe.place(state.iframeBrowser === true && state.connected && openingShown() === null && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !covered && !settingsPane.isOpen() && !(isPhone() && root.classList.contains('listing')));
+    iframe.place(browserTab() && state.connected && openingShown() === null && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !covered && !settingsPane.isOpen() && !(isPhone() && root.classList.contains('listing')));
   };
   const browserResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reportFrames()) : null;
 

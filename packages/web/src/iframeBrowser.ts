@@ -17,6 +17,37 @@ export function frameUrl(url: string): boolean {
     return false;
   }
 }
+/** What the page reads of the browser to tell whether it can install the extension: its user agent string and, where it has them, its client hints. */
+export interface BrowserIdentity {
+  userAgent: string;
+  userAgentData?: { brands?: ReadonlyArray<{ brand: string }>; mobile?: boolean; platform?: string } | undefined;
+  /** Whether any pointer is fine, a mouse or touchpad (`(any-pointer: fine)`); left out where unknown. */
+  finePointer?: boolean;
+}
+
+/**
+ * Whether this browser can install the Switchboard extension that embedded link tabs need (architecture.md § Embedded link tabs): Chromium on a
+ * desktop, as Chrome and Edge on Windows, macOS, Linux and ChromeOS. Safari, Firefox, every iOS and iPadOS browser and Chromium on Android cannot.
+ * Read from User-Agent Client Hints where the browser has them (Chromium in a secure context), else from the user agent string; an iPad's Safari
+ * names itself a Mac but never Chrome. Chrome on Android in desktop mode, the default on large tablets, names itself desktop Linux in both, so a
+ * Linux browser counts only with a fine pointer, a mouse or touchpad, which a desktop has and a tablet seldom does.
+ */
+export function canInstallExtension(browser: BrowserIdentity): boolean {
+  const hints = browser.userAgentData;
+  const hinted = hints?.brands !== undefined && hints.brands.length > 0;
+  const linux = hinted ? hints.platform === 'Linux' : /\bLinux\b/.test(browser.userAgent) && !/\bCrOS\b/.test(browser.userAgent);
+
+  if (linux && browser.finePointer === false) {
+    return false;
+  }
+
+  if (hinted) {
+    return hints.brands!.some(({ brand }) => brand === 'Chromium') && hints.mobile !== true && hints.platform !== 'Android';
+  }
+
+  return /\bChrom(?:e|ium)\/\d/.test(browser.userAgent) && !/Android|Mobile|iPhone|iPad|iPod|CriOS|EdgiOS|FxiOS/.test(browser.userAgent);
+}
+
 export function frameLinks(row: PageRow | null): Array<{ url: string; label: string }> {
   if (row === null) return [];
   const links = [{ url: row.url, label: 'Ticket' }, ...row.links];

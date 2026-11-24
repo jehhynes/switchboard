@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { IframeBrowser, frameUrl, frameLinks } from '../src/iframeBrowser.js';
+import { IframeBrowser, canInstallExtension, frameUrl, frameLinks } from '../src/iframeBrowser.js';
 import type { PageRow } from '@switchboard/protocol';
 const row = (id = 1): PageRow => ({ workItemId: id, url: `https://github.com/o/r/issues/${id}`, links: [{ label: 'PR', url: 'https://github.com/o/r/pull/3', kind: 'pr' }, { label: 'Duplicate', url: `https://github.com/o/r/issues/${id}` }, { label: 'Other', url: 'https://example.com/' }] }) as PageRow;
 async function rig(answer: unknown = { ok: true }) {
@@ -103,5 +103,52 @@ describe('embedded browser tabs', () => {
     r.browser.requireReload(); r.browser.draw(r.host, row(), false);
     expect(r.host.textContent).toContain('Reload Switchboard');
     r.browser.dispose(); r.host.remove();
+  });
+});
+
+describe('canInstallExtension', () => {
+  const agents = {
+    chromeWindows: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+    edgeWindows: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0',
+    chromeMac: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+    safariIphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1',
+    chromeIphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/142.0.0.0 Mobile/15E148 Safari/604.1',
+    safariIpad: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15',
+    safariMac: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15',
+    firefoxWindows: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0',
+    chromeAndroid: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36',
+    chromeAndroidTablet: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+  };
+  const brands = (...names: string[]) => names.map((brand) => ({ brand }));
+
+  it('CanInstallExtension_DesktopChromeOrEdgeUserAgent_IsTrue', () => {
+    expect([agents.chromeWindows, agents.edgeWindows, agents.chromeMac].map((userAgent) => canInstallExtension({ userAgent }))).toEqual([true, true, true]);
+  });
+
+  it('CanInstallExtension_SafariFirefoxIosOrAndroidUserAgent_IsFalse', () => {
+    const cannot = [agents.safariIphone, agents.chromeIphone, agents.safariIpad, agents.safariMac, agents.firefoxWindows, agents.chromeAndroid, agents.chromeAndroidTablet];
+
+    expect(cannot.map((userAgent) => canInstallExtension({ userAgent }))).toEqual(cannot.map(() => false));
+  });
+
+  it('CanInstallExtension_ClientHints_DecideOverTheUserAgentString', () => {
+    // Chrome and Edge on a desktop name Chromium among their brands and are not mobile.
+    expect(canInstallExtension({ userAgent: '', userAgentData: { brands: brands('Chromium', 'Google Chrome', 'Not_A Brand'), mobile: false, platform: 'Windows' } })).toBe(true);
+    expect(canInstallExtension({ userAgent: '', userAgentData: { brands: brands('Chromium', 'Microsoft Edge'), mobile: false, platform: 'macOS' } })).toBe(true);
+    // A phone, or an Android tablet, which reports itself as not mobile, cannot, whatever its string says.
+    expect(canInstallExtension({ userAgent: agents.chromeWindows, userAgentData: { brands: brands('Chromium', 'Google Chrome'), mobile: true, platform: 'Android' } })).toBe(false);
+    expect(canInstallExtension({ userAgent: agents.chromeWindows, userAgentData: { brands: brands('Chromium', 'Google Chrome'), mobile: false, platform: 'Android' } })).toBe(false);
+    // Android Chrome in desktop mode names itself desktop Linux; with no fine pointer it counts as the tablet it is.
+    const linux = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
+    const desktopMode = { brands: brands('Chromium', 'Google Chrome'), mobile: false, platform: 'Linux' };
+
+    expect(canInstallExtension({ userAgent: linux, userAgentData: desktopMode, finePointer: false })).toBe(false);
+    expect(canInstallExtension({ userAgent: linux, finePointer: false })).toBe(false);
+    expect(canInstallExtension({ userAgent: linux, userAgentData: desktopMode, finePointer: true })).toBe(true);
+    expect(canInstallExtension({ userAgent: linux, finePointer: true })).toBe(true);
+    // ChromeOS keeps its extensions, mouse or not.
+    expect(canInstallExtension({ userAgent: 'Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', finePointer: false })).toBe(true);
+    // No brands, as before the hints are read: the string decides.
+    expect(canInstallExtension({ userAgent: agents.chromeWindows, userAgentData: { brands: [], mobile: false, platform: '' } })).toBe(true);
   });
 });
