@@ -44,7 +44,20 @@
             "file": "C:\\Users\\op\\.switchboard\\windows\\gh-113-widgets-655280.code-workspace"
           },
           "open": null,
-          "terminal": null,
+          "terminal": {
+            "provider": "claude",
+            "sessionId": "s1",
+            "cwd": "D:/git/widgets",
+            "args": [
+              "attach",
+              "s1"
+            ],
+            "name": "gh-113-widgets-655280-s1",
+            "title": "Issue <13> · sb:gh-113-widgets-655280-s1",
+            "handoff": null,
+            "active": false,
+            "codeMode": true
+          },
           "controls": [
             {
               "label": "Stop session",
@@ -121,20 +134,6 @@
           "pastes": [],
           "commands": [
             {
-              "label": "Open in terminal",
-              "glyph": "",
-              "command": {
-                "type": "terminal",
-                "provider": "claude",
-                "sessionId": "s1",
-                "cwd": "D:/git/widgets",
-                "name": "gh 113",
-                "shortId": "aaaa1111",
-                "active": false,
-                "codeMode": true
-              }
-            },
-            {
               "label": "History",
               "glyph": "",
               "command": {
@@ -193,7 +192,19 @@
             "cwd": "D:/git/widgets/.worktrees/107-fix",
             "provider": "claude"
           },
-          "terminal": null,
+          "terminal": {
+            "provider": "claude",
+            "sessionId": "aaaa1111-native",
+            "cwd": "D:/git/widgets/.worktrees/107-fix",
+            "args": [
+              "--resume",
+              "aaaa1111-native"
+            ],
+            "name": "gh-107-58c609-aaaa1111",
+            "title": "Issue <7> · sb:gh-107-58c609-aaaa1111",
+            "handoff": null,
+            "active": false
+          },
           "controls": [
             {
               "label": "Mark done",
@@ -282,19 +293,6 @@
               }
             },
             {
-              "label": "Open in terminal",
-              "glyph": "",
-              "command": {
-                "type": "terminal",
-                "provider": "claude",
-                "sessionId": "aaaa1111-native",
-                "cwd": "D:/git/widgets/.worktrees/107-fix",
-                "name": "gh 107",
-                "shortId": null,
-                "active": false
-              }
-            },
-            {
               "label": "History",
               "glyph": "",
               "command": {
@@ -370,7 +368,19 @@
             "cwd": "D:/git/support",
             "provider": "claude"
           },
-          "terminal": null,
+          "terminal": {
+            "provider": "claude",
+            "sessionId": "aaaa1111-native",
+            "cwd": "D:/git/support",
+            "args": [
+              "--resume",
+              "aaaa1111-native"
+            ],
+            "name": "gh-110-support-c6262c-aaaa1111",
+            "title": "Issue <10> · sb:gh-110-support-c6262c-aaaa1111",
+            "handoff": null,
+            "active": false
+          },
           "controls": [
             {
               "label": "Approve",
@@ -452,19 +462,6 @@
             }
           ],
           "commands": [
-            {
-              "label": "Open in terminal",
-              "glyph": "",
-              "command": {
-                "type": "terminal",
-                "provider": "claude",
-                "sessionId": "aaaa1111-native",
-                "cwd": "D:/git/support",
-                "name": "gh 110",
-                "shortId": null,
-                "active": false
-              }
-            },
             {
               "label": "History",
               "glyph": "",
@@ -762,7 +759,20 @@
             "cwd": "D:/git/widgets",
             "provider": "claude"
           },
-          "terminal": null,
+          "terminal": {
+            "provider": "claude",
+            "sessionId": "cm15",
+            "cwd": "D:/git/widgets",
+            "args": [
+              "attach",
+              "cm15"
+            ],
+            "name": "gh-115-widgets-655280-cm15",
+            "title": "Issue <15> · sb:gh-115-widgets-655280-cm15",
+            "handoff": null,
+            "active": false,
+            "codeMode": true
+          },
           "controls": [
             {
               "label": "Stop session",
@@ -821,20 +831,6 @@
           "mainTitle": "Open in terminal: attaches to the Code Mode session",
           "pastes": [],
           "commands": [
-            {
-              "label": "Open in terminal",
-              "glyph": "",
-              "command": {
-                "type": "terminal",
-                "provider": "claude",
-                "sessionId": "cm15",
-                "cwd": "D:/git/widgets",
-                "name": "gh 115",
-                "shortId": "eeee5555",
-                "active": false,
-                "codeMode": true
-              }
-            },
             {
               "label": "History",
               "glyph": "",

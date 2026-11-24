@@ -5224,7 +5224,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   askLinks();
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && askLinks(), { signal: listening.signal });
   // ---- The stream ----
-  // The installed app says so, since a dock click with `dock.openIn: web` shows its work item there (architecture.md § Web page).
+  // The installed app says so, since `alerts.surface: auto` raises needs-you alerts only there (architecture.md § Web page).
   // The hub routes needs-you alerts to a page only once it may show notifications, so the page says when that changes.
   askForNotifications(document, () => reportFocus(true));
   const installedApp = deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);

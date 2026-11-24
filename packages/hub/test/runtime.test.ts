@@ -56,6 +56,7 @@ function config(patch: Partial<Settings['sessions']> = {}): Config {
       sources: { github: { kind: 'github', pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '', namespace: '', options: {} } },
     },
     settingsError: null,
+    settingsWarnings: [],
     playbooks: PLAYBOOKS,
     playbookErrors: [],
   };

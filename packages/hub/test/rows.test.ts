@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { groupOf, PERMISSION_PROMPT, START_PROMPT } from '@switchboard/core/group';
 import { SETUP_AT_LIMIT } from '@switchboard/core/limit';
 import {
-  ANSWER_IN_TERMINAL,
   clockOf,
   controlsOf,
   listGroups,
@@ -159,7 +158,6 @@ describe('controlsOf', () => {
 
     expect(labels(waiting)).toContain('Stop session');
     expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: { type: 'terminal', shortId: 'aaaa1111', active: false } });
-    expect(mainControl(waiting, 'review')).toBe(ANSWER_IN_TERMINAL);
     expect(startPromptText(waiting)).toEqual([{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.' }]);
     // A registered session shows the prompt in the operator's own window.
     expect(startPromptText(item(7, { sessions: [session({ state: 'waiting', stateDetail: PERMISSION_PROMPT, released: true })] }))).toEqual([]);
@@ -214,13 +212,12 @@ describe('Code Mode sessions (PRD R95)', () => {
     }
   });
 
-  it('offers Open in terminal, not Open in Claude, on a question, a permission prompt and a start prompt, and Answer in terminal with review', () => {
+  it('offers Open in terminal, not Open in Claude, on a question, a permission prompt and a start prompt', () => {
     for (const stateDetail of [null, PERMISSION_PROMPT, START_PROMPT]) {
       const waiting = item(7, { sessions: [held({ state: 'waiting', stateDetail })] });
 
       expect(labels(waiting)).not.toContain('Open in Claude');
       expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: attach });
-      expect(mainControl(waiting, 'review')).toBe(ANSWER_IN_TERMINAL);
     }
   });
 

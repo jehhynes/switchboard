@@ -394,6 +394,26 @@ describe('createHubApp', () => {
     for (const command of ['pane-pair', 'pane-open', 'pane-rect']) expect(app.post[`/v1/conversation/${command}`]).toBeUndefined();
   });
 
+  it("loads retired settings, logs a warning for each, and returns them from Settings' check", async () => {
+    const retired = { sessions: { installHooks: false }, dock: { openVSCode: 'review', openTerminal: 'auto', openIn: 'web' }, alerts: { surface: 'dock' }, web: { chromePane: true } };
+    const warnings = [
+      'dock.openVSCode is no longer used and can be removed.',
+      'dock.openTerminal is no longer used and can be removed.',
+      'dock.openIn is no longer used and can be removed.',
+      'web.chromePane is no longer used and can be removed.',
+      'alerts.surface dock is no longer used and can be removed; it now works as auto.',
+    ];
+
+    writeSettings(retired);
+    const logs: string[] = [];
+    const app = await start((line) => logs.push(line));
+
+    expect(logs.filter((line) => line.startsWith('settings.json: '))).toEqual(warnings.map((warning) => `settings.json: ${warning}`));
+    expect((app.snapshot() as { errors: { settings: string | null } }).errors.settings).toBeNull();
+    expect(await app.post['/v1/conversation/page-settings-check']!({ settings: retired })).toEqual({ status: 200, body: { errors: [], warnings } });
+    expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { sessions: { installHooks: false } } })).toEqual({ status: 200, body: { errors: [], warnings: [] } });
+  });
+
   it('has no route for VS Code windows, which no longer connect: no claim, open, window command, background session, Open in Switchboard, window History or Expand replies', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
@@ -653,12 +673,12 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { sessions: { concurrency: 11 } } })).toMatchObject({ status: 200, body: { errors: [expect.stringContaining('sessions.concurrency')] } });
     expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { playbooks: { 'dev:develop': { ...playbook, template: '{{nope}}' } } } })).toEqual({
       status: 200,
-      body: { errors: ['playbooks.dev:develop: Unknown template variable: nope.'] },
+      body: { errors: ['playbooks.dev:develop: Unknown template variable: nope.'], warnings: [] },
     });
-    expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { playbooks: { 'dev:develop': playbook } } })).toEqual({ status: 200, body: { errors: [] } });
+    expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { playbooks: { 'dev:develop': playbook } } })).toEqual({ status: 200, body: { errors: [], warnings: [] } });
     expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { playbooks: { 'dev:develop': { ...playbook, returnOf: ['dev:develop'] } } } })).toEqual({
       status: 200,
-      body: { errors: ['playbooks.dev:develop: returnOf must list other playbook names, not dev:develop.'] },
+      body: { errors: ['playbooks.dev:develop: returnOf must list other playbook names, not dev:develop.'], warnings: [] },
     });
     expect(await app.post['/v1/conversation/page-settings-check']!({})).toEqual({ status: 400, body: { error: 'Expected {settings}.' } });
 
@@ -1029,7 +1049,7 @@ describe('createHubApp', () => {
     expect(systemAlerts).toHaveLength(2);
   });
 
-  it('shows needs-you messages for alerts.surface dock as for auto, and as system notifications for system even with a page that may notify (PRD R65)', async () => {
+  it('shows needs-you messages for the retired alerts.surface dock as for auto, and as system notifications for system even with a page that may notify (PRD R65)', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, alerts: { surface: 'dock' } });
     const dockApp = await start();
     const dockFrames: string[] = [];
@@ -1233,7 +1253,7 @@ describe('createHubApp', () => {
   });
 
   it("runs hub.js with sessions.nodePath as a Code Mode session's terminal in the dock view, and opens a held session's terminal in the terminal app (PRD R95)", async () => {
-    writeSettings({ sessions: { installHooks: false, nodePath: '/opt/node/bin/node' }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, dock: { openTerminal: 'app' } });
+    writeSettings({ sessions: { installHooks: false, nodePath: '/opt/node/bin/node' }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const logs: string[] = [];
     const entry = { session: 'held-1', label: 'l', pid: 9, cwd: 'D:/scratch', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null };
     const connection = {

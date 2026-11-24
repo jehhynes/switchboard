@@ -45,7 +45,6 @@ export function settings(patch: { sessions?: Partial<Settings['sessions']>; tria
       zoho: { kind: 'zoho', pollIntervalSeconds: 300, repoRoot: 'D:/git/support', triagePlaybook: 'triage:zoho', setupPrompt: '', namespace: 'support', options: {} },
     },
     schedules: patch.schedules ?? {},
-    dock: DEFAULT_SETTINGS.dock,
     alerts: DEFAULT_SETTINGS.alerts,
     voice: DEFAULT_SETTINGS.voice,
     web: DEFAULT_SETTINGS.web,

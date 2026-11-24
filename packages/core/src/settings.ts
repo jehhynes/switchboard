@@ -90,35 +90,11 @@ export interface ScheduleSettings {
   at: number | null;
 }
 
-/** Where a dock row opens its work (PRD R71): `always` in its VS Code item window, `review` in a terminal until it is `awaiting-approval` or `finished`. */
-export const OPEN_VSCODE = ['always', 'review'] as const;
-
-export type OpenVSCode = (typeof OPEN_VSCODE)[number];
-
-/**
- * Where the dock's Open in terminal runs with `dock.openVSCode: always` (PRD R28): `vscode` in the item window, `app` in the terminal app,
- * `auto` in the item window while it is open and otherwise in the terminal app. With `review` it always runs in the terminal app.
- */
-export const OPEN_TERMINAL = ['vscode', 'app', 'auto'] as const;
-
-export type OpenTerminal = (typeof OPEN_TERMINAL)[number];
-
-/** Where a dock row's click opens its work item (PRD R71): `vscode` as `dock.openVSCode` says, `web` in the installed web page; Alt-click opens the other. */
-export const OPEN_IN = ['vscode', 'web'] as const;
-
-export type OpenIn = (typeof OPEN_IN)[number];
-
-export interface DockSettings {
-  openVSCode: OpenVSCode;
-  openTerminal: OpenTerminal;
-  openIn: OpenIn;
-}
-
 /**
  * Which surface raises needs-you alerts (PRD R65), so one event alerts once: `auto` the installed web page while one is open, else a system
- * notification; `web` any open web page, the installed one first, else a system notification; `dock` the dock; `system` a system notification.
+ * notification; `web` any open web page, the installed one first, else a system notification; `system` a system notification.
  */
-export const ALERT_SURFACES = ['auto', 'web', 'dock', 'system'] as const;
+export const ALERT_SURFACES = ['auto', 'web', 'system'] as const;
 
 export type AlertSurface = (typeof ALERT_SURFACES)[number];
 
@@ -267,7 +243,6 @@ export interface Settings {
   triage: TriageSettings;
   sources: Record<string, SourceSettings>;
   schedules: Record<string, ScheduleSettings>;
-  dock: DockSettings;
   alerts: AlertSettings;
   voice: VoiceSettings;
   web: WebSettings;
@@ -279,7 +254,6 @@ export const DEFAULT_SETTINGS: Settings = {
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
   schedules: {},
-  dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
   alerts: { surface: 'auto' },
   voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, briefReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
   web: { port: 47616, iframeBrowser: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto' },
@@ -290,7 +264,8 @@ const NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 const SOURCE_DEFAULTS = { kind: '', pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '' };
 
-export type SettingsResult = { settings: Settings } | { errors: string[] };
+/** A valid file's settings, with a warning for each retired setting it still holds; or why the file is rejected. */
+export type SettingsResult = { settings: Settings; warnings: string[] } | { errors: string[] };
 
 type Json = Record<string, unknown>;
 
@@ -465,6 +440,42 @@ class Reader {
   }
 }
 
+// Settings the dock and the VS Code extension used. They load with a warning, and no effect, for one release; then remove these lists and the
+// alerts.surface dock case, so they become errors.
+const RETIRED_SECTIONS = ['dock'];
+const RETIRED_WEB_KEYS = ['chromePane'];
+
+/** A warning for each retired setting in a settings.json value; alerts.surface dock loads as auto. */
+export function settingsWarnings(value: unknown): string[] {
+  if (!isObject(value)) {
+    return [];
+  }
+
+  const unused = (path: string) => `${path} is no longer used and can be removed.`;
+  const warnings: string[] = [];
+
+  for (const section of RETIRED_SECTIONS.filter((key) => value[key] !== undefined)) {
+    const entry = value[section];
+    const keys = isObject(entry) ? Object.keys(entry) : [];
+
+    warnings.push(...(keys.length === 0 ? [unused(section)] : keys.map((key) => unused(`${section}.${key}`))));
+  }
+
+  const web = value['web'];
+
+  if (isObject(web)) {
+    warnings.push(...RETIRED_WEB_KEYS.filter((key) => web[key] !== undefined).map((key) => unused(`web.${key}`)));
+  }
+
+  const alerts = value['alerts'];
+
+  if (isObject(alerts) && alerts['surface'] === 'dock') {
+    warnings.push('alerts.surface dock is no longer used and can be removed; it now works as auto.');
+  }
+
+  return warnings;
+}
+
 /** Parses `settings.json`. Any error outside `playbooks` rejects the whole file, so the hub keeps the last valid settings (PRD R42). */
 export function parseSettings(text: string): SettingsResult {
   let root: unknown;
@@ -480,7 +491,7 @@ export function parseSettings(text: string): SettingsResult {
   }
 
   const read = new Reader();
-  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', 'dock', 'alerts', 'voice', 'web', 'playbooks'], 'settings');
+  read.unknown(root, ['sessions', 'triage', 'sources', 'schedules', ...RETIRED_SECTIONS, 'alerts', 'voice', 'web', 'playbooks'], 'settings');
   // Each playbook is checked on its own by `parsePlaybooks`, so an invalid one is left out rather than rejecting the file.
   read.section(root, 'playbooks', 'playbooks');
 
@@ -567,17 +578,9 @@ export function parseSettings(text: string): SettingsResult {
     schedules[name] = parseSchedule(read, read.section(schedulesIn, name, path), path);
   }
 
-  const dockIn = read.section(root, 'dock', 'dock');
-  read.unknown(dockIn, ['openVSCode', 'openTerminal', 'openIn'], 'dock');
-  const dock: DockSettings = {
-    openVSCode: read.choice(dockIn, 'openVSCode', 'dock', OPEN_VSCODE, defaults.dock.openVSCode),
-    openTerminal: read.choice(dockIn, 'openTerminal', 'dock', OPEN_TERMINAL, defaults.dock.openTerminal),
-    openIn: read.choice(dockIn, 'openIn', 'dock', OPEN_IN, defaults.dock.openIn),
-  };
-
   const alertsIn = read.section(root, 'alerts', 'alerts');
   read.unknown(alertsIn, ['surface'], 'alerts');
-  const alerts: AlertSettings = { surface: read.choice(alertsIn, 'surface', 'alerts', ALERT_SURFACES, defaults.alerts.surface) };
+  const alerts: AlertSettings = { surface: read.choice(alertsIn['surface'] === 'dock' ? { surface: 'auto' } : alertsIn, 'surface', 'alerts', ALERT_SURFACES, defaults.alerts.surface) };
 
   const voiceIn = read.section(root, 'voice', 'voice');
   read.unknown(voiceIn, ['enabled', 'voice', 'style', 'speed', 'expressive', 'briefReplies', 'expandReplies', 'awayMinutes', 'needsYouSound', 'outputDevice', 'micIdleMinutes', 'endPauseMs', 'inputDevice', 'halfDuplexTailMs', 'duplex', 'matchThreshold', 'pitchLowFactor', 'pitchMinLowShare', 'roomHold', 'roomHoldSeconds', 'personas', 'playbookPersonas', 'spokenAlerts', 'alertOn', 'alertAnswerSeconds', 'operatorName'], 'voice');
@@ -631,7 +634,7 @@ export function parseSettings(text: string): SettingsResult {
   voice.playbookPersonas = parsePlaybookPersonas(read, voiceIn['playbookPersonas'], voice.personas);
 
   const webIn = read.section(root, 'web', 'web');
-  read.unknown(webIn, ['port', 'chromePane', 'iframeBrowser', 'remoteHosts', 'remoteLogins', 'tailscale', 'diffLayout', 'diffWrap'], 'web');
+  read.unknown(webIn, ['port', ...RETIRED_WEB_KEYS, 'iframeBrowser', 'remoteHosts', 'remoteLogins', 'tailscale', 'diffLayout', 'diffWrap'], 'web');
   const web: WebSettings = {
     port: read.integer(webIn, 'port', 'web', defaults.web.port, 0, 65535),
     iframeBrowser: read.boolean(webIn, 'iframeBrowser', 'web', defaults.web.iframeBrowser),
@@ -642,7 +645,7 @@ export function parseSettings(text: string): SettingsResult {
     diffWrap: read.choice(webIn, 'diffWrap', 'web', DIFF_WRAPS, defaults.web.diffWrap),
   };
 
-  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, dock, alerts, voice, web } };
+  return read.errors.length > 0 ? { errors: read.errors } : { settings: { sessions, triage, sources, schedules, alerts, voice, web }, warnings: settingsWarnings(root) };
 }
 
 /** `voice.personas`: each persona's ID unique, its voice and style defaulting to the section's. */

@@ -9,11 +9,11 @@ describe('parseSettings', () => {
         triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
         sources: {},
         schedules: {},
-        dock: { openVSCode: 'always', openTerminal: 'vscode', openIn: 'vscode' },
         alerts: { surface: 'auto' },
         voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, briefReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
         web: { port: 47616, iframeBrowser: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto' },
       },
+      warnings: [],
     });
   });
 
@@ -25,10 +25,9 @@ describe('parseSettings', () => {
         sources: {
           github: { pollIntervalSeconds: 300, repoRoot: 'D:/git/widgets', triagePlaybook: 'triage:github', setupPrompt: '/init-worktree {{ticket.sourceKey}}', repo: 'acme/widgets', logins: ['work-login'] },
         },
-        dock: { openVSCode: 'review', openTerminal: 'auto', openIn: 'web' },
-        alerts: { surface: 'dock' },
+        alerts: { surface: 'web' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, briefReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: ' Alex ' },
-        web: { port: 0, chromePane: true, iframeBrowser: true, remoteHosts: ['PC.tailnet.ts.net', 'pc.tailnet.ts.net '], remoteLogins: ['alex@example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off' },
+        web: { port: 0, iframeBrowser: true, remoteHosts: ['PC.tailnet.ts.net', 'pc.tailnet.ts.net '], remoteLogins: ['alex@example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off' },
       }),
     );
 
@@ -48,11 +47,11 @@ describe('parseSettings', () => {
           },
         },
         schedules: {},
-        dock: { openVSCode: 'review', openTerminal: 'auto', openIn: 'web' },
-        alerts: { surface: 'dock' },
+        alerts: { surface: 'web' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, briefReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, personas: [], playbookPersonas: {}, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: 'Alex' },
         web: { port: 0, iframeBrowser: true, remoteHosts: ['pc.tailnet.ts.net'], remoteLogins: ['alex@example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off' },
       },
+      warnings: [],
     });
   });
 
@@ -76,7 +75,6 @@ describe('parseSettings', () => {
   it('refuses a web port outside 0 to 65535 and other web keys', () => {
     expect(parseSettings('{"web":{"port":65536,"host":"0.0.0.0"}}')).toEqual({ errors: ['web.host is not a setting.', 'web.port must be a whole number from 0 to 65535.'] });
     expect(parseSettings('{"web":{"port":1.5}}')).toEqual({ errors: ['web.port must be a whole number from 0 to 65535.'] });
-    expect(parseSettings('{"web":{"chromePane":true}}')).toHaveProperty('settings');
     expect(parseSettings('{"web":{"iframeBrowser":"yes"}}')).toEqual({ errors: ['web.iframeBrowser must be true or false.'] });
     expect(parseSettings('{"web":{"diffLayout":"inline","diffWrap":true}}')).toEqual({ errors: ['web.diffLayout must be one of auto, split, stacked.', 'web.diffWrap must be a string.'] });
   });
@@ -133,15 +131,31 @@ describe('parseSettings', () => {
     expect(parseSettings('{"voice":{"speed":0.25,"outputDevice":null}}')).toMatchObject({ settings: { voice: { speed: 0.25, outputDevice: null } } });
   });
 
-  it('refuses a dock.openVSCode or dock.openTerminal outside its choices, and other dock keys', () => {
-    expect(parseSettings('{"dock":{"openVSCode":"never","width":3}}')).toEqual({ errors: ['dock.width is not a setting.', 'dock.openVSCode must be one of always, review.'] });
-    expect(parseSettings('{"dock":{"openTerminal":"native"}}')).toEqual({ errors: ['dock.openTerminal must be one of vscode, app, auto.'] });
-    expect(parseSettings('{"dock":"review"}')).toMatchObject({ errors: [expect.stringContaining('dock')] });
+  it('loads each retired setting with a warning and no error, whatever its value, and alerts.surface dock as auto', () => {
+    const loaded = (value: unknown) => {
+      const result = parseSettings(JSON.stringify(value));
+
+      return 'errors' in result ? result : { warnings: result.warnings, surface: result.settings.alerts.surface, settings: result.settings };
+    };
+    const unused = (path: string) => `${path} is no longer used and can be removed.`;
+
+    expect(loaded({ dock: { openVSCode: 'review' } })).toMatchObject({ warnings: [unused('dock.openVSCode')] });
+    expect(loaded({ dock: { openTerminal: 'auto' } })).toMatchObject({ warnings: [unused('dock.openTerminal')] });
+    expect(loaded({ dock: { openIn: 'web' } })).toMatchObject({ warnings: [unused('dock.openIn')] });
+    expect(loaded({ dock: { openVSCode: 'never', openTerminal: 'native', width: 3 } })).toMatchObject({ warnings: [unused('dock.openVSCode'), unused('dock.openTerminal'), unused('dock.width')] });
+    expect(loaded({ dock: {} })).toMatchObject({ warnings: [unused('dock')] });
+    expect(loaded({ dock: 'review' })).toMatchObject({ warnings: [unused('dock')] });
+    expect(loaded({ web: { chromePane: true } })).toMatchObject({ warnings: [unused('web.chromePane')] });
+    expect(loaded({ alerts: { surface: 'dock' } })).toEqual(expect.objectContaining({ warnings: ['alerts.surface dock is no longer used and can be removed; it now works as auto.'], surface: 'auto' }));
+    expect(loaded({ alerts: { surface: 'system' } })).toMatchObject({ warnings: [], surface: 'system' });
+    // A retired setting leaves the rest as it would be without it.
+    expect((loaded({ dock: { openIn: 'web' }, web: { chromePane: true, port: 0 } }) as { settings: unknown }).settings).toEqual((loaded({ web: { port: 0 } }) as { settings: unknown }).settings);
+    // Another file's error still rejects it.
+    expect(parseSettings('{"dock":{"openIn":"web"},"alerts":{"surface":"both"}}')).toEqual({ errors: ['alerts.surface must be one of auto, web, system.'] });
   });
 
-  it('refuses a dock.openIn or alerts.surface outside its choices, and other alerts keys', () => {
-    expect(parseSettings('{"dock":{"openIn":"browser"}}')).toEqual({ errors: ['dock.openIn must be one of vscode, web.'] });
-    expect(parseSettings('{"alerts":{"surface":"both","sound":true}}')).toEqual({ errors: ['alerts.sound is not a setting.', 'alerts.surface must be one of auto, web, dock, system.'] });
+  it('refuses an alerts.surface outside its choices, and other alerts keys', () => {
+    expect(parseSettings('{"alerts":{"surface":"both","sound":true}}')).toEqual({ errors: ['alerts.sound is not a setting.', 'alerts.surface must be one of auto, web, system.'] });
     expect(parseSettings('{"alerts":"web"}')).toMatchObject({ errors: [expect.stringContaining('alerts')] });
   });
 
@@ -150,6 +164,7 @@ describe('parseSettings', () => {
       settings: expect.objectContaining({
         sources: { adhoc: { kind: 'adhoc', pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '', options: {} } },
       }),
+      warnings: [],
     });
   });
 
@@ -266,6 +281,7 @@ describe('parseSettings', () => {
             'by-hand': { playbook: 'ops:d', repoRoot: 'C:/Users/me/.claude', every: null, day: null, at: null },
           },
         }),
+        warnings: [],
       });
     });
 

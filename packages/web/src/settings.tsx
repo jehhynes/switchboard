@@ -259,6 +259,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
     if (value === null) {
       current.errors = [];
+      current.warnings = [];
       checkedEdits = covered;
       return;
     }
@@ -271,6 +272,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     }
 
     current.errors = (answer.body['errors'] as unknown[]).map(String);
+    current.warnings = Array.isArray(answer.body['warnings']) ? (answer.body['warnings'] as unknown[]).map(String) : [];
     checkedEdits = covered;
     draw();
   };
@@ -981,6 +983,9 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
             <div class="settings-bar-text">
               <span class="settings-status">{shown.status}</span>
               {shown.warning === null ? null : <span class="settings-warning">{shown.warning}</span>}
+              {shown.warnings.map((warning) => (
+                <span class="settings-warning">{warning}</span>
+              ))}
               {shown.errors.map((error) => (
                 <span class="settings-error">{error}</span>
               ))}

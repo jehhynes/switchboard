@@ -35,7 +35,7 @@ export class PageTargets {
 
   /**
    * The page that raises needs-you alerts for `alerts.surface`, among the pages that may show notifications: `auto` the installed page used
-   * last, as for `dock`, which no longer has a surface of its own; `web` that, else any page used last; `system` none. Null leaves the alert to a
+   * last; `web` that, else any page used last; `system` none. Null leaves the alert to a
    * system notification.
    */
   alerting(surface: AlertSurface): string | null {

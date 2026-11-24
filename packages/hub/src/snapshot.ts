@@ -2,7 +2,7 @@
  * The snapshot every window and the dock are built from (architecture.md § Hub lifecycle): a pure projection of the store and the runtime's
  * inputs, so the hub can build it in a worker thread with its own read-only connection and keep its main thread free.
  */
-import type { Comment, Link, OpenTerminal, OpenVSCode, Paste, Playbook, Provider, PullRequestStatus, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { Comment, Link, Paste, Playbook, Provider, PullRequestStatus, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { effectiveFocus, heldSlots, homeRepo, itemProvider, playbookChoices, PROVIDERS, queueWaits, reopenRefusal, repoRoots, resumesHeld, SCHEDULE_SOURCE, ADHOC_SOURCE } from '@switchboard/core';
 import type { HeldSession, HolderState } from './held.js';
 import { doneSince } from './rows.js';
@@ -96,10 +96,6 @@ export interface Snapshot {
   namespaces: Record<string, string>;
   /** The folder holding settings.json. */
   configDir: string;
-  /** `dock.openVSCode`: whether rows open their item window always, or only for review (PRD R71). */
-  openVSCode: OpenVSCode;
-  /** `dock.openTerminal`: where the dock's Open in terminal runs with `always` (PRD R28). */
-  openTerminal: OpenTerminal;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
   /** What the enabled sources' last polls left out, such as `personal: <url> belongs to github.` (PRD R44); absent from an older hub's. */
   notes?: string[];
@@ -222,8 +218,6 @@ export function buildSnapshot(store: Store, inputs: SnapshotInputs): Snapshot {
       .filter(([name]) => name !== ADHOC_SOURCE)
       .map(([name, source]) => ({ name, kind: source.kind, enabled: enabled.has(name) })),
     namespaces: Object.fromEntries(Object.entries(settings.sources).map(([name, source]) => [name, source.namespace])),
-    openVSCode: settings.dock.openVSCode,
-    openTerminal: settings.dock.openTerminal,
     configDir: inputs.configDir,
     errors: {
       settings: settingsError,

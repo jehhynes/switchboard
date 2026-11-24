@@ -1,5 +1,5 @@
 import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, retries, reviewOrder, triageLabel, turnOf, waitsOnPermission, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
-import type { OpenVSCode, Provider, TicketBlocker } from '@switchboard/core';
+import type { Provider, TicketBlocker } from '@switchboard/core';
 import { waitsOnLimit } from '@switchboard/core/limit';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
@@ -100,25 +100,22 @@ function commentControl(item: WorkItemView): Control {
   return { label: 'Add comment…', icon: 'comment', message: { type: 'action', action: { type: 'comment', workItemId: item.id } }, input };
 }
 
-/** Answer in terminal: the row's click, which opens the session's terminal, in place of Open in Claude or Codex (PRD R70, R71). */
-export const ANSWER_IN_TERMINAL: Control = { label: 'Answer in terminal', icon: 'terminal', message: { type: 'click' } };
-
 /**
  * The one control a Blocked on you, Ready for review or Unstarted row shows as a button, when one applies; every control is in its right-click
- * menu. With `dock.openVSCode: review`, Answer in terminal replaces Open in Claude or Codex and a prompt before start's Open in terminal.
+ * menu.
  */
-export function mainControl(item: WorkItemView, mode: OpenVSCode = 'always'): Control | null {
+export function mainControl(item: WorkItemView): Control | null {
   const group = groupOf(item);
 
   if (group === 'progress' || group === 'done') {
     return null;
   }
 
-  const controls = controlsOf(item, mode);
+  const controls = controlsOf(item);
 
   // A prompt before the session starts, a permission prompt, or any wait of a Code Mode session is answered by attaching to it (PRD R41, R70, R95).
   if (isBackground(activeSession(item)) && waitsInTerminal(activeSession(item))) {
-    return mode === 'review' ? ANSWER_IN_TERMINAL : (controls.find((control) => control.label === 'Open in terminal') ?? null);
+    return controls.find((control) => control.label === 'Open in terminal') ?? null;
   }
 
   // An ad-hoc or task work item's Start opens its prompt first (PRD R77).
@@ -142,8 +139,8 @@ export function mainTitle(item: WorkItemView, control: Control): string {
   return control.icon === 'terminal' && latest?.codeMode === true ? `${control.label}: attaches to the ${latest.withoutCodeMode === true || latest.registered === true ? 'session in the terminal holder' : 'Code Mode session'}` : control.label;
 }
 
-/** The controls that apply to a work item (PRD R27); with `dock.openVSCode: review`, Answer in terminal replaces Open in Claude or Codex. */
-export function controlsOf(item: WorkItemView, mode: OpenVSCode = 'always'): Control[] {
+/** The controls that apply to a work item (PRD R27). */
+export function controlsOf(item: WorkItemView): Control[] {
   const controls: Control[] = [];
   const session = activeSession(item);
   const action = (type: string) => ({ type: 'action', action: { type, workItemId: item.id } });

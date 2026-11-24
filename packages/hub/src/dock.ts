@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { isFolderHost, switchboardHome } from '@switchboard/core';
-import type { OpenTerminal, OpenVSCode, Provider, PullRequestStatus } from '@switchboard/core';
+import type { Provider, PullRequestStatus } from '@switchboard/core';
 import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
 import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
@@ -162,15 +162,12 @@ export interface DockHeld {
 
 /**
  * What a click does besides the switch: Open in Claude or Codex first, a session to open in the window's view of its provider, or the ticket in
- * the browser for a row with no window. With `dock.openVSCode: review`, `terminal` opens or brings forward the session's terminal instead of the
- * item window, and `select` only selects the row.
+ * the browser for a row with no window.
  */
 export type DockOpen =
   | { type: 'question'; workItemId: number; sessionId: string; cwd: string; provider: Provider }
   | { type: 'session'; sessionId: string; cwd: string; provider: Provider }
-  | { type: 'url'; url: string }
-  | ({ type: 'terminal' } & DockTerminal)
-  | { type: 'select' };
+  | { type: 'url'; url: string };
 
 export interface DockRow {
   /** `item:<work item ID>` or `ticket:<pool ticket ID>`. */
@@ -201,10 +198,7 @@ export interface DockRow {
   movable: boolean;
   window: DockWindow | null;
   open: DockOpen | null;
-  /**
-   * The terminal app window Open in terminal opens, with `dock.openVSCode: review` or `dock.openTerminal` `app` or `auto` (PRD R28); null
-   * otherwise. With `auto`, `commands` keeps the item window's Open in terminal too, and the dock picks one when it runs.
-   */
+  /** The terminal app window Open in terminal opens (PRD R28); null when the row offers none. */
   terminal: DockTerminal | null;
   /**
    * The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time.
@@ -230,7 +224,7 @@ export interface DockRow {
   mainTitle: string | null;
   /** The drafted texts Copy offers on an `awaiting-approval` row (PRD R60); empty otherwise. */
   pastes: { label: string; file: string }[];
-  /** The controls that run in VS Code, each with the message a window runs: Open changes, Open in terminal, History, Open report. */
+  /** The controls that run in VS Code, each with the message a window runs: Open changes, History, Open report. */
   commands: { label: string; glyph: string; command: Record<string, unknown> }[];
   /** What the search box matches: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63, R71). */
   search: string;
@@ -336,7 +330,7 @@ export function searchText(entry: Pick<WorkItemView, 'ticket' | 'links' | 'statu
 /** A row of `group` as the dock draws it; `order` is Ready for review's IDs in list order when the row is in that group. */
 export function dockRow(snapshot: Snapshot, entry: WorkItemView | PoolView, group: RowGroup, now: number, windows: string, order: number[] | null, band: string | null): DockRow {
   const kind = snapshot.sourceStates.find((source) => source.name === entry.ticket.source)?.kind;
-  const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, order, snapshot.openVSCode, snapshot.openTerminal, snapshot.repoKeys) : poolRow(entry, now, snapshot.namespaces);
+  const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, order, snapshot.repoKeys) : poolRow(entry, now, snapshot.namespaces);
 
   return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), sourceKind: kind ?? entry.ticket.source, search: searchText(entry, group, snapshot), links: linksOf(entry, snapshot.repoKeys, snapshot.pullRequests), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
 }
@@ -439,15 +433,12 @@ export function sourceGroups(states: Snapshot['sourceStates']): DockSourceGroup[
 }
 
 /** A work item's row; `order` is Ready for review's IDs in list order when the row is in that group, for its Move controls. */
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, mode: OpenVSCode, terminalIn: OpenTerminal, keys: RepoKeys | undefined): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, keys: RepoKeys | undefined): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const kind = markOf(item);
-  const controls = order === null ? controlsOf(item, mode) : [...controlsOf(item, mode), ...moveControls(item, order)];
+  const controls = order === null ? controlsOf(item) : [...controlsOf(item), ...moveControls(item, order)];
   const turn = item.ticket.snoozed ? null : turnOf(item);
   const report = item.status === 'awaiting-approval' ? item.approvalReport : null;
-  const main = mainControl(item, mode);
-  const terminal = mode === 'review' || terminalIn !== 'vscode' ? menuTerminal(item, windows) : null;
-  // With `auto`, the dock runs the item window's Open in terminal while that window is open.
-  const vscodeTerminal = terminal === null || (mode === 'always' && terminalIn === 'auto');
+  const main = mainControl(item);
 
   return {
     key: rowKeyOf(item),
@@ -472,14 +463,15 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     dim: order !== null && turn === 'agent',
     movable: order !== null,
     window: windowOf(item, windows),
-    open: mode === 'review' ? reviewOpenOf(item, windows) : openOf(item, windows),
-    terminal,
+    open: openOf(item, windows),
+    terminal: menuTerminal(item, windows),
     controls: hubControls(controls),
     main: main?.label ?? null,
     mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
     mainTitle: main === null ? null : mainTitle(item, main),
     pastes: item.status === 'awaiting-approval' ? item.pastes.map(({ label, file }) => ({ label, file })) : [],
-    commands: [...windowCommands(vscodeTerminal ? controls : controls.filter((control) => control.message['type'] !== 'terminal')), ...(report === null ? [] : [{ label: 'Open report', glyph: CONTROL_GLYPHS['symbol-file'], command: { type: 'openUrl', url: report } }])],
+    // Open in terminal runs in the terminal app, never in a VS Code window.
+    commands: [...windowCommands(controls.filter((control) => control.message['type'] !== 'terminal')), ...(report === null ? [] : [{ label: 'Open report', glyph: CONTROL_GLYPHS['symbol-file'], command: { type: 'openUrl', url: report } }])],
   };
 }
 
@@ -684,51 +676,6 @@ export function openOf(item: WorkItemView, windows: string): DockOpen | null {
   }
 
   return null;
-}
-
-/**
- * A row's click with `dock.openVSCode: review` (PRD R71): the first rule that holds for the latest session decides. A session its background
- * process holds opens its terminal, whatever the status; work that is `awaiting-approval` or `finished` opens the item window as `openOf` does;
- * an ended session resumes in a terminal. A registered session lives in the operator's window (PRD R81), and a starting or releasing one has
- * nothing to open yet.
- */
-export function reviewOpenOf(item: WorkItemView, windows: string): DockOpen | null {
-  const session = activeSession(item);
-  const latest = item.sessions.at(-1) ?? null;
-  if (latest?.execution === 'app-server') {
-    if (item.status === 'awaiting-approval' || item.status === 'finished') return openOf(item, windows);
-    const command = menuTerminal(item, windows);
-    return command === null ? openOf(item, windows) : { type: 'terminal', ...command };
-  }
-  const focus: DockOpen = item.focus === null ? { type: 'select' } : { type: 'url', url: item.focus };
-  const terminal = (command: DockTerminal | null): DockOpen => (command === null ? focus : { type: 'terminal', ...command });
-
-  if (session?.external === true) {
-    return openOf(item, windows);
-  }
-
-  if (session?.state === 'starting') {
-    return focus;
-  }
-
-  // A Code Mode session whose end waits for its terminal to detach is still held (PRD R95).
-  if (session?.releasing === true && session.codeMode !== true) {
-    return { type: 'select' };
-  }
-
-  if (isBackground(session)) {
-    return session.provider === 'codex' ? { type: 'select' } : terminal(menuTerminal(item, windows));
-  }
-
-  if (session !== null) {
-    return terminal(menuTerminal(item, windows));
-  }
-
-  if (item.status === 'awaiting-approval' || item.status === 'finished') {
-    return openOf(item, windows);
-  }
-
-  return latest?.nativeSessionId == null ? focus : terminal(menuTerminal(item, windows));
 }
 
 /** Open in terminal's window for the latest session (PRD R28): `claude attach` in its background process, else a resume; null when none applies. */

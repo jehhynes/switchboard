@@ -5,7 +5,7 @@ import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
 import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
 import { hostKey, hubBundlePath, SCHEDULE_SOURCE, NEW_CONVERSATION_TITLE, personaById, Store, switchboardHome, ticketRoot } from '@switchboard/core';
-import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, resumesHeld, TEMPLATE_VARIABLES } from '@switchboard/core';
+import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, resumesHeld, settingsWarnings, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings, ViewSettings } from '@switchboard/core';
 import { githubSource } from '@switchboard/github';
 import { zohoSource } from '@switchboard/zoho';
@@ -17,6 +17,7 @@ import { dockView, windowsDir, writeWorkspaceFile } from './dock.js';
 import { isPastePath } from './report.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { SOURCE_KINDS, checkSettings, loadConfig, readConfigFile, saveSettings } from './config.js';
+import type { Config } from './config.js';
 import type { HubApp } from './serve.js';
 import { Runtime } from './runtime.js';
 import type { ReportBody, RuntimeDeps } from './runtime.js';
@@ -238,6 +239,14 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     deps.log(`Code Mode idle limit: ${deps.codeModeIdleMs} ms`);
   }
 
+  const logWarnings = (loaded: Config): void => {
+    for (const warning of loaded.settingsWarnings) {
+      deps.log(`settings.json: ${warning}`);
+    }
+  };
+
+  logWarnings(config);
+
   // The names and logins the web page is served to through tailscale serve (architecture.md § Remote access), read at start and again when
   // web.remoteHosts, web.remoteLogins or web.tailscale changes; with web.tailscale, this machine's Tailscale name and owner join them once
   // `tailscale status` answers. A change that no longer allows a remote device ends its open streams.
@@ -355,6 +364,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     clearTimeout(pending);
     pending = setTimeout(() => {
       config = loadConfig(configDir, config, store.homeRepos());
+      logWarnings(config);
       runtime.reload(config);
       voice.settingsChanged();
       readRemote(config.settings.web);
@@ -829,8 +839,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     const unalerted = newlyNeedingIds.filter((id) => !alerted.includes(id));
     const chimed = voice.needsYou(unalerted, targetSession?.workItemId ?? null);
 
-    // One surface, `alerts.surface`, shows each needs-you message: a web page or a system notification, with `dock` as `auto`
-    // (architecture.md § Dock, Needs you).
+    // One surface, `alerts.surface`, shows each needs-you message: a web page or a system notification.
     if (needing.length > 0) {
       const surface = config.settings.alerts.surface;
       const page = pageTargets.alerting(surface);
@@ -921,7 +930,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       return refused === null ? { status: 200, body: { enrollment: voice.enrollment() } } : { status: 409, body: { error: refused, enrollment: voice.enrollment() } };
     },
     check: async (body: unknown) =>
-      isRecord(body) && 'settings' in body ? { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources(), store.homeRepos()) } } : { status: 400, body: { error: 'Expected {settings}.' } },
+      isRecord(body) && 'settings' in body
+        ? { status: 200, body: { errors: checkSettings(body['settings'], runtime.enabledSources(), store.homeRepos()), warnings: settingsWarnings(body['settings']) } }
+        : { status: 400, body: { error: 'Expected {settings}.' } },
     save: async (body: unknown) => {
       const version = isRecord(body) ? body['version'] : undefined;
 

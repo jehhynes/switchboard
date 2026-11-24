@@ -47,7 +47,6 @@ describe('PageTargets', () => {
     pages.notifies('app', true);
     expect(pages.alerting('auto')).toBe('app');
     expect(pages.alerting('web')).toBe('app');
-    expect(pages.alerting('dock')).toBe('app');
     expect(pages.alerting('system')).toBeNull();
   });
 });

@@ -22,6 +22,8 @@ export interface Config {
   settings: Settings;
   /** Why settings.json was rejected; the previous settings and playbooks stay in force (PRD R42). */
   settingsError: string | null;
+  /** The retired settings the loaded file still holds, which the hub logs; none when the file was rejected. */
+  settingsWarnings: string[];
   playbooks: Map<string, Playbook>;
   /** The playbooks left out, each invalid on its own. */
   playbookErrors: PlaybookError[];
@@ -280,7 +282,7 @@ export function saveSettings(configDir: string, value: unknown, version: string 
  */
 export function loadConfig(
   configDir: string,
-  previous: Config = { settings: DEFAULT_SETTINGS, settingsError: null, playbooks: new Map(), playbookErrors: [] },
+  previous: Config = { settings: DEFAULT_SETTINGS, settingsError: null, settingsWarnings: [], playbooks: new Map(), playbookErrors: [] },
   recorded: Readonly<Record<string, string>> = {},
 ): Config {
   let text: string;
@@ -289,10 +291,10 @@ export function loadConfig(
     text = readFileSync(settingsPath(configDir), 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { settings: DEFAULT_SETTINGS, settingsError: null, playbooks: new Map(), playbookErrors: [] };
+      return { settings: DEFAULT_SETTINGS, settingsError: null, settingsWarnings: [], playbooks: new Map(), playbookErrors: [] };
     }
 
-    return { ...previous, settingsError: `settings.json could not be read: ${(error as Error).message}` };
+    return { ...previous, settingsError: `settings.json could not be read: ${(error as Error).message}`, settingsWarnings: [] };
   }
 
   const parsed = parseSettings(text);
@@ -300,10 +302,10 @@ export function loadConfig(
   const rejected = 'errors' in parsed ? parsed.errors : sourcesErrors(parsed.settings, recorded);
 
   if ('errors' in parsed || rejected.length > 0) {
-    return { ...previous, settingsError: rejected.join(' ') };
+    return { ...previous, settingsError: rejected.join(' '), settingsWarnings: [] };
   }
 
   const { playbooks, errors } = parsePlaybooks((JSON.parse(text) as { playbooks?: unknown }).playbooks, parsed.settings.sessions.provider);
 
-  return { settings: parsed.settings, settingsError: null, playbooks, playbookErrors: errors };
+  return { settings: parsed.settings, settingsError: null, settingsWarnings: parsed.warnings, playbooks, playbookErrors: errors };
 }

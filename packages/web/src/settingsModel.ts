@@ -223,6 +223,8 @@ export class EditorState {
   draftVersion: string | null = null;
   /** The last check's errors for the whole draft. */
   errors: string[] = [];
+  /** The last check's warnings, one for each retired setting the draft still holds. */
+  warnings: string[] = [];
   /** A refused save's errors, or the check errors that stopped a save; shown in the bar until the next edit, discard or successful save. */
   barErrors: string[] = [];
   saving = false;
@@ -1190,45 +1192,6 @@ export function generalFields(state: EditorState): Section[] {
       ],
     },
     {
-      heading: 'Dock',
-      fields: [
-        {
-          path: 'dock.openVSCode',
-          label: 'Rows open in',
-          kind: 'select',
-          help: 'Where a row opens its work. Only for review opens the session in a terminal, Ptyxis on Linux or Windows Terminal on Windows, until its work awaits approval or is finished, so fewer VS Code windows stay open.',
-          placeholder: 'always',
-          options: [
-            { value: 'always', label: 'Always' },
-            { value: 'review', label: 'Only for review' },
-          ],
-        },
-        {
-          path: 'dock.openIn',
-          label: 'Row click opens',
-          kind: 'select',
-          help: 'Where a click on a row opens its work item. Web app shows it in the installed Switchboard web app, bringing its window forward, or opens the web page in your browser when the app is not open. Alt-click opens the other.',
-          placeholder: 'vscode',
-          options: [
-            { value: 'vscode', label: 'VS Code' },
-            { value: 'web', label: 'Web app' },
-          ],
-        },
-        {
-          path: 'dock.openTerminal',
-          label: 'Terminal for "Open in terminal"',
-          kind: 'select',
-          help: "Where Open in terminal runs when Rows open in is Always. VS Code when open brings forward the session's terminal app window when there is one, else uses the item window's terminal while that window is open, else the terminal app: Ptyxis on Linux, Windows Terminal on Windows. On Linux without Switchboard's GNOME Shell extension it uses the item window. Only for review always uses the terminal app.",
-          placeholder: 'vscode',
-          options: [
-            { value: 'vscode', label: 'VS Code' },
-            { value: 'app', label: 'Terminal app' },
-            { value: 'auto', label: 'VS Code when open' },
-          ],
-        },
-      ],
-    },
-    {
       heading: 'Alerts',
       fields: [
         {
@@ -1240,7 +1203,6 @@ export function generalFields(state: EditorState): Section[] {
           options: [
             { value: 'auto', label: 'Web app when open' },
             { value: 'web', label: 'Web page when open' },
-            { value: 'dock', label: 'Dock' },
             { value: 'system', label: 'System notification' },
           ],
         },
@@ -1300,7 +1262,7 @@ export function generalFields(state: EditorState): Section[] {
       heading: 'Advanced',
       advanced: true,
       fields: [
-        { path: 'sessions.installHooks', label: 'Install hooks', kind: 'boolean', help: 'Add Switchboard’s hooks to your Claude and Codex settings, so the dock shows when a session waits for you or runs in VS Code. Off, the session list and Codex’s run output alone decide state.', fallback: true },
+        { path: 'sessions.installHooks', label: 'Install hooks', kind: 'boolean', help: 'Add Switchboard’s hooks to your Claude and Codex settings, so the list shows when a session waits for you. Off, the session list and Codex’s run output alone decide state.', fallback: true },
         { path: 'sessions.claudePath', label: 'Claude Code path', kind: 'text', help: 'The Claude Code CLI the hub and Open in terminal run. Set its full path when their PATH does not include it.', placeholder: 'claude' },
         { path: 'sessions.codexPath', label: 'Codex path', kind: 'text', help: 'The Codex CLI the hub and Open in terminal run. Set its full path when their PATH does not include it, such as a Codex installed through nvm.', placeholder: 'codex' },
         { path: 'sessions.nodePath', label: 'Node.js path', kind: 'text', help: 'The Node.js that Switchboard’s hooks and session reports run. Set its full path, with no spaces, when the agents’ PATH does not include it, such as a Node.js installed through nvm.', placeholder: 'node' },
@@ -1531,7 +1493,7 @@ export function errorPages(state: EditorState): Map<string, string | null> {
 
 /** The parts of settings.json a page edits, by which the navigation marks it unsaved. */
 export function pagePaths(page: string): string[] {
-  return page === 'general' ? ['sessions', 'triage', 'dock', 'alerts', 'web'] : page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : page.startsWith('schedule:') ? [`schedules.${page.slice('schedule:'.length)}`] : [];
+  return page === 'general' ? ['sessions', 'triage', 'alerts', 'web'] : page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : page.startsWith('schedule:') ? [`schedules.${page.slice('schedule:'.length)}`] : [];
 }
 
 export function pageDirty(state: EditorState, page: string): boolean {
@@ -1645,10 +1607,14 @@ function item(state: EditorState, page: string, label: string, note?: string): N
   return { kind: 'item', label, page, ...(note === undefined ? {} : { note }), current: state.page === page, dirty: pageDirty(state, page), errors: pageHasErrors(state, page) };
 }
 
-/** The bar: the file's status, a warning that settings.json changed on disk, the errors of a refused or blocked save, and whether Save and Discard are enabled. */
+/**
+ * The bar: the file's status, a warning that settings.json changed on disk, the retired settings it holds, the errors of a refused or blocked
+ * save, and whether Save and Discard are enabled.
+ */
 export interface BarView {
   status: string;
   warning: string | null;
+  warnings: readonly string[];
   errors: readonly string[];
   canSave: boolean;
   canDiscard: boolean;
@@ -1663,7 +1629,7 @@ export function bar(state: EditorState): BarView {
       : [state.dirty ? 'Unsaved changes' : 'Saved', ...(count === 0 ? [] : [count === 1 ? '1 error' : `${count} errors`])].join(' · ');
   const warning = state.changedOnDisk ? 'settings.json changed on disk, so your changes cannot be saved. Discard them and open Settings again to load it.' : null;
 
-  return { status, warning, errors: state.barErrors, canSave: state.dirty && !state.changedOnDisk && !state.saving, canDiscard: (state.dirty || state.changedOnDisk) && !state.saving };
+  return { status, warning, warnings: state.warnings, errors: state.barErrors, canSave: state.dirty && !state.changedOnDisk && !state.saving, canDiscard: (state.dirty || state.changedOnDisk) && !state.saving };
 }
 
 /** A field with what it shows: its text or checked state, the option chosen, and the errors that name it. */

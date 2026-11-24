@@ -132,8 +132,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     // The hub keeps the config folder outside settings.json, so General names it and the command that changes it.
     expect(texts('.settings-note')).toContain('Config folder: C:/home/.switchboard. Change it with hub.js config set configDir <folder>.');
     expect(host.querySelector('.settings-file')?.textContent).toBe('C:/home/.switchboard/settings.json');
-    expect(texts('.settings-section-heading')).toEqual(['Sessions', 'Claude sessions', 'Codex sessions', 'Triage', 'Dock', 'Alerts', 'Web page', 'Diff viewer', 'Remote access', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Rows open in', 'Row click opens', 'Terminal for "Open in terminal"', 'Needs-you alerts from', 'Embedded browser tabs', 'Layout', 'Wrap long lines', 'Tailscale', 'Allowed hosts', 'Allowed logins']);
+    expect(texts('.settings-section-heading')).toEqual(['Sessions', 'Claude sessions', 'Codex sessions', 'Triage', 'Alerts', 'Web page', 'Diff viewer', 'Remote access', 'Advanced']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Needs-you alerts from', 'Embedded browser tabs', 'Layout', 'Wrap long lines', 'Tailscale', 'Allowed hosts', 'Allowed logins']);
     expect(host.querySelector('[data-path="sessions.installHooks"]')).toBeNull();
     // The diff viewer's layout and wrapping, set once for every page.
     expect([...field<HTMLSelectElement>('web.diffLayout').options].map((one) => one.value)).toEqual(['auto', 'split', 'stacked']);
@@ -147,8 +147,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(field<HTMLSelectElement>('sessions.provider').value).toBe('claude');
     expect([...field<HTMLSelectElement>('sessions.provider').options].map((option) => option.textContent)).toEqual(['Claude', 'Codex']);
     expect(field<HTMLSelectElement>('sessions.codex.permissionMode').value).toBe('bypassPermissions');
-    expect(field<HTMLSelectElement>('dock.openIn').value).toBe('vscode');
-    expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Web app when open', 'Web page when open', 'Dock', 'System notification']);
+    expect(host.querySelector('[data-path^="dock."]')).toBeNull();
+    expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Web app when open', 'Web page when open', 'System notification']);
 
     // Advanced opens to show the executable paths, and Install hooks shows the file's false over its default true.
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
@@ -183,6 +183,22 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     // The next edit drops the bar's errors.
     type('sessions.concurrency', '3');
     expect(host.querySelectorAll('.settings-bar .settings-error')).toHaveLength(0);
+  });
+
+  it("shows the check's warnings for retired settings in the bar, without counting them as errors or blocking a save", async () => {
+    const retired = 'dock.openIn is no longer used and can be removed.';
+
+    answers['page-settings-check'] = (body) => ({ status: 200, body: { errors: [], warnings: getAt(body['settings'] as never, 'dock') === undefined ? [] : [retired] } });
+    answers['page-settings-read'] = { status: 200, body: config({ sessions: { installHooks: false }, dock: { openIn: 'web' } }) };
+    await opened();
+
+    expect(texts('.settings-bar .settings-warning')).toEqual([retired]);
+    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+
+    type('sessions.concurrency', '3');
+    await settle(CHECK_DELAY_MS);
+    expect(texts('.settings-bar .settings-warning')).toEqual([retired]);
+    expect(button('Save').disabled).toBe(false);
   });
 
   it('edits remote access under General: the Tailscale switch and the allowed hosts and logins, one per line, each error on its list', async () => {
@@ -297,14 +313,12 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(pane.isOpen()).toBe(true);
     expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
 
-    field<HTMLSelectElement>('dock.openVSCode').value = 'review';
-    field<HTMLSelectElement>('dock.openVSCode').dispatchEvent(new Event('change', { bubbles: true }));
-    field<HTMLSelectElement>('alerts.surface').value = 'dock';
+    field<HTMLSelectElement>('alerts.surface').value = 'system';
     field<HTMLSelectElement>('alerts.surface').dispatchEvent(new Event('change', { bubbles: true }));
     expect(host.querySelector('.settings-nav-entry.current .settings-dirty')).not.toBeNull();
     button('Save').click();
     await settle();
-    expect(named('page-settings-save').at(-1)!.body).toMatchObject({ value: { sessions: { installHooks: false, codeMode: true }, dock: { openVSCode: 'review' }, alerts: { surface: 'dock' } }, version: 'v2' });
+    expect(named('page-settings-save').at(-1)!.body).toMatchObject({ value: { sessions: { installHooks: false, codeMode: true }, alerts: { surface: 'system' } }, version: 'v2' });
     expect(pane.isOpen()).toBe(false);
     expect(host.innerHTML).toBe('');
     expect(closed).toHaveBeenCalledTimes(1);
