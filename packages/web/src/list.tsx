@@ -128,9 +128,10 @@ export function bandRuns(rows: readonly PageRow[]): Array<{ band: string | null;
  * only the groups with rows show, every one open, and the search's end says when none matched. `menu` is the row whose menu is
  * open, by its key, with the menu's rows. An open group's rows with a band, Done's, sit under their band's heading, a muted label with its count
  * and a rule that opens or closes it (`bands`, else `OPEN_BANDS`); a closed band still shows the selected row, and a search opens every band.
- * `focusedRow` is the row the keyboard selected, by its key, drawn selected in place of `selected`'s. `drag` is a drag of a Ready for review row under way (reorder.ts): the dragged row and its drop line.
+ `selected` is the work item whose conversation is open, or is opening, and only its row is drawn selected and `aria-current`; keyboard focus,
+ * hover and an open row menu never move it, and the focus shows only as the focus ring (page.css). `drag` is a drag of a Ready for review row under way (reorder.ts): the dragged row and its drop line.
  */
-export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren; point?: { x: number; y: number } } | null = null, bands: ReadonlyMap<string, boolean> = new Map(), pillsOpen = false, focusedRow: string | null = null, drag: DragView | null = null): VNode | null {
+export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren; point?: { x: number; y: number } } | null = null, bands: ReadonlyMap<string, boolean> = new Map(), pillsOpen = false, drag: DragView | null = null): VNode | null {
   if (groups.every((group) => group.rows.length === 0)) {
     return filtering ? null : <p class="empty">No work items yet. They appear here when Switchboard starts one.</p>;
   }
@@ -139,7 +140,7 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
     <nav class="work-list" aria-label="Work items">
       {groups.map((group) => {
         const open = filtering || !collapsed.has(group.key);
-        const isSelected = (row: PageRow): boolean => focusedRow === null ? row.workItemId !== null && row.workItemId === selected : rowKey(row) === focusedRow;
+        const isSelected = (row: PageRow): boolean => row.workItemId !== null && row.workItemId === selected;
         const rows = open ? group.rows : group.rows.filter(isSelected);
         const rowList = (shown: readonly PageRow[]) =>
           shown.length === 0 ? null : group.key === 'done' ? (

@@ -21,6 +21,8 @@ let close: () => void;
 let posts: Array<{ url: string; body: Record<string, unknown> }>;
 let opened: string[];
 let refused: boolean;
+/** While set, a select's answer waits for it, so a test can deliver scopes while the select is outstanding. */
+let gate: Promise<void> | null;
 const el = (selector: string): HTMLElement => root.querySelector<HTMLElement>(selector)!;
 const key = (target: HTMLElement, name: string, patch: KeyboardEventInit = {}): KeyboardEvent => {
   const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...patch });
@@ -34,6 +36,7 @@ const start = (groups: PageGroup[]): Source => {
     EventSource: Source as unknown as typeof EventSource,
     fetch: (async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: JSON.parse(init?.body ?? '{}') });
+      if (gate !== null && url.endsWith('/select')) await gate;
       return { status: refused && url.endsWith('/select') ? 409 : 200, ok: true, json: async () => refused ? { error: 'No longer available.' } : {}, text: async () => '' } as Response;
     }) as typeof fetch,
     openUrl: (url) => opened.push(url),
@@ -48,7 +51,7 @@ beforeEach(() => {
   localStorage.clear();
   history.replaceState(null, '', '#');
   window.innerWidth = 1600;
-  posts = []; opened = []; refused = false;
+  posts = []; opened = []; refused = false; gate = null;
 });
 afterEach(() => { close?.(); vi.restoreAllMocks(); });
 
@@ -144,7 +147,7 @@ it('fixes a row menu to the viewport at its row, inside it near its right edge, 
   expect(css).toContain('#list:has(.row-menu) { position: relative; z-index: var(--sb-z-bar-menu); }');
 });
 
-it('walks headings, rows and Done bands, selecting locally and revealing each row, with no wrap or modified arrows', () => {
+it('walks headings, rows and Done bands, focusing and revealing each row without selecting it, with no wrap or modified arrows', () => {
   start([group('review', [row(1), row(2)]), group('done', [row(3, { band: 'Today' })])]);
   const reveal = vi.fn();
   HTMLElement.prototype.scrollIntoView = reveal;
@@ -153,31 +156,35 @@ it('walks headings, rows and Done bands, selecting locally and revealing each ro
   expect(document.activeElement).toBe(el('.group-head'));
   key(el('.group-head'), 'ArrowDown');
   expect(document.activeElement).toBe(el('.row[data-row="item:1"]'));
-  expect(el('.row.selected').dataset['row']).toBe('item:1');
+  // Nothing is open, so nothing is selected: the focus is only the focus ring.
+  expect(root.querySelector('.row.selected')).toBeNull();
   expect(reveal).toHaveBeenCalledWith({ block: 'nearest' });
-  key(el('.row.selected'), 'ArrowDown', { altKey: true });
-  expect(document.activeElement).toBe(el('.row.selected'));
-  key(el('.row.selected'), 'ArrowDown');
-  expect(el('.row.selected').dataset['row']).toBe('item:2');
-  key(el('.row.selected'), 'ArrowDown');
+  key((document.activeElement as HTMLElement), 'ArrowDown', { altKey: true });
+  expect(document.activeElement).toBe(el('.row[data-row="item:1"]'));
+  key((document.activeElement as HTMLElement), 'ArrowDown');
+  expect((document.activeElement as HTMLElement).dataset['row']).toBe('item:2');
+  key((document.activeElement as HTMLElement), 'ArrowDown');
   expect(document.activeElement).toBe(el('.group-head[data-group="done"]'));
   el('.group-head[data-group="done"]').click();
   key(el('.group-head[data-group="done"]'), 'ArrowDown');
   expect(document.activeElement).toBe(el('.band-head'));
   key(el('.band-head'), 'ArrowDown');
-  expect(el('.row.selected').dataset['row']).toBe('item:3');
-  key(el('.row.selected'), 'ArrowDown');
-  expect(document.activeElement).toBe(el('.row.selected'));
+  expect((document.activeElement as HTMLElement).dataset['row']).toBe('item:3');
+  key((document.activeElement as HTMLElement), 'ArrowDown');
+  expect(document.activeElement).toBe(el('.row[data-row="item:3"]'));
+  expect(root.querySelector('.row.selected')).toBeNull();
   expect(posts.filter((post) => post.url.endsWith('/select'))).toEqual([]);
-  key(el('.row.selected'), 'Enter');
+  key((document.activeElement as HTMLElement), 'Enter');
   expect(posts.filter((post) => post.url.endsWith('/select')).at(-1)?.body).toMatchObject({ workItemId: 3 });
+  expect(el('.row.selected').dataset['row']).toBe('item:3');
   delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
 });
 
-it('selects a row on focus and leaves its link pills focusable', () => {
+it('focuses a row without selecting it and leaves its link pills focusable', () => {
   start([group('progress', [row(1, { url: 'https://example.test/1' }), row(2)])]);
   el('.row').focus();
-  const selected = el('.row.selected');
+  expect(root.querySelector('.row.selected')).toBeNull();
+  const selected = (document.activeElement as HTMLElement);
   expect(selected.dataset['row']).toBe('item:1');
   expect(selected.querySelector('.row-actions')).toBeNull();
   expect(key(selected, 'Tab').defaultPrevented).toBe(false);
@@ -225,8 +232,8 @@ it('restores focus when keyed rows reorder inside the same group and closes the 
   el('.row[data-row="item:1"]').focus();
   source.emit('list', { groups: [group('review', [row(2), row(3), row(1, { url: 'https://example.test/1' })])] });
   expect(document.activeElement).toBe(el('.row[data-row="item:1"]'));
-  key(el('.row.selected'), 'ContextMenu');
-  el('.row.selected').click();
+  key(el('.row[data-row="item:1"]'), 'ContextMenu');
+  el('.row[data-row="item:1"]').click();
   expect(root.querySelector('.row-menu')).toBeNull();
 });
 
@@ -246,6 +253,140 @@ it('falls back to the opened row after a refused select or a local selection who
   el('.row[data-row="item:2"]').focus();
   source.emit('list', { groups: [group('review', []), group('done', [row(1)])] });
   expect(el('.row.selected').dataset['row']).toBe('item:1');
+});
+
+it('keeps the selection on the open work item while the focus, a hover or a row menu moves, and moves it only when a row opens', async () => {
+  const source = start([group('review', [row(1), row(2, { url: 'https://example.test/2' }), row(3, { url: 'https://example.test/3' })])]);
+  const scope = (id: number) => ({ kind: 'page', key: 'k', folder: 'D:/scratch', title: 'Item', scopeGen: id, conversations: [], workItemId: id, cwd: 'D:/scratch', sessionId: null });
+  source.emit('scope', { scope: scope(1) });
+  const marked = (): Array<[string | undefined, string | null]> => [...root.querySelectorAll<HTMLElement>('.row.selected, .row[aria-current="true"]')].map((one) => [one.dataset['row'], one.getAttribute('aria-current')]);
+  expect(marked()).toEqual([['item:1', 'true']]);
+  // Arrow keys move the focus only.
+  el('.row[data-row="item:1"]').focus();
+  key(el('.row[data-row="item:1"]'), 'ArrowDown');
+  expect(document.activeElement).toBe(el('.row[data-row="item:2"]'));
+  expect(marked()).toEqual([['item:1', 'true']]);
+  // A hover is only its hover style.
+  el('.row[data-row="item:3"]').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  expect(marked()).toEqual([['item:1', 'true']]);
+  // A row menu, from the keyboard or a right-click, leaves the selection where it was.
+  key(el('.row[data-row="item:2"]'), 'ContextMenu');
+  expect(root.querySelector('.row-menu')).not.toBeNull();
+  expect(marked()).toEqual([['item:1', 'true']]);
+  key(document.activeElement as HTMLElement, 'Escape');
+  el('.row[data-row="item:3"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+  expect(root.querySelector('.row-menu')).not.toBeNull();
+  expect(marked()).toEqual([['item:1', 'true']]);
+  key(document.activeElement as HTMLElement, 'Escape');
+  // Enter opens the focused row, which is selected at once, while it opens, and stays selected once the hub shows it.
+  el('.row[data-row="item:2"]').focus();
+  key(el('.row[data-row="item:2"]'), 'Enter');
+  expect(marked()).toEqual([['item:2', 'true']]);
+  await flush();
+  source.emit('scope', { scope: scope(2) });
+  expect(marked()).toEqual([['item:2', 'true']]);
+  // Space opens a row too.
+  el('.row[data-row="item:3"]').focus();
+  key(el('.row[data-row="item:3"]'), ' ');
+  expect(marked()).toEqual([['item:3', 'true']]);
+  // page.css: the focus is the theme's focus ring, which the selected row's rule neither draws nor hides.
+  expect(css).toContain('.row:focus-visible, .pill:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }');
+  expect(css).not.toMatch(/\.row\.selected[^{]*\{[^}]*outline/);
+  expect(css).not.toMatch(/\.row:(hover|focus)[^{]*\{[^}]*--sb-row-selected/);
+});
+
+it('keeps a phone list\'s selection on the open work item when Back returns to the list and the focus moves on', async () => {
+  window.innerWidth = 700;
+  const source = start([group('review', [row(1), row(2)])]);
+  el('.row[data-row="item:1"]').click();
+  await flush();
+  source.emit('scope', { scope: { kind: 'page', key: 'k', folder: 'D:/scratch', title: 'Item', scopeGen: 1, conversations: [], workItemId: 1, cwd: 'D:/scratch', sessionId: null } });
+  expect(root.classList.contains('listing')).toBe(false);
+  el('[data-action="back"]').click();
+  expect(root.classList.contains('listing')).toBe(true);
+  expect(document.activeElement).toBe(el('.row.selected'));
+  expect(el('.row.selected').dataset['row']).toBe('item:1');
+  key(el('.row.selected'), 'ArrowDown');
+  expect((document.activeElement as HTMLElement).dataset['row']).toBe('item:2');
+  expect([...root.querySelectorAll<HTMLElement>('.row.selected, .row[aria-current="true"]')].map((one) => one.dataset['row'])).toEqual(['item:1']);
+});
+
+it('selects a conversation of the open work item\'s host group from its click, before its scope comes, and goes back to the open one when the hub refuses it', async () => {
+  const source = start([group('review', [row(1), row(2)])]);
+  const scope = (id: number) => ({ kind: 'page', key: 'k', folder: 'D:/scratch', title: 'Item', scopeGen: id, conversations: [{ workItemId: 1, title: 'Item 1', primary: true, sessionId: null, state: 'idle', conversation: 'full', unread: 0 }, { workItemId: 2, title: 'Item 2', primary: false, sessionId: null, state: 'idle', conversation: 'full', unread: 0 }], workItemId: id, cwd: 'D:/scratch', sessionId: null });
+  source.emit('scope', { scope: scope(1) });
+  const marked = (): Array<string | undefined> => [...root.querySelectorAll<HTMLElement>('.row.selected, .row[aria-current="true"]')].map((one) => one.dataset['row']);
+  expect(marked()).toEqual(['item:1']);
+  el('.row[data-row="item:2"]').focus();
+  key(el('.row[data-row="item:2"]'), 'Enter');
+  expect(marked()).toEqual(['item:2']);
+  await flush();
+  source.emit('scope', { scope: scope(2) });
+  expect(marked()).toEqual(['item:2']);
+  refused = true;
+  el('.row[data-row="item:1"]').click();
+  expect(marked()).toEqual(['item:1']);
+  await flush();
+  await flush();
+  expect(marked()).toEqual(['item:2']);
+});
+
+it('selects the work item the hub shows by itself, as New session opens one, over the one the page last asked for', async () => {
+  const source = start([group('review', [row(1), row(2), row(3)])]);
+  const scope = (id: number) => ({ kind: 'page', key: 'k', folder: 'D:/scratch', title: 'Item', scopeGen: id, conversations: [], workItemId: id, cwd: 'D:/scratch', sessionId: null });
+  el('.row[data-row="item:2"]').click();
+  await flush();
+  source.emit('hello', { key: 'pk', groups: [group('review', [row(1), row(2), row(3)])], scope: scope(2), sessions: [], items: [], more: false, status: null, artifacts: [] });
+  expect(el('.row.selected').dataset['row']).toBe('item:2');
+  source.emit('scope', { scope: scope(3) });
+  expect([...root.querySelectorAll<HTMLElement>('.row.selected, .row[aria-current="true"]')].map((one) => one.dataset['row'])).toEqual(['item:3']);
+});
+
+it('keeps the latest choice under the shown head selected while a late scope of an earlier one, or of its earlier session, comes', async () => {
+  const source = start([group('review', [row(1), row(2), row(3)])]);
+  const conversations = [1, 2, 3].map((id) => ({ workItemId: id, title: `Item ${id}`, primary: id === 1, sessionId: null, state: 'idle', conversation: 'full', unread: 0 }));
+  const scope = (id: number, gen = id) => ({ kind: 'page', key: 'k', folder: 'D:/scratch', title: 'Item', scopeGen: gen, conversations, workItemId: id, cwd: 'D:/scratch', sessionId: null });
+  const marked = (): Array<string | undefined> => [...root.querySelectorAll<HTMLElement>('.row.selected, .row[aria-current="true"]')].map((one) => one.dataset['row']);
+  source.emit('scope', { scope: scope(1) });
+  let release!: () => void;
+  gate = new Promise((done) => { release = done; });
+  // 2, then 3 before 2's answer: 2's late scope leaves 3 selected.
+  el('.row[data-row="item:2"]').click();
+  el('.row[data-row="item:3"]').click();
+  await flush();
+  expect(marked()).toEqual(['item:3']);
+  source.emit('scope', { scope: scope(2) });
+  expect(marked()).toEqual(['item:3']);
+  gate = null; release(); await flush(); await flush();
+  source.emit('scope', { scope: scope(3) });
+  expect(marked()).toEqual(['item:3']);
+  // 1, then back to 3, the one shown: 1's late scope leaves 3 selected.
+  gate = new Promise((done) => { release = done; });
+  el('.row[data-row="item:1"]').click();
+  el('.row[data-row="item:3"]').click();
+  await flush();
+  // Another event between them changes nothing.
+  source.emit('list', { groups: [group('review', [row(1), row(2), row(3)])] });
+  expect(marked()).toEqual(['item:3']);
+  source.emit('scope', { scope: scope(1, 10) });
+  expect(marked()).toEqual(['item:3']);
+  gate = null; release(); await flush(); await flush();
+  source.emit('scope', { scope: scope(3, 11) });
+  expect(marked()).toEqual(['item:3']);
+  // 2, then an earlier session of 3, the one shown, before 2's answer: 3 is selected, and stays after 2's late scope and 3's own.
+  gate = new Promise((done) => { release = done; });
+  el('.row[data-row="item:2"]').click();
+  await flush();
+  const earlier = document.createElement('button');
+  earlier.dataset['action'] = 'select-session'; earlier.dataset['workItem'] = '3'; earlier.dataset['session'] = 'old';
+  root.append(earlier);
+  earlier.click();
+  expect(marked()).toEqual(['item:3']);
+  source.emit('scope', { scope: scope(2, 20) });
+  expect(marked()).toEqual(['item:3']);
+  gate = null; release(); await flush(); await flush();
+  source.emit('scope', { scope: { ...scope(3, 21), sessionId: 'old', earlier: true } });
+  expect(marked()).toEqual(['item:3']);
 });
 
 it('cycles F8 in list order through operator-turn rows, opens a closed group and clears a hiding search', async () => {

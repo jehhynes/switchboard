@@ -6676,6 +6676,9 @@ describe("the list's CSS", () => {
     expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-selected: #E4E6F1;/);
     expect(selected[0]).not.toMatch(/box-shadow|outline|border/);
     expect(declarationsOf((selector) => selector === 'button:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
+    // A keyboard-focused row, selected or not, shows the theme's focus ring and never the selection colour, which marks only the open work item.
+    expect(declarationsOf((selector) => selector === '.row:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
+    expect(declarationsOf((selector) => /^\.row:(focus|hover)/.test(selector)).join(' ')).not.toContain('--sb-row-selected');
     // The selected row keeps the dock's text colours: no foreground and no faded muted texts.
     expect(selected[0]).not.toMatch(/(^|[ ;])color:/);
     expect(css).not.toMatch(/\.row\.selected [^{]*\{[^}]*opacity/);

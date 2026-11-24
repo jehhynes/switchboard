@@ -2001,7 +2001,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   resized?.observe(panel);
 
-  let listSelection: string | null = null;
+  let listFocus: string | null = null;
   let pendingRowControl: { key: string; run: () => void } | null = null;
   let rowMenuPoint: { x: number; y: number } | undefined;
   const listRowElement = (key: string): HTMLElement | undefined => [...list.querySelectorAll<HTMLElement>('.row')].find((one) => one.dataset['row'] === key);
@@ -2302,8 +2302,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const focused = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement : null;
     const focusedRow = focused?.closest<HTMLElement>('.list-row')?.querySelector<HTMLElement>('.row')?.dataset['row'];
     const focusLink = focused?.matches('.pill') ? focused.dataset['link'] : undefined;
-    if (listSelection !== null && !state.groups.some((group) => group.rows.some((row) => rowKey(row) === listSelection))) listSelection = null;
-    mount(list, renderListPane(renderList(listed.groups, openingShown()?.workItemId ?? state.scope?.workItemId ?? null, view.collapsed, listed.filtering, rowMenu(), view.bands, true, listSelection, dragView), header.end(listed.groups)));
+    if (listFocus !== null && !state.groups.some((group) => group.rows.some((row) => rowKey(row) === listFocus))) listFocus = null;
+    mount(list, renderListPane(renderList(listed.groups, listSelected(), view.collapsed, listed.filtering, rowMenu(), view.bands, true, dragView), header.end(listed.groups)));
     // The rows may have moved under a still pointer.
     reorder.refresh();
     if (focusedRow !== undefined && document.activeElement !== focused) {
@@ -3249,8 +3249,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (hostSelection !== null && hostSelection.item !== workItemId) hostSelection = null;
     const listing = view.list || wanted === null;
 
-    listSelection = `item:${workItemId}`;
-    if (pendingRowControl?.key !== listSelection) pendingRowControl = null;
+    listFocus = `item:${workItemId}`;
+    if (pendingRowControl?.key !== listFocus) pendingRowControl = null;
     closeMenus();
 
     // Where the work item left is kept, and its tabs, for when it is opened again.
@@ -3265,6 +3265,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Another work item shows its own head and a placeholder at once, not the one shown before (opening.tsx).
     // A conversation of the shown work item's dropdown opens under the same head, as before.
     opening = !sameHead && (state.scope === null || !state.scope.conversations.some((entry) => entry.workItemId === workItemId)) ? { workItemId, title: rowTitle(workItemId), error: null } : null;
+    hostPending = opening === null ? workItemId : null;
 
     // Asked again after its open failed.
     if (acked === workItemId && (state.scope?.workItemId !== workItemId || shownSession() !== sessionId)) {
@@ -3316,15 +3317,26 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     showError(null);
     wanted = workItemId;
     wantedSession = sessionId;
+    hostPending = workItemId;
     reconcile();
     draw();
   };
   /** The work item being opened, until its `hello` brings it, or why it could not be opened. */
   // A work item the route asked for at the start opens as a row click does.
   let opening: Opening | null = wanted === null ? null : { workItemId: wanted, title: '', error: null };
+  /**
+   * The page's latest choice that opens under the shown head (a conversation of its host group, the shown one again or one of its sessions), until
+   * a scope comes while no select is outstanding (its own, or one the hub showed itself), or a refusal; null with none.
+   */
+  let hostPending: number | null = null;
   /** The opening to draw: one whose work item is not the one the page shows yet. */
   // Until the work item's own hello clears it: a `scope` event alone brings none of its conversation.
   const openingShown = (): Opening | null => (opening === null ? null : { ...opening, title: rowTitle(opening.workItemId) });
+  /**
+   * The work item the list draws selected: the one opening, else the page's latest choice under the shown head while it is pending (`hostPending`),
+   * else the one shown, also when the hub itself shows another, as New session does.
+   */
+  const listSelected = (): number | null => opening?.workItemId ?? hostPending ?? state.scope?.workItemId ?? null;
   const rowTitle = (workItemId: number): string => state.groups.flatMap((group) => group.rows).find((row) => row.workItemId === workItemId)?.title ?? 'Work item';
   /** Try again: the open is asked once more. */
   const retryOpening = (): void => {
@@ -3340,12 +3352,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Back to the list from an open that failed: the work item the hub still shows is the page's again, and a phone shows the list. */
   const leaveOpening = (): void => {
     opening = null;
+    hostPending = null;
     wanted = state.scope?.workItemId ?? null;
     wantedSession = shownSession();
     acked = wanted;
     ackedSession = wantedSession;
-    // The list's keyboard selection follows back to the work item shown, as after a refused select of the shown one's dropdown.
-    listSelection = wanted === null ? null : `item:${wanted}`;
+    // The list's keyboard place follows back to the work item shown, as after a refused select of the shown one's dropdown.
+    listFocus = wanted === null ? null : `item:${wanted}`;
     pendingRowControl = null;
     history.replaceState(history.state, '', wanted === null ? '#' : `#w=${wanted}`);
 
@@ -3396,7 +3409,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         wantedSession = shownSession();
         acked = wanted;
         ackedSession = wantedSession;
-        listSelection = wanted === null ? null : `item:${wanted}`;
+        hostPending = null;
+        listFocus = wanted === null ? null : `item:${wanted}`;
         pendingRowControl = null;
         if (view.rowMenu === `item:${asked}`) closeMenus();
         history.replaceState(history.state, '', wanted === null ? '#' : `#w=${wanted}`);
@@ -3711,7 +3725,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const openRowMenu = (key: string, point?: { x: number; y: number }): void => {
     const row = rowByKey(key);
     if (row === null || menuRows(row, view).length === 0) return;
-    listSelection = key;
+    listFocus = key;
     closeMenus();
     view.picker = false;
     view.viewMenu = false;
@@ -3734,9 +3748,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   }, { signal: listening.signal });
   list.addEventListener('focusin', (event) => {
     const target = event.target as HTMLElement;
-    if (!target.matches('.row') || listSelection === target.dataset['row']) return;
-    listSelection = target.dataset['row']!;
-    draw();
+    if (!target.matches('.row') || listFocus === target.dataset['row']) return;
+    // The focus is not the selection: only the open work item's row is drawn selected (list.tsx), so a focus needs no redraw.
+    listFocus = target.dataset['row']!;
     target.scrollIntoView?.({ block: 'nearest' });
   }, { signal: listening.signal });
   list.addEventListener('keydown', (event) => {
@@ -3757,7 +3771,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const stops = [...list.querySelectorAll<HTMLElement>('.row, .group-head, .band-head')];
       const next = stops[stops.indexOf(target) + (event.key === 'ArrowDown' ? 1 : -1)];
       if (next === undefined) return;
-      if (next.matches('.row')) { listSelection = next.dataset['row']!; draw(); }
+      if (next.matches('.row')) listFocus = next.dataset['row']!;
       next.focus({ preventScroll: true });
       next.scrollIntoView?.({ block: 'nearest' });
     } else if (plain && target.matches('.row') && (event.key === 'Enter' || event.key === ' ')) {
@@ -3774,7 +3788,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (event.key !== 'F8' || event.ctrlKey || event.metaKey || event.altKey || !state.connected || view.sheet !== null || view.personas !== null || settingsPane.isOpen() || root.querySelector('.sheet-backdrop') !== null) return;
     event.preventDefault();
     const rows = state.groups.flatMap((group) => group.rows.map((row) => ({ group, row })));
-    const selected = listSelection ?? (state.scope?.workItemId == null ? null : `item:${state.scope.workItemId}`);
+    const selected = listFocus ?? (state.scope?.workItemId == null ? null : `item:${state.scope.workItemId}`);
     const at = rows.findIndex(({ row }) => rowKey(row) === selected);
     const start = at < 0 ? (event.shiftKey ? rows.length : -1) : at;
     for (let step = 1; step <= rows.length; step++) {
@@ -3782,15 +3796,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // A stripe is the hub's operator-turn signal; an idle hosted conversation has neither a stripe nor agent-turn dimming.
       if (!['blocked', 'review'].includes(entry.group.key) || entry.row.stripe === null || entry.row.workItemId === null) continue;
       closeMenus();
-      listSelection = rowKey(entry.row);
-      const hidden = !header.list(state.groups).groups.some((group) => group.rows.some((row) => rowKey(row) === listSelection));
+      listFocus = rowKey(entry.row);
+      const hidden = !header.list(state.groups).groups.some((group) => group.rows.some((row) => rowKey(row) === listFocus));
       if (hidden) header.clearSearch();
       view.collapsed.delete(entry.group.key);
       keepGroup(entry.group.key, true);
       if (entry.row.band !== null) view.bands.set(`${entry.group.key}:${entry.row.band}`, true);
       void select(entry.row.workItemId);
       draw();
-      const target = listRowElement(listSelection);
+      const target = listRowElement(listFocus);
       target?.focus({ preventScroll: true });
       target?.scrollIntoView?.({ block: 'nearest' });
       break;
@@ -3855,7 +3869,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'select': {
         const workItemId = Number(button!.dataset['workItem']);
 
-        listSelection = button!.dataset['row'] ?? null;
+        listFocus = button!.dataset['row'] ?? null;
         // The dropdown's row or the note's button of the shown work item shows its current session in place; a list row opens the work item.
         if (button!.dataset['row'] === undefined && state.scope?.workItemId === workItemId && state.scope.earlier === true) {
           selectSession(workItemId, null);
@@ -5226,6 +5240,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const before = state;
 
       state = applyEvent(state, data);
+      // A pending choice ends with a scope that comes while no select is outstanding, its own or one the hub showed itself; a late scope of an
+      // earlier choice, a reconnect's hello with none, or any other event leaves it.
+      if (hostPending !== null && state.scope != null && state.scope !== before.scope && !selectInFlight && acked === wanted && ackedSession === wantedSession) hostPending = null;
       if (type === 'hello' && iframeAtLoad === null) iframeAtLoad = state.iframeBrowser === true;
       if (type === 'hello' || type === 'settings') {
         if (iframeAtLoad !== (state.iframeBrowser === true)) iframe.requireReload();

@@ -199,7 +199,7 @@ The dock's Settings window (PRD R54, [architecture.md § Settings window](archit
 | # | Behaviour | Web | Note |
 |---|---|---|---|
 | K1 | Rows, group and band headings and link pills take the focus, shown as a focus-blue ring | Present | Link pills take focus (R12). Pills left out by line 2's clipping are not Tab stops |
-| K2 | Up and Down move the focus along rows and headings; a row reached by keyboard is selected and scrolled into view | Present | Focus selects locally; Enter opens the conversation. Scrolling keeps rows below the pinned group heading |
+| K2 | Up and Down move the focus along rows and headings; a row reached by keyboard is selected and scrolled into view | Differs | The operator's decision (2026-11-23): on the page the selection colour marks only the work item whose conversation is open or opening, so a row reached by keyboard, or whose menu is open, shows the focus ring (K1) and is scrolled into view but is not selected until Enter or Space opens it. Scrolling keeps rows below the pinned group heading |
 | K3 | Enter on a row runs its click; Enter or Space on a heading toggles it | Present | |
 | K4 | Menu key or Shift+F10 opens a row's menu | Present | Escape returns focus to the row |
 | K5 | F8 and Shift+F8 select the next or previous operator's-turn row in Blocked on you and Ready for review, open its group, clear a hiding search and run its click | Present | Wraps in list order, skipping agent-turn and idle rows |
