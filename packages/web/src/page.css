@@ -1200,7 +1200,7 @@ button.picker.opening-title { background: transparent; cursor: default; font-wei
 .iframe-toolbar select { flex: 1; min-width: 100px; max-width: 100%; }
 .iframe-toolbar button { min-height: 30px; }
 .iframe-warning { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.iframe-browser iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: white; }
+.iframe-browser iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--vscode-editor-background); }
 .iframe-browser .iframe-slot { flex: 1; min-height: 0; width: 100%; }
 
 /* Link tabs scroll inside the strip, leaving fixed tabs and artifact menus accessible. */
