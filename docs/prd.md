@@ -9,7 +9,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 - Switchboard manages only sessions it starts. It does not discover or adopt sessions started elsewhere, except a fork of a session it started, which continues that session (R78), and a Claude session the operator registers (R81).
 - Switchboard does not host agent conversations itself: every Claude session it starts runs in an interactive `claude` held by Switchboard's terminal holder (R93, R94), and every Codex session as a thread in Codex's built-in app-server daemon (R107).
 - Switchboard tracks worktrees but never creates or deletes them. Skills create worktrees; the operator removes them.
-- Switchboard runs on Windows, and on Linux under GNOME on Wayland.
+- Switchboard runs on Windows and Linux.
 - Switchboard replaces Ground Control and the support board entirely; neither runs beside it. Switchboard is a modular, source-agnostic factory that reuses Ground Control's session mechanics (see [architecture.md](architecture.md)).
 
 ## Goals
