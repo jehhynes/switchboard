@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { answers, hubBundlePath, hubLogPath, lockAddress, switchboardHome } from '@switchboard/core';
 import { execFile } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, loadConfigFolder, reportReady, runConfig, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, findHub, gitBashRoot, handledBody, holdSupervisorLock, HubSupervisor, isSnapshotWorker, pendingHandover, postToHub, readStopped, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, stopSupervisor, supervisorAddress, supervisorOffPath, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, loadConfigFolder, reportReady, runConfig, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, dropColourOverrides, findHub, gitBashRoot, handledBody, holdSupervisorLock, HubSupervisor, isSnapshotWorker, pendingHandover, postToHub, readStopped, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, stopSupervisor, supervisorAddress, supervisorOffPath, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -786,6 +786,9 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (error) => {
   process.stderr.write(`unhandledRejection: ${String(error)}\n`);
 });
+
+// Every hub.js command, the supervisor and `start` included, so nothing it starts inherits them (mechanics M149).
+dropColourOverrides(process.env);
 
 // The hub runs its own bundle again as its snapshot worker (architecture.md § Hub lifecycle).
 if (isSnapshotWorker()) {

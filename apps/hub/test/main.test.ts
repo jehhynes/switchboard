@@ -777,6 +777,52 @@ describe('hub entry point', () => {
       await start('--stop').exited;
     }
   }, 60_000);
+  it('drops NO_COLOR and FORCE_COLOR at startup, so the hubs that hub.js start, a restart and the supervisor start run without them (mechanics M149)', async () => {
+    const seen = join(home, 'seen.jsonl');
+    const colour = { NO_COLOR: '1', FORCE_COLOR: '0' };
+    const lines = (): { argv: string[]; NO_COLOR: string | null; FORCE_COLOR: string | null }[] => (existsSync(seen) ? readFileSync(seen, 'utf8').trim().split('\n').map((line) => JSON.parse(line)) : []);
+    const clean = (from: number): boolean => lines().slice(from).every((line) => line.NO_COLOR === null && line.FORCE_COLOR === null);
+
+    mkdirSync(switchboardHome(home), { recursive: true });
+    // The installed bundle notes the environment each process it runs was started with, hubs and their snapshot workers, then runs the hub.
+    writeFileSync(
+      hubBundlePath(home),
+      `import('node:fs').then((fs) => { fs.appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ argv: process.argv.slice(2), NO_COLOR: process.env.NO_COLOR ?? null, FORCE_COLOR: process.env.FORCE_COLOR ?? null }) + '\\n'); return import(${JSON.stringify(pathToFileURL(main).href)}); });\n`,
+    );
+
+    try {
+      // The supervisor's hub, before any deliberate stop, after which the supervisor starts none.
+      const supervisor = startWith(colour, 'supervise', '--grace-ms=0', '--check-ms=200');
+
+      await recorded();
+      expect(lines().length).toBeGreaterThan(0);
+      expect(clean(0)).toBe(true);
+      expect(await stopSupervisor(home)).toBe(true);
+      expect((await supervisor.exited).code).toBe(0);
+      await start('--stop').exited;
+      await until(() => (record() === null ? true : null));
+
+      // Started from a shell that has them, the hub sees them; everything it starts, its successor on hub.js restart included, does not.
+      let from = lines().length;
+
+      launch(hubBundlePath(home), colour, ['--idle-ms=60000']);
+      await recorded();
+      expect(lines()[from]).toMatchObject(colour);
+      expect((await startWith(colour, 'restart').exited).code).toBe(0);
+      expect(lines().slice(from).some((line) => line.argv.some((argument) => argument.startsWith('--takeover=')))).toBe(true);
+      expect(clean(from + 1)).toBe(true);
+      await start('--stop').exited;
+      await until(() => (record() === null ? true : null));
+
+      from = lines().length;
+      expect((await startWith(colour, 'start').exited).code).toBe(0);
+      expect(lines().length).toBeGreaterThan(from);
+      expect(clean(from)).toBe(true);
+    } finally {
+      await stopSupervisor(home).catch(() => false);
+      await start('--stop').exited;
+    }
+  }, 60_000);
   it('starts the installed hub detached on hub.js start, with this runtime and the --config folder, and reports a running one', async () => {
     const missing = await start('start').exited;
 
