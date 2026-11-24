@@ -119,6 +119,19 @@ describe('ArtifactFolder', () => {
     expect(changes).toHaveLength(1);
   });
 
+  it('ignores a rewrite of the same bytes with a new time, as a git checkout makes, and still reads a different rewrite', () => {
+    put('chat/report.md', '# First', 2_000_000);
+    const { folder, changes } = watchFolder(dir, () => 9_000_000);
+
+    put('chat/report.md', '# First', 3_000_000);
+    folder.rescan();
+    expect(changes).toEqual([]);
+    expect(folder.list()[0]!.updatedAt).toBe(2_000_000);
+    put('chat/report.md', '# Other', 3_000_000);
+    folder.rescan();
+    expect(changes).toEqual([{ artifact: expect.objectContaining({ title: 'Other', updatedAt: 3_000_000 }) }]);
+  });
+
   it('removes the artifacts of a deleted folder and lists them again when it is back, and watches a folder made after it started', async () => {
     const { folder, changes } = watchFolder();
 
@@ -260,6 +273,40 @@ describe('ExternalArtifacts', () => {
       rmSync(join(real, 'report'), { force: true, recursive: false });
       rmSync(away, { recursive: true, force: true });
     }
+  });
+
+  it('ignores a named file rewritten with the same bytes and a new time, and reads one with different bytes', async () => {
+    const real = realpathSync.native(root);
+    const file = join(real, 'notes.md');
+
+    writeFileSync(file, '# Same');
+    utimesSync(file, 2_000, 2_000);
+
+    const { list, changes } = external([{ id: 1, path: file }]);
+
+    writeFileSync(file, '# Same');
+    utimesSync(file, 3_000, 3_000);
+    await new Promise((done) => setTimeout(done, 200));
+    expect(changes).toEqual([]);
+    expect(list.list()[0]!.updatedAt).toBe(2_000_000);
+    writeFileSync(file, '# Changed');
+    await vi.waitFor(() => expect(changes.at(-1)).toEqual({ artifact: expect.objectContaining({ title: 'Changed' }) }));
+  });
+
+  it("reads a tag's new title and kind on a named file rewritten with the same bytes, though the two would join to the same text", async () => {
+    const real = realpathSync.native(root);
+    const file = join(real, 'notes.md');
+
+    writeFileSync(file, '# Same');
+    utimesSync(file, 2_000, 2_000);
+
+    const { list, changes } = external([{ id: 1, path: file, title: 'A:B', kind: 'C' }]);
+
+    writeFileSync(file, '# Same');
+    utimesSync(file, 3_000, 3_000);
+    list.set([{ id: 1, path: file, title: 'A', kind: 'B:C' }]);
+    await vi.waitFor(() => expect(changes.at(-1)).toEqual({ artifact: expect.objectContaining({ title: 'A', kind: 'B:C' }) }));
+    expect(list.list()[0]).toMatchObject({ title: 'A', kind: 'B:C' });
   });
 
   it('marks an artifact changed when a file in the folder named after its stem changes, its own file unchanged', async () => {

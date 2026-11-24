@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, realpathSync, statSync, watch } from 'node:fs';
 import type { Dirent, FSWatcher } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
+import { createHash } from 'node:crypto';
 
 /** How the web page opens an artifact (architecture.md § Artifacts): by its file's extension. */
 export type ArtifactType = 'markdown' | 'html' | 'image' | 'audio' | 'video' | 'file';
@@ -53,6 +54,24 @@ export function artifactType(name: string): ArtifactType {
 
 /** Only text types are read for a title, and only up to this size. */
 const TITLE_READ_BYTES = 4_000_000;
+
+/** A read artifact's stat stamp and, for a file up to `DIGEST_MAX_BYTES`, its content's SHA-256. */
+type Stamped = { stamp: string; digest: string | null };
+
+/** Larger files, such as videos, are not hashed, so a rewrite of one counts as a change whatever its bytes. */
+const DIGEST_MAX_BYTES = 8 * 1024 * 1024;
+
+function contentDigest(path: string, size: number): string | null {
+  if (size > DIGEST_MAX_BYTES) {
+    return null;
+  }
+
+  try {
+    return createHash('sha256').update(readFileSync(path)).digest('hex');
+  } catch {
+    return null;
+  }
+}
 
 /**
  * An artifact's kind and title: a Markdown file's front matter `kind` and `title`, else its first `#` heading, an HTML page's `<title>`; the
@@ -109,7 +128,7 @@ export interface ArtifactFolderDeps {
  * `<owner>/<stem>/`, the folder of files it uses, is a change to it. A folder that does not exist, or is deleted, is looked for each second.
  */
 export class ArtifactFolder {
-  readonly #items = new Map<string, Artifact & { stamp: string }>();
+  readonly #items = new Map<string, Artifact & Stamped>();
   readonly #timers = new Map<string, NodeJS.Timeout>();
   #watcher: FSWatcher | null = null;
   #look: NodeJS.Timeout | null = null;
@@ -128,7 +147,7 @@ export class ArtifactFolder {
 
   /** The artifacts, newest first. */
   list(): Artifact[] {
-    return [...this.#items.values()].map(({ stamp: _stamp, ...artifact }) => artifact).sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path));
+    return [...this.#items.values()].map(({ stamp: _stamp, digest: _digest, meta: _meta, ...artifact }: Artifact & Stamped & { meta?: string }) => artifact).sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path));
   }
 
   /** Reads every artifact again, as when the folder appears. */
@@ -326,6 +345,14 @@ export class ArtifactFolder {
       return;
     }
 
+    const digest = contentDigest(real!, stat.size);
+
+    // The same bytes written again, as a git checkout or rebase does, are not a new version.
+    if (known !== undefined && digest !== null && known.digest === digest) {
+      known.stamp = stamp;
+      return;
+    }
+
     const type = artifactType(name);
     let text = '';
 
@@ -337,7 +364,7 @@ export class ArtifactFolder {
       }
     }
 
-    const artifact = { path: name, ...parseArtifact(text, name), ext: extname(name).slice(1).toLowerCase(), type, updatedAt: Math.max(stat.mtimeMs, known?.updatedAt ?? 0), stamp };
+    const artifact = { path: name, ...parseArtifact(text, name), ext: extname(name).slice(1).toLowerCase(), type, updatedAt: Math.max(stat.mtimeMs, known?.updatedAt ?? 0), stamp, digest };
 
     // A rewrite with an older time, as a copy that keeps its time, still counts as a change.
     if (known !== undefined && artifact.updatedAt === known.updatedAt) {
@@ -358,7 +385,7 @@ export class ArtifactFolder {
     }
   }
 
-  #publish({ stamp: _stamp, ...artifact }: Artifact & { stamp: string }): void {
+  #publish({ stamp: _stamp, digest: _digest, ...artifact }: Artifact & Stamped): void {
     if (!this.#quiet) {
       this.deps.log(`artifact changed: ${artifact.path}`);
       this.deps.onChange({ artifact });
@@ -484,7 +511,7 @@ export interface ExternalArtifactsDeps {
  * comes back still updates.
  */
 export class ExternalArtifacts {
-  readonly #items = new Map<number, Artifact & { stamp: string }>();
+  readonly #items = new Map<number, Artifact & Stamped & { meta: string }>();
   #entries = new Map<number, ExternalEntry>();
   readonly #watchers = new Map<string, FSWatcher>();
   readonly #timers = new Map<number, NodeJS.Timeout>();
@@ -514,7 +541,7 @@ export class ExternalArtifacts {
 
   /** The external artifacts, newest first. */
   list(): Artifact[] {
-    return [...this.#items.values()].map(({ stamp: _stamp, ...artifact }) => artifact).sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path));
+    return [...this.#items.values()].map(({ stamp: _stamp, digest: _digest, meta: _meta, ...artifact }: Artifact & Stamped & { meta?: string }) => artifact).sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path));
   }
 
   /** An entry by its ID, while it is listed. */
@@ -607,9 +634,18 @@ export class ExternalArtifacts {
     }
 
     const known = this.#items.get(entry.id);
-    const stamp = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${entry.title}:${entry.kind}:${usesStamp(entry)}`;
+    const meta = JSON.stringify([entry.title, entry.kind, usesStamp(entry)]);
+    const stamp = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${meta}`;
 
     if (known?.stamp === stamp) {
+      return;
+    }
+
+    const digest = contentDigest(entry.path, stat.size);
+
+    // The same bytes written again, as a git checkout or rebase does, are not a new version.
+    if (known !== undefined && digest !== null && known.digest === digest && known.meta === meta) {
+      known.stamp = stamp;
       return;
     }
 
@@ -636,6 +672,8 @@ export class ExternalArtifacts {
       updatedAt: Math.max(stat.mtimeMs, known?.updatedAt ?? 0),
       file: entry.path.split(sep).join('/'),
       stamp,
+      digest,
+      meta,
     };
 
     // A rewrite that kept the file's time, or a change to a file it uses, is still a newer version.
@@ -646,7 +684,7 @@ export class ExternalArtifacts {
     this.#items.set(entry.id, artifact);
 
     if (!this.#quiet) {
-      const { stamp: _stamp, ...view } = artifact;
+      const { stamp: _stamp, digest: _digest, meta: _meta, ...view } = artifact;
 
       this.deps.log(`artifact changed: ${entry.path}`);
       this.deps.onChange({ artifact: view });
