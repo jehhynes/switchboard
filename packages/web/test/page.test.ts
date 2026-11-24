@@ -4327,6 +4327,90 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('hides the embedded browser under a menu only where the menu overlaps it, as the Artifacts menu does, and under a modal dialog always', async () => {
+    const postMessage = vi.fn();
+    vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window);
+    onTestFinished(() => { vi.restoreAllMocks(); });
+    window.innerWidth = 1920;
+    // The column's Browser tab at the right; the session dropdown drops over the conversation, the Artifacts menu over the Browser tab.
+    const boxes: Record<string, { left: number; top: number; right: number; bottom: number }> = {
+      'iframe-slot': { left: 1000, top: 120, right: 1900, bottom: 1000 },
+      'conversation-menu': { left: 300, top: 60, right: 700, bottom: 600 },
+      'artifact-menu': { left: 1400, top: 100, right: 1880, bottom: 500 },
+    };
+    // Size observers that report only when the test says so, so the toast's host can say its toast grew.
+    const sized: Array<{ report: () => void; watched: Element[] }> = [];
+    vi.stubGlobal('ResizeObserver', class {
+      readonly watched: Element[] = [];
+      constructor(report: () => void) { sized.push({ report, watched: this.watched }); }
+      observe(element: Element): void { this.watched.push(element); }
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+    onTestFinished(() => { vi.unstubAllGlobals(); });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const box = Object.entries(boxes).find(([name]) => this.classList.contains(name))?.[1] ?? { left: 0, top: 0, right: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const page = startPage(root, {
+      fetch: (async () => ({ status: 200, ok: true, json: async () => ({}) })) as unknown as typeof globalThis.fetch,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000,
+      toExtension: async () => ({ ok: true }),
+    });
+    const source = FakeSource.last!;
+    hello(source, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1' })])] });
+    for (let index = 0; index < 8; index++) {
+      source.emit('artifact', { artifact: { path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 10_000 + index } });
+    }
+    await flush();
+    click('#detail [data-action="iframe-open"]');
+    await flush();
+    const shown = (): boolean => {
+      const last = postMessage.mock.calls.map(([message]) => message as Record<string, unknown>).filter((message) => message['type'] === 'switchboard-iframe').at(-1);
+      return last !== undefined && 'left' in last;
+    };
+    const settle = async (): Promise<void> => { await new Promise((done) => setTimeout(done, FRAME_SHOW_DELAY_MS + 20)); await flush(); };
+    expect(shown()).toBe(true);
+
+    // The session dropdown lies over the conversation, beside the frame, so the frame stays.
+    click('[data-action="picker"]');
+    await flush();
+    expect(root.querySelector('.conversation-menu')).not.toBeNull();
+    expect(shown()).toBe(true);
+    click('[data-action="picker"]');
+    await flush();
+
+    // The Artifacts menu drops over the Browser tab, so the frame hides while it is open and comes back once it closes.
+    click('#detail [data-action="artifact-menu"]');
+    await flush();
+    expect(root.querySelector('#detail .artifact-menu')).not.toBeNull();
+    expect(shown()).toBe(false);
+    click('#detail [data-action="artifact-menu"]');
+    await settle();
+    expect(shown()).toBe(true);
+
+    // A modal dialog hides it wherever its box lies.
+    const modal = document.createElement('div');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    root.append(modal);
+    await flush();
+    expect(shown()).toBe(false);
+    modal.remove();
+    await settle();
+    expect(shown()).toBe(true);
+
+    // A toast clear of the frame leaves it; one replaced in place by a longer text that reaches over it hides it, which only its size says.
+    showToast('Short.', 'info');
+    await flush();
+    expect(shown()).toBe(true);
+    boxes['toast'] = { left: 900, top: 100, right: 1500, bottom: 200 };
+    for (const observer of sized.filter((one) => one.watched.some((element) => element.id === 'toast'))) observer.report();
+    await flush();
+    expect(shown()).toBe(false);
+    page.close();
+  });
+
   it('hides the unpinned list in a drawer while a work item is open, shown by its button or a resting pointer and hidden as the dock auto-hides', () => {
     vi.useFakeTimers();
     localStorage.setItem('switchboard.listCollapsed', '1');

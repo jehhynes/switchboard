@@ -5110,8 +5110,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   window.addEventListener('pagehide', () => iframe.configure(false), { signal: listening.signal });
   window.addEventListener('pageshow', () => { if (iframeAtLoad === (state.iframeBrowser === true)) iframe.configure(state.iframeBrowser === true); }, { signal: listening.signal });
   const iframePlace = setInterval(() => reportFrames(), 5_000);
-  // Sibling frames must hide under the page's floating layers.
-  const floating = (): boolean => view.drawer !== null || contextMenu !== 'closed' || root.querySelector('.glass:not([hidden]), [role="menu"], [role="dialog"], [role="alertdialog"], #toast .toast') !== null;
+  // The sibling frame draws over the page, so it hides under a modal dialog or the list's drawer, and under a menu, popover or toast only
+  // where that layer's box overlaps the frame's, as the Artifacts menu does when it drops from its strip over the Browser tab. A menu that opens
+  // beside the frame, such as the session dropdown, leaves it showing.
+  const overlaps = (a: DOMRect, b: DOMRect): boolean => a.width > 0 && a.height > 0 && b.width > 0 && b.height > 0 && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  const floating = (): boolean => {
+    if (view.drawer !== null || root.querySelector('[aria-modal="true"], [role="alertdialog"]') !== null) return true;
+    const slot = iframe.slotRect();
+    return slot !== null && [...root.querySelectorAll<HTMLElement>('.glass:not([hidden]), [role="menu"], [role="dialog"], #toast .toast')].some((layer) => overlaps(layer.getBoundingClientRect(), slot));
+  };
   let floatingShown = false;
   let framesHold: ReturnType<typeof setTimeout> | null = null;
   /** Whether website frames stay hidden for a floating layer: at once while one is open, and until FRAME_SHOW_DELAY_MS after the last closes, so a quick close and open again does not flicker it. */
@@ -5147,6 +5154,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   browserResize?.observe(detailBody);
   browserResize?.observe(panel);
+  // A toast replaced in place changes only its text, which the layers' observer below does not see, so its size is watched for the overlap.
+  browserResize?.observe(toastHost);
   // A layer can open or close without a redraw, as the composer's list does, so the page's changes are watched too, once a turn at most.
   let layersQueued = false;
   const layers = typeof MutationObserver === 'function' ? new MutationObserver(() => {

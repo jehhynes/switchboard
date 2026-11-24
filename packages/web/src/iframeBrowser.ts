@@ -199,6 +199,10 @@ export class IframeBrowser {
     }
     if (this.#launchError !== null) this.#root.querySelector<HTMLElement>('.iframe-warning')!.textContent = this.#launchError;
   }
+  /** Where the website frame's slot lies on the page, while it is in the page, for the layers that would draw under the sibling frame. */
+  slotRect(): DOMRect | null {
+    return this.#slot?.isConnected === true ? this.#slot.getBoundingClientRect() : null;
+  }
   /** The extension owns a sibling frame so websites have an extension top-level page for its cookie exemptions. */
   place(visible: boolean): void {
     if (!this.#hosted) return;
