@@ -14,7 +14,7 @@ import { listenHub } from './server.js';
 import { clearStopped, writeStopped } from './supervise.js';
 import type { PageRoutes, PostContext, Reply } from './server.js';
 
-/** What the hub serves beyond its lifecycle: the snapshot and the dock view, requests, and the sessions that keep it running. */
+/** What the hub serves beyond its lifecycle: the snapshot, requests, the web page, and the sessions that keep it running. */
 export interface HubApp {
   post: Record<string, (body: unknown, context?: PostContext) => Promise<Reply>>;
   snapshot(): unknown;
@@ -26,8 +26,6 @@ export interface HubApp {
   page?: PageRoutes;
   /** The web page's fixed port, `web.port` as the hub started; 0 for none. */
   pagePort?(): number;
-  /** The dock view (PRD R71). */
-  dock(): object;
   /** URLs of snoozed tickets, for the Chrome extension (PRD R56). */
   snoozedUrls(): string[];
   /** Each ticket's playbook and group, for the Chrome extension (PRD R67). */
@@ -36,11 +34,6 @@ export interface HubApp {
   snoozeUrl: SnoozeByUrl;
   /** Ends a ticket's snooze by URL for the Chrome extension (PRD R66). */
   unsnoozeUrl: UnsnoozeByUrl;
-  onChange(listener: () => void): void;
-  /** Gives the app the way to send an event to the dock's streams, which answers how many it reached. */
-  attachDock?(send: (event: string, data: unknown) => number): void;
-  /** Receives the sender of forwarded clicks to the dock (PRD R65, R69). */
-  attachDockClick?(click: (data: unknown) => boolean): void;
   /** Gives the app the way to end the remote page streams that a change of remote access no longer allows. */
   attachRemote?(changed: () => void): void;
   /** Gives the app the local web page's URL once it is served, which a needs-you system notification opens (PRD R65). */
@@ -136,7 +129,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
   mkdirSync(switchboardHome(home), { recursive: true });
 
-  // A hub restarting onto a new build hands over to its successor; a hub a window or the dock starts meanwhile waits for that one, since it could
+  // A hub restarting onto a new build hands over to its successor; a hub that starts meanwhile waits for that one, since it could
   // take the lock first, and stops waiting once the handover names no running successor.
   const awaitSuccessor = async (): Promise<HubRecord | null> => {
     for (const deadline = Date.now() + (options.restart?.takeoverWaitMs ?? TAKEOVER_WAIT_MS); options.takeover === undefined && Date.now() < deadline; ) {
@@ -223,24 +216,12 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       ? {}
       : {
           post: app.post,
-          dock: () => app.dock(),
           ...(app.windowClosed === undefined ? {} : { windowClosed: (key: string) => app.windowClosed!(key) }),
           ...(app.conversation === undefined ? {} : { conversation: (key: string, write: (frame: string) => void) => app.conversation!(key, write) }),
           ...(app.page === undefined ? {} : { page: app.page }),
         }),
   });
 
-  // A burst of changes, such as a poll's worktree links, rebuilds the views once.
-  let update: NodeJS.Immediate | undefined;
-
-  app?.onChange(() => {
-    update ??= setImmediate(() => {
-      update = undefined;
-      server.update();
-    });
-  });
-  app?.attachDock?.((event, data) => server.notifyDock(event, data));
-  app?.attachDockClick?.((data) => server.clickDock(data));
   app?.attachRemote?.(() => server.remoteChanged());
   app?.attachPageUrl?.(() => server.pageUrl());
 
@@ -358,7 +339,6 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
       clearInterval(idle);
       clearInterval(restartTimer);
-      clearImmediate(update);
       process.off('exit', unclaim);
       server.stopViews();
       // A request being answered still uses the app; later ones are refused, and the app closes once those finish or after 5 seconds.

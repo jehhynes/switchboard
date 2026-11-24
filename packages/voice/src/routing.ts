@@ -1,6 +1,6 @@
 import type { ActiveReason, VoiceFocus, VoiceTarget } from './protocol.js';
 
-/** The focus must rest this long on another scoped window or session terminal window before the voice follows it. */
+/** The focus must rest this long on another scoped window before the voice follows it. */
 export const FOCUS_DEBOUNCE_MS = 500;
 
 export interface RouterDeps {
@@ -14,10 +14,9 @@ export interface RouterDeps {
 
 /**
  * The voice target (voice-design § 2.3): one session per machine, with a generation that rises at each change. It follows the focused scoped
- * window's selected conversation, or the session whose terminal window is in front, after `FOCUS_DEBOUNCE_MS`, and focus moving to another
- * session stops speech at once: the target is dropped right away, so nothing plays until the new one is set. Talk here sets it at once. With the
- * focus outside every scoped window and session terminal window the target stays until the away timeout drops it. Only the hub's `targets` can
- * be targets.
+ * window's selected conversation after `FOCUS_DEBOUNCE_MS`, and focus moving to another session stops speech at once: the target is dropped
+ * right away, so nothing plays until the new one is set. Talk here sets it at once. With the focus outside every scoped window the target stays
+ * until the away timeout drops it. Only the hub's `targets` can be targets.
  */
 export class Router {
   gen = 0;

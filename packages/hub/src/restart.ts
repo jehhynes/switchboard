@@ -294,8 +294,8 @@ function alive(pid: number): boolean {
 }
 
 /**
- * The successor a restart hands over to, while its handover is under `TAKEOVER_WAIT_MS` old and its process runs; null otherwise. A hub, VS Code
- * window or dock that finds no hub then waits for this one rather than starting its own, which could take the lock first.
+ * The successor a restart hands over to, while its handover is under `TAKEOVER_WAIT_MS` old and its process runs; null otherwise. A hub start
+ * that finds no hub then waits for this one rather than starting its own, which could take the lock first.
  */
 export function pendingHandover(home: string, running: (pid: number) => boolean = alive, now: number = Date.now()): { pid: number } | null {
   try {

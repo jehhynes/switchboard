@@ -38,8 +38,6 @@ export interface HubServerOptions {
   windowClosed?: (key: string) => void;
   /** Opens a page's conversation stream for its page key, writing each SSE frame; null for a key no page holds. */
   conversation?: (key: string, write: (frame: string) => void) => { close(): void } | null;
-  /** The dock view, sent as a `dock` event when a `/dock/events` stream opens and on each `update` (PRD R71). */
-  dock?: () => object;
   /** The web page (architecture.md § Web page); without it the hub serves none. */
   page?: PageRoutes;
   /** The hub's build, which `/page/ping` answers, so a page can tell a hub that serves another page. */
@@ -152,7 +150,7 @@ export const LOCAL_PAGE_COMMANDS = new Set(['held-open', 'page-pair', 'page-devi
 const REMOTE_AWARE_COMMANDS = new Set(['page-new-session', 'page-folders']);
 
 /** The page routes only the hub token reaches, which the page's own routes never answer. */
-const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices', '/page/voice']);
+const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices']);
 
 /** The page commands the hub answers itself: pairing a device, the device list and voice on a device (architecture.md § Remote access). */
 const DEVICE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'page-voice-state']);
@@ -169,27 +167,18 @@ export interface HubServer {
   pageUrl(): Promise<string>;
   port: number;
   token: string;
-  /** Connected event streams. */
+  /** Connected page conversation streams. */
   clients(): number;
   /** When the last event stream closed, or null while one is open. Starts at listen time. */
   emptySince(): number | null;
-  /** Sends each `/dock/events` stream the dock view again. */
-  update(): void;
-  /** Sends an event to every `/dock/events` stream, such as `show` or `config`; returns how many streams it reached. */
-  notifyDock(event: string, data: unknown): number;
   /** Ends the open page and console streams of remote devices whose host or login `PageRoutes.remote` no longer allows (architecture.md § Remote access). */
   remoteChanged(): void;
-  /**
-   * Sends a `click` event to the newest `/dock/events` stream opened with `?click=1`, so one dock runs a click VS Code forwards (PRD R65, R69);
-   * returns whether one was open.
-   */
-  clickDock(data: unknown): boolean;
   /**
    * Serves the web page on `port` too, its fixed port (architecture.md § Web page), trying again while the port is taken for up to `waitMs`, as by a
    * hub that is stopping. Answers null once it listens, or why not; a page link waits for the answer and then names this port, or the hub's own.
    */
   listenPage(port: number, waitMs?: number): Promise<string | null>;
-  /** Builds no more views, so nothing reads the app after it closes; streams that open get only `hello`. */
+  /** Opens no more conversation streams, so nothing reads the app after it closes. */
   stopViews(): void;
   /** `POST` requests on the hub's and the page's ports not yet answered, so the hub restarts only between them (architecture.md § Hub lifecycle). */
   inFlight(): number;
@@ -197,8 +186,6 @@ export interface HubServer {
   hold(reason: string): void;
   close(): Promise<void>;
 }
-
-type View = 'dock' | 'conversation';
 
 /** How often each stream hears from the hub: a comment, or for a web page's stream a `tick` event, which its watchdog sees (architecture.md § Web page). */
 const HEARTBEAT_MS = 15_000;
@@ -263,10 +250,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const token = randomBytes(32).toString('hex');
   const expected = Buffer.from(`Bearer ${token}`);
   const now = options.now ?? Date.now;
-  // Each open stream and the view it sends.
-  const streams = new Map<ServerResponse, View>();
-  // Dock streams that run forwarded clicks, oldest first; an older dock does not ask for them.
-  const clickStreams: ServerResponse[] = [];
+  // The open conversation streams.
+  const streams = new Set<ServerResponse>();
 
   let emptySince: number | null = now();
   let inFlight = 0;
@@ -298,41 +283,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     return given.length === expected.length && timingSafeEqual(given, expected);
   };
 
-  const dock = options.dock;
-  // Set by stopViews and close: the app that builds the views may already be closed.
+  // Set by stopViews and close: the app behind the streams may already be closed.
   let closing = false;
-
-  /** The dock's `dock` event, or null before the first build or once the views stop. */
-  const message = (): string | null => {
-    const built = closing || dock === undefined ? undefined : dock();
-
-    return built === undefined ? null : `event: dock\ndata: ${JSON.stringify(built)}\n\n`;
-  };
-
-  /** A `/dock/events` stream; `click=1` asks for the clicks VS Code forwards. */
-  const openDock = (request: IncomingMessage, response: ServerResponse, query: URLSearchParams): void => {
-    response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    response.write(`event: hello\ndata: ${JSON.stringify(options.identity)}\n\n`);
-    response.write(message() ?? '');
-    streams.set(response, 'dock');
-    emptySince = null;
-
-    if (query.get('click') === '1') {
-      clickStreams.push(response);
-    }
-
-    request.on('close', () => {
-      streams.delete(response);
-
-      if (clickStreams.includes(response)) {
-        clickStreams.splice(clickStreams.indexOf(response), 1);
-      }
-
-      if (streams.size === 0) {
-        emptySince = now();
-      }
-    });
-  };
 
   /** A page's conversation stream (architecture.md § Conversation API); refused for a key no connected page holds. */
   const openConversation = (request: IncomingMessage, response: ServerResponse, key: string): void => {
@@ -358,7 +310,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     pending = null;
-    streams.set(response, 'conversation');
+    streams.add(response);
     emptySince = null;
     request.on('close', () => {
       stream.close();
@@ -381,8 +333,6 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   // The open page and console streams of remote devices with the host and login each came through, so a change of remote access that no
   // longer allows them ends them (architecture.md § Remote access).
   const remoteStreams = new Map<ServerResponse, { host: string; login: string }>();
-  // Web pages' conversation streams, which get a `tick` event in place of the heartbeat comment, since a browser shows a page no comment.
-  const tickStreams = new Set<ServerResponse>();
   // Where each open page key's stream came from, this computer or a remote host and login, so its artifact links work only from there.
   const pageKeyOrigins = new Map<string, string>();
   const originOf = (origin: PageOrigin): string => (origin.host === null ? 'local' : `${origin.host} ${origin.login}`);
@@ -737,10 +687,6 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       openConversation(request, response, key);
       pageStreams.set(response, page.access.sessionOf(request.headers.cookie));
 
-      if (streams.get(response) === 'conversation') {
-        tickStreams.add(response);
-      }
-
       if (origin.host !== null) {
         remoteStreams.set(response, { host: origin.host, login: origin.login });
       }
@@ -748,7 +694,6 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       request.on('close', () => {
         pageStreams.delete(response);
         remoteStreams.delete(response);
-        tickStreams.delete(response);
 
         if (key !== null) {
           const ended = key;
@@ -949,7 +894,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     // A command a page posts: from the page's own origin, naming a page key, and only a conversation command.
     const command = path.slice('/v1/conversation/'.length);
-    // Held-session controls share the dock's handlers, behind the page's origin and key checks.
+    // Held-session controls share the `/holder/*` handlers, behind the page's origin and key checks.
     const heldRoute = ({ 'held-list': '/holder/list', 'held-stop': '/holder/stop', 'held-open': '/holder/open' } as Record<string, string>)[command];
     const handler = options.post?.[heldRoute ?? path];
 
@@ -1123,8 +1068,6 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       json(response, 401, { error: 'unauthorized' });
     } else if (request.method === 'GET' && path === '/status') {
       json(response, 200, options.identity);
-    } else if (request.method === 'GET' && path === '/dock/events') {
-      openDock(request, response, url.searchParams);
     } else if (request.method === 'POST' && path === '/page/link' && page !== undefined) {
       // A one-time link to the web page, which `hub.js web` hands out (architecture.md § Web page), on the page's
       // fixed port once it is known whether the page listens there.
@@ -1161,16 +1104,6 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       const reply = devices();
 
       json(response, reply.status, reply.body);
-    } else if (request.method === 'POST' && path === '/page/voice' && page !== undefined) {
-      // Allows or forbids voice on a paired device, for the dock's Settings window (architecture.md § Remote access).
-      readJson(request).then(
-        (body) => {
-          const reply = deviceVoice(body);
-
-          json(response, reply.status, reply.body);
-        },
-        (error: Error) => json(response, 400, { error: error.message }),
-      );
     } else if (request.method === 'POST' && path === '/shutdown') {
       json(response, 200, { stopping: true });
       options.onShutdown();
@@ -1196,23 +1129,10 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   });
   server.on('upgrade', upgradeVoice);
 
-
-  const notify = (to: View, event: string, data: unknown): number => {
-    let sent = 0;
-
-    for (const [stream, view] of streams) {
-      if (view === to) {
-        stream.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-        sent++;
-      }
-    }
-
-    return sent;
-  };
-
+  // Each page stream gets a `tick` event, which its watchdog sees, rather than a comment, since a browser shows a page no comment.
   const heartbeat = setInterval(() => {
-    for (const stream of streams.keys()) {
-      stream.write(tickStreams.has(stream) ? 'event: tick\ndata: {}\n\n' : ': ping\n\n');
+    for (const stream of streams) {
+      stream.write('event: tick\ndata: {}\n\n');
     }
   }, options.heartbeatMs ?? HEARTBEAT_MS);
 
@@ -1235,17 +1155,6 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         token,
         clients: () => streams.size,
         emptySince: () => emptySince,
-        update: () => {
-          // The dock's view is built once, and only while a stream shows it.
-          const built = [...streams.values()].includes('dock') ? message() : null;
-
-          for (const [stream, view] of streams) {
-            if (view === 'dock') {
-              stream.write(built ?? '');
-            }
-          }
-        },
-        notifyDock: (event, data) => notify('dock', event, data),
         remoteChanged: () => {
           const remote = page?.remote?.() ?? { hosts: [], logins: [] };
 
@@ -1257,13 +1166,6 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
           }
 
           page?.voice?.close((device) => !remote.hosts.includes(device.host) || !remote.logins.includes(device.login), 'Remote access no longer allows this device.');
-        },
-        clickDock: (data) => {
-          const stream = clickStreams.at(-1);
-
-          stream?.write(`event: click\ndata: ${JSON.stringify(data)}\n\n`);
-
-          return stream !== undefined;
         },
         listenPage: (wanted, waitMs = PAGE_PORT_WAIT_MS) => {
           const listened = (async (): Promise<string | null> => {
@@ -1310,7 +1212,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
             closing = true;
             clearInterval(heartbeat);
 
-            for (const stream of streams.keys()) {
+            for (const stream of streams) {
               stream.end();
             }
 

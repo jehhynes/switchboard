@@ -23,7 +23,7 @@ export interface HeldSession {
   orphan: boolean;
 }
 
-/** A restart of the terminal holder to the installed build, as the dock and the web page show it (architecture.md § Restarting the holder). */
+/** A restart of the terminal holder to the installed build, as the web page shows it (architecture.md § Restarting the holder). */
 export type HolderRestartState =
   | { state: 'running'; at: number }
   | { state: 'done'; at: number; resumed: number; failed: { session: string; key: string | null; error: string }[]; error: string | null };
@@ -44,7 +44,7 @@ export function idleText(ms: number): string {
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-/** A held session's columns as `hub.js holder list` and the dock's held sessions window show them (PRD R94). */
+/** A held session's columns as `hub.js holder list` and the page's Held sessions show them (PRD R94). */
 export function heldTexts(one: HeldSession, now: number): { item: string; nativeSessionId: string; idle: string; memory: string } {
   return {
     item: one.orphan && one.workItemId === null ? 'No work item' : (one.key ?? 'No work item'),

@@ -32,6 +32,34 @@ afterEach(async () => {
   remove();
 });
 
+/** An app with the web page, whose one page key is `key-1`. */
+function pageApp(overrides: Partial<HubApp> = {}): HubApp {
+  return {
+    post: {},
+    snapshot: () => ({}),
+    snoozedUrls: () => [],
+    cards: () => [],
+    snoozeUrl: () => null,
+    unsnoozeUrl: () => null,
+    busy: () => false,
+    page: { access: new PageAccess(Store.open(':memory:')), asset: () => null, opened: () => 'key-1', isPage: (key) => key === 'key-1', list: () => [], files: async () => null, artifact: () => null, upload: () => ({ status: 403, body: {} }) },
+    conversation: (_key, write) => {
+      write('event: hello\ndata: {}\n\n');
+      return { close: () => {} };
+    },
+    close: () => {},
+    ...overrides,
+  };
+}
+
+/** Signs in to the hub's page with a one-time link and opens a page's conversation stream with the cookie. */
+async function openPageStream(record: { port: number; token: string }): Promise<{ close(): void } | null> {
+  const link = new URL(JSON.parse((await call(record.port, 'POST', '/page/link', record.token))!.body).url);
+  const signIn = await new Promise<string>((resolve) => request({ host: '127.0.0.1', port: record.port, path: `${link.pathname}${link.search}` }, (response) => (response.resume(), resolve(String(response.headers['set-cookie']).split(';')[0]!))).end());
+
+  return openStream(record.port, '/v1/conversation/events?page=1', { Cookie: signIn });
+}
+
 async function serve(options: Partial<ServeOptions> = {}): Promise<ServeResult> {
   const result = await serveHub({ home, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', log: () => {}, exit: vi.fn(), ...options });
 
@@ -75,7 +103,7 @@ describe('serveHub', () => {
     expect(record.version).toBe('0.1.0');
     expect(record.build).toBe('b1');
     expect(record.configDir).toBe('C:/cfg');
-    // The dock starts a hub with the runtime this one runs under (PRD R71).
+    // The record names the runtime the hub runs under.
     expect(record.execPath).toBe(process.execPath);
     expect(await findHub(home)).toEqual(record);
   });
@@ -136,21 +164,7 @@ describe('serveHub', () => {
   it('ends the streams before it closes the app, so their close handlers can still read the store', async () => {
     const events: string[] = [];
     let closed = false;
-    const app: HubApp = {
-      post: {},
-      snapshot: () => ({}),
-      dock: () => ({}),
-      snoozedUrls: () => [],
-      cards: () => [],
-      snoozeUrl: () => null,
-      unsnoozeUrl: () => null,
-      onChange: () => {},
-      busy: () => false,
-      page: { access: new PageAccess(Store.open(':memory:')), asset: () => null, opened: () => 'key-1', isPage: (key) => key === 'key-1', list: () => [], files: async () => null, artifact: () => null, upload: () => ({ status: 403, body: {} }) },
-      conversation: (_key, write) => {
-        write('event: hello\ndata: {}\n\n');
-        return { close: () => {} };
-      },
+    const app = pageApp({
       windowClosed: (key) => {
         if (closed) {
           throw new Error('database is not open');
@@ -162,11 +176,9 @@ describe('serveHub', () => {
         closed = true;
         events.push('app closed');
       },
-    };
+    });
     const hub = served(await serve({ app: async () => app, browserPort: null }));
-    const link = new URL(JSON.parse((await call(hub.record.port, 'POST', '/page/link', hub.record.token))!.body).url);
-    const signIn = await new Promise<string>((resolve) => request({ host: '127.0.0.1', port: hub.record.port, path: `${link.pathname}${link.search}` }, (response) => (response.resume(), resolve(String(response.headers['set-cookie']).split(';')[0]!))).end());
-    const stream = await openStream(hub.record.port, '/v1/conversation/events?page=1', { Cookie: signIn });
+    const stream = await openPageStream(hub.record);
 
     expect(stream).not.toBeNull();
     await hub.stop('test');
@@ -177,7 +189,7 @@ describe('serveHub', () => {
   it('refuses new requests once stopping and closes the app only after the requests it is answering', async () => {
     const events: string[] = [];
     let release: (() => void) | null = null;
-    const app: HubApp = { post: { '/slow': () => new Promise((done) => (release = () => (events.push('answered'), done({ status: 200, body: {} })))), '/fast': async () => ({ status: 200, body: {} }) }, snapshot: () => ({}), dock: () => ({}), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, onChange: () => {}, busy: () => false, close: () => void events.push('app closed') };
+    const app: HubApp = { post: { '/slow': () => new Promise((done) => (release = () => (events.push('answered'), done({ status: 200, body: {} })))), '/fast': async () => ({ status: 200, body: {} }) }, snapshot: () => ({}), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, busy: () => false, close: () => void events.push('app closed') };
     const hub = served(await serve({ app: async () => app, browserPort: null }));
     const slow = call(hub.record.port, 'POST', '/slow', hub.record.token, 5000, {});
 
@@ -271,10 +283,10 @@ describe('serveHub', () => {
     expect(recordOnDisk()).toBeNull();
   });
 
-  it('stays up while a client is connected', async () => {
+  it('stays up while a page is connected', async () => {
     const exit = vi.fn();
-    const hub = served(await serve({ idleMs: 100, exit }));
-    const stream = await openStream(hub.record.port, '/dock/events', { Authorization: `Bearer ${hub.record.token}` });
+    const hub = served(await serve({ idleMs: 100, exit, app: async () => pageApp(), browserPort: null }));
+    const stream = await openPageStream(hub.record);
 
     expect(stream).not.toBeNull();
     await new Promise((done) => setTimeout(done, 400));
@@ -285,28 +297,9 @@ describe('serveHub', () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
-  it('builds the views once for a burst of changes', async () => {
-    let change = () => {};
-    let built = 0;
-    const app: HubApp = { post: {}, snapshot: () => ({}), dock: () => ({ built: ++built }), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, onChange: (listener) => (change = listener), busy: () => false, close: () => {} };
-    const hub = served(await serve({ app: async () => app, browserPort: null }));
-    const states: string[] = [];
-    const stream = await openStream(hub.record.port, '/dock/events', { Authorization: `Bearer ${hub.record.token}` }, (event, data) => event === 'dock' && states.push(data));
-
-    await until(() => (states.length === 1 ? true : null));
-    change();
-    change();
-    change();
-    await until(() => (states.length === 2 ? true : null));
-    await new Promise((done) => setTimeout(done, 50));
-
-    expect(states).toEqual(['{"built":1}', '{"built":2}']);
-    stream!.close();
-  });
-
   describe('browser endpoint', () => {
     const cards: Card[] = [{ url: 'https://github.com/o/r/issues/2', playbook: 'dev:qa-failure', group: 'blocked', snoozed: false }];
-    const app = (urls: string[], snoozeUrl: HubApp['snoozeUrl'] = () => null, unsnoozeUrl: HubApp['unsnoozeUrl'] = () => null): HubApp => ({ post: {}, snapshot: () => ({}), dock: () => ({}), snoozedUrls: () => urls, cards: () => cards, snoozeUrl, unsnoozeUrl, onChange: () => {}, busy: () => false, close: () => {} });
+    const app = (urls: string[], snoozeUrl: HubApp['snoozeUrl'] = () => null, unsnoozeUrl: HubApp['unsnoozeUrl'] = () => null): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => urls, cards: () => cards, snoozeUrl, unsnoozeUrl, busy: () => false, close: () => {} });
 
     async function freePort(): Promise<number> {
       const probe = createServer();
@@ -396,7 +389,7 @@ describe('serveHub', () => {
 });
 
 describe('serveHub restart onto a new build', () => {
-  const app = (quiet: () => string | null): HubApp => ({ post: {}, snapshot: () => ({}), dock: () => ({}), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, onChange: () => {}, busy: () => false, quiet, close: () => {} });
+  const app = (quiet: () => string | null): HubApp => ({ post: {}, snapshot: () => ({}), snoozedUrls: () => [], cards: () => [], snoozeUrl: () => null, unsnoozeUrl: () => null, busy: () => false, quiet, close: () => {} });
 
   it('lets a successor wait for the lock of the hub it takes over from, and take its record once that hub stops', async () => {
     const first = served(await serve());

@@ -1,8 +1,10 @@
 import { request } from 'node:http';
+import { Store } from '@switchboard/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { call } from '../src/http.js';
+import { PageAccess } from '../src/page.js';
 import { listenHub } from '../src/server.js';
-import type { HubServer } from '../src/server.js';
+import type { HubServer, HubServerOptions } from '../src/server.js';
 import { openStream, until } from './helpers.js';
 
 const identity = { hub: 'switchboard', protocol: 1, version: '0.1.0', pid: 99 };
@@ -13,7 +15,27 @@ afterEach(async () => {
   await server.close();
 });
 
-const bearer = (s: HubServer) => ({ Authorization: `Bearer ${s.token}` });
+/** The web page's routes with a page key per stream, `key-1` first, and a conversation that `opens` counts. */
+function withPage(opens: { count: number } = { count: 0 }): Pick<HubServerOptions, 'page' | 'conversation'> {
+  let keys = 0;
+
+  return {
+    page: { access: new PageAccess(Store.open(':memory:')), asset: () => null, opened: () => `key-${++keys}`, isPage: (key) => key.startsWith('key-'), list: () => [], files: async () => null, artifact: () => null, upload: () => ({ status: 403, body: {} }) },
+    conversation: (_key, write) => {
+      opens.count++;
+      write('event: hello\ndata: {}\n\n');
+      return { close: () => {} };
+    },
+  };
+}
+
+/** Signs in to the page with a one-time link and opens a page's conversation stream; null when the hub refuses it. */
+async function openPage(s: HubServer): Promise<{ close(): void } | null> {
+  const link = new URL(JSON.parse((await call(s.port, 'POST', '/page/link', s.token))!.body).url);
+  const cookie = await new Promise<string>((resolve) => request({ host: '127.0.0.1', port: s.port, path: `${link.pathname}${link.search}` }, (response) => (response.resume(), resolve(String(response.headers['set-cookie']).split(';')[0]!))).end());
+
+  return openStream(s.port, '/v1/conversation/events?page=1', { Cookie: cookie });
+}
 
 describe('listenHub', () => {
   it('answers /hub without a token', async () => {
@@ -32,7 +54,6 @@ describe('listenHub', () => {
 
     expect((await call(server.port, 'GET', '/status', null))?.status).toBe(401);
     expect((await call(server.port, 'GET', '/status', 'wrong'))?.status).toBe(401);
-    expect((await call(server.port, 'GET', '/dock/events', null))?.status).toBe(401);
     expect((await call(server.port, 'POST', '/shutdown', `${server.token}x`))?.status).toBe(401);
     expect(onShutdown).not.toHaveBeenCalled();
   });
@@ -51,8 +72,9 @@ describe('listenHub', () => {
 
     expect((await call(server.port, 'GET', '/nothing', server.token))?.status).toBe(404);
     expect((await call(server.port, 'POST', '/status', server.token))?.status).toBe(404);
-    // VS Code windows' streams and reports are gone; a page's conversation stream needs its cookie and `page`.
+    // VS Code windows' and the dock's streams and reports are gone; a page's conversation stream needs its cookie and `page`.
     expect((await call(server.port, 'GET', '/events', server.token))?.status).toBe(404);
+    expect((await call(server.port, 'GET', '/dock/events', server.token))?.status).toBe(404);
     expect((await call(server.port, 'GET', '/v1/conversation/events?window=key-1', server.token))?.status).toBe(404);
     expect((await call(server.port, 'POST', '/window/focus', server.token, 2000, { window: 'key-1', focused: true }))?.status).toBe(404);
     expect((await call(server.port, 'POST', '/window/theme', server.token, 2000, { theme: 'dark', at: 1 }))?.status).toBe(404);
@@ -67,16 +89,16 @@ describe('listenHub', () => {
     expect(onShutdown).toHaveBeenCalledTimes(1);
   });
 
-  it('tracks connected event streams', async () => {
+  it('tracks connected page streams', async () => {
     let time = 1000;
 
-    server = await listenHub({ identity, onShutdown: () => {}, now: () => time });
+    server = await listenHub({ identity, onShutdown: () => {}, now: () => time, ...withPage() });
 
     expect(server.clients()).toBe(0);
     expect(server.emptySince()).toBe(1000);
 
-    const first = await openStream(server.port, '/dock/events', bearer(server));
-    const second = await openStream(server.port, '/dock/events', bearer(server));
+    const first = await openPage(server);
+    const second = await openPage(server);
 
     expect(first).not.toBeNull();
     expect(second).not.toBeNull();
@@ -92,34 +114,6 @@ describe('listenHub', () => {
     second!.close();
     await until(() => (server.clients() === 0 ? true : null));
     expect(server.emptySince()).toBe(3000);
-  });
-
-  it('sends a hello event and heartbeats on open streams', async () => {
-    server = await listenHub({ identity, onShutdown: () => {}, heartbeatMs: 20 });
-
-    let text = '';
-
-    await new Promise<void>((resolve) => {
-      const outbound = request(
-        { host: '127.0.0.1', port: server.port, path: '/dock/events', headers: { Authorization: `Bearer ${server.token}` } },
-        (response) => {
-          response.setEncoding('utf8');
-          response.on('data', (chunk: string) => {
-            text += chunk;
-
-            if (text.includes(': ping')) {
-              outbound.destroy();
-              resolve();
-            }
-          });
-        },
-      );
-
-      outbound.end();
-    });
-
-    expect(text).toContain(`event: hello\ndata: ${JSON.stringify(identity)}\n\n`);
-    expect(text).toContain(': ping\n\n');
   });
 });
 
@@ -137,130 +131,18 @@ describe('listenHub routes and state', () => {
     expect((await call(server.port, 'POST', '/echo', null, 2000, {}))?.status).toBe(401);
   });
 
-  it('sends each dock stream the dock view when it opens and again on update', async () => {
-    let dock = { d: 1 };
-    server = await listenHub({ identity, onShutdown: () => {}, dock: () => dock });
+  it('opens no page stream once views stop, because the hub then closes the app behind them', async () => {
+    const opens = { count: 0 };
 
-    const read = (path: string) => {
-      const chunks: string[] = [];
-      const outbound = request({ host: '127.0.0.1', port: server.port, path, headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
-        response.setEncoding('utf8');
-        response.on('data', (chunk: string) => chunks.push(chunk));
-      });
+    server = await listenHub({ identity, onShutdown: () => {}, ...withPage(opens) });
 
-      outbound.on('error', () => {});
-      outbound.end();
-
-      return { text: () => chunks.join(''), close: () => outbound.destroy() };
-    };
-    const docked = read('/dock/events');
-
-    await until(() => (docked.text().includes('event: dock\ndata: {"d":1}\n\n') ? true : null));
-    expect(server.clients()).toBe(1);
-    dock = { d: 2 };
-    server.update();
-    await until(() => (docked.text().includes('event: dock\ndata: {"d":2}\n\n') ? true : null));
-    expect(docked.text()).toMatch(/^event: hello\ndata: \{"hub":"switchboard"/);
-    docked.close();
-  });
-
-  it('sends a dock event to the dock streams, and counts them', async () => {
-    server = await listenHub({ identity, onShutdown: () => {}, dock: () => ({}) });
-
-    expect(server.notifyDock('show', {})).toBe(0);
-
-    const chunks: Record<string, string[]> = { '/dock/events': [], '/dock/events?click=1': [] };
-
-    for (const path of Object.keys(chunks)) {
-      const outbound = request({ host: '127.0.0.1', port: server.port, path, headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
-        response.setEncoding('utf8');
-        response.on('data', (chunk: string) => chunks[path]!.push(chunk));
-      });
-
-      outbound.on('error', () => {});
-      outbound.end();
-    }
-
-    await until(() => (server.clients() === 2 ? true : null));
-    expect(server.notifyDock('show', { a: 1 })).toBe(2);
-    await until(() => (Object.values(chunks).every((one) => one.join('').includes('event: show\ndata: {"a":1}\n\n')) ? true : null));
-  });
-
-  it('sends a forwarded click to the newest dock stream that asked for clicks, and to no other stream (PRD R65, R69)', async () => {
-    server = await listenHub({ identity, onShutdown: () => {}, dock: () => ({}) });
-
-    const open = (path: string) => {
-      const chunks: string[] = [];
-      const outbound = request({ host: '127.0.0.1', port: server.port, path, headers: { Authorization: `Bearer ${server.token}` } }, (response) => {
-        response.setEncoding('utf8');
-        response.on('data', (chunk: string) => chunks.push(chunk));
-      });
-
-      outbound.on('error', () => {});
-      outbound.end();
-
-      return { text: () => chunks.join(''), close: () => outbound.destroy() };
-    };
-
-    expect(server.clickDock({ rowKey: 'item:1' })).toBe(false);
-
-    const old = open('/dock/events');
-    const first = open('/dock/events?click=1');
-    const second = open('/dock/events?click=1');
-
-    await until(() => (server.clients() === 3 ? true : null));
-    expect(server.clickDock({ rowKey: 'item:2' })).toBe(true);
-    await until(() => (second.text().includes('event: click\ndata: {"rowKey":"item:2"}\n\n') ? true : null));
-
-    second.close();
-    await until(() => (server.clients() === 2 ? true : null));
-    expect(server.clickDock({ rowKey: 'item:3' })).toBe(true);
-    await until(() => (first.text().includes('"rowKey":"item:3"') ? true : null));
-    expect(first.text()).not.toContain('"rowKey":"item:2"');
-    expect(old.text()).not.toContain('event: click');
-
-    first.close();
+    expect(await openPage(server)).not.toBeNull();
     await until(() => (server.clients() === 1 ? true : null));
-    expect(server.clickDock({ rowKey: 'item:4' })).toBe(false);
-    old.close();
-  });
-
-  it('builds no view once views stop, because the hub then closes the app that builds them', async () => {
-    let appClosed = false;
-    let builtAfterClose = 0;
-    const local = await listenHub({
-      identity,
-      onShutdown: () => {},
-      dock: () => {
-        builtAfterClose += appClosed ? 1 : 0;
-        return {};
-      },
-    });
-    const connect = (path: string) => {
-      const outbound = request({ host: '127.0.0.1', port: local.port, path, headers: { Authorization: `Bearer ${local.token}` } }, (response) => response.resume());
-
-      outbound.on('error', () => {});
-      outbound.end();
-    };
-
-    connect('/dock/events');
-    await until(() => (local.clients() === 1 ? true : null));
     // The hub's stop: views stop, the app closes, and requests on open connections still arrive before the server closes.
-    local.stopViews();
-    appClosed = true;
-    connect('/dock/events');
-    await until(() => (local.clients() === 2 ? true : null));
-    local.update();
-    await local.close();
-    await new Promise((done) => setTimeout(done, 100));
-    expect(builtAfterClose).toBe(0);
-    server = await listenHub({ identity, onShutdown: () => {} });
-  });
-
-  it('refuses the dock stream without the token', async () => {
-    server = await listenHub({ identity, onShutdown: () => {}, dock: () => ({}) });
-
-    expect((await call(server.port, 'GET', '/dock/events', null))?.status).toBe(401);
+    server.stopViews();
+    expect(await openPage(server)).toBeNull();
+    expect(opens.count).toBe(1);
+    expect(server.clients()).toBe(1);
   });
 });
 

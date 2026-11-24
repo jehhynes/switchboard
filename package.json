@@ -19,11 +19,9 @@
     "packages/codex",
     "packages/web",
     "packages/hub",
-    "apps/dock",
     "extensions/chrome",
     "extensions/firefox",
-    "apps/hub",
-    "extensions/gnome-shell"
+    "apps/hub"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

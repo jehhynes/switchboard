@@ -28,7 +28,7 @@ export function needsReason(item: WorkItemView): string {
   return MARK_TITLES[markOf(item) as Mark];
 }
 
-/** The dock's message for a work item that started needing the operator, such as `Switchboard: Fix the inbox badge — Approve to send`. */
+/** The needs-you message for a work item that started needing the operator, such as `Switchboard: Fix the inbox badge — Approve to send`. */
 export function needsMessage(item: WorkItemView): string {
   return `Switchboard: ${item.ticket.title} — ${needsReason(item)}`;
 }

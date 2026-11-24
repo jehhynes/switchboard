@@ -1,5 +1,4 @@
-// The web page's Settings (architecture.md § Web page, PRD R54): the dock's Settings window's state, fields and pages, ported from
-// apps/dock/src/Switchboard.Dock/Settings, so the page edits settings.json as the dock does and shows the same pages, fields and errors.
+// The web page's Settings (architecture.md § Web page, PRD R54): its state, fields and pages, ported from the retired dock's Settings window.
 
 /** A JSON value as settings.json holds it. */
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };

@@ -75,15 +75,12 @@ describe('loadConfigFolder', () => {
     expect(loadConfigFolder(deps, join(home, 'flag'))).toEqual({ dir: resolve(home, 'flag'), source: 'file', notices: [] });
   });
 
-  it("falls back to the dock's dock-hub.json and then the Switchboard home, and reports a setting it cannot import", () => {
+  it('falls back to the Switchboard home, and reports a setting it cannot import', () => {
     writeVscode('{"switchboard.configDir": "relative/cfg"}');
-    mkdirSync(switchboardHome(home), { recursive: true });
-    writeFileSync(join(switchboardHome(home), 'dock-hub.json'), JSON.stringify({ execPath: 'node', configDir: join(home, 'dock') }));
 
-    expect(loadConfigFolder(deps, null)).toEqual({ dir: resolve(home, 'dock'), source: 'dock', notices: ['switchboard.configDir must be an absolute path or start with ~: relative/cfg, so it was not imported.'] });
+    expect(loadConfigFolder(deps, null)).toEqual({ dir: resolve(switchboardHome(home)), source: 'default', notices: ['switchboard.configDir must be an absolute path or start with ~: relative/cfg, so it was not imported.'] });
 
     rmSync(hubConfigPath(home));
-    rmSync(join(switchboardHome(home), 'dock-hub.json'));
     writeVscode('{ not json');
 
     expect(loadConfigFolder(deps, null)).toEqual({ dir: resolve(switchboardHome(home)), source: 'default', notices: [`${vscodeSettingsPath(deps)} could not be read as JSON, so switchboard.configDir was not imported.`] });

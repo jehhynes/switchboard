@@ -187,7 +187,7 @@ describe('parseSettings', () => {
         'sessions.codeMode must be true or false.',
         'triage.concurrency must be a whole number of at least 1.',
         'triage.timeoutSeconds must be a whole number of at least 1.',
-        "sources.github.enabled is not a setting; turn a source on and off in the dock's header.",
+        "sources.github.enabled is not a setting; turn a source on and off in the list's header.",
         'sources.github.pollIntervalSeconds must be a whole number of at least 10.',
         'sources.zoho must be an object.',
       ],

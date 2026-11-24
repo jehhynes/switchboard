@@ -643,13 +643,7 @@
             ],
             "file": "C:\\Users\\op\\.switchboard\\windows\\gh-108-widgets-655280.code-workspace"
           },
-          "open": {
-            "type": "question",
-            "workItemId": 8,
-            "sessionId": "aaaa1111-native",
-            "cwd": "D:/git/widgets",
-            "provider": "claude"
-          },
+          "open": null,
           "terminal": null,
           "controls": [
             {
@@ -704,24 +698,11 @@
               }
             }
           ],
-          "main": "Open in Claude",
-          "mainGlyph": "",
-          "mainTitle": "Open in Claude",
+          "main": null,
+          "mainGlyph": null,
+          "mainTitle": null,
           "pastes": [],
           "commands": [
-            {
-              "label": "Open in terminal",
-              "glyph": "",
-              "command": {
-                "type": "terminal",
-                "provider": "claude",
-                "sessionId": "aaaa1111-native",
-                "cwd": "D:/git/widgets",
-                "name": "gh 108",
-                "shortId": "aaaa1111",
-                "active": false
-              }
-            },
             {
               "label": "History",
               "glyph": "",

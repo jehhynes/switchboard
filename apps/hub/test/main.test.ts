@@ -114,10 +114,10 @@ async function until<T>(check: () => T | null, within = 10_000): Promise<T> {
   throw new Error('condition not met in time');
 }
 
-/** The status a stream answers, closed once its headers arrive. */
-function streamStatus(found: HubRecord, path: string): Promise<number> {
+/** The status a page's conversation stream answers with `cookie`, closed once its headers arrive. */
+function pageStreamStatus(found: HubRecord, cookie: string): Promise<number> {
   return new Promise((resolve) => {
-    const outbound = request({ host: '127.0.0.1', port: found.port, path, headers: { Authorization: `Bearer ${found.token}` } }, (response) => {
+    const outbound = request({ host: '127.0.0.1', port: found.port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${found.port}`, Cookie: cookie } }, (response) => {
       resolve(response.statusCode ?? 0);
       outbound.destroy();
     });
@@ -127,9 +127,36 @@ function streamStatus(found: HubRecord, path: string): Promise<number> {
   });
 }
 
-function get(port: number, path: string): Promise<string> {
+/** Signs a browser in to the hub's page with a one-time link, answering its cookie. */
+async function pageCookie(found: HubRecord): Promise<string> {
+  const link = await new Promise<string>((resolve, reject) => {
+    const outbound = request({ host: '127.0.0.1', port: found.port, method: 'POST', path: '/page/link', headers: { Authorization: `Bearer ${found.token}` } }, (response) => {
+      let body = '';
+
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => (body += chunk));
+      response.on('end', () => resolve((JSON.parse(body) as { url: string }).url));
+    });
+
+    outbound.on('error', reject);
+    outbound.end();
+  });
+  const url = new URL(link);
+
   return new Promise((resolve, reject) => {
-    const outbound = request({ host: '127.0.0.1', port, path }, (response) => {
+    const outbound = request({ host: '127.0.0.1', port: Number(url.port), path: `${url.pathname}${url.search}` }, (response) => {
+      response.resume();
+      resolve(String(response.headers['set-cookie']).split(';')[0]!);
+    });
+
+    outbound.on('error', reject);
+    outbound.end();
+  });
+}
+
+function get(port: number, path: string, headers: Record<string, string> = {}): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const outbound = request({ host: '127.0.0.1', port, path, headers }, (response) => {
       let body = '';
 
       response.setEncoding('utf8');
@@ -587,7 +614,7 @@ describe('hub entry point', () => {
     expect((await hub.exited).code).toBe(0);
     expect(record()).toBeNull();
   });
-  it('restarts onto another installed build once quiet, handing its record to the new hub, which the dock and pages reach again', async () => {
+  it('restarts onto another installed build once quiet, handing its record to the new hub, which pages reach again', async () => {
     // The installed bundle loads the built entry point, so changing the file changes the installed build.
     const bundle = hubBundlePath(home);
     const shim = `import(${JSON.stringify(pathToFileURL(main).href)});\n`;
@@ -600,11 +627,12 @@ describe('hub entry point', () => {
 
     expect(before.build).toBe(buildOf(bundle));
 
-    // The dock's stream: it ends when the hub hands over, and a new one opens on the new record.
-    let dockOpened = false;
-    const dockEnded = new Promise<void>((done) => {
-      const outbound = request({ host: '127.0.0.1', port: before.port, path: '/dock/events', headers: { Authorization: `Bearer ${before.token}` } }, (response) => {
-        dockOpened = response.statusCode === 200;
+    // A page's stream: it ends when the hub hands over, and a new one opens on the new record.
+    const cookie = await pageCookie(before);
+    let pageOpened = false;
+    const pageEnded = new Promise<void>((done) => {
+      const outbound = request({ host: '127.0.0.1', port: before.port, path: '/v1/conversation/events?page=1', headers: { Host: `127.0.0.1:${before.port}`, Cookie: cookie } }, (response) => {
+        pageOpened = response.statusCode === 200;
         response.resume();
         response.on('close', () => done());
       });
@@ -614,7 +642,7 @@ describe('hub entry point', () => {
     });
 
     try {
-      await until(() => (dockOpened ? true : null));
+      await until(() => (pageOpened ? true : null));
 
       writeFileSync(bundle, `${shim}// another build\n`);
 
@@ -631,12 +659,13 @@ describe('hub entry point', () => {
       expect(old.stdout).toContain(`restarting the hub from build ${before.build} onto build ${after.build}, which is installed`);
       expect(old.stdout).toContain(`hub restart: pid ${after.pid} took over with build ${after.build}`);
       expect(readFileSync(hubLogPath(home), 'utf8')).toContain(`listening on 127.0.0.1:${after.port} as pid ${after.pid}, build ${after.build}`);
-      // The successor took the lock: a hub the window started meanwhile waited for it instead.
+      // The successor took the lock: a hub started meanwhile waited for it instead.
       expect(readFileSync(hubLogPath(home), 'utf8')).not.toContain('A hub is already running');
 
-      // The dock's stream ended and a new one opens on the new record; a page's ping names the new build.
-      await dockEnded;
-      expect(await streamStatus(after, '/dock/events')).toBe(200);
+      // The page's stream ended and a new one opens on the new record with the same sign-in; a page's ping names the new build.
+      await pageEnded;
+      expect(await pageStreamStatus(after, cookie)).toBe(200);
+      expect(JSON.parse(await get(after.port, '/page/ping', { Host: `127.0.0.1:${after.port}`, Cookie: cookie }))).toEqual({ build: after.build, signedIn: true });
       expect(JSON.parse(await get(after.port, '/page/ping'))).toEqual({ build: after.build, signedIn: false });
     } finally {
       await start('--stop').exited;

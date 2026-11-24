@@ -869,19 +869,12 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(service.dictate(mine.key, 's2', 'and the tests', pieces, true)).toMatchObject({ message: { id: 'm-3', origin: 'voice', partial: true, spokenRequested: false } });
     await settled(() => expect(store.message('m-3')?.delivery).toBe('sent'));
     expect(holder.writes.at(-2)).toBe('\u001b[200~[voice] [partial] and the tests\u001b[201~');
-    expect(service.dictate(mine.key, 's2', 'too', pieces, false)).toMatchObject({ message: { origin: 'voice', spokenRequested: true } });
-
-    // Into the session through its terminal window, with no window key: typed the same way; one for an unknown session is refused to no window.
-    const sent = service.dictate(null, 's2', 'from the terminal', pieces, false);
+    const sent = service.dictate(mine.key, 's2', 'too', pieces, false);
 
     expect(sent).toMatchObject({ message: { origin: 'voice', spokenRequested: true } });
     // The queue types in order, so this, the last message, settling means none is still typing when the test's folder is removed.
     await settled(() => expect(store.message((sent as { message: { id: string } }).message.id)?.delivery).toBe('sent'));
-    expect(holder.writes).toContain('\u001b[200~[spoken] [voice] from the terminal\u001b[201~');
-    const before = mine.frames.length;
-
-    expect(service.dictate(null, 'nope', 'hello', pieces, false)).toEqual({ refused: 'The session has ended. Open it in the terminal to resume it.' });
-    expect(mine.frames).toHaveLength(before);
+    expect(holder.writes).toContain('\u001b[200~[spoken] [voice] too\u001b[201~');
 
     // Refused for another session than the window's, before anything is stored, with a refused message to the window only.
     expect(service.dictate(mine.key, 's3', 'hello', pieces, false)).toEqual({ refused: "The voice's session is no longer this window's." });
@@ -1111,15 +1104,6 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(frames.at(-1)).toMatchObject({ type: 'message', message: { id: 'm-2', delivery: 'not-sent', text: 'Fix the build' } });
     expect(logs).toContain('session s2: message m-2 not-sent: A newer session of this work item started; the message was not sent.');
     expect(held.writes).toEqual([]);
-  });
-
-  it("types dictation from an older session's own terminal window, which a newer session of its work item does not stop (voice-design decision 9)", async () => {
-    const { service, held, store } = setupSend();
-
-    store.insertSession({ ...(store.session('s2') as StoredSession), id: 's2b', nativeSessionId: 'n2b', startedAt: NOW + 1 });
-    expect(service.dictate(null, 's2', 'run the tests', [{ text: 'run the tests', score: null, f0: null, dropped: false }], false)).toMatchObject({ message: { origin: 'voice' } });
-    await settled(() => expect(held.writes).toContain('\u001b[200~[voice] run the tests\u001b[201~'));
-    expect(held.reservations).toEqual([{ sessionId: 's2', launch: 'launch-1' }]);
   });
 
   it("replays an opId only within the window's current session and scope generation", () => {
@@ -1978,27 +1962,28 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     mkdirSync(folder, { recursive: true });
 
     // Empty: a conversation now; the page selects it.
-    expect(service.newSession({ window: page.key, opId: 's1', folder, provider: 'codex', model: ' gpt-6.2-sol ' }, true)).toEqual({ status: 200, body: { workItemId: 51, folder: realpathSync.native(folder), run: 'now' } });
+    expect(service.newSession({ window: page.key, opId: 's1', folder, provider: 'codex', model: ' gpt-6.2-sol ' })).toEqual({ status: 200, body: { workItemId: 51, folder: realpathSync.native(folder), run: 'now' } });
     expect(created.at(-1)).toEqual({ kind: 'session', folder: realpathSync.native(folder), provider: 'codex', model: 'gpt-6.2-sol', prompt: null });
     expect(remembered).toEqual([realpathSync.native(folder)]);
-    expect(service.newSession({ window: page.key, opId: 's1', folder, provider: 'claude' }, true).status).toBe(200);
+    expect(service.newSession({ window: page.key, opId: 's1', folder, provider: 'claude' }).status).toBe(200);
     expect(created).toHaveLength(1);
     // A first message as the conversation's first turn, or a task queued or waiting.
-    expect(service.newSession({ window: page.key, opId: 's2', folder, provider: 'claude', prompt: '  Find the bug  ', run: 'now' }, true)).toMatchObject({ status: 200, body: { run: 'now' } });
+    expect(service.newSession({ window: page.key, opId: 's2', folder, provider: 'claude', prompt: '  Find the bug  ', run: 'now' })).toMatchObject({ status: 200, body: { run: 'now' } });
     expect(created.at(-1)).toMatchObject({ kind: 'session', prompt: 'Find the bug' });
-    expect(service.newSession({ window: page.key, opId: 's3', folder, provider: 'claude', prompt: 'Sweep', run: 'queue' }, true)).toMatchObject({ status: 200, body: { run: 'queue' } });
+    expect(service.newSession({ window: page.key, opId: 's3', folder, provider: 'claude', prompt: 'Sweep', run: 'queue' })).toMatchObject({ status: 200, body: { run: 'queue' } });
     expect(created.at(-1)).toMatchObject({ kind: 'task', prompt: 'Sweep', start: true, model: null });
-    expect(service.newSession({ opId: 's4', folder, provider: 'claude', prompt: 'Later', run: 'wait', model: 'opus' }, false)).toMatchObject({ status: 200, body: { run: 'wait' } });
+    expect(service.newSession({ window: page.key, opId: 's4', folder, provider: 'claude', prompt: 'Later', run: 'wait', model: 'opus' })).toMatchObject({ status: 200, body: { run: 'wait' } });
     expect(created.at(-1)).toMatchObject({ kind: 'task', prompt: 'Later', start: false, model: 'opus' });
     // A task needs a message; bad fields, a key that is not a page's, a missing or relative folder and the flow's refusal create nothing.
-    expect(service.newSession({ window: page.key, opId: 's5', folder, provider: 'claude', prompt: ' ', run: 'wait' }, true)).toEqual({ status: 400, body: { error: 'A task needs a first message.' } });
+    expect(service.newSession({ window: page.key, opId: 's5', folder, provider: 'claude', prompt: ' ', run: 'wait' })).toEqual({ status: 400, body: { error: 'A task needs a first message.' } });
     for (const bad of [{ provider: 'gpt' }, { run: 'later' }, { model: ' ' }, { prompt: 7 }, { opId: '' }]) {
-      expect(service.newSession({ window: page.key, opId: 's6', folder, provider: 'claude', ...bad }, true).status).toBe(400);
+      expect(service.newSession({ window: page.key, opId: 's6', folder, provider: 'claude', ...bad }).status).toBe(400);
     }
-    expect(service.newSession({ window, opId: 's7', folder, provider: 'claude' }, true).status).toBe(403);
-    expect(service.newSession({ window: page.key, opId: 's8', folder: join(dir, 'gone'), provider: 'claude' }, true)).toEqual({ status: 400, body: { error: `${join(dir, 'gone')} is not a folder a session can run in.` } });
-    expect(service.newSession({ window: page.key, opId: 's9', folder: 'work', provider: 'claude' }, true).status).toBe(400);
-    expect(service.newSession({ window: page.key, opId: 's10', folder, provider: 'claude', prompt: 'refuse' }, true)).toEqual({ status: 409, body: { error: 'Code Mode sessions need hooks.' } });
+    expect(service.newSession({ window, opId: 's7', folder, provider: 'claude' }).status).toBe(403);
+    expect(service.newSession({ opId: 's7', folder, provider: 'claude' }).status).toBe(403);
+    expect(service.newSession({ window: page.key, opId: 's8', folder: join(dir, 'gone'), provider: 'claude' })).toEqual({ status: 400, body: { error: `${join(dir, 'gone')} is not a folder a session can run in.` } });
+    expect(service.newSession({ window: page.key, opId: 's9', folder: 'work', provider: 'claude' }).status).toBe(400);
+    expect(service.newSession({ window: page.key, opId: 's10', folder, provider: 'claude', prompt: 'refuse' })).toEqual({ status: 409, body: { error: 'Code Mode sessions need hooks.' } });
     expect(created).toHaveLength(5);
   });
 
@@ -2018,10 +2003,10 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     roots.repoRoots = [root, join(dir, 'missing')];
 
     // This computer's page may use any folder; a paired device's only those under the roots, and no link out of them.
-    expect(service.newSession({ window: page.key, opId: 'r1', folder: outside, provider: 'claude' }, true).status).toBe(200);
-    expect(service.newSession({ window: page.key, opId: 'r2', folder: outside, provider: 'claude', remote: true }, true)).toMatchObject({ status: 400, body: { error: expect.stringContaining('is not in a recent folder, a repo root or a worktree') } });
-    expect(service.newSession({ window: page.key, opId: 'r3', folder: join(root, 'away'), provider: 'claude', remote: true }, true).status).toBe(400);
-    expect(service.newSession({ window: page.key, opId: 'r4', folder: join(root, 'src'), provider: 'claude', remote: true }, true).status).toBe(200);
+    expect(service.newSession({ window: page.key, opId: 'r1', folder: outside, provider: 'claude' }).status).toBe(200);
+    expect(service.newSession({ window: page.key, opId: 'r2', folder: outside, provider: 'claude', remote: true })).toMatchObject({ status: 400, body: { error: expect.stringContaining('is not in a recent folder, a repo root or a worktree') } });
+    expect(service.newSession({ window: page.key, opId: 'r3', folder: join(root, 'away'), provider: 'claude', remote: true }).status).toBe(400);
+    expect(service.newSession({ window: page.key, opId: 'r4', folder: join(root, 'src'), provider: 'claude', remote: true }).status).toBe(200);
     expect(created).toHaveLength(2);
 
     // The starting places: folders that exist, and the home folder and drives on this computer's page only.

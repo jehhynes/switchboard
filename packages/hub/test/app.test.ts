@@ -457,8 +457,6 @@ describe('createHubApp', () => {
   it('reloads settings and playbooks when settings.json changes', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
-    let changes = 0;
-    app.onChange(() => changes++);
 
     writeSettings({ sessions: { installHooks: false }, playbooks: { 'dev:develop': { description: 'Build it', template: 'Build.' } } });
 
@@ -466,7 +464,6 @@ describe('createHubApp', () => {
 
     writeSettings('{ broken');
     await until(() => ((app.snapshot() as { errors: { settings: string | null } }).errors.settings?.startsWith('settings.json is not valid JSON') ? true : null));
-    expect(changes).toBeGreaterThan(0);
   });
 
   it('polls the sources that are on at POST /poll, and refuses when none is', async () => {
@@ -491,7 +488,7 @@ describe('createHubApp', () => {
     const text = readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8');
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
     const states = () => (app.snapshot() as { sourceStates: unknown }).sourceStates;
-    const enabled = async () => ((await app.post['/config/read']!({})).body as { enabled: Record<string, boolean> }).enabled;
+    const enabled = async () => ((await app.post['/v1/conversation/page-settings-read']!({})).body as { enabled: Record<string, boolean> }).enabled;
 
     expect(states()).toEqual([{ name: 'zoho', kind: 'zoho', enabled: false }]);
     expect(await enabled()).toEqual({ zoho: false, adhoc: false });
@@ -510,30 +507,28 @@ describe('createHubApp', () => {
     expect((again.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', enabled: true }]);
   });
 
-  it('tells an open Settings window to read again after a toggle, and not after a refused one', async () => {
+  it("tells an open page's Settings to read again after a toggle, and not after a refused one", async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { zoho: { repoRoot: 'D:/support' } } });
     const app = await start();
-    const sent: string[] = [];
+    const frames: string[] = [];
+    const configs = () => frames.filter((frame) => frame.includes('\nevent: config\n')).length;
 
-    app.attachDock!((event) => {
-      sent.push(event);
-      return 1;
-    });
+    app.conversation!(app.page!.opened(false), (frame) => frames.push(frame));
     expect(await app.post['/sources']!({ name: 'forum', kind: 'forum', enabled: true })).toMatchObject({ status: 409 });
-    expect(sent).not.toContain('config');
+    expect(configs()).toBe(0);
     expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
-    expect(sent).toContain('config');
+    expect(configs()).toBe(1);
   });
 
   it('checks an enabled source\'s own keys only while it is on, and refuses an enabled key in settings.json', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { zoho: { repoRoot: 'D:/support' } } });
     const app = await start();
-    const check = async (settings: unknown) => ((await app.post['/config/check']!({ settings })).body as { errors: string[] }).errors;
+    const check = async (settings: unknown) => ((await app.post['/v1/conversation/page-settings-check']!({ settings })).body as { errors: string[] }).errors;
 
     expect(await check({ sources: { zoho: { repoRoot: 'D:/support' } } })).toEqual([]);
     expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
     expect(await check({ sources: { zoho: { repoRoot: 'D:/support' } } })).toEqual([expect.stringMatching(/^sources\.zoho\./)]);
-    expect(await check({ sources: { zoho: { enabled: true } } })).toEqual(["sources.zoho.enabled is not a setting; turn a source on and off in the dock's header."]);
+    expect(await check({ sources: { zoho: { enabled: true } } })).toEqual(["sources.zoho.enabled is not a setting; turn a source on and off in the list's header."]);
   });
 
   it('reads, reloads and writes settings and playbooks in a configDir outside the Switchboard home', async () => {
@@ -602,25 +597,13 @@ describe('createHubApp', () => {
     expect(app.snoozedUrls()).toEqual(['https://github.com/O/r/issues/2']);
   });
 
-  it('shows the dock only while a dock stream is connected, and tells it and every page when the config files change', async () => {
+  it("tells every page's Settings to read again when settings.json changes", async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
-    const sent: string[] = [];
-
-    expect(await app.post['/dock/show']!({})).toEqual({ status: 409, body: { error: 'The dock is not running.' } });
-    app.attachDock!((event) => {
-      sent.push(event);
-      return 1;
-    });
-    expect(await app.post['/dock/show']!({})).toEqual({ status: 200, body: { shown: true } });
-    expect(sent).toEqual(['show']);
-
-    // A page's Settings reads the file again too.
     const pageFrames: string[] = [];
 
     app.conversation!(app.page!.opened(false), (frame) => pageFrames.push(frame));
     writeSettings({ sessions: { installHooks: false, concurrency: 3 } });
-    await until(() => (sent.includes('config') ? true : null));
     await until(() => (pageFrames.some((frame) => frame.includes('\nevent: config\n')) ? true : null));
   });
 
@@ -631,10 +614,10 @@ describe('createHubApp', () => {
     const app = await start();
     const idle = { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-11-20T10:00:00.000Z' };
 
-    expect(await app.post['/config/voice-enroll']!({ action: 'status' })).toEqual({ status: 200, body: { enrollment: idle } });
-    expect(await app.post['/config/voice-enroll']!({ action: 'start' })).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).', enrollment: idle } });
-    expect(await app.post['/config/voice-enroll']!({ action: 'cancel' })).toEqual({ status: 200, body: { enrollment: idle } });
-    expect(await app.post['/config/voice-enroll']!({ action: 'finish' })).toEqual({ status: 400, body: { error: "Expected {action: 'start' | 'cancel' | 'status'}." } });
+    expect(await app.post['/v1/conversation/page-voice-enroll']!({ action: 'status' })).toEqual({ status: 200, body: { enrollment: idle } });
+    expect(await app.post['/v1/conversation/page-voice-enroll']!({ action: 'start' })).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).', enrollment: idle } });
+    expect(await app.post['/v1/conversation/page-voice-enroll']!({ action: 'cancel' })).toEqual({ status: 200, body: { enrollment: idle } });
+    expect(await app.post['/v1/conversation/page-voice-enroll']!({ action: 'finish' })).toEqual({ status: 400, body: { error: "Expected {action: 'start' | 'cancel' | 'status'}." } });
   });
 
   it("logs a page's Mic on timing in the hub log, with each step from the tap (architecture.md § Dictation)", async () => {
@@ -655,7 +638,7 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
     const playbook = { description: 'Build it', reports: ['done'], template: 'Build {{ticket.title}}.' };
-    const read = async () => (await app.post['/config/read']!({})).body as { settings: { version: string | null; value: unknown }; permissionModes: string[]; sourceKinds: string[]; inUse: Record<string, number> };
+    const read = async () => (await app.post['/v1/conversation/page-settings-read']!({})).body as { settings: { version: string | null; value: unknown }; permissionModes: string[]; sourceKinds: string[]; inUse: Record<string, number> };
     const file = () => JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'));
 
     const first = await read();
@@ -667,38 +650,37 @@ describe('createHubApp', () => {
     expect(first.inUse).toEqual({});
     expect((first as unknown as { configDir: string }).configDir).toBe(join(temp.home, '.switchboard'));
 
-    expect(await app.post['/config/check']!({ settings: { sessions: { concurrency: 11 } } })).toMatchObject({ status: 200, body: { errors: [expect.stringContaining('sessions.concurrency')] } });
-    expect(await app.post['/config/check']!({ settings: { playbooks: { 'dev:develop': { ...playbook, template: '{{nope}}' } } } })).toEqual({
+    expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { sessions: { concurrency: 11 } } })).toMatchObject({ status: 200, body: { errors: [expect.stringContaining('sessions.concurrency')] } });
+    expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { playbooks: { 'dev:develop': { ...playbook, template: '{{nope}}' } } } })).toEqual({
       status: 200,
       body: { errors: ['playbooks.dev:develop: Unknown template variable: nope.'] },
     });
-    expect(await app.post['/config/check']!({ settings: { playbooks: { 'dev:develop': playbook } } })).toEqual({ status: 200, body: { errors: [] } });
-    expect(await app.post['/config/check']!({ settings: { playbooks: { 'dev:develop': { ...playbook, returnOf: ['dev:develop'] } } } })).toEqual({
+    expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { playbooks: { 'dev:develop': playbook } } })).toEqual({ status: 200, body: { errors: [] } });
+    expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { playbooks: { 'dev:develop': { ...playbook, returnOf: ['dev:develop'] } } } })).toEqual({
       status: 200,
       body: { errors: ['playbooks.dev:develop: returnOf must list other playbook names, not dev:develop.'] },
     });
-    expect(await app.post['/config/check']!({})).toEqual({ status: 400, body: { error: 'Expected {settings}.' } });
+    expect(await app.post['/v1/conversation/page-settings-check']!({})).toEqual({ status: 400, body: { error: 'Expected {settings}.' } });
 
     const value = { sessions: { installHooks: false, concurrency: 3 }, playbooks: { 'dev:develop': playbook } };
 
-    expect(await app.post['/config/save']!({ value, version: 'stale' })).toEqual({ status: 409, body: { errors: ['settings.json changed on disk after the editor read it. Discard your changes and open Settings again to load it.'] } });
-    expect(await app.post['/config/save']!({ value: { ...value, playbooks: { 'dev:develop': { ...playbook, reports: ['nope'] } } }, version: first.settings.version })).toMatchObject({ status: 409 });
+    expect(await app.post['/v1/conversation/page-settings-save']!({ value, version: 'stale' })).toEqual({ status: 409, body: { errors: ['settings.json changed on disk after the editor read it. Discard your changes and open Settings again to load it.'] } });
+    expect(await app.post['/v1/conversation/page-settings-save']!({ value: { ...value, playbooks: { 'dev:develop': { ...playbook, reports: ['nope'] } } }, version: first.settings.version })).toMatchObject({ status: 409 });
     expect(file()).toEqual({ sessions: { installHooks: false } });
-    expect(await app.post['/config/save']!({ value, version: first.settings.version })).toEqual({ status: 200, body: { saved: true, version: (await read()).settings.version ?? 'unread' } });
+    expect(await app.post['/v1/conversation/page-settings-save']!({ value, version: first.settings.version })).toEqual({ status: 200, body: { saved: true, version: (await read()).settings.version ?? 'unread' } });
     expect(file()).toEqual(value);
     await until(() => ((app.snapshot() as { playbooks: { name: string }[] }).playbooks.some((entry) => entry.name === 'dev:develop') ? true : null));
 
-    expect(await app.post['/config/save']!({ version: null })).toEqual({ status: 400, body: { error: 'Expected {value, version}.' } });
-    expect(await app.post['/config/save']!({ value: {}, version: null, configDir: 'D:/old' })).toEqual({
+    expect(await app.post['/v1/conversation/page-settings-save']!({ version: null })).toEqual({ status: 400, body: { error: 'Expected {value, version}.' } });
+    expect(await app.post['/v1/conversation/page-settings-save']!({ value: {}, version: null, configDir: 'D:/old' })).toEqual({
       status: 409,
       body: { errors: [`The config folder is now ${join(temp.home, '.switchboard')}, not D:/old. Settings reads it again; make your change there.`] },
     });
     expect(app.post['/config/delete']).toBeUndefined();
-    // The web page's Settings posts the same routes as page commands.
-    expect(app.post['/v1/conversation/page-settings-read']).toBe(app.post['/config/read']);
-    expect(app.post['/v1/conversation/page-settings-check']).toBe(app.post['/config/check']);
-    expect(app.post['/v1/conversation/page-settings-save']).toBe(app.post['/config/save']);
-    expect(app.post['/v1/conversation/page-voice-enroll']).toBe(app.post['/config/voice-enroll']);
+    // The Settings routes are page commands only.
+    for (const path of ['/config/read', '/config/check', '/config/save', '/config/voice-enroll']) {
+      expect(app.post[path]).toBeUndefined();
+    }
     expect(await app.post['/v1/conversation/page-settings-save']!({ window: 'page-1', opId: 'o', value: {}, version: 'stale' })).toMatchObject({ status: 409 });
     // Voice on the computer takes only a page's key.
     expect(await app.post['/v1/conversation/page-voice-computer']!({})).toEqual({ status: 400, body: { error: 'Expected {window}.' } });
@@ -737,20 +719,7 @@ describe('createHubApp', () => {
     expect(await expand({ on: true })).toEqual({ status: 409, body: { error: 'settings.json is not a JSON object. Fix it in Settings.' } });
   });
 
-  it('writes each item window\'s workspace file when it builds the dock view', async () => {
-    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
-    const app = await start();
-
-    expect(await app.post['/action']!({ type: 'adhoc', prompt: 'Look around', repoRoot: 'D:/scratch', start: true })).toMatchObject({ status: 200 });
-    await until(() => ((app.snapshot() as { workItems: { sessions: unknown[] }[] }).workItems[0]?.sessions.length ? true : null));
-
-    const window = (app.dock() as { groups: { rows: { window: { name: string; file: string; title: string } | null }[] }[] }).groups.flatMap((group) => group.rows).find((row) => row.window !== null)!.window!;
-
-    expect(window.file.startsWith(join(temp.home, '.switchboard', 'windows'))).toBe(true);
-    expect(JSON.parse(readFileSync(window.file, 'utf8')).settings['window.title']).toBe(`${window.title}\${separator}\${activeEditorShort}\${separator}sb:${window.name}`);
-  });
-
-  it('searches Done rows before the Done list for the dock, and selects one it found (PRD R63)', async () => {
+  it('searches Done rows before the Done list for the page, for a page key only (PRD R63)', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const app = await start();
 
@@ -765,48 +734,39 @@ describe('createHubApp', () => {
     app.runtime.send({ type: 'adhoc', prompt: 'Something else', repoRoot: 'D:/scratch', start: false });
     await app.runtime.settled();
 
-    const found = await app.post['/dock/search']!({ text: 'signing KEY', since: 0 });
-
-    expect(found).toMatchObject({ status: 200, body: { more: false, rows: [{ key: 'item:1', title: 'Rotate the signing key' }] } });
-    expect(await app.post['/dock/search']!({ text: 'signing', since: Date.now() - 30 * 86_400_000 })).toEqual({ status: 200, body: { rows: [], more: false } });
-    expect(await app.post['/dock/select']!({ rowKey: 'item:1' })).toMatchObject({ status: 200 });
-    expect(await app.post['/dock/select']!({ rowKey: 'item:9' })).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
-
-    // The web page's search further back finds the same rows, as the page's rows, for a page key only.
+    // The page's search further back finds the rows the snapshot left out, as the page's rows, for a page key only.
     const page = app.page!.opened();
 
     expect(await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing KEY', since: 0 })).toMatchObject({ status: 200, body: { more: false, rows: [{ workItemId: 1, title: 'Rotate the signing key', host: null, search: expect.stringContaining('Rotate the signing key') }] } });
     expect((await app.post['/v1/conversation/page-search']!({ window: 'nobody', text: 'signing', since: 0 })).status).toBe(403);
     expect((await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing' })).status).toBe(400);
-    // The page's New session form makes a task that waits for Start, as the dock's does.
+    expect((await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing', since: Number.NaN })).status).toBe(400);
+    expect(await app.post['/v1/conversation/page-search']!({ window: page, text: 'signing', since: Date.now() - 30 * 86_400_000 })).toEqual({ status: 200, body: { rows: [], more: false } });
+    // The page's New session form makes a task that waits for Start.
     expect(await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'p1', folder: temp.home, provider: 'claude', prompt: 'From the page', run: 'wait' })).toMatchObject({ status: 200, body: { run: 'wait' } });
     await app.runtime.settled();
     expect((app.snapshot() as { workItems: { ticket: { title: string } }[] }).workItems.map((one) => one.ticket.title)).toContain('From the page');
-
-    for (const body of [{}, { text: 'x' }, { text: 3, since: 0 }, { text: 'x', since: 'now' }, { text: 'x', since: Number.NaN }]) {
-      expect(await app.post['/dock/search']!(body)).toEqual({ status: 400, body: { error: 'Expected {text, since}, the search text and the epoch milliseconds to search from.' } });
-    }
   });
 
-  it('creates one standalone session or task from the dock and the page, shares their recent folders and imports the dock\'s once (PRD R122)', async () => {
+  it('creates one standalone session or task from the page and keeps its recent folders, the newest first (PRD R122)', async () => {
     writeSettings({ sessions: { provider: 'codex' }, sources: { adhoc: { repoRoot: temp.home } } });
-    const dockKept = join(temp.home, 'kept');
-    mkdirSync(dockKept, { recursive: true });
-    mkdirSync(join(temp.home, '.switchboard'), { recursive: true });
-    writeFileSync(join(temp.home, '.switchboard', 'dock.json'), JSON.stringify({ width: 320, recentFolders: [dockKept, 7] }));
+    const other = join(temp.home, 'other');
+    mkdirSync(other, { recursive: true });
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
     closers.push(() => app.close());
     const page = app.page!.opened();
-    const first = await app.post['/dock/new-session']!({ opId: 'one', folder: temp.home, provider: 'codex', model: 'gpt-6.2-sol' });
+    const first = await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'one', folder: temp.home, provider: 'codex', model: 'gpt-6.2-sol' });
     expect(first).toMatchObject({ status: 200, body: { workItemId: 1, run: 'now' } });
-    expect(await app.post['/dock/new-session']!({ opId: 'one', folder: temp.home, provider: 'claude' })).toEqual(first);
+    expect(await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'one', folder: temp.home, provider: 'claude' })).toEqual(first);
     expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'two', folder: temp.home, provider: 'codex', model: null, prompt: 'Find the bug' })).status).toBe(200);
-    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'three', folder: dockKept, provider: 'codex', prompt: 'Sweep the logs', run: 'queue', model: 'gpt-6.2-sol' })).status).toBe(200);
+    expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'three', folder: other, provider: 'codex', prompt: 'Sweep the logs', run: 'queue', model: 'gpt-6.2-sol' })).status).toBe(200);
     expect((await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'bad', folder: join(temp.home, 'gone'), provider: 'codex' })).status).toBe(400);
-    // The dock and the page see the same recent folders: the newest first, then the one the dock kept.
-    const places = (await app.post['/dock/folders']!({})).body as { recent: string[]; repoRoots: string[] };
-    expect(places.recent).toEqual([realpathSync.native(dockKept), realpathSync.native(temp.home)]);
-    expect(((await app.post['/v1/conversation/page-folders']!({ window: page })).body as { recent: string[] }).recent).toEqual(places.recent);
+    expect((await app.post['/v1/conversation/page-new-session']!({ opId: 'four', folder: temp.home, provider: 'codex' })).status).toBe(403);
+    for (const path of ['/dock/new-session', '/dock/folders']) {
+      expect(app.post[path]).toBeUndefined();
+    }
+    const places = (await app.post['/v1/conversation/page-folders']!({ window: page })).body as { recent: string[] };
+    expect(places.recent).toEqual([realpathSync.native(other), realpathSync.native(temp.home)]);
     const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
     expect(writer.workItem(1)).toMatchObject({ interactive: true, model: 'gpt-6.2-sol' });
     expect(writer.workItem(2)).toMatchObject({ interactive: true, taskPrompt: 'Find the bug' });
@@ -1035,31 +995,13 @@ describe('createHubApp', () => {
     expect(order()).toEqual([1, 3, 2]);
   });
 
-  it('forwards a click to the dock only while a dock that runs clicks is connected (PRD R65, R69)', async () => {
-    writeSettings({ sessions: { installHooks: false } });
-    const app = await start();
-    const clicks: unknown[] = [];
-
-    expect(await app.post['/dock/click']!({ rowKey: 'item:7' })).toEqual({ status: 409, body: { error: 'The dock is not running.' } });
-    app.attachDockClick!((data) => {
-      clicks.push(data);
-      return true;
-    });
-    expect(await app.post['/dock/click']!({ rowKey: 'item:7' })).toEqual({ status: 202, body: { sent: true } });
-    expect(clicks).toEqual([{ rowKey: 'item:7' }]);
-    expect(await app.post['/dock/click']!({ rowKey: 7 })).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
-    expect(clicks).toHaveLength(1);
-  });
-
   it('shows each needs-you message on one surface: the installed page used last, else a system notification, sounding there only without the voice (PRD R65)', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const app = await start();
-    const dock: Array<[string, unknown]> = [];
     const frames: string[] = [];
     const needing = needingIn(app);
     const pageNeeds = () => frames.filter((frame) => frame.includes('event: needs\n')).map((frame) => JSON.parse(frame.slice(frame.indexOf('data: ') + 6)) as Record<string, unknown>);
 
-    app.attachDock!((event, data) => (dock.push([event, data]), 1));
     // A browser tab is not the installed app, so with alerts.surface auto a system notification says it, opening the page at the work item.
     app.conversation!(app.page!.opened(false), (frame) => frames.push(frame));
 
@@ -1067,7 +1009,6 @@ describe('createHubApp', () => {
 
     await until(() => (systemAlerts.length === 1 ? true : null));
     expect(systemAlerts).toEqual([{ alerts: [{ workItemId: first, title: 'Fix the badge', reason: 'Review, then approve', url: `http://127.0.0.1:47616/page/#w=${first}` }], sound: true }]);
-    expect(dock.filter(([event]) => event === 'needs')).toEqual([]);
     expect(pageNeeds()).toEqual([]);
 
     // The installed app that may not show notifications cannot alert either.
@@ -1086,20 +1027,31 @@ describe('createHubApp', () => {
 
     expect(pageNeeds()).toEqual([expect.objectContaining({ type: 'needs', items: [{ workItemId: second, message: 'Switchboard: Rename the field — Review, then approve' }], sound: true })]);
     expect(systemAlerts).toHaveLength(2);
-    expect(dock.filter(([event]) => event === 'needs')).toEqual([]);
   });
 
-  it('shows needs-you messages on the dock for alerts.surface dock, and as system notifications for system even with a page that may notify (PRD R65)', async () => {
+  it('shows needs-you messages for alerts.surface dock as for auto, and as system notifications for system even with a page that may notify (PRD R65)', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, alerts: { surface: 'dock' } });
     const dockApp = await start();
-    const dock: Array<[string, unknown]> = [];
+    const dockFrames: string[] = [];
 
-    dockApp.attachDock!((event, data) => (dock.push([event, data]), 1));
-
+    // With no installed page that may notify, a system notification says it.
     const first = await needingIn(dockApp)('Fix the badge');
 
-    expect(dock.filter(([event]) => event === 'needs')).toEqual([['needs', { items: [{ rowKey: `item:${first}`, message: 'Switchboard: Fix the badge — Review, then approve' }] }]]);
-    expect(systemAlerts).toEqual([]);
+    await until(() => (systemAlerts.length === 1 ? true : null));
+    expect(systemAlerts[0]).toEqual({ alerts: [expect.objectContaining({ workItemId: first, title: 'Fix the badge' })], sound: true });
+
+    // The installed page that may notify says it instead.
+    const dockPage = dockApp.page!.opened(true);
+
+    dockApp.conversation!(dockPage, (frame) => dockFrames.push(frame));
+    expect(await dockApp.post['/v1/conversation/page-focus']!({ window: dockPage, focused: false, notify: true })).toEqual({ status: 200, body: { focused: false } });
+
+    const shown = await needingIn(dockApp)('Rename the field');
+
+    await until(() => (dockFrames.some((frame) => frame.includes('event: needs\n')) ? true : null));
+    expect(dockFrames.find((frame) => frame.includes('event: needs\n'))).toContain(`"workItemId":${shown}`);
+    expect(systemAlerts).toHaveLength(1);
+    systemAlerts.length = 0;
     closers.pop();
     await dockApp.close();
 
@@ -1120,98 +1072,44 @@ describe('createHubApp', () => {
     expect(frames.some((frame) => frame.includes('event: needs\n'))).toBe(false);
   });
 
-  it('shows a dock row in the installed page used last, or answers the page at its work item with none open (architecture.md § Dock)', async () => {
-    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, dock: { openIn: 'web' } });
-    const app = await start();
-
-    app.runtime.send({ type: 'adhoc', prompt: 'Fix the badge', repoRoot: 'D:/scratch', start: false });
-    await app.runtime.settled();
-
-    const id = (app.snapshot() as { workItems: { id: number }[] }).workItems[0]!.id;
-    const context = { pageUrl: async () => 'http://127.0.0.1:47616/page/' };
-    expect((app.dock() as { openIn?: string }).openIn).toBe('web');
-    // A browser tab is not the installed app, so the dock opens the page at the work item.
-    app.page!.opened(false);
-    expect(await app.post['/dock/page']!({ rowKey: `item:${id}` }, context)).toEqual({ status: 200, body: { url: `http://127.0.0.1:47616/page/#w=${id}` } });
-
-    const older = app.page!.opened(true);
-    const newer = app.page!.opened(true);
-    const olderFrames: string[] = [];
-    const newerFrames: string[] = [];
-
-    app.conversation!(older, (frame) => olderFrames.push(frame));
-    app.conversation!(newer, (frame) => newerFrames.push(frame));
-
-    const shown = await app.post['/dock/page']!({ rowKey: `item:${id}` }, context);
-    const marker = (shown.body as { marker: string }).marker;
-    const showsIn = (frames: string[]) => frames.filter((frame) => frame.includes('event: show\n')).map((frame) => JSON.parse(frame.slice(frame.indexOf('data: ') + 6)) as Record<string, unknown>);
-
-    expect(shown).toEqual({ status: 200, body: { marker: expect.stringMatching(/^[0-9a-f]{12}$/) } });
-    expect(showsIn(newerFrames)).toEqual([expect.objectContaining({ type: 'show', workItemId: id, marker })]);
-    expect(showsIn(olderFrames)).toEqual([]);
-    // The installed page that gained focus last takes over.
-    expect(await app.post['/v1/conversation/page-focus']!({ window: older, focused: true })).toMatchObject({ status: 200 });
-    await app.post['/dock/page']!({ rowKey: `item:${id}` }, context);
-    expect(showsIn(olderFrames)).toHaveLength(1);
-    expect(showsIn(newerFrames)).toHaveLength(1);
-
-    expect(await app.post['/dock/page']!({ rowKey: 'item:999' }, context)).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
-    expect(await app.post['/dock/page']!({ rowKey: 3 }, context)).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
-  });
-
-  it("selects a dock row, refusing a body with no row or an unknown one, and passes the flow's refusal of the dock's New session on (architecture.md § Dock)", async () => {
+  it("passes the flow's refusal of the page's New session on, and makes no folder-hosted conversation", async () => {
     writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const app = await start(() => {});
 
     app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
     await app.runtime.settled();
 
-    const row = (app.dock() as { groups: { rows: { key: string }[] }[] }).groups.flatMap((group) => group.rows)[0]!;
+    const page = app.page!.opened();
 
-    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: {} });
-    expect(await app.post['/dock/select']!({})).toEqual({ status: 400, body: { error: 'Expected {rowKey}.' } });
-    expect(await app.post['/dock/select']!({ rowKey: 'nope' })).toEqual({ status: 404, body: { error: 'No work item has that row.' } });
-
-    // The dock's New session gets the flow's refusal, and makes no folder-hosted conversation.
-    expect(await app.post['/dock/new-session']!({ folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Claude sessions need sessions.installHooks.' } });
-    expect(app.post['/dock/new-conversation']).toBeUndefined();
+    expect(await app.post['/v1/conversation/page-new-session']!({ window: page, folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Claude sessions need sessions.installHooks.' } });
     expect(app.runtime.snapshot().workItems).toHaveLength(1);
   });
-  it('shows the dock the voice target\'s mic mark and a voice problem as a note, and answers a row click with why the voice did not move (architecture.md § Voice)', async () => {
+  it("shows the page no mic mark while no session is the voice target, and a voice problem as a note in the list's header (architecture.md § Voice)", async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: true } });
     const app = await start(() => {});
 
     app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
     await app.runtime.settled();
 
-    const rows = () => (app.dock() as { notes: string[]; groups: { rows: { key: string; voice: { glyph: string; title: string } | null }[] }[] }).groups.flatMap((group) => group.rows);
-    const row = rows()[0]!;
-
-    // No session is the voice target, so no row has the mic mark.
-    expect(row.voice).toBeNull();
     const key = app.page!.opened();
+    const frames: string[] = [];
+    const notes = () =>
+      frames
+        .filter((frame) => frame.includes('event: list\n') || frame.includes('event: hello\n'))
+        .flatMap((frame) => (JSON.parse(frame.slice(frame.indexOf('data: ') + 6)) as { header?: { notes: string[] } }).header?.notes ?? []);
 
+    app.conversation!(key, (frame) => frames.push(frame));
+    // No session is the voice target, so no row has the mic mark.
+    expect((app.page!.list() as Array<{ rows: Array<{ voice: unknown }> }>).flatMap((group) => group.rows).map((row) => row.voice)).toEqual([null]);
     expect(await app.post['/v1/conversation/select']!({ window: key, opId: 's', workItemId: 1 })).toMatchObject({ status: 200 });
-    // No voice build is installed in this home, so the process cannot start: the dock says so.
-    await until(() => ((app.dock() as { notes: string[] }).notes.some((note) => note.startsWith('Voice: The voice process is not installed')) ? true : null));
-    // Its session is not a live, observed one, since hooks are off; with its page closed there is none to talk to.
-    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { voice: 'Voice is not available for this session.' } });
-    app.windowClosed!(key);
-    expect(await app.post['/dock/select']!({ rowKey: row.key })).toEqual({ status: 200, body: { voice: 'Open a window for this session to use voice.' } });
-
-    // The dock reports a session's terminal window in front, or none.
-    const sessionId = app.runtime.snapshot().workItems[0]!.sessions[0]!.id;
-
-    expect(await app.post['/dock/focus']!({ sessionId })).toEqual({ status: 200, body: { focus: sessionId } });
-    expect(await app.post['/dock/focus']!({ sessionId: null })).toEqual({ status: 200, body: { focus: null } });
-    expect(await app.post['/dock/focus']!({ sessionId: 'nope' })).toEqual({ status: 404, body: { error: 'No session has that ID.' } });
-    expect(await app.post['/dock/focus']!({ sessionId, at: Date.now() })).toEqual({ status: 200, body: { focus: sessionId } });
-    expect(await app.post['/dock/focus']!({ sessionId: '' })).toEqual({ status: 400, body: { error: 'Expected {sessionId, at?}, a session ID or null and the epoch milliseconds of the change.' } });
-    expect(await app.post['/dock/focus']!({ sessionId, at: 'now' })).toEqual({ status: 400, body: { error: 'Expected {sessionId, at?}, a session ID or null and the epoch milliseconds of the change.' } });
-    expect(await app.post['/dock/focus']!([])).toEqual({ status: 400, body: { error: 'Expected {sessionId, at?}, a session ID or null and the epoch milliseconds of the change.' } });
+    // No voice build is installed in this home, so the process cannot start: the page says so.
+    await until(() => (notes().some((note) => note.startsWith('Voice: The voice process is not installed')) ? true : null));
+    for (const path of ['/dock/select', '/dock/focus', '/dock/page', '/dock/click', '/dock/search', '/dock/show']) {
+      expect(app.post[path]).toBeUndefined();
+    }
   });
 
-  it("gives a Code Mode row a Persona menu with the session's persona checked, which pins through /action, and none with voice off (architecture.md § Personas)", async () => {
+  it("pins a session's persona through /action and clears the pin, refusing an unknown persona and any while voice is off (architecture.md § Personas)", async () => {
     const personas = [
       { id: 'nova', name: 'Nova', personality: 'Warm.' },
       { id: 'orion', name: 'Orion' },
@@ -1223,44 +1121,25 @@ describe('createHubApp', () => {
     app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
     await app.runtime.settled();
 
-    type Control = { label: string; action: Record<string, unknown>; group?: string; checked?: boolean };
-    const menu = () => (app.dock() as { groups: { rows: { controls: Control[] }[] }[] }).groups.flatMap((group) => group.rows)[0]!.controls.filter((control) => control.group === 'Persona');
     const sessionId = app.runtime.snapshot().workItems[0]!.sessions.at(-1)!.id;
+    const persona = () => {
+      const session = app.runtime['deps'].store.session(sessionId)!;
 
-    expect(menu().map((control) => [control.label, control.checked])).toEqual([
-      ['Nova', true],
-      ['Orion', false],
-    ]);
-    expect(menu()[1]!.action).toEqual({ type: 'persona', sessionId, personaId: 'orion' });
+      return [session.personaId, session.personaPinned === true];
+    };
 
-    expect(await app.post['/action']!(menu()[1]!.action)).toEqual({ status: 200, body: { done: true } });
-    expect(menu().map((control) => [control.label, control.checked])).toEqual([
-      ['Nova', false],
-      ['Orion (pinned)', true],
-      ['Clear pin', false],
-    ]);
-    expect(await app.post['/action']!(menu()[2]!.action)).toEqual({ status: 200, body: { done: true } });
-    expect(menu().map((control) => control.label)).toEqual(['Nova', 'Orion']);
+    expect(persona()).toEqual(['nova', false]);
+    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 'orion' })).toEqual({ status: 200, body: { done: true } });
+    expect(persona()).toEqual(['orion', true]);
+    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: null })).toEqual({ status: 200, body: { done: true } });
+    expect(persona()[1]).toBe(false);
     expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 'vega' })).toEqual({ status: 409, body: { error: 'No persona vega in voice.personas.' } });
     expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 3 })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
 
     // Personas are part of voice.
     writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: false, personas } });
-    await until(() => (menu().length === 0 ? true : null));
+    await until(async () => ((await app.post['/action']!({ type: 'persona', sessionId, personaId: 'orion' })).status === 409 ? true : null));
     expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 'orion' })).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
-  });
-
-  it('gives a row no Persona menu with an empty roster', async () => {
-    writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: true } });
-    const app = await start(() => {});
-
-    app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
-    await app.runtime.settled();
-
-    const controls = (app.dock() as { groups: { rows: { controls: Array<{ group?: string }> }[] }[] }).groups.flatMap((group) => group.rows)[0]!.controls;
-
-    expect(controls.length).toBeGreaterThan(0);
-    expect(controls.some((control) => control.group !== undefined)).toBe(false);
   });
 
   it('attaches to a held session through the server, refusing a request without the token, a bad body and an unknown session (PRD R95)', async () => {
@@ -1382,11 +1261,6 @@ describe('createHubApp', () => {
     });
     const run = { executable: '/opt/node/bin/node', args: [join(temp.home, '.switchboard', 'hub.js'), 'attach', 'held-1'] };
 
-    await app.post['/holder/list']!({});
-    const view = app.dock() as { groups: { rows: { terminal: Record<string, unknown> | null }[] }[]; held?: { terminal: Record<string, unknown> | null }[] };
-
-    expect(view.groups.flatMap((group) => group.rows)[0]?.terminal).toMatchObject(run);
-    expect(view.held?.[0]?.terminal).toMatchObject(run);
     expect(await app.post['/holder/open']!({ id: 'held-1', cwd: 'D:/forged', args: ['forged'] })).toEqual({ status: 200, body: { opening: true } });
     expect(terminals).toEqual([expect.objectContaining({ sessionId: 'held-1', cwd: 'D:/scratch', codeMode: true, ...run })]);
     terminalError = 'Windows Terminal is unavailable.';

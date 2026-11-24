@@ -445,80 +445,6 @@ describe('VoiceControl dictation', () => {
     expect(notified.at(-1)!.payload.voice).not.toHaveProperty('halfDuplex');
     control.replyChanged({ id: 'r1', sessionId: 's1', kind: 'reply', source: 'transcript', withdrawn: false, rewrittenBy: null, speak: null, spokenState: 'none', answers: null } as unknown as ConversationReply);
   });
-  it('types dictation into the target\'s terminal while it is in front, with no window event, and drops a cut-off utterance there', async () => {
-    const { control, connection, notified, dictated, piece, end, fragments, focus } = await setup();
-
-    // The terminal of k1's session came to the front; VS Code reported its blur.
-    focus(null);
-    control.terminalFocused('s1', 1);
-    expect(connection.sent.filter((one) => one.type === 'targets').at(-1)).toMatchObject({ focus: { sessionId: 's1', via: 'terminal' } });
-    connection.receive({ type: 'words', gen: 1, utteranceId: 'u1', sessionId: 's1', text: 'run the' });
-    piece('run the');
-    piece('tests');
-    end();
-    expect(dictated).toEqual([{ key: null, sessionId: 's1', text: 'run the tests', partial: false, pieces: [expect.objectContaining({ text: 'run the' }), expect.objectContaining({ text: 'tests' })] }]);
-    expect(notified.filter((one) => one.type !== 'voice')).toEqual([]);
-    expect(fragments().map((one) => `${String(one.event)} ${String(one.text)}`)).toEqual(['heard run the', 'heard tests', 'submitted run the', 'submitted tests']);
-
-    // Cut off: its words are not kept for the next utterance.
-    piece('stale', 'u2');
-    end(false, 'u2');
-    piece('commit it', 'u3');
-    end(true, 'u3');
-    expect(dictated.map((one) => [one.key, one.text])).toEqual([
-      [null, 'run the tests'],
-      [null, 'commit it'],
-    ]);
-    // k1's own composer holds nothing of it.
-    expect(control.dictated('k1', 's1')).toBeNull();
-  });
-
-  it('keeps dictating into the terminal with the focus in another app when no window shows the session, and into a window that shows it', async () => {
-    const { control, windows, dictated, piece, end, focus } = await setup();
-
-    focus(null);
-    control.terminalFocused('s1', 1);
-    control.terminalFocused(null, 1);
-    // A window shows s1, so dictation goes to it, as in slice 10.
-    piece('one');
-    end();
-    expect(dictated.at(-1)).toMatchObject({ key: 'k1', text: 'one' });
-
-    // With k1 closed, the voice came to s1 from its terminal, so dictation goes there.
-    windows.delete('k1');
-    control.windowClosed('k1');
-    piece('two', 'u2');
-    end(true, 'u2');
-    expect(dictated.at(-1)).toMatchObject({ key: null, text: 'two' });
-  });
-
-  it('drops the words heard for a terminal when the voice process stops, so the next utterance after its restart types only its own', async () => {
-    const { control, connection, dictated, piece, end, focus, advance, settle } = await setup();
-
-    focus(null);
-    control.terminalFocused('s1', 1);
-    piece('discard this');
-    connection.drop();
-    advance(60_000);
-    await settle();
-    connection.receive({ type: 'active', gen: 2, sessionId: 's1', reason: 'focus' });
-    piece('run the tests', 'u2', 2);
-    end(true, 'u2', 2);
-    expect(dictated.map((one) => [one.key, one.text])).toEqual([[null, 'run the tests']]);
-  });
-
-  it('logs a refused terminal turn without sending a window anything', async () => {
-    const { control, notified, piece, end, fragments, focus, refuse } = await setup();
-
-    focus(null);
-    control.terminalFocused('s1', 1);
-    refuse('The session ended.');
-    piece('hello');
-    end();
-    expect(notified.filter((one) => one.type !== 'voice')).toEqual([]);
-    expect(fragments().filter((one) => one.event === 'refused')).toMatchObject([{ text: 'hello', error: 'The session ended.' }]);
-  });
-
   it('sends the reply a spoken turn spoke over with its message, and keeps it with a draft left unsent until Enter sends it', async () => {
     const { control, dictated, piece, end } = await setup();
     const interrupted = { replyId: 'r1', said: 'The session token', rest: 'is refreshed in two places.' };
@@ -730,16 +656,5 @@ describe('VoiceControl enrolment', () => {
     // An expired hold the process has not ended yet holds nothing.
     connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null, roomHold: Date.UTC(2026, 10, 20, 11) });
     expect(control.view('k1')).not.toHaveProperty('roomHold');
-
-    connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null, roomHold: Date.UTC(2026, 10, 20, 12, 1) });
-    focus(null);
-    control.terminalFocused('s1', 1);
-    piece('talk to you later', 'u3');
-    end(true, 'u3');
-    expect(dictated.map((one) => one.text)).toEqual(['fix it']);
-    connection.receive({ type: 'audio', mic: 'hearing', engine: 'decibri', device: null, recognizer: null, error: null });
-    piece('run it', 'u4');
-    end(true, 'u4');
-    expect(dictated.map((one) => [one.key, one.text])).toEqual([['k1', 'fix it'], [null, 'run it']]);
   });
 });

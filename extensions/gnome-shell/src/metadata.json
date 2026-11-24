@@ -1,7 +1,0 @@
-{
-  "uuid": "switchboard@switchboard",
-  "name": "Switchboard",
-  "description": "Lets the Switchboard dock find VS Code's windows and bring them forward.",
-  "shell-version": ["50"],
-  "url": "https://github.com/work-login/switchboard"
-}

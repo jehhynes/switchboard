@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
 import type { ConversationReply } from '@switchboard/core';
-import { NOT_RESUMED, PHONE_HAS_VOICE, PHONE_MIC_FRAME, PHONE_MIC_HERE, PHONE_PCM_FRAME, PHONE_RESUME_MS, VOICE_RESTART_MS, VoiceControl, parseVoiceHandover } from '../src/voice.js';
+import { NOT_RESUMED, PHONE_MIC_FRAME, PHONE_MIC_HERE, PHONE_PCM_FRAME, PHONE_RESUME_MS, VOICE_RESTART_MS, VoiceControl, parseVoiceHandover } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
 import type { WindowScope } from '../src/windows.js';
 
@@ -136,11 +136,10 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     control.update();
     expect(sentOf('targets').at(-1)!.focus).toEqual({ sessionId: 's2', via: 'window' });
     focus('pc');
-    control.terminalFocused('s1', 2_000);
+    control.update();
     expect(sentOf('targets').at(-1)!.focus).toEqual({ sessionId: 's2', via: 'window' });
 
-    // A dock click and a selection in a window on this computer leave it on the phone.
-    expect(control.dockSelect(1)).toBe(PHONE_HAS_VOICE);
+    // A selection in a window on this computer leaves it on the phone.
     control.selected('pc');
     expect(sentOf('talk-here')).toHaveLength(1);
 

@@ -614,7 +614,7 @@ export class Runtime {
     }
   }
 
-  /** The sources the operator turned on in the dock's header (PRD R3). */
+  /** The sources the operator turned on in the list's header (PRD R3). */
   enabledSources(): Set<string> {
     return this.deps.store.enabledSources();
   }
@@ -630,7 +630,7 @@ export class Runtime {
     return null;
   }
 
-  /** Polls every source that is on now and restarts its poll interval, for the dock's Refresh; returns why it could not, or null. */
+  /** Polls every source that is on now and restarts its poll interval, for More Actions' Refresh sources; returns why it could not, or null. */
   pollNow(): string | null {
     if (this.sources.size === 0) {
       const errors = Object.entries(this.sourceErrors).map(([name, error]) => `${name}: ${error}`);

@@ -349,7 +349,7 @@ async function install(home: string, rest: readonly string[], bundle: string | u
   }
 
   // The installed hub starts on config.json's folder, so import it now (architecture.md § Config folder).
-  // A running hub's folder is what a window, the dock or a login entry chose, and its restart onto this build reads config.json.
+  // A running hub's folder is what a window or a login entry chose, and its restart onto this build reads config.json.
   const loaded = loadConfigFolder(configDeps(home), null, { running: running?.configDir ?? null });
 
   if ('error' in loaded) {

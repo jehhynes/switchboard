@@ -448,8 +448,9 @@ describe('dockView', () => {
     expect(shown.returned).toBe(3);
   });
 
-  it('matches the recorded dock message the dock app reads', () => {
-    const recorded = JSON.parse(readFileSync(new URL('../../../apps/dock/test/fixtures/dock.json', import.meta.url), 'utf8')) as unknown;
+  it("matches the recorded dockView output the page's rows are built from", () => {
+    const fixture = new URL('./fixtures/dock-view.json', import.meta.url);
+    const recorded = JSON.parse(readFileSync(fixture, 'utf8')) as unknown;
     const view = dockView(
       snapshot(
         [
@@ -496,13 +497,9 @@ describe('dockView', () => {
     );
 
     // The fixture was recorded on Windows; elsewhere the workspace file is joined to the windows folder with '/'.
-    const sent = JSON.parse(JSON.stringify(view).replaceAll(`${JSON.stringify(W).slice(1, -1)}/`, `${JSON.stringify(W).slice(1, -1)}\\\\`)) as { groups: { rows: { key: string }[] }[] };
-    // item:8 is the question row of a session in Claude's background service, whose Open in Claude the hub no longer sends (PRD R93); the dock reads it
-    // until the dock is removed, so the fixture keeps it, and every other row is the hub's.
-    const without8 = (message: { groups: { rows: { key: string }[] }[] }) => ({ ...message, groups: message.groups.map((group) => ({ ...group, rows: group.rows.filter((one) => one.key !== 'item:8') })) });
+    const built = JSON.parse(JSON.stringify(view).replaceAll(`${JSON.stringify(W).slice(1, -1)}/`, `${JSON.stringify(W).slice(1, -1)}\\\\`)) as unknown;
 
-    expect(sent.groups.flatMap((group) => group.rows).some((one) => one.key === 'item:8')).toBe(true);
-    expect(without8(sent)).toEqual(without8(recorded as typeof sent));
+    expect(built).toEqual(recorded);
   });
 });
 

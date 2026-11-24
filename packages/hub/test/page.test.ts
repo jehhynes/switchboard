@@ -883,7 +883,7 @@ describe('the web page routes', () => {
         '/holder/open': async (body) => { posted.push(body); return { status: 200, body: { done: true } }; },
         '/holder/list': async (body) => { posted.push(body); return { status: 200, body: { held: [] } }; },
         '/holder/stop': async (body) => { posted.push(body); return { status: 200, body: { stopped: 's' } }; },
-        '/dock/page': async (_body, context) => ({ status: 200, body: { url: await context!.pageUrl() } }),
+        '/page-url': async (_body, context) => ({ status: 200, body: { url: await context!.pageUrl() } }),
         '/v1/conversation/page-settings-save': async (body) => {
           posted.push(body);
           return { status: 200, body: {} };
@@ -1026,9 +1026,9 @@ describe('the web page routes', () => {
     stream.on('error', () => {});
     stream.end();
     await until(() => (server.clients() === 1 ? true : null));
-    // The installed app says so as it opens its stream; the dock's routes learn the page's address on its fixed port.
+    // The installed app says so as it opens its stream; the hub's routes learn the page's address on its fixed port.
     expect(installed).toEqual([true]);
-    expect(JSON.parse((await send(server.port, 'POST', '/dock/page', { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' }, {})).body)).toEqual({ url: `http://127.0.0.1:${port}/page/` });
+    expect(JSON.parse((await send(server.port, 'POST', '/page-url', { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' }, {})).body)).toEqual({ url: `http://127.0.0.1:${port}/page/` });
 
     const post = (path: string, origin: string, headers: Record<string, string> = { Cookie: cookie }) => send(port, 'POST', path, { 'Content-Type': 'application/json', Origin: origin, ...headers }, { window: 'page-1', workItemId: 4 });
 

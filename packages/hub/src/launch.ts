@@ -9,7 +9,7 @@ export interface Launcher {
   openUrl(url: string): void;
   /** Opens a workspace file or a folder in VS Code, which brings forward the window already on it. */
   openCode(target: string): void;
-  /** Opens the held session's attach client in the dock's terminal app. */
+  /** Opens the held session's attach client in the terminal app. */
   openTerminal?(terminal: DockTerminal): void | Promise<void>;
 }
 
@@ -50,7 +50,7 @@ export function launchEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /**
- * The VS Code the dock starts (`VsCodeInstall`): on Windows `Code.exe` beside the `bin\code.cmd` found on PATH, else in the per-user install
+ * The VS Code that Open in VS Code starts: on Windows `Code.exe` beside the `bin\code.cmd` found on PATH, else in the per-user install
  * folder; elsewhere `code` on PATH. Throws when there is none.
  */
 export function codeExecutable(platform: NodeJS.Platform, env: NodeJS.ProcessEnv, exists: (path: string) => boolean = existsSync): string {

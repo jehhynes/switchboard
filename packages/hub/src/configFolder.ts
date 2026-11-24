@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
-import { isAbsolute, join, posix, resolve, win32 } from 'node:path';
+import { join, posix, resolve, win32 } from 'node:path';
 import { hubConfigPath, readHubConfig, resolveConfigDir, switchboardHome, writeHubConfig } from '@switchboard/core';
 
 /**
@@ -81,8 +81,8 @@ export function vscodeSettingsPath(deps: ConfigFolderDeps): string {
   return path.join(base, 'Code', 'User', 'settings.json');
 }
 
-/** Where a config folder came from: config.json, the `--config` flag, the running hub, VS Code's setting, the dock's record, or the default. */
-export type ConfigSource = 'file' | 'flag' | 'hub' | 'vscode' | 'dock' | 'default';
+/** Where a config folder came from: config.json, the `--config` flag, the running hub, VS Code's setting, or the default. */
+export type ConfigSource = 'file' | 'flag' | 'hub' | 'vscode' | 'default';
 
 export type LoadedConfigFolder = { dir: string; source: ConfigSource; notices: string[] } | { error: string };
 
@@ -97,7 +97,7 @@ function readText(path: string): string | null {
 /**
  * The config folder the hub uses (architecture.md § Config folder). config.json wins, so a `--config` that differs is ignored with a notice; a
  * config.json that cannot be used is an error, so the hub never falls back to a folder without the operator's playbooks. Without config.json the
- * folder is imported once, from `--config`, the running hub's folder (which a window, the dock or a login entry chose), VS Code's `switchboard.configDir` (read only), the dock's `dock-hub.json`, else the Switchboard home,
+ * folder is imported once, from `--config`, the running hub's folder (which a window or a login entry chose), VS Code's `switchboard.configDir` (read only), else the Switchboard home,
  * and written to config.json unless \`persist\` is false, as for a dry run.
  */
 export function loadConfigFolder(deps: ConfigFolderDeps, flag: string | null, options: { persist?: boolean; running?: string | null } = {}): LoadedConfigFolder {
@@ -146,14 +146,6 @@ export function loadConfigFolder(deps: ConfigFolderDeps, flag: string | null, op
       }
     }
 
-    const dock = readText(join(switchboardHome(deps.home), 'dock-hub.json'));
-    const dockValue = dock === null ? null : (parseJsonc(dock) as Record<string, unknown> | null);
-    const dockDir = typeof dockValue === 'object' && dockValue !== null ? dockValue['configDir'] : undefined;
-
-    if (typeof dockDir === 'string' && isAbsolute(dockDir)) {
-      return { dir: resolve(dockDir), source: 'dock' };
-    }
-
     return { dir: resolve(switchboardHome(deps.home)), source: 'default' };
   })();
 
@@ -173,7 +165,6 @@ const SOURCES: Record<ConfigSource, string> = {
   flag: 'imported from --config',
   hub: 'imported from the running hub',
   vscode: "imported from VS Code's switchboard.configDir",
-  dock: "imported from the dock's dock-hub.json",
   default: 'the Switchboard home, since nothing named another',
 };
 

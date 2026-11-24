@@ -1112,7 +1112,7 @@ export class ConversationService {
     return { groups: this.pageList(), ...(header === undefined ? {} : { header }) };
   }
 
-  /** Sends each page its list when it or its header changed, as after the voice changed the dock's view. */
+  /** Sends each page its list when it or its header changed, as after the voice changed a row's mark or a note. */
   pageListChanged(): void {
     this.#listChanged();
   }
@@ -1945,8 +1945,8 @@ export class ConversationService {
 
   /**
    * `page-search {window, text, since}` (architecture.md § Web page): the list's search further back, the Done rows from `since`, in epoch
-   * milliseconds, up to the Done list, whose search text holds every word of `text`, answered as `{rows, more}` as the dock's `/dock/search`
-   * answers it. 403 for a key that is not a page's.
+   * milliseconds, up to the Done list, whose search text holds every word of `text`, answered as `{rows, more}`. 403 for a key that is not a
+   * page's.
    */
   pageSearch(body: Record<string, unknown>): { status: number; body: unknown } {
     const { window, text, since } = body;
@@ -2026,13 +2026,13 @@ export class ConversationService {
   readonly #standalone = new Map<string, { status: number; body: { workItemId: number; folder: string; run: NewSessionRun } }>();
 
   /**
-   * `page-new-session {window, opId, folder, provider, model?, prompt?, run?}` and `POST /dock/new-session` without `window` (PRD R122): the New
-   * session form. Without a first message, or with `run` `now`, a standalone conversation that starts at once; with `queue` or `wait`, an ad-hoc
-   * task (PRD R6) started when a slot is free or waiting for Start. The folder passes the hub's folder check (`allowedFolder`), which keeps a
+   * `page-new-session {window, opId, folder, provider, model?, prompt?, run?}` (PRD R122): the New session form. Without a first message, or
+   * with `run` `now`, a standalone conversation that starts at once; with `queue` or `wait`, an ad-hoc task (PRD R6) started when a slot is
+   * free or waiting for Start. The folder passes the hub's folder check (`allowedFolder`), which keeps a
    * paired device's page (`remote`, which the server sets) to the recent folders, repo roots and worktrees. Answers `{workItemId, folder, run}`,
    * puts the folder first among the recent folders, and selects the work item on the page; a repeated `opId` answers the first success.
    */
-  newSession(body: Record<string, unknown>, page: boolean): { status: number; body: unknown } {
+  newSession(body: Record<string, unknown>): { status: number; body: unknown } {
     const { window, opId, folder, provider, model, prompt, run } = body;
     const mode: NewSessionRun | null = run === undefined || run === null ? 'now' : run === 'now' || run === 'queue' || run === 'wait' ? run : null;
 
@@ -2049,7 +2049,7 @@ export class ConversationService {
       return { status: 400, body: { error: 'Expected {opId, folder, provider, model?, prompt?, run?}.' } };
     }
 
-    if (page && (typeof window !== 'string' || !this.deps.windows.isPage(window))) {
+    if (typeof window !== 'string' || !this.deps.windows.isPage(window)) {
       return { status: 403, body: { error: 'Not in this window.' } };
     }
 
@@ -2059,14 +2059,14 @@ export class ConversationService {
       return { status: 400, body: { error: 'A task needs a first message.' } };
     }
 
-    const key = `${page ? window : 'dock'} ${opId}`;
+    const key = `${window} ${opId}`;
     const earlier = this.#standalone.get(key);
 
     if (earlier !== undefined) {
       return earlier;
     }
 
-    const allowed = allowedFolder(folder, page && body['remote'] === true ? rootList(this.#folderRoots()) : null);
+    const allowed = allowedFolder(folder, body['remote'] === true ? rootList(this.#folderRoots()) : null);
 
     if ('error' in allowed) {
       return { status: 400, body: { error: allowed.error } };
@@ -2092,10 +2092,8 @@ export class ConversationService {
 
     this.deps.rememberFolder?.(allowed.folder);
 
-    if (page) {
-      this.deps.windows.select(window as string, made.workItemId);
-      this.scopesChanged([window as string]);
-    }
+    this.deps.windows.select(window, made.workItemId);
+    this.scopesChanged([window]);
 
     this.conversationsChanged();
     return answer;
@@ -2132,13 +2130,6 @@ export class ConversationService {
     const listed = await listFolder(path, remote ? rootList(roots) : null);
 
     return 'error' in listed ? { status: 400, body: listed } : { status: 200, body: listed };
-  }
-
-  /** `POST /dock/folders`: the New session form's starting places for the dock, without the home folder and drives, which its picker reaches. */
-  async dockFolders(): Promise<{ status: number; body: unknown }> {
-    const places = await folderPlaces(this.#folderRoots(), false);
-
-    return { status: 200, body: places };
   }
 
   /**
@@ -2549,7 +2540,7 @@ export class ConversationService {
     window: string | null,
     launch: string | null,
     text: string,
-    options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; olderToo?: boolean; interrupted?: Interruption | null; guard?: () => string | null; answers?: MessageAnswer[]; voiced?: boolean },
+    options: { opId: string; command: boolean; pieces: Piece[] | null; partial: boolean; auto?: boolean; interrupted?: Interruption | null; guard?: () => string | null; answers?: MessageAnswer[]; voiced?: boolean },
   ): ConversationMessage {
     const sessionId = session.id;
     const { spoken, expressive } = this.deps.voice?.spokenFor(sessionId, options.command || options.partial, options.pieces === null && options.voiced !== true ? window : null) ?? { spoken: false, expressive: false };
@@ -2596,7 +2587,7 @@ export class ConversationService {
 
     this.#changed(sessionId, { type: 'message', message });
     const deliver = (to: Session, toLaunch: string | null): void => this.#adapter(to)?.send(to, message, typed, (outcome) => this.#delivered(message.id, outcome), {
-      check: () => this.#check(sessionId, toLaunch, options.olderToo === true) ?? options.guard?.() ?? null,
+      check: () => this.#check(sessionId, toLaunch) ?? options.guard?.() ?? null,
       reserve: () => this.deps.input.reserve(sessionId, toLaunch),
       pasting: (at) => this.deps.store.updateMessage(message.id, { pastedAt: at }),
       command: options.command,
@@ -2623,22 +2614,19 @@ export class ConversationService {
   }
 
   /**
-   * Dictated text the voice sends into the window's selected conversation's current session, or with a null key into the session whose terminal
-   * window it came from, which no window scope names (architecture.md § Dictation): a spoken turn's end as a `[voice]` message, or a
-   * `[partial]` part of one still being spoken. Refused, before anything is stored, for a session the window no longer shows, one that cannot
+   * Dictated text the voice sends into the window's selected conversation's current session (architecture.md § Dictation): a spoken turn's end
+   * as a `[voice]` message, or a `[partial]` part of one still being spoken. Refused, before anything is stored, for a session the window no longer shows, one that cannot
    * take a message or a holder that cannot type; the window then gets a `message` event with delivery `refused` and why, and its draft keeps
    * the text.
    */
-  dictate(key: string | null, sessionId: string, text: string, pieces: Piece[], partial: boolean, interrupted: Interruption | null = null): { message: ConversationMessage } | { refused: string } {
-    const scope = key === null ? null : this.deps.windows.scope(key);
+  dictate(key: string, sessionId: string, text: string, pieces: Piece[], partial: boolean, interrupted: Interruption | null = null): { message: ConversationMessage } | { refused: string } {
+    const scope = this.deps.windows.scope(key);
     const session = this.deps.store.session(sessionId);
     const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
     const refused =
-      (key !== null && (scope === null || scope.sessionId !== sessionId)) || session === null || view === null
-        ? key === null
-          ? SESSION_ENDED
-          : "The voice's session is no longer this window's."
-        : key !== null && scope!.earlier === true
+      scope === null || scope.sessionId !== sessionId || session === null || view === null
+        ? "The voice's session is no longer this window's."
+        : scope.earlier === true
           ? EARLIER_SESSION
           : view.conversation !== 'full'
           ? (view.reason ?? SESSION_ENDED)
@@ -2652,24 +2640,19 @@ export class ConversationService {
       const why = refused ?? SESSION_ENDED;
       const at = this.deps.now();
 
-      if (key === null) {
-        return { refused: why };
-      }
-
       this.#send(key, 'message', {
         message: { type: 'message', id: `refused-${this.deps.newId()}`, sessionId, workItemId: session?.workItemId ?? null, at, ord: 0, origin: 'voice', text, provisional: false, withdrawn: false, delivery: 'refused', error: why, spokenRequested: false, pieces, ...(partial ? { partial: true } : {}) },
       });
       return { refused: why };
     }
 
-    return { message: this.#type(session, key, session.launchId ?? null, text, { opId: `voice-${this.deps.newId()}`, command: false, pieces, partial, auto: true, olderToo: key === null, interrupted }) };
+    return { message: this.#type(session, key, session.launchId ?? null, text, { opId: `voice-${this.deps.newId()}`, command: false, pieces, partial, auto: true, interrupted }) };
   }
 
   /**
-   * Why a message for this session and launch can no longer be typed; null while it can. Only dictation into a session's own terminal window may
-   * go to a session older than its work item's newest (voice-design decision 9).
+   * Why a message for this session and launch can no longer be typed; null while it can.
    */
-  #check(sessionId: string, launch: string | null, olderToo = false): string | null {
+  #check(sessionId: string, launch: string | null): string | null {
     const session = this.deps.store.session(sessionId);
 
     if (session === null || session.state === 'ended') {
@@ -2680,7 +2663,7 @@ export class ConversationService {
       return SESSION_RELAUNCHED;
     }
 
-    return olderToo || this.deps.store.sessionsFor(session.workItemId).at(-1)?.id === sessionId ? null : NEWER_SESSION;
+    return this.deps.store.sessionsFor(session.workItemId).at(-1)?.id === sessionId ? null : NEWER_SESSION;
   }
 
   /**

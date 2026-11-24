@@ -27,10 +27,6 @@ const byName = new Map(workspaces.map((w) => [w.name, w]));
 const undeclared = { '@switchboard/hub-app': ['@switchboard/chrome'] };
 for (const w of workspaces) w.deps = [...w.deps, ...(undeclared[w.name] ?? [])].filter((d) => byName.has(d));
 
-// Files another workspace's tests read: the hub's dock contract test compares
-// its output with the dock's recorded fixture (packages/hub/test/dock.test.ts).
-const readBy = [{ prefix: 'apps/dock/test/fixtures/', workspace: '@switchboard/hub' }];
-
 // Files no workspace's checks cover: documentation, and the hook itself, which
 // a commit that changes it exercises.
 const exempt = (file) => /\.(md|txt)$/i.test(file) || file.startsWith('.githooks/') || file === 'tools/precommit.mjs';
@@ -66,7 +62,6 @@ for (const file of staged) {
   const w = workspaces.find((ws) => file.startsWith(ws.dir + '/'));
   if (w) touched.add(w.name);
   else outside.push(file);
-  for (const r of readBy) if (file.startsWith(r.prefix)) touched.add(r.workspace);
 }
 
 if (full || outside.length > 0) {

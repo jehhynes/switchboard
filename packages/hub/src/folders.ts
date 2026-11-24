@@ -1,9 +1,8 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { hostKey, isFolderHost } from '@switchboard/core';
-import type { Store } from '@switchboard/core';
 import { SKIPPED } from './page.js';
 
 /**
@@ -169,31 +168,4 @@ export async function listFolder(path: string, roots: readonly string[] | null):
   const parent = up === folder || 'error' in allowedFolder(up, roots) ? null : up;
 
   return { path: folder, parent, folders, more };
-}
-
-/** The `pagePrefs` entry set once the dock's recent folders were imported. */
-const DOCK_FOLDERS_IMPORTED = 'dockFoldersImported';
-
-/**
- * Adds the folders the dock kept in `<home>/dock.json` (`recentFolders`) to the store's recent folders, once: the dock and every page share the
- * store's since PRD R122. A missing or unreadable file imports nothing.
- */
-export function importDockFolders(store: Pick<Store, 'pagePref' | 'setPagePref' | 'rememberFolders' | 'recentFolders'>, home: string, same: (a: string, b: string) => boolean): void {
-  if (store.pagePref(DOCK_FOLDERS_IMPORTED) !== null) {
-    return;
-  }
-
-  let folders: string[] = [];
-
-  try {
-    const kept = (JSON.parse(readFileSync(join(home, 'dock.json'), 'utf8')) as { recentFolders?: unknown }).recentFolders;
-
-    folders = Array.isArray(kept) ? kept.filter((one): one is string => typeof one === 'string' && one.trim() !== '') : [];
-  } catch {
-    // No dock.json, or none the dock wrote.
-  }
-
-  // After the hub's own, which are newer.
-  store.rememberFolders([...store.recentFolders(), ...folders], same);
-  store.setPagePref(DOCK_FOLDERS_IMPORTED, '1');
 }

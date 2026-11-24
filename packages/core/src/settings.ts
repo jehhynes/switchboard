@@ -532,7 +532,7 @@ export function parseSettings(text: string): SettingsResult {
     }
 
     if (enabled !== undefined) {
-      read.errors.push(`${path}.enabled is not a setting; turn a source on and off in the dock's header.`);
+      read.errors.push(`${path}.enabled is not a setting; turn a source on and off in the list's header.`);
     }
 
     const root = read.string(common, 'repoRoot', path, SOURCE_DEFAULTS.repoRoot);

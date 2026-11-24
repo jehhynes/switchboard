@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, watch, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
@@ -14,9 +14,7 @@ import { findBash } from './bash.js';
 import { cardsOf } from './cards.js';
 import { DoneSearch } from './dockSearch.js';
 import { dockView, windowsDir, writeWorkspaceFile } from './dock.js';
-import type { DockRow, DockTerminal } from './dock.js';
 import { isPastePath } from './report.js';
-import { rowKeyOf } from './rows.js';
 import { DEBRIEF_SCAN_MS, Debriefs } from './debriefs.js';
 import { SOURCE_KINDS, checkSettings, loadConfig, readConfigFile, saveSettings } from './config.js';
 import type { HubApp } from './serve.js';
@@ -46,7 +44,6 @@ import { PageChanges, VIEWED_REFUSED } from './changes.js';
 import { needsMessage, needsReason, newlyNeeding, rowFor } from './needs.js';
 import { systemNotifier } from './systemAlerts.js';
 import { installedProviders } from './installed.js';
-import { importDockFolders } from './folders.js';
 import { claudeModelChoices, CODEX_MODELS_MS, codexModelChoices, withConfigured } from './models.js';
 import type { ModelChoice } from './models.js';
 import { localRoots, mainCheckout, openLocalFile } from './localFiles.js';
@@ -58,10 +55,10 @@ import type { PageBrowser } from './server.js';
 import { browserExtensionZip } from './browserExtension.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
-/** The dock's and the page's neutral note while no device has the voice because the phone was lost (`VoiceControl.phoneLost`). */
+/** The page's neutral note while no device has the voice because the phone was lost (`VoiceControl.phoneLost`). */
 export const PHONE_LOST_NOTE = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or Talk here on this computer.';
 
-/** Operator events the dock may send (PRD R27). */
+/** Operator events `/action` takes (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
@@ -172,7 +169,7 @@ export function parseAction(body: unknown): FlowEvent | null {
     return null;
   }
 
-  // A dock row's Persona menu pins a persona to the row's session, or clears the pin (architecture.md § Personas).
+  // Pins a persona to a session, or clears the pin (architecture.md § Personas).
   if (body['type'] === 'persona') {
     const { sessionId, personaId } = body;
 
@@ -319,20 +316,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     log: deps.log,
   });
 
-  let sendDock: (event: string, data: unknown) => number = () => 0;
   /** The local web page's URL, which a system notification's click opens; the server's, once it attaches it. */
   let pageUrl = (): Promise<string> => Promise.resolve(`http://127.0.0.1:${config.settings.web.port}/page/`);
-  /** settings.json or a source's state changed: the dock's Settings window and every page's Settings read the file again (PRD R54). */
+  /** settings.json or a source's state changed: every page's Settings reads the file again (PRD R54). */
   const configChanged = (): void => {
-    sendDock('config', {});
-
     for (const key of conversation.pages()) {
       conversation.notify(key, 'config', {});
     }
   };
-  let clickDock: (data: unknown) => boolean = () => false;
   /**
-   * What a terminal runs, from the settings as they are when the window or dock takes it: the agent's CLI from `sessions.claudePath` or
+   * What a terminal runs, from the settings as they are when it opens: the agent's CLI from `sessions.claudePath` or
    * `sessions.codexPath` (PRD R28), or for a Code Mode session `hub.js attach <Switchboard session ID>` with `sessions.nodePath` (PRD R95).
    */
   const terminalRun = (terminal: { provider?: unknown; codeMode?: unknown; execution?: unknown; sessionId?: unknown }): { executable: string; args?: string[] } => {
@@ -352,7 +345,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   /** Why a write from a Settings window that read another config folder is refused, or null; a body without `configDir` names none. */
   const movedFrom = (read: unknown): string | null =>
     typeof read === 'string' && read !== configDir ? `The config folder is now ${configDir}, not ${read}. Settings reads it again; make your change there.` : null;
-  // What each item window's workspace file holds, so a dock view writes only the files that changed (PRD R71).
+  // What each item window's workspace file holds, so Open in VS Code writes only the files that changed (PRD R71).
   const written = new Map<string, string>();
   const windows = windowsDir(options.home);
 
@@ -370,7 +363,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         voiceSockets.close(() => true, VOICE_OFF);
       }
 
-      // The dock's Settings window reads the file again (PRD R54).
+      // Every page's Settings reads the file again (PRD R54).
       configChanged();
     }, RELOAD_DEBOUNCE_MS);
   };
@@ -378,19 +371,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   // Focused pages participate in voice routing.
   const focusedPages = new Set<string>();
-  // The installed page a dock click opens a work item in, and the page that raises needs-you alerts (architecture.md § Web page).
+  // The page that raises needs-you alerts (architecture.md § Web page).
   const pageTargets = new PageTargets();
   // Each window sees only its own work item (architecture.md § Window scope); views are built off the main thread and published whole.
   const scopes = new WindowScopes({ store, windows });
   const doneSearch = new DoneSearch();
-  /** A done work item's ID and ticket by its row key, for a row the dock's search found before the Done list (PRD R63). */
-  const olderRow = (rowKey: string): { id: number; ticket: { hostWindow?: string | null } } | undefined => {
-    const item = /^item:(\d+)$/.test(rowKey) ? store.workItem(Number(rowKey.slice(5))) : null;
-    const ticket = item === null || item.status !== 'done' ? null : store.ticket(item.ticketId);
-
-    return item === null || ticket === null ? undefined : { id: item.id, ticket };
-  };
-  const builtListeners: Array<() => void> = [];
   const builder = new SnapshotBuilder({
     inputs: () => runtime.snapshotInputs(),
     inThread: (inputs) => {
@@ -407,15 +392,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   let focusedWindow: string | null = null;
   // What a window's view and the web page read of the settings, in each `hello` and again when settings.json is reloaded.
   const viewSettings = (): ViewSettings => ({ briefReplies: config.settings.voice.briefReplies, expandReplies: !config.settings.voice.briefReplies, diffLayout: config.settings.web.diffLayout, diffWrap: config.settings.web.diffWrap, iframeBrowser: config.settings.web.iframeBrowser });
-  // The page's list and header, sent again when the voice changes the dock's view; set once the conversation service exists.
+  // The page's list and header, sent again when the voice changes a row's mark or the notes; set once the conversation service exists.
   let pageListChanged = (): void => {};
-  const builtNow = (): void => {
-    pageListChanged();
-
-    for (const listener of builtListeners) {
-      listener();
-    }
-  };
+  const builtNow = (): void => pageListChanged();
   // The page keys of paired devices' pages, which cannot take the voice back to this computer (architecture.md § Remote access).
   const remotePages = new Set<string>();
   // The ad-hoc work item an operator event made, found as the one new ad-hoc ticket's.
@@ -435,8 +414,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   };
   const sameFolder = (one: string, other: string): boolean => hostKey(one) === hostKey(other);
 
-  // The dock's recent folders join the hub's once, since the dock and every page now share them (PRD R122).
-  importDockFolders(store, home, sameFolder);
   // Codex's model list, asked of its app-server once per hub start; a failed or slow answer is asked again next time (PRD R122).
   let codexListed: Promise<ModelChoice[]> | null = null;
   const codexModels = async (): Promise<ModelChoice[]> => {
@@ -533,7 +510,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     dictate: (key, sessionId, text, pieces, partial, interrupted) => conversation.dictate(key, sessionId, text, pieces, partial, interrupted ?? null),
     enrolledAt: () => enrolledAt(home),
     fragmentsDir: join(home, 'voice'),
-    // The dock's mic mark and voice note are added to its view as it is sent.
+    // The page's mic mark and voice note follow the voice.
     dockChanged: builtNow,
     now: deps.now,
     log: deps.log,
@@ -797,7 +774,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         focusedPages.add(key);
         pageTargets.focused(key);
         focusedWindow = key;
-        voice.windowGained(deps.now());
         // A page coming to the front reads the pull requests again (PRD R92).
         runtime.refreshPullRequests();
       } else {
@@ -829,7 +805,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     conversation.scopesChanged(scopes.update(built.snapshot));
     conversation.sessionsChanged();
 
-    // The dock, a web page or a system notification says when a work item starts needing the operator, which the windows no longer see (PRD R65).
+    // A web page or a system notification says when a work item starts needing the operator (PRD R65).
     const newly = newlyNeeding(announced, built.snapshot);
     const newlyNeedingIds = newly.map((item) => item.id);
     const needing = newly.flatMap((item) => {
@@ -853,7 +829,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     const unalerted = newlyNeedingIds.filter((id) => !alerted.includes(id));
     const chimed = voice.needsYou(unalerted, targetSession?.workItemId ?? null);
 
-    // One surface, `alerts.surface`, shows each needs-you message: a web page, the dock or a system notification (architecture.md § Dock, Needs you).
+    // One surface, `alerts.surface`, shows each needs-you message: a web page or a system notification, with `dock` as `auto`
+    // (architecture.md § Dock, Needs you).
     if (needing.length > 0) {
       const surface = config.settings.alerts.surface;
       const page = pageTargets.alerting(surface);
@@ -862,8 +839,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       if (page !== null) {
         conversation.pageNeeds(page, needing.map(({ workItemId, message }) => ({ workItemId, message })), sound && voice.pageMaySound(page));
-      } else if (surface === 'dock') {
-        sendDock('needs', { items: needing.map(({ rowKey, message }) => ({ rowKey, message })) });
       } else {
         const here = sound && voice.systemMaySound();
 
@@ -874,9 +849,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       }
     }
 
-    for (const listener of builtListeners) {
-      listener();
-    }
   };
   /** The latest views; on the main thread, built again when a change came since, so a reader sees it at once. */
   /**
@@ -892,44 +864,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   };
   const views = (): Built => (builder.inThread && builder.dirty ? builder.buildNow() : (builder.latest() ?? builder.buildNow()));
 
-  /** The dock view with each terminal's command, from the settings as they are now; each row's workspace file is written first. */
-const dockWithRuns = () => {
-    const view = views().dock;
-
-    // The dock opens a row's item window from its file, so the file is there before the view is.
-    // A hosted conversation's row names its host's window, whose file the host's primary work item writes.
-    for (const window of view.groups.flatMap((group) => group.rows.flatMap((row) => (row.window === null || row.window.hosted === true ? [] : [row.window])))) {
-      try {
-        writeWorkspaceFile(window, written);
-      } catch (error) {
-        deps.log(`workspace file ${window.file} not written: ${String(error)}`);
-      }
-    }
-
-    const executable = (terminal: DockTerminal): DockTerminal => ({ ...terminal, ...terminalRun(terminal) });
-
-    // The voice target's row has the mic or speaker mark, and a voice problem is a note: no window shows another's or a global one (architecture.md § Voice).
-    const activeRow = voiceRow();
-
-    return {
-      ...view,
-      openIn: config.settings.dock.openIn,
-      ...withVoiceNotes(view.notes),
-      ...(view.held === undefined ? {} : { held: view.held.map((one) => (one.terminal === null ? one : { ...one, terminal: executable(one.terminal) })) }),
-      groups: view.groups.map((group) => ({
-        ...group,
-        rows: group.rows.map((row) => ({
-          ...row,
-          open: row.open?.type === 'terminal' ? { ...executable(row.open), type: 'terminal' as const } : row.open,
-          terminal: row.terminal === null ? null : executable(row.terminal),
-          voice: row.key === activeRow ? voiceMark(voice.micLive, voice.speakReplies, voice.device === 'phone') : null,
-          controls: [...row.controls, ...personaControls(row.key)],
-        })),
-      })),
-    };
-  };
-
-  /** The row of the voice target's work item, which has the mic mark in the dock and on the page (architecture.md § Voice), or null. */
+  /** The row of the voice target's work item, which has the mic mark on the page (architecture.md § Voice), or null. */
   function voiceRow(): string | null {
     const targetSession = voice.target === null ? null : store.session(voice.target);
 
@@ -937,7 +872,7 @@ const dockWithRuns = () => {
   }
 
   /**
-   * The dock's notes with the voice's problem last, and the neutral voice note while the phone was lost, as the dock and the page show them
+   * The list's notes with the voice's problem last, and the neutral voice note while the phone was lost, as the page shows them
    * (architecture.md § Voice). Voice the operator turned off, or a phone left by choice, has no note.
    */
   function withVoiceNotes(notes: string[]): { notes: string[]; voiceNote?: string } {
@@ -949,34 +884,6 @@ const dockWithRuns = () => {
     };
   }
 
-  /**
-   * A row's Persona menu (architecture.md § Personas): with `voice.enabled` on and a roster, each persona for the work item's current Code Mode
-   * session, the session's own checked, and Clear pin while one is pinned.
-   */
-  function personaControls(rowKey: string): DockRow['controls'] {
-    const voiceSettings = config.settings.voice;
-    const workItemId = rowKey.startsWith('item:') ? Number(rowKey.slice(5)) : null;
-    const session = workItemId === null ? null : (store.sessionsFor(workItemId).at(-1) ?? null);
-
-    if (!voiceSettings.enabled || voiceSettings.personas.length === 0 || session === null || (session.codeMode !== true && session.execution !== 'app-server')) {
-      return [];
-    }
-
-    const pinned = session.personaPinned === true;
-    const action = (personaId: string | null) => ({ type: 'persona', sessionId: session.id, personaId });
-
-    return [
-      ...voiceSettings.personas.map((persona) => ({
-        label: pinned && session.personaId === persona.id ? `${persona.name} (pinned)` : persona.name,
-        glyph: '',
-        action: action(persona.id),
-        group: 'Persona',
-        checked: session.personaId === persona.id,
-      })),
-      ...(pinned ? [{ label: 'Clear pin', glyph: '', action: action(null), group: 'Persona', checked: false }] : []),
-    ];
-  }
-
   runtime.onChange(() => builder.schedule());
   runtime.setConversationReader({ read: (sessionIds) => conversation.readNow(sessionIds), catchUp: (sessionId) => conversation.catchUp(sessionId), continueAfterLimit: (sessionId, text, guard) => conversation.continueAfterLimit(sessionId, text, guard) });
 
@@ -984,7 +891,7 @@ const dockWithRuns = () => {
   runtime.start();
   conversation.start();
 
-  // The Settings editor's routes (PRD R54): the dock posts them with the hub token, and the web page as page commands (architecture.md § Settings window).
+  // The Settings editor's routes (PRD R54), which the web page posts as page commands (architecture.md § Settings window).
   const settingsRoutes = {
     // settings.json with its version, and what the editor offers.
     read: async () => ({
@@ -1169,7 +1076,7 @@ const dockWithRuns = () => {
 
         return 'refused' in result ? { status: result.status, body: { error: result.refused } } : { status: 200, body: result };
       },
-      // The dock's Restart and resume of a terminal holder from an older build (architecture.md § Restarting the holder).
+      // Restart and resume of a terminal holder from an older build (architecture.md § Restarting the holder).
       '/holder/restart': async (body) => {
         const refused = restartHolder(isRecord(body) ? body['detail'] : undefined);
 
@@ -1198,7 +1105,6 @@ const dockWithRuns = () => {
       '/v1/conversation/send': async (body) => (isRecord(body) ? conversation.send(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text, command?}.' } }),
       '/v1/conversation/card-draft': async (body) => (isRecord(body) ? conversation.cardCommand('card-draft', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, card, draft}.' } }),
       '/v1/conversation/card-dismiss': async (body) => (isRecord(body) ? conversation.cardCommand('card-dismiss', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, card, slug}.' } }),
-      // `installed` lets the dock skip its provider choice when only one CLI is found (PRD R104).
       // The providers a new session can start in and their models (PRD R122): the configured default first, then the form's choices.
       '/v1/conversation/providers': async () => {
         const sessions = config.settings.sessions;
@@ -1219,7 +1125,7 @@ const dockWithRuns = () => {
       '/v1/conversation/history': async (body) => (isRecord(body) ? conversation.history(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/seen': async (body) => (isRecord(body) ? conversation.seen(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, ids}.' } }),
       '/v1/conversation/select': async (body) => (isRecord(body) ? conversation.select(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId}.' } }),
-      '/v1/conversation/page-new-session': async (body) => (isRecord(body) ? conversation.newSession(body, true) : { status: 400, body: { error: 'Expected {window, opId, folder, provider, model?, prompt?, run?}.' } }),
+      '/v1/conversation/page-new-session': async (body) => (isRecord(body) ? conversation.newSession(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider, model?, prompt?, run?}.' } }),
       '/v1/conversation/page-folders': async (body) => (isRecord(body) ? conversation.pageFolders(body) : { status: 400, body: { error: 'Expected {window, path?}.' } }),
       '/v1/conversation/statuses': async (body) => (isRecord(body) ? conversation.statuses(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/commands': async (body) => (isRecord(body) ? conversation.commands(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
@@ -1287,94 +1193,7 @@ const dockWithRuns = () => {
 
         return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
       },
-      // VS Code forwards the click of a row that opens a terminal or nothing, which only the dock runs (PRD R65, R69, R71).
-      '/dock/click': async (body) => {
-        if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
-          return { status: 400, body: { error: 'Expected {rowKey}.' } };
-        }
-
-        return clickDock({ rowKey: body['rowKey'] }) ? { status: 202, body: { sent: true } } : { status: 409, body: { error: 'The dock is not running.' } };
-      },
-      // The dock's search past its Done list (PRD R63): Done rows from `since`, in epoch milliseconds, whose search text holds every word of `text`.
-      '/dock/search': async (body) => {
-        if (!isRecord(body) || typeof body['text'] !== 'string' || typeof body['since'] !== 'number' || !Number.isFinite(body['since'])) {
-          return { status: 400, body: { error: 'Expected {text, since}, the search text and the epoch milliseconds to search from.' } };
-        }
-
-        return { status: 200, body: doneSearch.search(store, views().snapshot, runtime.snapshotInputs(), body['text'], body['since'], windows) };
-      },
-      // A dock row's click (architecture.md § Dock), which is also Talk here for its work item's session (architecture.md § Voice).
-      '/dock/select': async (body) => {
-        if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
-          return { status: 400, body: { error: 'Expected {rowKey}.' } };
-        }
-
-        // A row the search found before the Done list is not in the snapshot (PRD R63).
-        const item = views().snapshot.workItems.find((one) => rowKeyOf(one) === body['rowKey']) ?? olderRow(body['rowKey']);
-
-        if (item === undefined) {
-          return { status: 404, body: { error: 'No work item has that row.' } };
-        }
-
-        const voiceRefused = config.settings.voice.enabled ? voice.dockSelect(item.id) : null;
-
-        return { status: 200, body: voiceRefused === null ? {} : { voice: voiceRefused } };
-      },
-      // A dock row's click with `dock.openIn: web`, or its Alt-click (architecture.md § Dock): the installed page used last shows the work item and
-      // puts the marker in its title, by which the dock brings its window forward; with no installed page open the dock opens the page at it.
-      '/dock/page': async (body, context) => {
-        if (!isRecord(body) || typeof body['rowKey'] !== 'string') {
-          return { status: 400, body: { error: 'Expected {rowKey}.' } };
-        }
-
-        const item = views().snapshot.workItems.find((one) => rowKeyOf(one) === body['rowKey']) ?? olderRow(body['rowKey']);
-
-        if (item === undefined) {
-          return { status: 404, body: { error: 'No work item has that row.' } };
-        }
-
-        const key = pageTargets.installed();
-
-        if (key !== null) {
-          const marker = randomBytes(6).toString('hex');
-
-          conversation.notify(key, 'show', { workItemId: item.id, marker });
-          return { status: 200, body: { marker } };
-        }
-
-        const page = (await context?.pageUrl()) ?? `http://127.0.0.1:${config.settings.web.port}/page/`;
-
-        return { status: 200, body: { url: `${page}#w=${item.id}` } };
-      },
-      // The dock reports a session's terminal window coming to the front, or null when it left (architecture.md § Voice): the voice follows it as
-      // it follows a window.
-      '/dock/focus': async (body) => {
-        const sessionId = isRecord(body) ? body['sessionId'] : undefined;
-        const at = isRecord(body) ? (body['at'] ?? deps.now()) : undefined;
-
-        if (!(sessionId === null || (typeof sessionId === 'string' && sessionId !== '')) || typeof at !== 'number') {
-          return { status: 400, body: { error: 'Expected {sessionId, at?}, a session ID or null and the epoch milliseconds of the change.' } };
-        }
-
-        if (sessionId !== null && store.session(sessionId) === null) {
-          voice.terminalFocused(null, at);
-          return { status: 404, body: { error: 'No session has that ID.' } };
-        }
-
-        voice.terminalFocused(sessionId, at);
-        return { status: 200, body: { focus: sessionId } };
-      },
-      // The dock's New session form (PRD R122): its folders, then the conversation or task it makes.
-      '/dock/folders': async () => conversation.dockFolders(),
-      '/dock/new-session': async (body) => (isRecord(body) ? conversation.newSession(body, false) : { status: 400, body: { error: 'Expected {opId, folder, provider, model?, prompt?, run?}.' } }),
-      '/dock/show': async () =>
-        sendDock('show', {}) > 0 ? { status: 200, body: { shown: true } } : { status: 409, body: { error: 'The dock is not running.' } },
-      // The dock's Settings window (PRD R54).
-      '/config/read': settingsRoutes.read,
-      '/config/voice-enroll': settingsRoutes.enroll,
-      '/config/check': settingsRoutes.check,
-      '/config/save': settingsRoutes.save,
-      // The web page's Settings (architecture.md § Web page): the same routes as page commands.
+      // The web page's Settings (architecture.md § Web page).
       '/v1/conversation/page-settings-read': settingsRoutes.read,
       '/v1/conversation/page-voice-enroll': settingsRoutes.enroll,
       '/v1/conversation/page-settings-check': settingsRoutes.check,
@@ -1471,15 +1290,8 @@ const dockWithRuns = () => {
       browser,
     },
     pagePort: () => config.settings.web.port,
-    dock: () => dockWithRuns(),
-    attachDock: (send) => {
-      sendDock = send;
-    },
     attachPageUrl: (url) => {
       pageUrl = url;
-    },
-    attachDockClick: (click) => {
-      clickDock = click;
     },
     attachRemote: (changed) => {
       remoteChanged = changed;
@@ -1488,7 +1300,6 @@ const dockWithRuns = () => {
     cards: () => browser.cards(),
     snoozeUrl: (url, until) => browser.snooze(url, until),
     unsnoozeUrl: (url) => browser.unsnooze(url),
-    onChange: (listener) => void builtListeners.push(listener),
     busy: () => runtime.hasActiveSessions() || debriefs.running(),
     quiet: () => runtime.restartBlocker() ?? (conversation.sending() ? 'a message is being sent' : (voice.restartBlocker() ?? (debriefs.running() ? 'a friction debrief is running' : null))),
     // The voice goes on as it was under the hub that takes over: the phone's page takes it back without a tap (architecture.md § Hub lifecycle).
