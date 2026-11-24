@@ -981,6 +981,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** A message sent from another tab leaves that tab shown, with a short line that it went. */
   const confirmSent = (): void => {
     clearTimeout(sentTimer);
+
+    // Where the tabs fold into the conversation's, the composer hides off the Conversation tab, so the toast says it there.
+    if (root.classList.contains('off-conversation')) {
+      sentNote.hidden = true;
+      toastBox.show('Sent. Its reply shows on the Conversation tab.', 'info');
+      return;
+    }
+
     sentNote.hidden = mainTab() === 'conversation';
 
     if (!sentNote.hidden) {
@@ -1378,6 +1386,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       event.preventDefault();
+
+      // Files dropped on another tab, where the tabs fold and the composer hides, show the Conversation tab, so their chips show.
+      if (root.classList.contains('off-conversation') && canAttach()) {
+        leaving('conversation');
+        chooseTab('conversation');
+        view.artifact = null;
+        draw();
+        saveTab();
+      }
+
       attachFiles([...(event.dataTransfer?.files ?? [])]);
     },
     { signal: listening.signal },
@@ -2317,8 +2335,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       target?.scrollIntoView?.({ block: 'nearest' });
     }
 
-    // An ended session's note sits just above the composer on every tab, with Resume, as in the Conversation view; the page resumes it in the
-    // terminal holder, or a Codex thread in its daemon, without a terminal.
+    // An ended session's note sits just above the composer, with Resume, as in the Conversation view, so it shows only where the composer does;
+    // the page resumes it in the terminal holder, or a Codex thread in its daemon, without a terminal.
     mount(note, draftShown() ? renderDraftNote(view.newDraft!) : renderEndedNote(state.session, resuming, state.scope?.earlier === true ? (state.scope.workItemId ?? null) : null));
 
     // From the wide layout Status, Artifacts, Console and Browser are a column of their own; embedded tabs covers the Browser tab's area.
@@ -2334,9 +2352,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     root.classList.toggle('wide', side);
     root.classList.toggle('item-opening', pending !== null);
-    // Under 800 px of height the composer shows only on the Conversation tab (page.css).
+    // Where the tabs fold into the conversation's, the composer and the note show only on the Conversation tab (page.css).
     // A work item being opened opens on the Conversation tab there, so its composer keeps its place meanwhile.
     root.classList.toggle('off-conversation', state.scope !== null && pending === null && mainTab() !== 'conversation');
+
+    // The hidden box gives up the focus, so its blur tells the hub, and spoken turns send as messages again rather than join a draft out of view.
+    if (root.classList.contains('off-conversation') && composerHost.contains(document.activeElement)) {
+      (document.activeElement as HTMLElement).blur();
+    }
 
     if (!side) {
       mount(detailHead, null);

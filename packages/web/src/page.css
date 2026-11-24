@@ -830,10 +830,8 @@ body.artifact-window > .artifact-view { height: 100%; }
   .composer-input { font-size: 16px; }
   input:not([type="checkbox"], [type="radio"], [type="file"]), textarea, select { font-size: 16px !important; }
 }
-/* Where a short screen hides the composer off the Conversation tab (below), the other tabs' scrollers keep the home indicator's inset. */
-@media (height < 800px) {
-  #root.off-conversation:not(:has(#composer:focus-within)) > .main { --sb-end: env(safe-area-inset-bottom); }
-}
+/* Where the composer hides off the Conversation tab (below), the other tabs' scrollers keep the home indicator's inset. */
+#root.off-conversation > .main { --sb-end: env(safe-area-inset-bottom); }
 /* On a touch screen every icon button in the bars, inside a menu's anchor or not, is at least 44 px square, with its glyph at 20 px, centred. */
 @media (hover: none), (pointer: coarse) {
   :is(.header, .list-header, .settings-head, .persona-head, .changes-bar) :is(button.icon, a.icon, button.actions) { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
@@ -999,12 +997,10 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
    The conversation's pane keeps the width set on its sash, 940 px by default, its timeline and composer as wide as with the column hidden, and
    the column, at least 360 px (DETAIL_MIN), takes the rest of the width, so a wide screen gives the status and artifacts the room. */
 .detail { display: none; }
-/* A screen under 800 px tall, such as a phone on its side or a short window, gives the other tabs the whole height: the composer and the note above it show only on the
-   Conversation tab (#root.off-conversation, set by main.ts), hidden rather than removed so the draft stays. A focused composer stays, so an
-   on-screen keyboard that shortens the page never takes away the box being typed in. A wide layout always shows the conversation here. */
-@media (height < 800px) {
-  #root.off-conversation:not(:has(#composer:focus-within)) #note, #root.off-conversation:not(:has(#composer:focus-within)) #composer { display: none; }
-}
+/* Where the tabs fold into the conversation's, as on a phone, the other tabs get the whole height: the composer and the ended session's note
+   above it show only on the Conversation tab (#root.off-conversation, set by main.ts), hidden rather than removed so the draft, attachments and
+   live words stay and a voice reply plays on. A wide layout always shows the conversation here. */
+#root.off-conversation #note, #root.off-conversation #composer { display: none; }
 :where(html:not(.phone)) #root.wide > .main { flex: 0 1 var(--chat-width, 940px); }
 :where(html:not(.phone)) #root.wide > .chat-sash { display: block; }
 :where(html:not(.phone)) #root.wide > .detail { display: flex; flex: 1 1 360px; flex-direction: column; min-width: 360px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }

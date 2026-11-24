@@ -35,9 +35,9 @@ describe('the page on a phone', () => {
     expect(css).toMatch(/\.scroll\.console-pane \{[^}]*padding: 0 0 var\(--sb-end\);/);
     // A framed HTML or PDF artifact scrolls inside its frame, so the frame ends above the inset.
     expect(css).toContain('.scroll.framed { display: flex; flex-direction: column; padding: 0 0 var(--sb-end); }');
-    // Where a short screen hides the composer off the Conversation tab, by the same condition, the other tabs keep the inset.
-    expect(css).toContain('#root.off-conversation:not(:has(#composer:focus-within)) #composer { display: none; }');
-    expect(css).toContain('@media (height < 800px) {\n  #root.off-conversation:not(:has(#composer:focus-within)) > .main { --sb-end: env(safe-area-inset-bottom); }\n}');
+    // Where the composer hides off the Conversation tab, by the same condition, the other tabs keep the inset.
+    expect(css).toContain('#root.off-conversation #note, #root.off-conversation #composer { display: none; }');
+    expect(css).toContain('\n#root.off-conversation > .main { --sb-end: env(safe-area-inset-bottom); }\n');
     // Full-screen Settings runs to the edge too, its bar holding the inset.
     expect(css).toContain('.settings-backdrop { padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);');
     expect(css).toContain('.settings-bar { flex-wrap: wrap; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }');

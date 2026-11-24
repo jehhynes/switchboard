@@ -870,7 +870,7 @@ describe('the page', () => {
     page.close();
   });
 
-  it('keeps the composer on every tab, says Sent after a send from the Status tab, and shows an ended session\'s reason above the composer', async () => {
+  it('keeps the composer\'s box across tabs, says Sent in the toast after a send that ends off the Conversation tab, shows it for files dropped there, and shows an ended session\'s reason above the composer', async () => {
     const { page, source } = start();
     const composer = root.querySelector<HTMLElement>('#composer')!;
 
@@ -887,8 +887,19 @@ describe('the page', () => {
     await flush();
     expect(posts.some((post) => post.url.endsWith('/send') && post.body['text'] === 'From the status')).toBe(true);
     expect(root.querySelector('.tab.selected')?.getAttribute('data-tab')).toBe('status');
-    expect(composer.querySelector<HTMLElement>('.composer-sent')!.hidden).toBe(false);
+    // The folded tabs hide the composer off the Conversation tab, so the toast says it went, not the composer's own line.
+    expect(root.classList.contains('off-conversation')).toBe(true);
+    expect(composer.querySelector<HTMLElement>('.composer-sent')!.hidden).toBe(true);
+    expect(root.querySelector('.toast.info .toast-text')?.textContent).toBe('Sent. Its reply shows on the Conversation tab.');
     expect(SENT_NOTE_MS).toBe(4_000);
+
+    // Files dropped on another tab show the Conversation tab, where the composer shows their chips.
+    const dropped = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(dropped, 'dataTransfer', { value: { types: ['Files'], files: [new File(['d'], 'report.pdf', { type: 'application/pdf' })] } });
+    root.querySelector('#panel')!.dispatchEvent(dropped);
+    expect(dropped.defaultPrevented).toBe(true);
+    expect(root.querySelector('.tab.selected')?.getAttribute('data-tab')).toBe('conversation');
+    expect(root.classList.contains('off-conversation')).toBe(false);
 
     source.emit('session', { session: session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' }) });
     expect(root.querySelector('#note .session-note-text')?.textContent).toBe('The session has ended. Resume continues it.');
@@ -911,7 +922,7 @@ describe('the page', () => {
     page.close();
   });
 
-  it('marks #root.off-conversation while the tabs show another tab, for the short-screen rule, keeping the draft, and never in the wide layout', () => {
+  it('marks #root.off-conversation while the tabs show another tab, which hides the composer, keeping the draft and dropping its focus, and never in the wide layout', () => {
     window.innerWidth = 700;
 
     const { page, source } = start();
@@ -923,10 +934,12 @@ describe('the page', () => {
     expect(root.classList.contains('off-conversation')).toBe(false);
     input.value = 'Half a thought';
     input.dispatchEvent(new Event('input'));
+    input.focus();
     root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
     expect(root.classList.contains('off-conversation')).toBe(true);
-    // Hidden by the stylesheet only, so the box and its text stay.
+    // Hidden by the stylesheet only, so the box and its text stay; the hidden box gives up the focus.
     expect(composer.hidden).toBe(false);
+    expect(document.activeElement).not.toBe(input);
     expect(root.querySelector('#composer textarea')).toBe(input);
     root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     expect(root.classList.contains('off-conversation')).toBe(false);
@@ -1987,7 +2000,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     root.querySelector<HTMLElement>('#head [data-tab="status"]')!.click();
     expect(root.classList.contains('off-conversation')).toBe(true);
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
-    // It opens on the Conversation tab, so the short screen's rule keeps the composer's place meanwhile.
+    // It opens on the Conversation tab, so the composer keeps its place meanwhile.
     expect(root.classList.contains('off-conversation')).toBe(false);
     expect(labels('#head .opening-tabs .tab')).toEqual(['Conversation', 'Status', 'Console']);
     await flush();
@@ -6931,16 +6944,16 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: env\(safe-area-inset-left\);.*width: 3px;/);
   });
 
-  it('shows the composer and the note above it only on the Conversation tab under 800 px of height, unless the composer has the focus', () => {
-    // Kept while focused, for the on-screen keyboard; a refusal shows in the toast, on every tab.
-    const rule = '#root.off-conversation:not(:has(#composer:focus-within))';
+  it('shows the composer and the note above it only on the Conversation tab, at every height', () => {
+    // A refusal shows in the toast, on every tab.
+    const rule = '#root.off-conversation';
 
-    // Every height under 800 px, a zoomed 799.5 px included, and no width condition.
-    expect(css).toContain(`@media (height < 800px) {\n  ${rule} #note, ${rule} #composer { display: none; }\n}`);
-    // Nothing else hides them by that class, so taller screens keep the composer on every tab; the class's one other use gives a phone's
-    // other tabs' scrollers back the home indicator's inset at their end, which a shown composer takes away.
+    // No media condition: a tall phone hides them off the Conversation tab as a short screen does.
+    expect(css).toContain(`\n${rule} #note, ${rule} #composer { display: none; }\n`);
+    expect(css).not.toMatch(/off-conversation:not\(:has\(#composer:focus-within\)\)/);
+    // The class's one other use gives the other tabs' scrollers back the home indicator's inset at their end, which a shown composer takes away.
     expect(css.match(/off-conversation/g)).toHaveLength(3);
-    expect(css).toContain(`${rule} > .main { --sb-end: env(safe-area-inset-bottom); }`);
+    expect(css).toContain(`\n${rule} > .main { --sb-end: env(safe-area-inset-bottom); }\n`);
   });
 
   it('puts Status and Artifacts beside the conversation only where #root.wide says they fit, never on a phone', () => {
