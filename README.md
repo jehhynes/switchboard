@@ -12,6 +12,13 @@ Every assigned issue, support case or review means opening a terminal, finding t
 
 Switchboard does the running. You do the deciding.
 
+## How it's different
+
+- **A to-do list that fills itself.** Session managers run the sessions you start. Switchboard's sidebar fills itself from your sources, such as the GitHub issues assigned to you, and shows each work item's current status as it passes between the agent and you, until it lands in Done.
+- **Playbooks, chosen by triage.** Each kind of work is a playbook: a prompt, or a single slash command for one of your skills, plus rules such as whether it may start on its own. Triage reads the ticket and picks the playbook, so a bug gets fixed, a question gets a drafted answer and a review request gets a review.
+- **Your skills do the work.** Cloud agents run their own agent in their sandbox on a fixed issue-to-PR path. Switchboard runs your own Claude Code or Codex on your machine, with your skills, hooks and sign-ins, and stays out of the way: it is the control and observability layer that starts sessions, watches them and shows you where they stand.
+- **Your machine is the server.** One developer, one machine: no team server, no vendor sandbox. You can still reach it from your phone or any of your other devices, over Tailscale.
+
 ## A ticket's day
 
 1. **Assigned.** A bug, *Short links with uppercase letters return 404*, is assigned to you.
