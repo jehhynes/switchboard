@@ -84,7 +84,7 @@ describe('DoneSearch (PRD R63)', () => {
     expect(search.search(store, snapshot, inputs(), '  ', 0, 'C:/w').rows).toEqual([]);
   });
 
-  it('matches every word in the key, linked pull requests, playbook and branch, as the dock does', () => {
+  it('matches every word in the key, linked pull requests, playbook and branch', () => {
     const old = doneSince(T0) - DAY;
     const id = ticket('18941', 'Inbox badge', old, { playbook: 'dev:review-pr' });
 

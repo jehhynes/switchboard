@@ -1,6 +1,6 @@
 /**
- * The composer's voice controls, drawn alike by the VS Code Conversation view and the web page (architecture.md § Voice, § Dictation): the mic
- * button with its states, Speak replies and Talk here. Both control the computer's one voice process through the hub. Imports nothing, for
+ * The composer's voice controls, drawn by the web page (architecture.md § Voice, § Dictation): the mic
+ * button with its states, Speak replies and Talk here. They control the computer's one voice process through the hub. Imports nothing, for
  * browser bundles.
  */
 
@@ -41,8 +41,8 @@ function escape(text: string): string {
 /**
  * The composer footer's voice controls (architecture.md § Voice), ghost icon buttons as in Claude Code's footer, in one cluster with the mic
  * beside Send: Speak replies as a speaker toggle while the voice is here, which also stops the reply playing, so the composer has no separate Stop
- * (Escape stops speaking from the keyboard); one Talk here in its place while it is elsewhere, only for a session it can speak for (`live`). Nothing while voice is off. `place` names where it is drawn: a VS Code
- * window or the web page, which control the same voice process on this computer. While the voice is here but no device has it, after the phone
+ * (Escape stops speaking from the keyboard); one Talk here in its place while it is elsewhere, only for a session it can speak for (`live`). Nothing while voice is off. `place` names where it is drawn, for
+ * the Talk here tooltip; the web page passes `page`. Every page controls the same voice process on this computer. While the voice is here but no device has it, after the phone
  * left, "Voice is off — Talk here" stands before Speak replies, so a reply is not skipped unnoticed.
  */
 export function renderVoiceControls(voice: VoiceControlsView | null, live = true, place: VoicePlace = 'window'): string {

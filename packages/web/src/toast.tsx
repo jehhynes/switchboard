@@ -1,4 +1,4 @@
-// The page's toast (architecture.md § Web page, Toast), as the dock's status toast: one message at a time at the page's top, a refusal or failure in
+// The page's toast (architecture.md § Web page, Toast): one message at a time at the page's top, a refusal or failure in
 // the warning colours, any other message, such as a copy that worked or a work item that started needing the operator, in neutral ones.
 import type { VNode } from 'preact';
 import { mount, unmount } from './island.js';
@@ -13,7 +13,7 @@ export interface ToastMessage {
   workItemId: number | null;
 }
 
-/** How long a message shows on a visible page with the pointer off it, as the dock's status toast. */
+/** How long a message shows on a visible page with the pointer off it, carried over from the retired dock's status toast. */
 export const TOAST_SHOWN_MS = 10_000;
 /** How often the page counts that time. */
 const TOAST_TICK_MS = 1_000;
@@ -120,7 +120,7 @@ export function toast(host: HTMLElement, deps: ToastDeps): Toast {
     timer = setInterval(tick, TOAST_TICK_MS);
   };
   const over = (): void => void (hovered = true);
-  // The 1-second count could miss a short hover, so leaving the toast starts its time again, as in the dock.
+  // The 1-second count could miss a short hover, so leaving the toast starts its time again.
   const leave = (): void => {
     hovered = false;
 

@@ -74,7 +74,7 @@ export function toastInput(alerts: readonly SystemAlert[], sound: boolean): stri
 }
 
 /**
- * The notifier that runs this computer's notification helper (architecture.md § Dock, Needs you): Windows PowerShell's WinRT toast on Windows,
+ * The notifier that runs this computer's notification helper (architecture.md § Web page): Windows PowerShell's WinRT toast on Windows,
  * `notify-send` on Linux, whose Open action opens the URL, and `osascript` on macOS, whose notification opens nothing. A helper that fails is
  * logged; the alert is not retried.
  */

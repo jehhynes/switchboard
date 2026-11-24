@@ -132,7 +132,7 @@ export function addMenuItems(doc: Document, list: Element, card: (url: string) =
     closeGitHubMenu();
     open(target.url);
   };
-  // A change of state, such as a snooze from the dock while the menu is open, updates the items in place, so focus stays.
+  // A change of state, such as a snooze from the web page while the menu is open, updates the items in place, so focus stays.
   let openItem = slot('open');
 
   if (openItem === null) {

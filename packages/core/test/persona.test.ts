@@ -190,7 +190,7 @@ describe('personas in the flow (architecture.md § Personas)', () => {
     expect(h.send({ type: 'persona', sessionId: action.sessionId, personaId: 'vega' }).refused).toBe('No persona vega in voice.personas.');
     expect(h.send({ type: 'persona', sessionId: 'nope', personaId: 'nova' }).refused).toBe('Unknown session nope.');
 
-    // A dock menu shown before voice was turned off pins nothing.
+    // A persona menu shown before voice was turned off pins nothing.
     h.settings = withRoster(false);
     expect(h.send({ type: 'persona', sessionId: action.sessionId, personaId: 'orion' }).refused).toBe('Voice is off (voice.enabled).');
     expect(h.store.session(action.sessionId)?.personaId).toBe('nova');

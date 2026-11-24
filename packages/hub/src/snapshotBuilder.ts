@@ -3,7 +3,7 @@ import type { DockView } from './dock.js';
 import type { Snapshot, SnapshotInputs } from './snapshot.js';
 import type { SnapshotReply, SnapshotRequest, SnapshotWorkerData } from './snapshotWorker.js';
 
-/** A build: the snapshot, the dock view built from it, and how long the main thread waited for it. */
+/** A build: the snapshot, the list view built from it, and how long the main thread waited for it. */
 export interface Built {
   snapshot: Snapshot;
   dock: DockView;

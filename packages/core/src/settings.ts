@@ -112,11 +112,11 @@ export const DIFF_WRAPS = ['auto', 'on', 'off'] as const;
 
 export type DiffWrapSetting = (typeof DIFF_WRAPS)[number];
 
-/** The settings a VS Code window's view and the web page read, in a stream's `hello` and its `settings` event. */
+/** The settings the web page reads, in a stream's `hello` and its `settings` event. */
 export interface ViewSettings {
   iframeBrowser?: boolean;
   briefReplies: boolean;
-  /** The inverse of `briefReplies`, for a VS Code window that still runs an extension build from before Brief replies, until it reloads. */
+  /** The inverse of `briefReplies`, which builds of the retired VS Code extension from before Brief replies read. */
   expandReplies: boolean;
   diffLayout: DiffLayoutSetting;
   diffWrap: DiffWrapSetting;

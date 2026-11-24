@@ -1,4 +1,4 @@
-/* The header's conversation dropdown, shared by the VS Code Conversation view and the web page, whose builds put this file before their own
+/* The header's conversation dropdown, drawn by the web page, whose build puts this file before its own
    styles (architecture.md § Conversation view). At rest the button is drawn as one control: a rounded fill a little lighter than the side bar,
    with no border, holding the state icon, the title, the provider's mark and the chevron; hover lifts it a little more. In its menu a hovered
    row is grey and the selected conversation blue, the focus colour as a selected work item's row is in the page's list, in every theme. */

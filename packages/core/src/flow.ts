@@ -232,11 +232,6 @@ export type FlowEvent =
   /** A standalone conversation (PRD R122), empty or with `prompt` as its first message. */
   | { type: 'new-session'; repoRoot: string; provider?: Provider; model?: string | null; prompt?: string }
   /**
-   * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item hosted by the window binding `hostWindow`, run in
-   * `folder`, whose session starts at once with no prompt.
-   */
-  | { type: 'new-conversation'; hostWindow: string; folder: string; provider?: Provider }
-  /**
    * New conversation… on the web page (architecture.md § Web page): a new session of the work item, in its folder, with `prompt`, the
    * operator's first message, as its prompt; in `provider`, else its latest session's.
    */
@@ -418,7 +413,7 @@ function textOf(text: string | null | undefined): string | null {
   return text?.trim() || null;
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-session', 'new-conversation', 'item-session', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position', 'persona']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-session', 'item-session', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position', 'persona']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -537,8 +532,6 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
       return { repoRoot: event.repoRoot, start: event.start === true, model: event.model ?? null };
     case 'new-session':
       return { repoRoot: event.repoRoot, provider: event.provider ?? null, model: event.model ?? null };
-    case 'new-conversation':
-      return { folder: event.folder };
     case 'item-session':
       return { provider: event.provider ?? null };
     case 'persona':
@@ -745,8 +738,6 @@ class Flow {
         return this.adhoc(event.prompt, event.repoRoot, event.start === true, event.provider, event.model);
       case 'new-session':
         return this.newSession(event.repoRoot, event.provider, event.model, event.prompt);
-      case 'new-conversation':
-        return this.newConversation(event.hostWindow, event.folder, event.provider);
       case 'item-session':
         return this.itemSession(this.openItem(event.workItemId), event.prompt, event.provider);
       case 'conversation-title':
@@ -1042,7 +1033,7 @@ class Flow {
       throw new Refusal('Choose a repo for the prompt.');
     }
 
-    const item = this.insertAdhoc(prompt, title, repoRoot, null, start ? 'queued' : 'unstarted', null, provider);
+    const item = this.insertAdhoc(prompt, title, repoRoot, null, start ? 'queued' : 'unstarted', provider);
     if (model != null) this.store.updateWorkItem(item.id, { model: model.trim() });
   }
 
@@ -1056,23 +1047,9 @@ class Flow {
     checkModel(model);
     const message = prompt?.trim() ?? '';
     const title = message === '' ? NEW_CONVERSATION_TITLE : summarizeMessage(message) || NEW_CONVERSATION_TITLE;
-    const item = this.insertAdhoc(message === '' ? null : message, title, repoRoot, null, 'running', null, provider, true);
+    const item = this.insertAdhoc(message === '' ? null : message, title, repoRoot, null, 'running', provider, true);
     this.store.updateWorkItem(item.id, { ...(model != null ? { model: model.trim() } : {}), ...(title === NEW_CONVERSATION_TITLE ? {} : { titleOrigin: 'generated' as const }) });
     this.startSession(this.store.workItem(item.id)!);
-  }
-
-  /**
-   * A hosted conversation (architecture.md § Hosted conversations): an ad hoc work item in the window's folder, hosted by its window binding,
-   * whose session starts at once at an empty prompt, without waiting for a free slot, since the operator is there to use it.
-   */
-  private newConversation(hostWindow: string, folder: string, provider?: Provider): void {
-    this.checkInteractiveProvider(provider);
-
-    if (folder === '' || hostWindow === '') {
-      throw new Refusal('The window has no folder.');
-    }
-
-    this.startSession(this.insertAdhoc(null, NEW_CONVERSATION_TITLE, folder, null, 'running', hostWindow, provider));
   }
 
   /**
@@ -1273,11 +1250,11 @@ class Flow {
    * An ad-hoc ticket and work item: queued when the operator chose Start automatically, otherwise unstarted, and running, with no
    * prompt, for a registered session (PRD R6, R68, R81).
    */
-  private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running', hostWindow: string | null = null, provider?: Provider, interactive = false): WorkItem {
+  private insertAdhoc(prompt: string | null, title: string, repoRoot: string, parentId: number | null, status: 'queued' | 'unstarted' | 'running', provider?: Provider, interactive = false): WorkItem {
     const keys = this.store.adhocKeys().map(Number);
     const sourceKey = String(Math.max(0, ...keys) + 1);
     // A follow-up keeps its origin when Delete clears its parentId (PRD R27, R120).
-    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: parentId === null ? null : 'task', title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot, ...(hostWindow === null ? {} : { hostWindow }) });
+    const ticket = this.store.insertTicket({ source: ADHOC_SOURCE, sourceKey, ref: `#${sourceKey}`, sourceId: parentId === null ? null : 'task', title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: this.now, lastPolledAt: null, repoRoot });
     const queued = status === 'queued';
 
     if (parentId !== null) {
@@ -1286,7 +1263,7 @@ class Flow {
 
     return this.store.insertWorkItem({
       ticketId: ticket.id,
-      interactive: interactive || hostWindow !== null,
+      interactive,
       model: null,
       playbook: null,
       ...(provider === undefined ? {} : { provider }),
@@ -2167,7 +2144,7 @@ class Flow {
       throw new Refusal('Only a Code Mode or Codex app-server session has a persona.');
     }
 
-    // Personas are part of voice, so a dock menu shown before voice was turned off pins nothing.
+    // Personas are part of voice, so a persona menu shown before voice was turned off pins nothing.
     if (!voice.enabled) {
       throw new Refusal('Voice is off (voice.enabled).');
     }

@@ -137,7 +137,7 @@ interface PullRequestNode {
   commits: { nodes: Array<{ commit: { statusCheckRollup: { state: string } | null } }> };
 }
 
-/** A pull request's GraphQL fields as the pane shows them. */
+/** A pull request's GraphQL fields as Switchboard shows them. */
 export function pullRequestStatus(node: PullRequestNode): PullRequestStatus {
   const checks = node.commits.nodes[0]?.commit.statusCheckRollup?.state ?? null;
 

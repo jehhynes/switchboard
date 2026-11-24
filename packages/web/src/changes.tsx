@@ -1,5 +1,5 @@
-// The Changes tab (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to disk, as the VS Code
-// window's Open changes shows them, every changed file's diff in one scrolling tab at the end of the tab strips, drawn by the diff viewer the page
+// The Changes tab (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to disk,
+// every changed file's diff in one scrolling tab at the end of the tab strips, drawn by the diff viewer the page
 // loads on first use, which reads only the files near the view, under a bar with the list's counts, its toggles, a Files menu to go to a file
 // and a scope menu that picks what the list compares: every change since the base, the uncommitted changes, one commit, or two points.
 import type { ComponentChildren, VNode } from 'preact';

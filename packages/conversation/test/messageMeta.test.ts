@@ -3,7 +3,7 @@ import { metaLine, spokenMark, stamped, toneMark, voiceMark } from '../src/messa
 
 const at = new Date(2026, 10, 20, 9, 5, 7).getTime();
 
-describe('the message meta line shared by the Conversation view and the web page', () => {
+describe('the message meta line the web page draws', () => {
   it('stamps every timed item with message details on, and otherwise only the first after a day divider', () => {
     expect([stamped(true, true, false), stamped(true, false, true), stamped(true, false, false), stamped(false, true, true)]).toEqual([true, true, false, false]);
   });

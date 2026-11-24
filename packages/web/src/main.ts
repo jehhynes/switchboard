@@ -64,9 +64,7 @@ export const ADVANCE_MS = 200;
 /** How long typing in a card's Other field pauses before the hub hears it. */
 export const OTHER_SETTLE_MS = 400;
 
-export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'questions', 'needs', 'show', 'config', 'viewed'];
-/** How long the page's title holds the marker the dock finds its window by after a `show` (architecture.md § Dock). */
-export const SHOW_MARKER_MS = 5_000;
+export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'questions', 'needs', 'config', 'viewed'];
 /** How long an unread reply or status must be visible on a focused page before it counts as seen (architecture.md § Unread). */
 export const SEEN_MS = 1_000;
 const SEEN_CHECK_MS = 250;
@@ -75,7 +73,7 @@ const COMPOSER_MAX_PX = 200;
 export const SENT_NOTE_MS = 4_000;
 /** How often the page reads the prompt a session waits on in its terminal while it waits. */
 export const PROMPT_POLL_MS = 1_000;
-/** How long the box's draft waits before the hub hears it, as in the Conversation view. */
+/** How long the box's draft waits before the hub hears it. */
 export const COMPOSER_DRAFT_MS = 300;
 /** The widths the sashes allow for the work items and the conversation, in pixels, their arrow-key step, and where the page keeps them. */
 export const SIDE_MIN = 200;
@@ -99,7 +97,7 @@ const EXPAND = 'switchboard.expandReplies';
 const OLD_TEXT_SCALE = 'switchboard.textScale';
 const CHAT_WIDTH = 'switchboard.chatWidth';
 /**
- * The drawer's timing, as the dock's auto-hide: a pointer resting on the sliver this long shows it, and a drawer shown that way hides once
+ * The drawer's timing, carried over from the retired dock's auto-hide: a pointer resting on the sliver this long shows it, and a drawer shown that way hides once
  * nothing has kept it open for `DRAWER_HIDE_MS`, checked every `DRAWER_TICK_MS`.
  */
 export const DRAWER_REVEAL_MS = 500;
@@ -190,7 +188,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const sheetHost = root.querySelector<HTMLElement>('#sheet')!;
   // The persona dialog over the whole page, as Settings is.
   const personaHost = root.appendChild(document.createElement('div'));
-  // The toast over the page (toast.tsx): every refusal and failure, a copy that worked and the needs-you message, as the dock's status toast.
+  // The toast over the page (toast.tsx): every refusal and failure, a copy that worked and the needs-you message.
   const toastHost = root.appendChild(document.createElement('div'));
 
   toastHost.id = 'toast';
@@ -353,7 +351,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const showBrowser = (): boolean => browserTab() && itemLinks();
   /** Whether the Console tab shows: an active session, not ended, that the terminal holder may hold; otherwise its console would be blank, so there is no tab. */
   const showConsole = (): boolean => hasConsole(state.session);
-  /** Whether the open work item's row offers History, as the dock's does. */
+  /** Whether the open work item's row offers History. */
   const offersHistory = (): boolean => (selectedRow(state)?.history ?? null) !== null;
   /** The work item whose History tab the operator opened from an actions menu, or null; its close mark hides it again. Kept in its `TabSet`. */
   let historyOpen: number | null = null;
@@ -576,7 +574,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
   const dropFileIcons = useFileIcons({ fetch: (...args) => readFetch(...args), loaded: () => draw() });
 
-  // The groups the operator opened or closed on an earlier load, as the dock keeps them across runs.
+  // The groups the operator opened or closed on an earlier load.
   view.collapsed = collapsedGroups(localStorage.getItem(GROUPS_KEY));
 
   try {
@@ -625,9 +623,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   if (conversationEntry(history.state)) {
     history.replaceState(null, '');
   }
-  /** The marker of the dock's latest `show`, in the title until the dock has found this window. */
-  let showMarker: string | null = null;
-  let showTimer: ReturnType<typeof setTimeout> | undefined;
   // The page's connection (architecture.md § Web page, Connection): it owns the stream and says whether the page is live, offline or signed out.
   const connection = new Connection({
     open: () => new deps.EventSource(installedApp ? '/v1/conversation/events?page=1&installed=1' : '/v1/conversation/events?page=1'),
@@ -675,8 +670,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     return answer;
   };
-  // The list's header: the dock header's source icons, search and More Actions (architecture.md § Web page).
-  // Settings over the whole page, as the dock's Settings window (architecture.md § Web page); it reads settings.json again when the page comes back.
+  // The list's header: the source icons, search and More Actions (architecture.md § Web page).
+  // Settings over the whole page (architecture.md § Web page); it reads settings.json again when the page comes back.
   const settingsHost = root.appendChild(document.createElement('div'));
   const settingsPane = settings(settingsHost, { post: (name, body) => post(name, body), closed: () => root.querySelector<HTMLElement>('.more-actions')?.focus() });
 
@@ -788,7 +783,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const chips = composerHost.querySelector<HTMLElement>('.attachments')!;
   // Document listeners end with the page.
   const listening = new AbortController();
-  // A drag of a Ready for review row moves it, as the dock's (PRD R73); its drop line redraws before the next repaint.
+  // A drag of a Ready for review row moves it (PRD R73); its drop line redraws before the next repaint.
   const reorder = rowDrag(list, {
     changed: (drag) => {
       dragView = drag;
@@ -1129,7 +1124,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    // Attached files go as mentions after the text, as the Conversation view puts a picked file's mention in the box.
+    // Attached files go as mentions after the text.
     const files = shownAttachments().slice();
     const typed = input.value;
     const mentions = files.flatMap((one) => mentionOf(one.path!.replaceAll('\\', '/')) ?? []);
@@ -1155,7 +1150,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     toEnd();
 
-    // Sending leaves the box, as in the Conversation view, so later spoken turns send on their own again (architecture.md § Dictation).
+    // Sending leaves the box, so later spoken turns send on their own again (architecture.md § Dictation).
     if (state.voice?.here === true && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic) && document.activeElement === input) {
       input.blur();
     }
@@ -1336,7 +1331,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     attachFiles([...(attachInput.files ?? [])]);
     attachInput.value = '';
   });
-  // Files pasted with no text beside them are attached; text pasted with a picture, as from a web page, stays text, as in the Conversation view.
+  // Files pasted with no text beside them are attached; text pasted with a picture, as from a web page, stays text.
   input.addEventListener('paste', (event) => {
     const data = event.clipboardData;
     const files = [...(data?.files ?? [])];
@@ -1614,7 +1609,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     { signal: listening.signal },
   );
 
-  // The box's focus and draft, for the focus rule of dictation (architecture.md § Dictation). Unlike the Conversation view's, the box keeps
+  // The box's focus and draft, for the focus rule of dictation (architecture.md § Dictation). The box keeps
   // dictation listening while it has the focus (`listen`): spoken turns join its draft and wait for Send.
   let composerTimer: ReturnType<typeof setTimeout> | undefined;
   const tellHub = (): void => {
@@ -1688,7 +1683,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       : state.session?.state === 'ended' && state.session.conversation !== 'none'
         ? 'Resume the session to send a message.'
         : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : connection.state === 'offline' ? "Can't send while offline." : connection.state === 'signedOut' ? 'Signed out.' : 'Connecting to Switchboard…'));
-    // The same controls as the Conversation view's, acting on this computer's voice process (architecture.md § Web page).
+    // The voice controls from packages/conversation, acting on this computer's voice process (architecture.md § Web page).
     mount(voiceControls, renderShared(renderVoice(state.voice, live)));
     syncHint();
     // On a paired device the mic shows while the voice is elsewhere too, off: its tap takes the voice to this phone (PRD R119).
@@ -1934,7 +1929,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
-  // Whether the conversation follows its end, set by the operator's own scrolling, and where the page itself last scrolled it, as in the Conversation view.
+  // Whether the conversation follows its end, set by the operator's own scrolling, and where the page itself last scrolled it.
   let pinned = true;
   let ownTop = 0;
   /** What the panel last showed: its tab and conversation; another starts at its top, or at its end for a conversation. */
@@ -2065,7 +2060,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       unmount(pane);
     }
   };
-  // ---- The work items' drawer (architecture.md § Web page), shown and hidden as the dock's auto-hide ----
+  // ---- The work items' drawer (architecture.md § Web page), shown and hidden as an auto-hide ----
   const drawer = root.querySelector<HTMLElement>('.side')!;
   const sliver = root.querySelector<HTMLElement>('.sliver')!;
   // Under a drawer opened by its button or a key, a backdrop takes the press outside it, so the press closes the drawer and does nothing else.
@@ -2109,7 +2104,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       head.querySelector<HTMLElement>('.list-toggle')?.focus();
     }
   };
-  /** What keeps a drawer shown by the pointer open, as the dock's `HideDelay`: the pointer over it, a menu or sheet of the list, or typing in its search box. */
+  /** What keeps a drawer shown by the pointer open: the pointer over it, a menu or sheet of the list, or typing in its search box. */
   const drawerKept = (): boolean => {
     const focused = document.activeElement;
 
@@ -2205,7 +2200,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   backdrop.addEventListener('click', () => closeDrawer());
 
   /**
-   * Draws the hidden list's sliver, as the dock's `SliverBars`: each row's coloured stripe at its height, cut to the list's view and left out
+   * Draws the hidden list's sliver: each row's coloured stripe at its height, cut to the list's view and left out
    * under a pinned group heading; once a frame at most.
    */
   let sliverQueued = false;
@@ -2303,8 +2298,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (dropped && drawer.contains(document.activeElement) && getComputedStyle(drawer).display === 'none') {
       head.querySelector<HTMLElement>('.back-toggle')?.focus();
     }
-    // The dock finds this page by its temporary show marker.
-    document.title = pageTitle(state.groups) + (showMarker === null ? '' : ` [sb-show ${showMarker}]`);
+    document.title = pageTitle(state.groups);
     header.draw(state.header, state.groups);
     // A search shows only the rows that match, in every group, open (PRD R63).
     const listed = header.list(state.groups);
@@ -2335,7 +2329,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       target?.scrollIntoView?.({ block: 'nearest' });
     }
 
-    // An ended session's note sits just above the composer, with Resume, as in the Conversation view, so it shows only where the composer does;
+    // An ended session's note sits just above the composer, with Resume, so it shows only where the composer does;
     // the page resumes it in the terminal holder, or a Codex thread in its daemon, without a terminal.
     mount(note, draftShown() ? renderDraftNote(view.newDraft!) : renderEndedNote(state.session, resuming, state.scope?.earlier === true ? (state.scope.workItemId ?? null) : null));
 
@@ -3280,7 +3274,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     keepScroll();
     rememberTabs();
 
-    // Choosing a work item hides the drawer, as a row's click hides the auto-hidden dock.
+    // Choosing a work item hides the drawer.
     closeDrawer();
     wanted = workItemId;
     wantedSession = sessionId;
@@ -4492,7 +4486,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    // Ctrl+Enter goes ahead in an input sheet, whose box takes several lines, as in the dock's dialog.
+    // Ctrl+Enter goes ahead in an input sheet, whose box takes several lines.
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && view.sheet?.kind === 'input') {
       event.preventDefault();
       void sheetGo();
@@ -4792,7 +4786,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       showError(String(answer.body['error'] ?? `Not moved (status ${answer.status}).`));
     }
   };
-  // Alt+Up and Alt+Down move the selected Ready for review row, as the dock's (PRD R73), with its Move up and Move down; not while typing.
+  // Alt+Up and Alt+Down move the selected Ready for review row (PRD R73), with its Move up and Move down; not while typing.
   document.addEventListener(
     'keydown',
     (event) => {
@@ -4883,7 +4877,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     } else if (action.confirm !== null) {
       view.sheet = { kind: 'confirm', row: key, action };
       draw();
-      // A control that asks first starts on Cancel, so Enter cancels it, as the dock's dialog does.
+      // A control that asks first starts on Cancel, so Enter cancels it.
       sheetHost.querySelector<HTMLElement>('.sheet [data-action="sheet-cancel"]')?.focus();
       return;
     } else {
@@ -5001,7 +4995,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const field = event.target as HTMLInputElement | HTMLTextAreaElement;
     const sheet = view.sheet;
 
-    // An input sheet keeps its text and choice, and enables its button as the dock's dialog does, without a redraw under the caret.
+    // An input sheet keeps its text and choice, and enables its button, without a redraw under the caret.
     if (sheet?.kind === 'input') {
       if (field.classList.contains('sheet-input')) {
         sheet.text = field.value;
@@ -5026,7 +5020,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       sheet.picked = field.value;
     } else if (field.classList.contains('snooze-date')) {
       sheet.date = field.value;
-      // Picking a date chooses On, as in the dock's dialog.
+      // Picking a date chooses On.
       sheet.picked = field.value === '' ? sheet.picked : 'date';
       draw();
     } else if (field.classList.contains('snooze-comment')) {
@@ -5345,7 +5339,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         changes.viewedEvent(data);
       }
 
-      // settings.json changed on disk: Settings reads it again, keeping unsaved edits under the dock's changed-on-disk warning (PRD R54).
+      // settings.json changed on disk: Settings reads it again, keeping unsaved edits under the changed-on-disk warning (PRD R54).
       // With no save in flight, the hub's settings hold what Brief replies asked for, or a newer change.
       if ((type === 'settings' || type === 'hello') && briefSending === null) {
         briefAsked = null;
@@ -5360,18 +5354,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         setTimeout(reportFrames, 0);
       }
 
-      // A dock click shows its work item here, as a click on its row would (architecture.md § Dock).
-      if (type === 'show' && typeof data['workItemId'] === 'number') {
-        showMarker = typeof data['marker'] === 'string' ? data['marker'] : null;
-        clearTimeout(showTimer);
-        showTimer = setTimeout(() => {
-          showMarker = null;
-          draw();
-        }, SHOW_MARKER_MS);
-        void select(data['workItemId']);
-      }
-
-      // The hub chose this page to raise needs-you alerts (alerts.surface, PRD R65): the last message in the toast, as in the dock's, a
+      // The hub chose this page to raise needs-you alerts (alerts.surface, PRD R65): the last message in the toast, a
       // notification per work item, and the chime when nothing else sounds.
       if (type === 'needs' && Array.isArray(data['items'])) {
         const last = (data['items'] as NeedsItem[]).at(-1);
@@ -5576,7 +5559,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       strips?.disconnect();
       settingsShown?.disconnect();
       clearInterval(promptTimer);
-      clearTimeout(showTimer);
 
       for (const { timer } of otherTimers.values()) {
         clearTimeout(timer);
@@ -5614,7 +5596,7 @@ function inView(element: HTMLElement, area: HTMLElement): boolean {
 /** How long a card or a message an answer links to stays highlighted. */
 const FLASH_MS = 1_600;
 
-/** Highlights a card or a message an answer links to for a moment, as the Conversation view does. */
+/** Highlights a card or a message an answer links to for a moment. */
 function flash(element: HTMLElement): void {
   element.classList.remove('linked');
   void element.offsetWidth;

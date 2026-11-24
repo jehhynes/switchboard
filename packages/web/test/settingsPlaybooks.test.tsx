@@ -17,7 +17,7 @@ const config = (value: unknown, patch: Record<string, unknown> = {}) => ({
   ...patch,
 });
 
-describe('Settings playbooks (architecture.md § Settings window)', () => {
+describe('Settings playbooks (architecture.md § Web page)', () => {
   let host: HTMLElement;
   let posts: Array<{ name: string; body: Record<string, unknown> }>;
   let answers: Record<string, Answer | ((body: Record<string, unknown>) => Answer)>;
@@ -84,7 +84,7 @@ describe('Settings playbooks (architecture.md § Settings window)', () => {
     expect(host.querySelector('.settings-page .settings-message')?.textContent).toBe('Fix this entry in settings.json in an editor, or delete it.');
   });
 
-  it("draws a task playbook's page as the dock's: Start and Reports rows, Approve sends while Approval is on, the agent's modes, and the template's variables", async () => {
+  it("draws a task playbook's page: Start and Reports rows, Approve sends while Approval is on, the agent's modes, and the template's variables", async () => {
     await open();
     entry('build').click();
     await settle();
@@ -140,7 +140,7 @@ describe('Settings playbooks (architecture.md § Settings window)', () => {
     await settle();
 
     expect(host.querySelector('[data-path="template"] .settings-field-error')?.textContent).toBe('Unknown template variable: nope.');
-    // As in the dock, an error that starts with no field's key, such as one about the reports, shows at the top of the page.
+    // An error that starts with no field's key, such as one about the reports, shows at the top of the page.
     expect(texts('.settings-page > .settings-error')).toEqual(['reports must list known reports.', 'Something else.']);
     expect(texts('.settings-group .settings-field-error')).toEqual([]);
     expect(entry('General').querySelector('.settings-errors')).toBeNull();

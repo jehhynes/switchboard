@@ -290,17 +290,17 @@ export interface ConversationServiceDeps {
   personas?(): PersonaView;
   /** Pins a persona to a session, or clears its pin with null; why not, or null. */
   pinPersona?(sessionId: string, personaId: string | null): string | null;
-  /** The web page's list, in the dock's groups (architecture.md § Web page); without it a page lists nothing. */
+  /** The web page's list, in the list view's groups (architecture.md § Web page); without it a page lists nothing. */
   pageList?(): PageListGroup[];
-  /** The web page's list header: the dock header's sources (architecture.md § Web page). */
+  /** The web page's list header: the configured sources (architecture.md § Web page). */
   pageHeader?(): PageHeader;
-  /** Turns one source on or off, as the dock's source icons do: why not, or null. */
+  /** Turns one source on or off: why not, or null. */
   setSource?(name: string, enabled: boolean): string | null;
-  /** Polls each source that is on now, as the dock's Refresh sources does: why not, or null. */
+  /** Polls each source that is on now: why not, or null. */
   pollSources?(): string | null;
-  /** Restarts a terminal holder from an older build and resumes its sessions, as the dock's Restart and resume does: why not, or null once it started. */
+  /** Restarts a terminal holder from an older build and resumes its sessions: why not, or null once it started. */
   restartHolder?(detail?: string): string | null;
-  /** Runs a schedule now (PRD R82), as the dock's `run-schedule` does: the run's work item, or why not. */
+  /** Runs a schedule now (PRD R82) with the `run-schedule` event: the run's work item, or why not. */
   runSchedule?(name: string): { workItemId: number } | { refused: string };
   /** Makes a standalone conversation (PRD R122), empty or with `prompt` as its first message, and starts it: its work item, or why not. */
   newStandalone?(folder: string, provider: Provider, model: string | null, prompt: string | null): { workItemId: number } | { refused: string };
@@ -310,12 +310,12 @@ export interface ConversationServiceDeps {
   folderRoots?(): FolderRoots;
   /** Puts a folder new work was created in first among the recent folders. */
   rememberFolder?(folder: string): void;
-  /** The Done rows from `since` up to the Done list whose search text holds every word of `text`, as the dock's search further back (PRD R63). */
+  /** The Done rows from `since` up to the Done list whose search text holds every word of `text`: the list's search further back (PRD R63). */
   searchDone?(text: string, since: number): { rows: PageRow[]; more: boolean };
   /** A page's focus changed: a focused, visible page counts as a focused window for the voice; `notify`, when sent, whether it may show notifications. */
   pageFocused?(key: string, focused: boolean, notify?: boolean): void;
   /**
-   * Runs one of the page's row actions (`PAGE_ACTIONS`) on a work item, after checking that its dock row still offers it: why not, or null
+   * Runs one of the page's row actions (`PAGE_ACTIONS`) on a work item, after checking that its list row still offers it: why not, or null
    * (architecture.md § Web page).
    */
   rowAction?(workItemId: number, label: string, extra: PageActionExtra): string | null;
@@ -335,9 +335,9 @@ export interface ConversationServiceDeps {
    * checking that it holds the URL now: why not, or null.
    */
   rowOpen?(rowKey: string, url: string): string | null;
-  /** Runs one of a pool ticket's row controls, by its label, after checking that its dock row still offers it: why not, or null. */
+  /** Runs one of a pool ticket's row controls, by its label, after checking that its list row still offers it: why not, or null. */
   poolAction?(ticketId: number, label: string, extra: PageActionExtra): string | null;
-  /** Places a Ready for review work item after `after`, or first when null, as a drag in the dock does (PRD R73): why not, or null. */
+  /** Places a Ready for review work item after `after`, or first when null, as a drag in the list does (PRD R73): why not, or null. */
   rowMove?(workItemId: number, after: number | null): string | null;
   /** A session's questions were settled outside a turn, as by a dismissal, which can end its wait on them (PRD R103). */
   questionsSettled?(sessionId: string): void;
@@ -1100,7 +1100,7 @@ export class ConversationService {
   /** The list each page was last sent. */
   readonly #listShown = new Map<string, string>();
 
-  /** The web page's list (architecture.md § Web page): the dock's groups and rows, as `pageList` in `page.ts` gives them. */
+  /** The web page's list (architecture.md § Web page): the list view's groups and rows, as `pageList` in `page.ts` gives them. */
   pageList(): PageListGroup[] {
     return this.deps.pageList?.() ?? [];
   }
@@ -1137,7 +1137,7 @@ export class ConversationService {
   }
 
   /**
-   * `page-source {window, name, enabled}` (architecture.md § Web page): turns one source on or off, as the dock's source icons do. 403 for a key
+   * `page-source {window, name, enabled}` (architecture.md § Web page): turns one source on or off. 403 for a key
    * that is not a page's, 409 with the hub's refusal.
    */
   pageSource(body: Record<string, unknown>): { status: number; body: unknown } {
@@ -1209,7 +1209,7 @@ export class ConversationService {
   readonly #rowCommands = new Map<string, Promise<{ status: number; body: unknown }>>();
 
   /**
-   * `row-action {window, scopeGen, opId, workItemId, label, until?, comment?, text?, choice?}` (architecture.md § Web page): one of the dock's controls on the
+   * `row-action {window, scopeGen, opId, workItemId, label, until?, comment?, text?, choice?}` (architecture.md § Web page): one of the hub's row controls on the
    * page's selected work item, named by its label, rechecked against its row when it runs. 403 for a key that is not a page's or another work item, 409 for a stale
    * `scopeGen` and with the refusal, such as a control the row no longer offers.
    */
@@ -1805,7 +1805,7 @@ export class ConversationService {
 
   /**
    * `needs {items, sound}` to the page that raises needs-you alerts (`alerts.surface`, PRD R65): the work items that started needing the
-   * operator, each with the dock's message, and whether the page plays the needs-you sound. A key that is not a page's gets nothing.
+   * operator, each with its needs-you message, and whether the page plays the needs-you sound. A key that is not a page's gets nothing.
    */
   pageNeeds(key: string, items: Array<{ workItemId: number; message: string }>, sound: boolean): void {
     if (this.deps.windows.isPage(key)) {
@@ -1979,7 +1979,7 @@ export class ConversationService {
   }
 
   /**
-   * `page-history {window, ticketId}` (architecture.md § Web page): a ticket's History as the VS Code History tab shows it, built by the hub
+   * `page-history {window, ticketId}` (architecture.md § Web page): a ticket's History, built by the hub
    * (`historyView`), with the filter chips' categories: `{view, categories}`. 403 for a key that is not a page's, 409 for a ticket the store
    * does not know.
    */
@@ -2000,8 +2000,7 @@ export class ConversationService {
   }
 
   /**
-   * `page-poll {window}` (architecture.md § Web page): More Actions' Refresh sources, which polls each source that is on now, as the dock's
-   * `/poll` does. 403 for a key that is not a page's, 409 with the hub's refusal.
+   * `page-poll {window}` (architecture.md § Web page): More Actions' Refresh sources, which polls each source that is on now. 403 for a key that is not a page's, 409 with the hub's refusal.
    */
   pagePoll(body: Record<string, unknown>): { status: number; body: unknown } {
     if (typeof body['window'] !== 'string') {
@@ -2019,7 +2018,7 @@ export class ConversationService {
 
   /**
    * `page-holder-restart {window, detail}` (architecture.md § Restarting the holder): the list header's Restart and resume, which restarts a terminal
-   * holder from an older build and resumes its sessions, as the dock's does; `detail` is the confirmation the operator accepted. 403 for a key that is not a page's, 409 with the hub's refusal.
+   * holder from an older build and resumes its sessions; `detail` is the confirmation the operator accepted. 403 for a key that is not a page's, 409 with the hub's refusal.
    */
   pageHolderRestart(body: Record<string, unknown>): { status: number; body: unknown } {
     if (typeof body['window'] !== 'string') {
@@ -2149,8 +2148,8 @@ export class ConversationService {
   }
 
   /**
-   * `page-adhoc {window, opId, schedule}` (architecture.md § Web page): the New session form's Run a schedule now (PRD R82), as the dock's
-   * does, answering `{done, workItemId}` and selecting the run on the page. Only a schedule the list header offers is run (400 otherwise); 403
+   * `page-adhoc {window, opId, schedule}` (architecture.md § Web page): the New session form's Run a schedule now (PRD R82),
+   * answering `{done, workItemId}` and selecting the run on the page. Only a schedule the list header offers is run (400 otherwise); 403
    * for a key that is not a page's, 409 with the flow's refusal. A repeated `opId` answers the first success; one after a refusal runs again.
    */
   pageAdhoc(body: Record<string, unknown>): { status: number; body: unknown } {

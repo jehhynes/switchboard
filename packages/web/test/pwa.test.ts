@@ -187,7 +187,7 @@ describe('the installable page', () => {
     expect(JSON.parse(PAGE_ASSETS['manifest.webmanifest']!.body)).toMatchObject({ theme_color: sideBar });
   });
 
-  it("draws the composer from the composer.css it shares with the Conversation view, before the page's own rules, which leave the box alone", () => {
+  it("draws the composer from packages/conversation's composer.css, before the page's own rules, which leave the box alone", () => {
     const css = PAGE_ASSETS['page.css']!.body;
     const own = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/page.css'), 'utf8');
     const shared = readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/composer.css'), 'utf8');

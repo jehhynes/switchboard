@@ -73,7 +73,7 @@ describe('the list header (architecture.md § Web page)', () => {
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
   const hello = (source: FakeSource, patch: Record<string, unknown> = {}) => source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], header: header(), scope: null, ...patch });
 
-  it("draws each source kind's logo as the dock does, grey while off, with the hub's tooltip, and a tag for a kind without a logo", () => {
+  it("draws each source kind's logo, grey while off, with the hub's tooltip, and a tag for a kind without a logo", () => {
     const host = document.createElement('div');
 
     host.innerHTML = html(renderListHeader(header({ sources: [github, { ...zoho, enabled: false }, { kind: 'jira', enabled: true, title: 'jira: polled', sources: [{ name: 'jira', enabled: true }] }] }), { menu: null, sheet: null, search: closed() }));
@@ -174,7 +174,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(rangeSince(1, now)).toBe(new Date(2026, 9, 21, 12).getTime());
     expect(rangeSince(2, now)).toBe(new Date(2026, 7, 21, 12).getTime());
     expect(rangeSince(3, now)).toBe(0);
-    // A day the month back lacks is its last day, as the dock's AddMonths.
+    // A day the month back lacks is its last day.
     expect(rangeSince(1, new Date(2026, 2, 31, 12).getTime())).toBe(new Date(2026, 1, 28, 12).getTime());
     expect(rangeSince(2, new Date(2026, 4, 31, 12).getTime())).toBe(new Date(2026, 1, 28, 12).getTime());
   });
@@ -306,7 +306,7 @@ describe('the list header (architecture.md § Web page)', () => {
   };
   const menuRows = () => [...root.querySelectorAll('.more-menu > li')].map((li) => (li.classList.contains('menu-separator') ? '-' : li.textContent));
 
-  it("lists More Actions in the dock's groups, the sources first for a phone", async () => {
+  it("lists More Actions in its groups, the sources first for a phone", async () => {
     const { page, source } = start();
 
     hello(source);
@@ -452,7 +452,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(location.hash).toBe('#w=1');
   });
 
-  it("shows the dock's notes under the header in the warning colour, and the held-session note, which opens what Held sessions opens", () => {
+  it("shows the hub's notes under the header in the warning colour, and the held-session note, which opens what Held sessions opens", () => {
     const { source } = start();
 
     hello(source);

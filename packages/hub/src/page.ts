@@ -445,7 +445,7 @@ export function pageGroups(snapshot: Snapshot, windows: string, keep: number | n
 }
 
 /**
- * A row of the page's list: the dock row's three lines, its mark and its stripe, as the dock built them (architecture.md § Web page); a work item's
+ * A row of the page's list: the list row's three lines, its mark and its stripe, as the hub's list view built them (architecture.md § Web page); a work item's
  * with its ID, or a pool ticket's, which has no conversation, with its ticket's ID and no work item.
  */
 export interface PageRow {
@@ -455,7 +455,7 @@ export interface PageRow {
   /** Line 1: the priority dot's tooltip, or null, and the time at its end. */
   priority: DockRow['priority'];
   time: DockRow['time'];
-  /** The ticket's key, such as `gh 18941`, and its source's plugin, which colours its pill as the dock's; `url` is the ticket's, empty for an ad-hoc one. */
+  /** The ticket's key, such as `gh 18941`, and its source's plugin, which colours its pill; `url` is the ticket's, empty for an ad-hoc one. */
   ticket: string;
   sourceKind: string;
   url: string;
@@ -468,25 +468,25 @@ export interface PageRow {
   mark: DockRow['mark'];
   details: DockRow['details'];
   stripe: DockRow['stripe'];
-  /** A Ready for review row on the agent's turn, dimmed as the dock dims it. */
+  /** A Ready for review row on the agent's turn, which the list dims. */
   dim: boolean;
   /** A hosted conversation's host: its folder's or its window's name; null for other work items. */
   host: string | null;
-  /** The dock's controls the page offers for the row, in the dock's menu order (architecture.md § Web page). */
+  /** The hub's row controls the page offers for the row, in menu order (architecture.md § Web page). */
   actions: PageAction[];
-  /** The label of the control the dock shows as the row's button, when the page offers it; else null. */
+  /** The label of the row's main control, shown as its button, when the page offers it; else null. */
   main: string | null;
   /** The labels of the drafted texts Copy offers (PRD R60); the files stay in the hub. */
   pastes: string[];
-  /** What the list's search matches, as the dock's search box does: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63). */
+  /** What the list's search matches: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63). */
   search: string;
   /** What the row opens: Open in VS Code, run with `row-command`, and Open report, opened in a file tab. */
   opens: PageOpen[];
   /** A Done row's date band, such as `Today`, or an older Done row's month, such as `October 2026` (PRD R27); null in the other groups. */
   band: string | null;
-  /** Line 1's mic mark, before the time, on the voice target's row, as the dock shows it; null on the others. */
+  /** Line 1's mic mark, before the time, on the voice target's row; null on the others. */
   voice: { glyph: string; title: string } | null;
-  /** The ticket whose History the row's menu opens, as the dock's History command names it: its ID and key; null when the dock offers none. */
+  /** The ticket whose History the row's menu opens, as the row's History command names it: its ID and key; null when the row offers none. */
   history: { ticketId: number; key: string } | null;
 }
 
@@ -497,14 +497,14 @@ export interface PageVoiceMark {
   title: string;
 }
 
-/** The dock's actions the page may run through `row-action`, each on one work item. */
+/** The hub's row actions the page may run through `row-action`, each on one work item. */
 export const PAGE_ACTIONS = ['start', 'pick', 'retriage-pool', 'approve', 'retry', 'stop', 'mark-done', 'reopen', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'delete'] as const;
 export type PageActionType = (typeof PAGE_ACTIONS)[number];
 
-/** The groups of the dock's row menu (`MenuOf`), in its order, with a separator between them; what the row opens comes before `asking`. */
+/** The groups of the row menu (`MenuOf`), in its order, with a separator between them; what the row opens comes before `asking`. */
 export type PageActionGroup = 'main' | 'work' | 'state' | 'notes' | 'order' | 'asking';
 
-/** The text a control asks for before it runs, without the action fields it fills, which stay in the hub: the dock's input dialog. */
+/** The text a control asks for before it runs, without the action fields it fills, which stay in the hub: the row's input dialog. */
 export interface PageInput {
   question: string;
   detail: string;
@@ -517,7 +517,7 @@ export interface PageInput {
 }
 
 /**
- * One control the page offers: its dock label, which names it in `row-action`, the action it runs, its codicon, its group in the dock's menu,
+ * One control the page offers: its label, which names it in `row-action`, the action it runs, its codicon, its group in the row menu,
  * what the page asks first, and the text it asks for.
  */
 export interface PageAction {
@@ -529,9 +529,9 @@ export interface PageAction {
   input: PageInput | null;
 }
 
-/** The dock's state controls, which change what the work item waits for (`StateActions` in the dock). */
+/** The state controls, which change what the work item waits for (`StateActions`). */
 const STATE_ACTIONS = new Set<string>(['mark-done', 'reopen', 'snooze', 'restore']);
-/** The order controls of a Ready for review row (`OrderActions` in the dock). */
+/** The order controls of a Ready for review row (`OrderActions`). */
 const ORDER_ACTIONS = new Set<string>(['move', 'reset-position']);
 /** Each control glyph's codicon name, for the page, which draws codicons by name. */
 const CONTROL_ICONS = new Map<string, string>(Object.entries(CONTROL_GLYPHS).map(([name, glyph]) => [glyph, name]));
@@ -539,9 +539,9 @@ const CONTROL_ICONS = new Map<string, string>(Object.entries(CONTROL_GLYPHS).map
 export const MAX_INPUT_CHARS = 100_000;
 
 /**
- * The page's controls for a dock row: the dock's hub controls whose action is in `PAGE_ACTIONS`, grouped and ordered as the dock's menu: the row's
+ * The page's controls for a list row: the hub's row controls whose action is in `PAGE_ACTIONS`, grouped and ordered as the row menu: the row's
  * main control, its work, its state, its notes (Add comment…), its order in Ready for review, then the controls that ask first. Stop session asks first on
- * the page, as Delete does in the dock.
+ * the page, as Delete does.
  */
 export function pageActions(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>): PageAction[] {
   const offered = row.controls.filter((control) => (PAGE_ACTIONS as readonly string[]).includes(String(control.action['type'])) && control.group === undefined);
@@ -573,9 +573,8 @@ export interface PageActionExtra {
 }
 
 /**
- * The action `row-action` posts for a work item's dock row, by the control's label: the hub's own control's action, never the page's, with
- * Snooze's `until` and `comment`, and an input's text and changed choice set as the fields the hub's control names, as the dock's input dialog
- * sets them; why not when the row no longer offers it or the answer does not do (a text or a changed choice is needed, and a choice must be one
+ * The action `row-action` posts for a work item's list row, by the control's label: the hub's own control's action, never the page's, with
+ * Snooze's `until` and `comment`, and an input's text and changed choice set as the fields the hub's control names; why not when the row no longer offers it or the answer does not do (a text or a changed choice is needed, and a choice must be one
  * offered).
  */
 export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>, label: string, extra: PageActionExtra): { event: Record<string, unknown> } | { refused: string } {
@@ -619,14 +618,14 @@ export interface PageOpen {
   file?: string;
 }
 
-/** The label of the page's counterpart of the dock row's click, which opens its VS Code window. */
+/** The label of the page's control that opens the row's VS Code window. */
 export const OPEN_IN_VSCODE = 'Open in VS Code';
 
 /** The label of the control that opens an awaiting-approval row's draft, which the page opens in a file tab. */
 export const OPEN_REPORT = 'Open report';
 
 /**
- * The draft the dock row's Open report names, which the page opens in a file tab and `local-file` reads for the page's selected work item; null
+ * The draft the list row's Open report names, which the page opens in a file tab and `local-file` reads for the page's selected work item; null
  * without one. The page shows History itself, and leaves out Open changes and Open in terminal, which its Changes and Console tabs replace.
  */
 export function pageReportOf(row: Pick<DockRow, 'commands'>): string | null {
@@ -640,7 +639,7 @@ function destinationOf(row: Pick<DockRow, 'window'>): string | null {
   return row.window?.file ?? row.window?.folder ?? null;
 }
 
-/** What the row opens from the page: Open in VS Code when it has a window, then Open report when the dock lists a draft, with or without a window. */
+/** What the row opens from the page: Open in VS Code when it has a window, then Open report when the row lists a draft, with or without a window. */
 export function pageOpens(row: Pick<DockRow, 'window' | 'commands'>): PageOpen[] {
   const report = pageReportOf(row);
 
@@ -688,7 +687,7 @@ export async function pasteText(file: string): Promise<string> {
   return (await readFile(file, 'utf8')).replace(/^\uFEFF/, '').trimEnd();
 }
 
-/** A group of the page's list: one of the dock's groups, with its codicon glyph. */
+/** A group of the page's list: one of the list view's groups, with its codicon glyph. */
 export interface PageListGroup {
   key: RowGroup;
   title: string;
@@ -704,8 +703,8 @@ function hostTitle(host: string): string {
 }
 
 /**
- * The page's list (architecture.md § Web page): the dock's groups in the dock's order, with its titles, glyphs and empty texts, holding the
- * dock's rows where the dock puts them: the work items', hosted conversations included (every conversation is a work item), and the pool
+ * The page's list (architecture.md § Web page): the list view's groups in its order, with their titles, glyphs and empty texts, holding the
+ * list view's rows where it puts them: the work items', hosted conversations included (every conversation is a work item), and the pool
  * tickets' in Unstarted and Snoozed; `voice` names the voice target's row, which gets the mic mark.
  */
 export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot, 'workItems' | 'pool'>, voice: PageVoiceMark | null = null): PageListGroup[] {
@@ -731,7 +730,7 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
   });
 }
 
-/** A work item's dock row as the page's list shows it, `host` being its ticket's host window or null; a pool ticket's with no work item and its `ticketId`. */
+/** A work item's list view row as the page's list shows it, `host` being its ticket's host window or null; a pool ticket's with no work item and its `ticketId`. */
 export function pageRow(row: DockRow, workItemId: number | null, host: string | null, ticketId: number | null = null): PageRow {
   const actions = pageActions(row);
 
@@ -764,35 +763,35 @@ export function pageRow(row: DockRow, workItemId: number | null, host: string | 
   };
 }
 
-/** The ticket the dock row's History command opens, or null without one. */
+/** The ticket the row's History command opens, or null without one. */
 function historyOf(row: Pick<DockRow, 'commands'>): PageRow['history'] {
   const command = row.commands.find((one) => one.command['type'] === 'history')?.command;
 
   return command === undefined || typeof command['ticketId'] !== 'number' ? null : { ticketId: command['ticketId'], key: String(command['key'] ?? '') };
 }
 
-/** What the page's list header shows besides the list (architecture.md § Web page): the dock header's source icons and what its More Actions offer. */
+/** What the page's list header shows besides the list (architecture.md § Web page): the source icons and what More Actions offers. */
 export interface PageHeader {
-  /** The dock's notes above its groups: settings, playbook, hook, source and voice errors, then what an unconfigured home lacks (PRD R42). */
+  /** The notes above the groups: settings, playbook, hook, source and voice errors, then what an unconfigured home lacks (PRD R42). */
   notes: string[];
-  /** The dock's note while a held session has no work item, "N held sessions without a work item" (PRD R94); absent otherwise. */
+  /** The note while a held session has no work item, "N held sessions without a work item" (PRD R94); absent otherwise. */
   heldNote?: string;
-  /** The dock's neutral note while no device has the voice because the phone was lost (PRD R119); absent otherwise. */
+  /** The neutral note while no device has the voice because the phone was lost (PRD R119); absent otherwise. */
   voiceNote?: string;
-  /** The configured sources but ad-hoc, by kind, as the dock's header icons show them. */
+  /** The configured sources but ad-hoc, by kind, as the header's icons show them. */
   sources: DockSourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
   repoRoots: string[];
   /** The schedules the New session form can run now (PRD R82). */
   schedules: { name: string; playbook: string }[];
-  /** The dock's holder notice and restart result (architecture.md § Restarting the holder); absent when the dock shows none. */
+  /** The holder notice and restart result (architecture.md § Restarting the holder); absent when there is none. */
   holderNotice?: DockHolderNotice;
   holderResult?: DockHolderResult;
   /** Where the voice is while it is not on this computer, with voice on: a paired phone, or none after the phone left (PRD R119); absent otherwise. */
   voiceDevice?: 'phone' | 'none';
 }
 
-/** The page's list header, from the built dock view, so the page and the dock show the same sources; the New session form asks `page-folders` for its folders. */
+/** The page's list header, from the built list view, so the header and the list agree; the New session form asks `page-folders` for its folders. */
 export function pageHeader(dock: Pick<DockView, 'notes' | 'heldNote' | 'voiceNote' | 'sources' | 'repoRoots' | 'schedules' | 'holderNotice' | 'holderResult'>): PageHeader {
   return {
     notes: dock.notes,
@@ -806,12 +805,12 @@ export function pageHeader(dock: Pick<DockView, 'notes' | 'heldNote' | 'voiceNot
   };
 }
 
-/** A pool ticket's row in the dock's view, or null when no group lists it. */
+/** A pool ticket's row in the list view, or null when no group lists it. */
 export function poolRowOf(dock: Pick<DockView, 'groups'>, ticketId: number): DockRow | null {
   return dock.groups.flatMap((group) => group.rows).find((row) => row.key === `ticket:${ticketId}`) ?? null;
 }
 
-/** A work item's row in the dock's view, or null when no group lists it. */
+/** A work item's row in the list view, or null when no group lists it. */
 export function dockRowOf(dock: Pick<DockView, 'groups'>, workItemId: number): DockRow | null {
   return dock.groups.flatMap((group) => group.rows).find((row) => row.key === `item:${workItemId}`) ?? null;
 }

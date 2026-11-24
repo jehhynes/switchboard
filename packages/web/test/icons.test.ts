@@ -15,7 +15,7 @@ function glyphOf(name: string): string | null {
 }
 
 describe('the shared mark icons', () => {
-  it('name the codicon whose glyph the dock and the pane draw for each mark, so the page, the views and the dock cannot drift', () => {
+  it('name the codicon whose glyph MARK_GLYPHS gives each mark, so the page and the browser extension pills cannot drift', () => {
     for (const mark of Object.keys(MARK_ICONS) as Mark[]) {
       expect([mark, glyphOf(MARK_ICONS[mark])]).toEqual([mark, MARK_GLYPHS[mark]]);
     }
@@ -29,7 +29,7 @@ describe('the shared mark icons', () => {
 describe('the spinning codicons', () => {
   const page = PAGE_ASSETS['page.css']!.body;
 
-  it('keep spinning under reduced motion, as the dock and the Conversation view do, while the other reduced-motion rules stay', () => {
+  it('keep spinning under reduced motion, while the other reduced-motion rules stay', () => {
     // Each reduced-motion block whole, over as many lines as it takes.
     const reduced = page.split(/@media\s*\(prefers-reduced-motion:\s*reduce\)/).slice(1).map((rest) => rest.slice(0, rest.indexOf('}\n') + 1).replace(/\s+/g, ' '));
 

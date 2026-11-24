@@ -13,7 +13,7 @@ export interface HubRecord {
   build: string;
   /** The folder holding settings.json. */
   configDir: string;
-  /** The hub's runtime, `process.execPath`: VS Code's Electron when a window started it, Node.js from `hub.js start`; the dock starts a hub with it (PRD R71). */
+  /** The hub's runtime, `process.execPath`: Node.js from `hub.js start` (PRD R71). */
   execPath: string;
   port: number;
   token: string;

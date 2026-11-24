@@ -10,7 +10,7 @@ export interface SnapshotWorkerData {
   kind: 'snapshot';
   /** The store's database, which the worker opens read-only. */
   db: string;
-  /** The folder of the item windows' workspace files, which the dock view names. */
+  /** The folder of the item windows' workspace files, which the list view names. */
   windows: string;
 }
 
@@ -19,7 +19,7 @@ export interface SnapshotRequest {
   inputs: SnapshotInputs;
 }
 
-/** The snapshot and the dock view as JSON, which the main thread parses once, or why the build failed. */
+/** The snapshot and the list view (`dockView`) as JSON, which the main thread parses once, or why the build failed. */
 export type SnapshotReply = { id: number; snapshot: string; dock: string } | { id: number; error: string };
 
 /** Answers each request on the port with a snapshot built from a read-only store and the inputs it carries. */

@@ -19,7 +19,7 @@ export interface VoiceView {
   /** The reply of this window's session playing now, or null. */
   speaking: string | null;
   speakReplies: boolean;
-  /** Why capture cannot run, while the mic is `unavailable` here; playback and speech errors are the voice's, which the dock shows. */
+  /** Why capture cannot run, while the mic is `unavailable` here; playback and speech errors are the voice's, which the list's notes show. */
   error: string | null;
   /**
    * Only while the voice is here and its capture cancels no echo: why, such as "no echo cancellation on Remote Audio". Listening then pauses
@@ -69,7 +69,7 @@ interface Composer {
 }
 
 /**
- * Voiceprint enrolment as the dock's Voice page shows it (architecture.md § Voice check and barge-in): `idle` before any this run, `starting`
+ * Voiceprint enrolment as the Settings Voice page shows it (architecture.md § Voice check and barge-in): `idle` before any this run, `starting`
  * while the voice process starts, `recording` until `endsAt`, then how it ended; `enrolledAt` when the saved voiceprint was made, or null.
  */
 export interface EnrollmentView {
@@ -108,7 +108,7 @@ const TIMINGS_KEPT = 50;
 export const VOICE_LINGER_MS = 10 * 60_000;
 /** A crashed voice process is started again at most this often. */
 export const VOICE_RESTART_MS = 60_000;
-/** The mic codicon in codicon.ttf, which marks the voice target's dock row while the mic is on (architecture.md § Voice). */
+/** The mic codicon in codicon.ttf, which marks the voice target's list row while the mic is on (architecture.md § Voice). */
 export const VOICE_GLYPH = '\u{ec12}';
 /** The speaker codicon (`unmute`), which marks the voice target's row while the mic is off and Speak replies on: the voice speaks there, but nothing listens. */
 export const SPEAKER_GLYPH = '\u{eb75}';
@@ -462,7 +462,7 @@ export class VoiceControl {
   }
 
   /**
-   * Whether no device has the voice because the phone was lost, which the dock and the page note (PRD R119): its connection dropped or stalled,
+   * Whether no device has the voice because the phone was lost, which the page's list notes (PRD R119): its connection dropped or stalled,
    * or it did not come back after a hub restart. False after the operator's own Voice off, a hidden or closed page, or a refusal for a sign-out,
    * a forbidden device or voice turned off, since the operator chose those.
    */
@@ -865,14 +865,14 @@ export class VoiceControl {
 
   /**
    * Whether the mic is on where the voice is: turned on, and capture neither off, stopped by the idle timeout nor unavailable. The voice
-   * target's row shows the mic mark only then, else the speaker mark while Speak replies is on (architecture.md § Dock, PRD R109).
+   * target's row shows the mic mark only then, else the speaker mark while Speak replies is on (architecture.md § Web page, PRD R109).
    */
   get micLive(): boolean {
     return this.#micOn && this.#mic !== 'off' && this.#mic !== 'idle-off' && this.#mic !== 'unavailable';
   }
 
   /**
-   * Sends each window its voice state when it changed, and the dock and the page's list their row mark when the mic came on or went off or
+   * Sends each window its voice state when it changed, and the page's list its row mark when the mic came on or went off or
    * Speak replies was turned on or off.
    */
   viewsChanged(): void {
@@ -1211,7 +1211,7 @@ export class VoiceControl {
   }
 
   /**
-   * Voiceprint enrolment from the dock's Voice page (architecture.md § Voice check and barge-in): `start` starts the voice process if it is not
+   * Voiceprint enrolment from the Settings Voice page (architecture.md § Voice check and barge-in): `start` starts the voice process if it is not
    * running and has it record; `cancel` stops a recording. Why not, or null.
    */
   enroll(action: 'start' | 'cancel'): string | null {

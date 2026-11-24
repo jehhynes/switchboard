@@ -3,9 +3,9 @@ import { Harness, playbooks, settings } from './flowHarness.js';
 import type { FlowEvent } from '../src/flow.js';
 
 describe('session provider choice', () => {
-  it.each(['claude', 'codex'] as const)('starts a hosted %s session independently of the default', provider => {
+  it.each(['claude', 'codex'] as const)('starts a standalone %s session independently of the default', provider => {
     const h = new Harness({ settings: settings({ sessions: { provider: provider === 'claude' ? 'codex' : 'claude', codeMode: true } }) });
-    const actions = h.act({ type: 'new-conversation', hostWindow: 'D:/folder', folder: 'D:/folder', provider });
+    const actions = h.act({ type: 'new-session', repoRoot: 'D:/folder', provider });
     expect(actions).toMatchObject([{ type: 'start-session', provider }]);
     expect(h.store.session('s1')?.provider).toBe(provider);
     expect(h.item(1).provider).toBe(provider);
@@ -15,7 +15,7 @@ describe('session provider choice', () => {
 
   it('checks the chosen provider prerequisites and refuses invalid input before creating work', () => {
     const h = new Harness({ settings: settings({ sessions: { provider: 'codex', codeMode: false, installHooks: false } }) });
-    const event = { type: 'new-conversation', hostWindow: 'D:/folder', folder: 'D:/folder' } as const;
+    const event = { type: 'new-session', repoRoot: 'D:/folder' } as const;
     expect(h.send({ ...event, provider: 'claude' }).refused).toBe('Claude sessions need sessions.installHooks.');
     expect(h.send({ ...event, provider: 'other' } as unknown as FlowEvent).refused).toBe('Choose Claude or Codex.');
     expect(h.store.activeSessions()).toHaveLength(0);
@@ -56,7 +56,7 @@ describe('session provider choice', () => {
 
   it('keeps an explicit provider while waiting for a free slot', () => {
     const h = new Harness({ settings: settings({ sessions: { provider: 'codex', codeMode: true, concurrency: 1 } }) });
-    const first = h.act({ type: 'new-conversation', hostWindow: 'D:/folder', folder: 'D:/folder', provider: 'claude' })[0];
+    const first = h.act({ type: 'new-session', repoRoot: 'D:/folder', provider: 'claude' })[0];
     h.started(first);
     h.act({ type: 'marker', sessionId: 's1', state: 'running', detail: null });
     expect(h.act({ type: 'adhoc', prompt: 'Wait', repoRoot: 'D:/folder', start: true, provider: 'claude' })).toEqual([]);

@@ -2,7 +2,7 @@ import { ARTIFACTS_ENV } from '@switchboard/core';
 
 /**
  * The conversation rules of a Code Mode session's prompt (architecture.md § Conversation): the tags and the question shape
- * the Conversation view reads, from claude-collab's `instructions/live-collaboration.md`, and why to ask in a reply rather than with AskUserQuestion. They never change how a session writes, its length,
+ * the web page's conversation reads, from claude-collab's `instructions/live-collaboration.md`, and why to ask in a reply rather than with AskUserQuestion. They never change how a session writes, its length,
  * format or verbosity (voice-design decision 21), except how it asks the operator a question (PRD R103), the one place the card's usefulness depends on the content, and that a `[details]` line comes before the part of a reply the operator can skip, as claude-collab's replies did, so the view can show the rest first whether or not it is spoken. Each slice of the view adds the rules for what it shows, so a session is never told to write
  * what nothing reads; the contract hook gives a resumed or compacted session the current rules. `artifactsDir` is the session's artifact folder (architecture.md § Artifacts), which its environment
  * also names; the artifact rules say only where and how to write an artifact, not when or how much. With `voice` (`voice.enabled`) the rules add the

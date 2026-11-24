@@ -4,7 +4,7 @@ import { mount } from './island.js';
 
 /** Where the page keeps each work item's attached files, over a reload. */
 const ATTACHMENTS = 'switchboard.attachments';
-/** The largest file the composer attaches, the hub's limit and the Conversation view's for a pasted image. */
+/** The largest file the composer attaches, the hub's limit. */
 export const MAX_ATTACH_BYTES = 10 * 1024 * 1024;
 /** The most files one message carries. */
 export const MAX_ATTACHMENTS = 10;

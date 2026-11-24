@@ -97,7 +97,7 @@ function readText(path: string): string | null {
 /**
  * The config folder the hub uses (architecture.md § Config folder). config.json wins, so a `--config` that differs is ignored with a notice; a
  * config.json that cannot be used is an error, so the hub never falls back to a folder without the operator's playbooks. Without config.json the
- * folder is imported once, from `--config`, the running hub's folder (which a window or a login entry chose), VS Code's `switchboard.configDir` (read only), else the Switchboard home,
+ * folder is imported once, from `--config`, the running hub's folder (which a login entry or an earlier start chose), VS Code's `switchboard.configDir` (read only), else the Switchboard home,
  * and written to config.json unless \`persist\` is false, as for a dry run.
  */
 export function loadConfigFolder(deps: ConfigFolderDeps, flag: string | null, options: { persist?: boolean; running?: string | null } = {}): LoadedConfigFolder {

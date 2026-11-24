@@ -7,8 +7,8 @@ import type { ChangedPath, DiffRow } from '@switchboard/core';
 import type { WindowScope } from './windows.js';
 
 /**
- * The web page's Changes list (PRD R118, architecture.md § Web page): a worktree's changes from its merge base to disk, read with the git CLI as
- * VS Code's Open changes shows them (PRD R57), committed, staged, unstaged, conflicted and untracked, each file once; or the range the page's
+ * The web page's Changes list (PRD R118, architecture.md § Web page): a worktree's changes from its merge base to disk, read with the git CLI
+ * (PRD R57), committed, staged, unstaged, conflicted and untracked, each file once; or the range the page's
  * scope names: from HEAD, the base or a commit since the base, to disk or to one of those commits.
  */
 
@@ -102,7 +102,7 @@ export type Git = (args: string[], cwd: string, options?: { maxBytes?: number; s
 
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BYTES = 64 * 1024 * 1024;
-/** Refs tried in order for the merge base, as the VS Code window's Open changes tries them. Nothing is fetched. */
+/** Refs tried in order for the merge base. Nothing is fetched. */
 export const BASE_REFS = ['origin/HEAD', 'origin/main', 'origin/master'];
 
 /** The `GIT_*` variables git reads from the hub's environment; any other, such as `GIT_DIR` or `GIT_EXTERNAL_DIFF`, could point it elsewhere or change its output. */
@@ -145,8 +145,7 @@ function fields(output: Buffer): string[] {
 }
 
 /**
- * Parses `git diff -z --name-status`: a copy counts as an addition and a conflict or type change as a modification, as the VS Code window's
- * Open changes reads them.
+ * Parses `git diff -z --name-status`: a copy counts as an addition and a conflict or type change as a modification.
  */
 export function parseNameStatus(output: Buffer): ChangedPath[] {
   const parts = fields(output);

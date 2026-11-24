@@ -88,7 +88,7 @@ export class Router {
     this.#clear('away');
     this.#set(sessionId, 'talk-here');
 
-    // Talk here from the dock, with no scoped window focused, still times out.
+    // Talk here with no scoped window focused still times out.
     if (this.#focus === null) {
       this.#startAway();
     }

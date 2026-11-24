@@ -310,7 +310,7 @@ describe('dockView', () => {
     ]);
   });
 
-  it('gives a row its main control, pastes, VS Code commands and search text', () => {
+  it('gives a row its main control, pastes, commands and search text', () => {
     const waiting = row(
       item(7, {
         worktree,

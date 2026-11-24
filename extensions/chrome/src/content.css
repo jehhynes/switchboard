@@ -68,7 +68,7 @@
   margin-right: 6px;
 }
 
-/* VS Code's icon font, as the dock draws the marks; an SVG of the same paths renders thin and grainy at fractional display scales. */
+/* VS Code's icon font (codicons), as the web page draws the marks; an SVG of the same paths renders thin and grainy at fractional display scales. */
 @font-face {
   font-family: switchboard-codicon;
   src: url('chrome-extension://__MSG_@@extension_id__/codicon.ttf') format('truetype');
@@ -116,7 +116,7 @@
   }
 }
 
-/* The dock row's stripe colours: a failure, a block or question, and a review or approval on the operator's turn. */
+/* The list row's stripe colours: a failure, a block or question, and a review or approval on the operator's turn. */
 .switchboard-pill[data-switchboard-tone="error"] {
   border-color: color-mix(in srgb, var(--borderColor-danger-emphasis, #cf222e) 50%, var(--borderColor-default, #d1d9e0));
   background: var(--bgColor-danger-muted, #ffebe9);

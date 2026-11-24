@@ -16,7 +16,7 @@ const config = (value: unknown, patch: Record<string, unknown> = {}) => ({
   ...patch,
 });
 
-describe('Settings schedules (architecture.md § Settings window)', () => {
+describe('Settings schedules (architecture.md § Web page)', () => {
   let host: HTMLElement;
   let posts: Array<{ name: string; body: Record<string, unknown> }>;
   const file = {

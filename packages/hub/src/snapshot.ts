@@ -1,5 +1,5 @@
 /**
- * The snapshot every window and the dock are built from (architecture.md § Hub lifecycle): a pure projection of the store and the runtime's
+ * The snapshot every window and the list view are built from (architecture.md § Hub lifecycle): a pure projection of the store and the runtime's
  * inputs, so the hub can build it in a worker thread with its own read-only connection and keep its main thread free.
  */
 import type { Comment, Link, Paste, Playbook, Provider, PullRequestStatus, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
@@ -46,7 +46,7 @@ export interface WorkItemView extends WorkItem {
   pastes: Paste[];
   /** The operator's comments, oldest first (PRD R87). */
   comments: Comment[];
-  /** Earlier started work items for the same ticket with the same playbook or one it is a return of; above 0 the dock marks the work item Returned (PRD R51). */
+  /** Earlier started work items for the same ticket with the same playbook or one it is a return of; above 0 the list marks the work item Returned (PRD R51). */
   returned: number;
   /** The ticket of the work item whose session reported this one as a task (PRD R68). */
   parent: Ticket | null;
@@ -72,16 +72,16 @@ export interface PoolView {
   focus: string | null;
   /** The ticket's links, such as a GitHub issue its thread names (PRD R52, R61). */
   links: Link[];
-  /** Started done work items for the ticket with the latest triage's playbook or one it is a return of; above 0 the dock marks it Returned (PRD R51). */
+  /** Started done work items for the ticket with the latest triage's playbook or one it is a return of; above 0 the list marks it Returned (PRD R51). */
   returned: number;
   /** The playbooks Start with guidance… offers, the triage's among them (PRD R35). */
   playbookChoices: string[];
 }
 
-/** Everything a window and the dock show, sent whole on each change. */
+/** Everything a window and the list view show, sent whole on each change. */
 export interface Snapshot {
   workItems: WorkItemView[];
-  /** Oldest first by the source's sort time; the dock orders it with the unstarted work items (PRD R27). */
+  /** Oldest first by the source's sort time; the list orders it with the unstarted work items (PRD R27). */
   pool: PoolView[];
   playbooks: { name: string; description: string }[];
   /** Repos an ad-hoc prompt can run in: each source's repo root, the first being the default. */
@@ -135,7 +135,7 @@ export function repoKeysOf(settings: Settings, stored: Readonly<Record<string, r
 }
 
 
-/** Builds a work item's view as the snapshot shows it, and counts a ticket's returns (PRD R51); the dock's search builds older Done rows with it. */
+/** Builds a work item's view as the snapshot shows it, and counts a ticket's returns (PRD R51); the list's search further back builds older Done rows with it. */
 export function workItemViews(store: Store, inputs: SnapshotInputs): { view: (item: WorkItem) => WorkItemView; returned: (items: WorkItem[], playbook: string | null, ticket: Ticket) => number } {
 const { settings } = inputs;
 const playbooks = new Map(inputs.playbooks);

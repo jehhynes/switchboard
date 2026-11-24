@@ -1,4 +1,4 @@
-// The page's list of work items (architecture.md § Web page), drawn as the dock's.
+// The page's list of work items (architecture.md § Web page).
 import type { ComponentChildren, VNode } from 'preact';
 import { MARK_ICONS, SPINNING_MARKS } from '@switchboard/core/group';
 import { bandOpen, rowKey } from './render.js';
@@ -6,7 +6,7 @@ import type { PageGroup, PageRow } from '@switchboard/protocol';
 import type { DragView } from './reorder.js';
 import { WindowRows } from './windowRows.js';
 
-/** The codicon Returned shows, as the dock's pill does. */
+/** The codicon Returned's pill shows. */
 const RETURNED_GLYPH = '\u{eae2}';
 
 /**
@@ -23,10 +23,10 @@ function Pill({ classes, glyph, text, title, opens }: { classes: string; glyph: 
 }
 
 /**
- * A row of the list, drawn as the dock's three lines from the hub's dock row: line 1 the priority dot, the title and the time; line 2 the
+ * A row of the list, drawn in three lines from the hub's dock row: line 1 the priority dot, the title and the time; line 2 the
  * comment icon, the playbook with its namespace muted (or a hosted conversation's host), the ticket key as a pill in its source's colour, the
  * link pills and Returned, those that do not fit left out whole by the page's CSS (page.css, Line 2); line 3 the mark and the
- * details, a muted " · " between them, in their tones. The dock's stripe is on its left edge.
+ * details, a muted " · " between them, in their tones. The row's stripe is on its left edge.
  */
 function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, position }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; menuPoint: { x: number; y: number } | undefined; pillsOpen: boolean; movable: boolean; drag: DragView | null; position?: { index: number; total: number } }) {
   const kind = row.mark?.kind;
@@ -50,7 +50,7 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
   const classes = ['row', ...(row.stripe === null ? [] : [`stripe-${row.stripe}`]), ...(row.dim ? ['dim'] : []), ...(selected ? ['selected'] : []), ...(movable ? ['movable'] : []), ...dragged, ...dropEdge].join(' ');
   const key = rowKey(row);
   const hasMenu = row.actions.length + row.pastes.length + row.opens.length + row.links.length > 0 || row.url !== '' || row.history !== null;
-  // Without the browser pane a pill with a link opens it instead of the row's click, as the dock's `OnPillTapped` (PRD R52).
+  // Without the browser pane a pill with a link opens it instead of the row's click (PRD R52).
   const opens = (which: string): Record<string, string> => (pillsOpen ? { 'data-action': 'open-link', 'data-row': key, 'data-link': which } : {});
   const details = row.details.map((detail, index) => [
     index > 0 ? <span class="row-detail-separator" aria-hidden="true">·</span> : null,
@@ -123,7 +123,7 @@ export function bandRuns(rows: readonly PageRow[]): Array<{ band: string | null;
 }
 
 /**
- * The page's list (architecture.md § Web page): the dock's groups in its order, each a header with its codicon, title and count that opens or
+ * The page's list (architecture.md § Web page): the work item groups in their order, each a header with its codicon, title and count that opens or
  * collapses it, then its rows; a collapsed group still shows the selected row, so the selection is never hidden. While a search `filtering` it,
  * only the groups with rows show, every one open, and the search's end says when none matched. `menu` is the row whose menu is
  * open, by its key, with the menu's rows. An open group's rows with a band, Done's, sit under their band's heading, a muted label with its count

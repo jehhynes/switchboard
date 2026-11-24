@@ -213,7 +213,7 @@ describe('VoiceControl', () => {
     expect(stops()).toBe(1);
   });
 
-  it('starts nothing while voice.enabled is off, and shows the dock why the process cannot run, trying again a minute later', async () => {
+  it('starts nothing while voice.enabled is off, and shows the list why the process cannot run, trying again a minute later', async () => {
     const off = setup({ enabled: false });
 
     off.windows.set('k1', scope('k1', 1, 's1'));
@@ -487,7 +487,7 @@ describe('VoiceControl', () => {
     expect(connections[0]!.sent.slice(before)).toEqual([{ type: 'cancel', replyId: 'r1', off: true }, { type: 'cancel', replyId: 'r2', off: true }]);
   });
 
-  it('runs Talk here, Stop speaking and Replay only where they apply, and turns a dock row click into Talk here', async () => {
+  it('runs Talk here, Stop speaking and Replay only where they apply, and turns selecting a conversation into Talk here', async () => {
     const { control, connections, windows, full, reply, settle, focus } = setup();
 
     windows.set('k1', scope('k1', 1, 's1'));
@@ -546,7 +546,7 @@ describe('VoiceControl', () => {
     expect(connections[0]!.sent.filter((one) => one.type === 'earcon')).toHaveLength(1);
   });
 
-  it('fails what was offered when the process stops, shows the dock, reports playback trouble only to the window it is in, and passes settings on', async () => {
+  it('fails what was offered when the process stops, shows the list, reports playback trouble only to the window it is in, and passes settings on', async () => {
     const { control, connections, windows, reply, replies, notified, settle, advance, setSettings } = setup();
 
     windows.set('k1', scope('k1', 1, 's1'));
@@ -555,7 +555,7 @@ describe('VoiceControl', () => {
     await settle();
     connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' });
     connections[0]!.receive({ type: 'audio', mic: 'off', engine: 'decibri', device: null, recognizer: null, error: 'no device' });
-    // Playback trouble is the voice's: the dock shows it, no window does.
+    // Playback trouble is the voice's: the list shows it, no window does.
     expect(control.view('k1').error).toBeNull();
     expect(control.view('k2').error).toBeNull();
     expect(control.dockError()).toBe('no device');
@@ -765,7 +765,7 @@ describe('spoken alerts in the hub', () => {
     focus(null);
   });
 
-  it('says the mic is on where the voice is only while it is turned on and capture runs, and tells the dock when that changes (PRD R109)', async () => {
+  it('says the mic is on where the voice is only while it is turned on and capture runs, and tells the list when that changes (PRD R109)', async () => {
     const { control, connections, windows, settle, dockChanges } = setup({ enabled: true });
 
     windows.set('k1', scope('k1', 1, 's1'));

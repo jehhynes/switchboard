@@ -1,5 +1,5 @@
-// Markup the page does not build itself: Markdown from markdown-it, with raw HTML off, and the HTML of the renderers the page shares with the
-// Conversation view (`packages/conversation`), which escape what they draw. It becomes Preact nodes, so it is patched with the rest of the page.
+// Markup the page does not build itself: Markdown from markdown-it, with raw HTML off, and the HTML of the renderers in
+// `packages/conversation`, which escape what they draw. It becomes Preact nodes, so it is patched with the rest of the page.
 import { h } from 'preact';
 import type { ComponentChild } from 'preact';
 

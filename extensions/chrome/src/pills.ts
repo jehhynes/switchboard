@@ -57,12 +57,12 @@ function pill(doc: Document, card: Card): HTMLElement {
   const namespace = doc.createElement('span');
 
   element.className = PILL;
-  // A link to the ticket's row in VS Code, which open.ts follows on a click or Enter (PRD R69).
+  // A link to the ticket's work item in Switchboard, which open.ts follows on a click or Enter (PRD R69).
   element.tabIndex = 0;
   element.setAttribute('role', 'link');
   element.dataset['switchboardGroup'] = card.snoozed ? 'snoozed' : card.group;
 
-  // The dock row's stripe colour: error, warning or turn (PRD R27, R67).
+  // The list row's stripe colour: error, warning or turn (PRD R27, R67).
   if (card.stripe != null) {
     element.dataset['switchboardTone'] = card.stripe;
   }
@@ -151,8 +151,8 @@ function update(pill: Element, wanted: Element): void {
 }
 
 /**
- * Puts a pill after the issue reference in each loaded card's header and each table row's title, with the dock row's mark and
- * the playbook Switchboard chose, coloured as the dock row's stripe (PRD R67). A pill that matches its card is left alone, so a
+ * Puts a pill after the issue reference in each loaded card's header and each table row's title, with the list row's mark and
+ * the playbook Switchboard chose, coloured as the list row's stripe (PRD R67). A pill that matches its card is left alone, so a
  * pass that changes nothing makes no mutation, and one whose card changed is updated in place.
  */
 export function applyPills(root: ParentNode, cards: ReadonlyMap<string, Card>): void {

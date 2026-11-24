@@ -1,6 +1,6 @@
 import type { PoolView, Snapshot, WorkItemView } from '../src/runtime.js';
 
-// Fixtures for the row and dock views, which build from a panel snapshot.
+// Fixtures for the row and list views, which build from a panel snapshot.
 
 export const NOW = Date.UTC(2026, 9, 3, 12);
 

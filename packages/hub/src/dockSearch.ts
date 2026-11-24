@@ -1,5 +1,5 @@
 /**
- * The dock's search of work done before its Done list (PRD R63): the dock filters the rows it has, and asks the hub only when the operator widens
+ * The list's search of work done before its Done list (PRD R63): the page filters the rows it has, and asks the hub only when the operator widens
  * the searched range past them.
  */
 import type { Link, Store, Ticket, WorkItem } from '@switchboard/core';
@@ -9,7 +9,7 @@ import { doneSince } from './rows.js';
 import { workItemViews } from './snapshot.js';
 import type { Snapshot, SnapshotInputs, WorkItemView } from './snapshot.js';
 
-/** The most rows one search answers; the dock says there are more. */
+/** The most rows one search answers; the page says there are more. */
 export const SEARCH_LIMIT = 100;
 
 export interface DockSearch {

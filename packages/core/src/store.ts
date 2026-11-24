@@ -3,7 +3,6 @@ import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemS
 import { ownPrompt } from './group.js';
 import { CONVERSATION_RETENTION } from './conversation.js';
 import type { ConversationMessage, ConversationReply, ConversationStatus, MessageAnswer, Piece, TranscriptCheckpoint } from './conversation.js';
-import { windowFileKey } from './conversation.js';
 
 export const MIGRATIONS = [
   `CREATE TABLE tickets (
@@ -167,7 +166,7 @@ export const MIGRATIONS = [
   );`,
   // A session's task report records the work item it came from (PRD R68).
   `ALTER TABLE workItems ADD COLUMN parentId INTEGER REFERENCES workItems(id);`,
-  // A work item that never had a session is deleted when its ticket leaves (PRD R10), so IDs must not be reused: the dock can act on a stale one.
+  // A work item that never had a session is deleted when its ticket leaves (PRD R10), so IDs must not be reused: the page can act on a stale one.
   `CREATE TABLE workItemsNew (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticketId INTEGER NOT NULL REFERENCES tickets(id),
@@ -459,8 +458,8 @@ export const MIGRATIONS = [
   `ALTER TABLE workItems ADD COLUMN provider TEXT;`,
   // Rate limits (architecture.md § Rate limits): the limit a session's last turn stopped at, as JSON.
   `ALTER TABLE sessions ADD COLUMN rateLimit TEXT;`,
-  // A snapshot and the dock's search read work items by when they were done and tickets by these columns; without the indexes each read scans the
-  // whole history (architecture.md § Dock).
+  // A snapshot and the list's search read work items by when they were done and tickets by these columns; without the indexes each read scans the
+  // whole history (architecture.md § Web page).
   `CREATE INDEX IF NOT EXISTS workItemsByDoneAt ON workItems (doneAt);
   CREATE INDEX IF NOT EXISTS workItemsDone ON workItems (status, doneAt);
   CREATE INDEX IF NOT EXISTS ticketsBySnoozed ON tickets (snoozed);
@@ -693,7 +692,7 @@ const RECENT_FOLDERS = 'recentFolders';
 /** How many folders `Store.recentFolders` keeps. */
 export const RECENT_FOLDER_COUNT = 10;
 
-/** A done work item as the dock's search reads it (PRD R63). */
+/** A done work item as the list's search reads it (PRD R63). */
 export interface DoneSearchEntry {
   id: number;
   playbook: string | null;
@@ -826,7 +825,7 @@ export class Store {
 
   /** Opens or creates the database and applies pending migrations. Use `:memory:` in tests. */
   static open(path: string): Store {
-    // Loaded on first use, so importing core (as the extension does) does not load SQLite or print its experimental warning.
+    // Loaded on first use, so importing core does not load SQLite or print its experimental warning.
     const { DatabaseSync: Database } = process.getBuiltinModule('node:sqlite');
     const db = new Database(path);
 
@@ -1274,7 +1273,7 @@ export class Store {
   }
 
   /**
-   * What the dock's search matches of each work item done from `since` to before `until` whose ticket is not snoozed, newest first (PRD R63): one
+   * What the list's search matches of each work item done from `since` to before `until` whose ticket is not snoozed, newest first (PRD R63): one
    * read of the few columns its search text needs.
    */
   doneSearchEntries(since: number, until: number): DoneSearchEntry[] {
@@ -1903,7 +1902,7 @@ export class Store {
     return (this.#db.prepare('SELECT value FROM pagePrefs WHERE name = ?').get(name) as { value: string } | undefined)?.value ?? null;
   }
 
-  /** The folders new work was last created in, newest first, which the New session form offers on the dock and every page (PRD R122). */
+  /** The folders new work was last created in, newest first, which the New session form offers on every page (PRD R122). */
   recentFolders(): string[] {
     try {
       const kept = JSON.parse(this.pagePref(RECENT_FOLDERS) ?? '[]') as unknown;
@@ -1959,18 +1958,6 @@ export class Store {
   /** Forgets the sign-ins last used before `usedBefore`, and all but the `keep` used last. */
   trimPageSessions(usedBefore: number, keep: number): void {
     this.#db.prepare('DELETE FROM pageSessions WHERE usedAt < ? OR hash NOT IN (SELECT hash FROM pageSessions ORDER BY usedAt DESC, createdAt DESC LIMIT ?)').run(usedBefore, keep);
-  }
-
-  /**
-   * The work items of the ad hoc tickets a host hosts (`Ticket.hostWindow`, compared by `windowFileKey`), newest first. Compared in
-   * JavaScript, because SQLite's `lower()` lowers only ASCII letters, so a folder named "Étage" would match no spelling of itself.
-   */
-  hostedWorkItems(file: string): WorkItem[] {
-    const key = windowFileKey(file);
-
-    return this.#all<WorkItem & { hostWindow: string }>('SELECT w.*, t.hostWindow AS hostWindow FROM workItems w JOIN tickets t ON t.id = w.ticketId WHERE t.hostWindow IS NOT NULL ORDER BY w.id DESC')
-      .filter((row) => windowFileKey(row.hostWindow) === key)
-      .map(({ hostWindow: _host, ...item }) => item as WorkItem);
   }
 
   #replyRows(sql: string, ...params: Array<SQLInputValue | Record<string, SQLInputValue>>): ConversationReply[] {

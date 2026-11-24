@@ -1,4 +1,4 @@
-/* Settings as a dialog over the dimmed page, as the dock's Settings window (architecture.md § Web page): the navigation beside the page, and the
+/* Settings as a dialog over the dimmed page (architecture.md § Web page): the navigation beside the page, and the
    bar under both; on a phone it takes the whole screen, and the navigation is a list that drills into each page, with Back to it. */
 .settings-backdrop { position: fixed; inset: 0; z-index: var(--sb-z-settings); display: flex; align-items: center; justify-content: center; padding: max(24px, var(--sb-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); background: rgba(0, 0, 0, 0.45); }
 .settings { box-sizing: border-box; display: flex; flex-direction: column; width: min(960px, 100%); height: min(80vh, 100%); overflow: hidden; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 8px; box-shadow: 0 8px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5)); background: var(--vscode-editor-background); color: var(--vscode-foreground); }

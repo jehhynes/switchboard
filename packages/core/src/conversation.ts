@@ -107,7 +107,7 @@ export interface ConversationReply {
   transcriptUuid: string | null;
   /** Its place in the conversation, which the store sets. */
   ord: number;
-  /** When the operator saw it in the Conversation view (architecture.md § Unread); null while unread. */
+  /** When the operator saw it in the conversation (architecture.md § Unread); null while unread. */
   seenAt: number | null;
   /** Its primary response, the part before its `[details]` line, shown first and read aloud while Speak replies is on (an older reply's `[speak]` passage); null without one. */
   speak?: string | null;
@@ -151,7 +151,7 @@ export interface ConversationStatus {
   replyId: string;
   at: number;
   markdown: string;
-  /** When the operator saw it on the Conversation view's Status tab (architecture.md § Unread); null while unread. Only the latest status counts as unread. */
+  /** When the operator saw it on the conversation's Status tab (architecture.md § Unread); null while unread. Only the latest status counts as unread. */
   seenAt: number | null;
 }
 

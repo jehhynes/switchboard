@@ -116,13 +116,13 @@ export function renderComposerMenu(menu: ComposerMenu, active: number): VNode {
   );
 }
 
-/** HTML of the voice controls, the mic and the context meter, drawn by the renderers the Conversation view shares. */
+/** HTML of the voice controls, the mic and the context meter, drawn by the renderers in packages/conversation. */
 export function renderShared(html: string): VNode {
   return <>{trusted(html)}</>;
 }
 
 /**
- * The note above the composer while the session has ended, with Resume, as the Conversation view's; a session the page cannot talk to at all
+ * The note above the composer while the session has ended, with Resume; a session the page cannot talk to at all
  * (`none`) gets only its reason.
  */
 export function renderEndedNote(session: PageState['session'], resuming: boolean, earlierOf: number | null = null): VNode | null {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { browserCommand, codeExecutable, launchEnvironment, launcher } from '../src/launch.js';
 
 describe('launcher (architecture.md § Web page)', () => {
-  it('opens the dock terminal app with literal attach arguments and without session markers', async () => {
+  it('opens the terminal app with literal attach arguments and without session markers', async () => {
     const runs: Array<{ file: string; args: string[]; env: NodeJS.ProcessEnv }> = [];
     const run = (file: string, args: string[], env: NodeJS.ProcessEnv) => { runs.push({ file, args, env }); };
     const terminal = { provider: 'claude' as const, sessionId: 's7', cwd: 'D:/scratch & work', name: 'sb:gh 7', title: 'Switchboard · gh 7', args: ['D:/home/hub.js', 'attach', 's7'], executable: 'D:\\node\\node.exe', active: false, handoff: null, codeMode: true as const };
@@ -44,7 +44,7 @@ describe('launcher (architecture.md § Web page)', () => {
     expect(runs).toHaveLength(2);
   });
 
-  it('finds VS Code as the dock does: Code.exe beside code.cmd on PATH, else the per-user install, else code on PATH elsewhere', () => {
+  it('finds VS Code: Code.exe beside code.cmd on PATH, else the per-user install, else code on PATH elsewhere', () => {
     const env = { PATH: 'C:\\Windows;C:\\VS Code\\bin', LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local' };
     const has = (...paths: string[]) => (path: string) => paths.includes(path);
 

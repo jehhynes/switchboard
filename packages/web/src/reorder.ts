@@ -1,8 +1,8 @@
-// Reordering Ready for review on the page (PRD R73), as the dock does: a row dragged to a new place, with a drop line where it will land, moves
+// Reordering Ready for review on the page (PRD R73): a row dragged to a new place, with a drop line where it will land, moves
 // there on release; Escape, a cancelled pointer or a lost capture ends the drag without a move. A mouse or pen drags once it moves a few pixels
 // up or down; a finger first holds still on the row, so a touch that moves at once still scrolls the list.
 
-/** How far a mouse or pen moves up or down from its press before the press becomes a drag, as the dock's `DragStart`. */
+/** How far a mouse or pen moves up or down from its press before the press becomes a drag, carried over from the retired dock. */
 export const DRAG_START_PX = 4;
 /** How long a finger holds still on a row before the touch becomes a drag. */
 export const HOLD_MS = 500;
@@ -33,7 +33,7 @@ export interface DragView {
 
 /**
  * The drop a release at `y` makes for the dragged work item among Ready for review's `rows`, in list order: past the middle of a row is below it.
- * Null above the first row or below the last, and at the dragged row's own place, as the dock's `DropAt`.
+ * Null above the first row or below the last, and at the dragged row's own place.
  */
 export function dropAt(rows: readonly DropRow[], dragged: number, y: number): Drop | null {
   const from = rows.findIndex((row) => row.workItemId === dragged);

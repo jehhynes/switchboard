@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, realpathSync, statSync, watch } from 'node:f
 import type { Dirent, FSWatcher } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 
-/** How the extension opens an artifact (architecture.md § Artifacts): by its file's extension. */
+/** How the web page opens an artifact (architecture.md § Artifacts): by its file's extension. */
 export type ArtifactType = 'markdown' | 'html' | 'image' | 'audio' | 'video' | 'file';
 
 /**

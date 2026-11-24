@@ -11,7 +11,7 @@ import { ConnectionDot } from './connectionView.js';
 import { trusted } from './trusted.js';
 import type { PageAction, PageRow } from '@switchboard/protocol';
 
-/** The most links the menu lists by themselves; more go in its Open link submenu, as the dock's `MenuLinks`. */
+/** The most links the menu lists by themselves; more go in its Open link submenu. */
 const MENU_LINKS = 2;
 
 /** A link's menu label, cut to `LINK_LABEL_MAX` with an ellipsis. */
@@ -34,7 +34,7 @@ function Gutter({ checked }: { checked: boolean }) {
 const Separator = () => <li class="menu-separator" role="separator"></li>;
 
 /**
- * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped as the dock's row menu is: the main control, the work controls, the
+ * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped: the main control, the work controls, the
  * state controls, Add comment…, the order controls, what the row opens (Copy, several drafts in a Copy submenu, Open in VS Code and Open report, History for a work item, Open ticket and its
  * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
  * row, so a pool ticket's menu in the list runs as the header's does.
@@ -61,14 +61,14 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 
   );
   const act = (action: PageAction): VNode => item({ 'data-action': 'row-action', 'data-label': action.label }, action.icon, action.label);
   const grouped = (group: PageAction['group']): VNode[] => actions.filter((one) => one.group === group).map(act);
-  // A link's label can be free text a session reported, so a long one is cut, whole in its tooltip, as in the dock's menu.
+  // A link's label can be free text a session reported, so a long one is cut, whole in its tooltip.
   const link = (which: string, label: string, icon: string | null, classes = ''): VNode =>
     item({ 'data-action': 'open-link', 'data-link': which, ...(label.length > LINK_LABEL_MAX ? { title: label } : {}) }, icon, clipLabel(label), null, classes);
   const submenu = [
     item({ 'data-action': 'link-menu', 'aria-haspopup': 'true', 'aria-expanded': String(view.linkMenu) }, 'link-external', 'Open link', <span class={`codicon codicon-chevron-${view.linkMenu ? 'down' : 'right'}`} aria-hidden="true"></span>),
     ...(view.linkMenu ? row.links.map((one, index) => link(String(index), one.label, null, 'submenu-row')) : []),
   ];
-  // One draft copies at once; several open a Copy submenu of their labels, as in the dock's menu.
+  // One draft copies at once; several open a Copy submenu of their labels.
   const copy =
     pastes.length === 1
       ? [item({ 'data-action': 'row-paste', 'data-label': pastes[0]! }, 'copy', `Copy ${pastes[0]!}`)]
@@ -82,7 +82,7 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 
     ...copy,
     // Open report opens its draft in a file tab of the page; Open in VS Code asks the hub to start VS Code.
     ...commands.map((one) => item(one.file === undefined ? { 'data-action': 'row-command', 'data-label': one.label } : { 'data-action': 'row-report', 'data-file': one.file, title: one.file }, one.icon, one.label)),
-    // The dock's History, which selects the work item's History tab; a pool ticket has no work item open, so no tab to show it in.
+    // History, which selects the work item's History tab; a pool ticket has no work item open, so no tab to show it in.
     ...(row.history === null || row.workItemId === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? submenu : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
@@ -93,7 +93,7 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 
 }
 
 /**
- * The header's row actions (architecture.md § Web page): the dock's main control as a button, then the row's menu (`menuRows`) under an
+ * The header's row actions (architecture.md § Web page): the row's main control as a button, then the row's menu (`menuRows`) under an
  * ellipsis; nothing when the row offers none.
  */
 function Actions({ row, view }: { row: PageRow | null; view: View }) {
@@ -481,7 +481,7 @@ export function renderTabs(view: View, state: PageState, browser = false, strip:
   const fixed = (tab: Tab): VNode => {
     const { label, icon } = TABS.find((one) => one.tab === tab)!;
 
-    // As in the VS Code view, Status has the unread dot while its status is unread; the page shows no unread counts.
+    // Status has the unread dot while its status is unread; the page shows no unread counts.
     return <TabButton selected={tab === view.tab} label={label} icon={icon} unread={tab === 'status' && fresh} attrs={{ 'data-tab': tab }} />;
   };
 

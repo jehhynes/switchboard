@@ -1,5 +1,5 @@
-// The web page's Settings (architecture.md § Web page, PRD R54): the dock's Settings window over the whole page, drawn with Preact, posting the
-// hub's config routes as page commands. Its state, fields and pages are the dock's, in settingsModel.ts.
+// The web page's Settings (architecture.md § Web page, PRD R54): a dialog over the whole page, drawn with Preact, posting the
+// hub's config routes as page commands. Its state, fields and pages are in settingsModel.ts.
 import type { VNode } from 'preact';
 import { mount } from './island.js';
 import { isPhone } from './layout.js';
@@ -21,7 +21,7 @@ export interface SettingsDeps {
 /** How often Settings asks how a running enrolment stands. */
 export const ENROLL_POLL_MS = 1_000;
 
-/** The draft is checked this long after the last edit, as the dock's. */
+/** The draft is checked this long after the last edit, carried over from the retired dock. */
 export const CHECK_DELAY_MS = 250;
 
 /** The question Settings asks: before closing over unsaved changes, or before deleting a playbook. */
@@ -75,7 +75,7 @@ export interface Settings {
   reload(): Promise<void>;
 }
 
-/** Settings drawn into `host`: the navigation, the page and the bar, as the dock's window, and a phone's list that drills into each page. */
+/** Settings drawn into `host`: the navigation, the page and the bar, and a phone's list that drills into each page. */
 export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   const view: View = { open: false, drill: 'nav', error: null, notice: null, opened: new Set(), help: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE() };
   let state: EditorState | null = null;
@@ -740,7 +740,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     cancelCheck();
     view.open = false;
     view.ask = null;
-    // The draft goes with Settings, as with the dock's window.
+    // The draft goes with Settings.
     state = null;
     asked = false;
     enrollSeq++;
@@ -881,7 +881,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     event.stopPropagation();
 
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 's') {
-      // Ctrl+S saves from any field and keeps Settings open, as the dock's.
+      // Ctrl+S saves from any field and keeps Settings open.
       event.preventDefault();
       void save();
     } else if (event.key === 'Escape') {

@@ -56,7 +56,7 @@ export function toneVersion(section: string | null): string | null {
     return null;
   }
 
-  // FNV-1a, 32 bits: enough to tell one section from the next, with no crypto import in a module the extension loads.
+  // FNV-1a, 32 bits: enough to tell one section from the next, with no crypto import.
   let hash = 0x811c9dc5;
 
   for (let index = 0; index < section.length; index++) {

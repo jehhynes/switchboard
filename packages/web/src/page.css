@@ -1,4 +1,4 @@
-/* The web page (architecture.md § Web page), drawn as the VS Code Conversation view is, from the theme copy's variables. */
+/* The web page (architecture.md § Web page), drawn from the theme copy's VS Code variables. */
 /* The page never scrolls or bounces as a whole: its panes scroll themselves, and nothing is wider than the screen. Nothing outside them moves
    either: each pane, popup and dialog that scrolls sets overscroll-behavior: contain, so no drag reaches the page at its end or with nothing to
    scroll, the composer's box never bounces, and a pan that starts outside every scroller does nothing, though a pinch still zooms (each scroller
@@ -12,12 +12,12 @@ html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: non
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { touch-action: pinch-zoom; }
 textarea { overscroll-behavior: none; }
-/* The page's own colours, which VS Code's theme has no variable for: the dock's in Dark Modern and, with the operating system's light setting,
-   in Light Modern (theme.css). The composer's fill in light follows the Conversation view's light themes (composer.css).
+/* The page's own colours, which VS Code's theme has no variable for, carried over from the retired dock: in Dark Modern and, with the operating system's light setting,
+   in Light Modern (theme.css). The composer's fill in light follows composer.css's light themes.
    Surfaces: Dark Modern draws the conversation on the side bar's colour, as Claude Code's panel does. Light Modern keeps white for the editor
    alone, so in light the conversation is the white surface, its header and tab bars take the side bar's grey as Light Modern's title bar and
-   editor tabs do, and the selected row takes the dock's light selection colour (#E4E6F1, Light Modern's selected activity bar item), since
-   Light Modern's list selection (#E8E8E8) barely shows on the side bar. The list's muted texts take the dock's grey (DockMuted), which in
+   editor tabs do, and the selected row takes a light selection colour (#E4E6F1, Light Modern's selected activity bar item), since
+   Light Modern's list selection (#E8E8E8) barely shows on the side bar. The list's muted texts take their own grey, which in
    Light Modern is #717171, not the theme's description colour. */
 :root { --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #7a7a7a; --sb-chat-background: var(--vscode-sideBar-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: var(--vscode-list-activeSelectionBackground); --sb-row-muted: var(--vscode-descriptionForeground); --sb-tab-shade: 25%; }
 @media (prefers-color-scheme: light) {
@@ -93,9 +93,9 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .empty, .notice { margin: 8px 0; color: var(--vscode-descriptionForeground); }
 .live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
-/* The list of work items, in the dock's groups and drawn as its rows (architecture.md § Web page). */
+/* The list of work items, in its groups and rows (architecture.md § Web page). */
 .side { flex: none; width: 100%; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); }
-/* The list's header, as the dock's title row: the icons keep their width at the right. */
+/* The list's header, one title row: the icons keep their width at the right. */
 .side-head { flex: none; }
 .list-header { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; background: var(--sb-bar-background); }
 /* On a phone the list is its own view and no window title names the app, so the header starts with the icon and "Switchboard", which take
@@ -169,7 +169,7 @@ svg.source-logo.forum { color: #57ae57; }
 .device-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .device-detail { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
 @media (hover: none), (pointer: coarse) { .sheet-select { min-height: 44px; } .more-menu .menu-row { height: 44px; } }
-/* The dock's notes above the groups, in the warning colour; the held-session note is a button that looks like one. */
+/* The notes above the groups, in the warning colour; the held-session note is a button that looks like one. */
 .list-note { display: block; box-sizing: border-box; width: 100%; margin: 0; padding: 4px 4px 4px 20px; border: none; background: transparent; color: var(--vscode-editorWarning-foreground); text-align: left; overflow-wrap: anywhere; }
 button.held-note { cursor: pointer; }
 /* Why no device has the voice after the phone was lost: information, not a warning. */
@@ -192,7 +192,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .work-list ul { list-style: none; margin: 0; padding: 0; }
 /* The gap after a group is inside its section, so its pinned header stays until the next group's header reaches it. */
 .group::after { content: ''; display: block; height: 8px; }
-/* A group's header is a tinted bar of the focus blue, as the dock's: chevron, the group's codicon, its title and its count. It stays pinned at the
+/* A group's header is a tinted bar of the focus blue: chevron, the group's codicon, its title and its count. It stays pinned at the
    top of the list while the group's rows scroll under it, until the next group's header pushes it up; mixed with the list's background, so the
    bar is opaque and rows do not show through it. Rows and their menus scroll to below it. */
 .group-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--group-head-height); padding: 4px 8px 4px 6px; border: none; background: color-mix(in srgb, var(--vscode-focusBorder) 25%, var(--vscode-sideBar-background)); color: var(--vscode-foreground); text-align: left; cursor: pointer; }
@@ -202,7 +202,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .group-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .group-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center; font-size: 11px; font-weight: 600; line-height: 18px; background: var(--vscode-focusBorder); color: #fff; }
 .group-count.zero { background: color-mix(in srgb, var(--vscode-descriptionForeground) 18%, transparent); color: var(--vscode-descriptionForeground); }
-/* Done's date bands, as the dock's: a muted label with its count and a rule, no tint or stripe, which opens or closes its rows. */
+/* Done's date bands: a muted label with its count and a rule, no tint or stripe, which opens or closes its rows. */
 .band-head { display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; margin-top: 6px; padding: 3px 8px; border: none; background: transparent; color: var(--vscode-descriptionForeground); font-size: 12px; text-align: left; cursor: pointer; }
 .band-head:hover { background: var(--vscode-list-hoverBackground); }
 .band-title { font-weight: 600; }
@@ -210,50 +210,50 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .band-rule { flex: 1; height: 1px; margin-left: 8px; background: var(--vscode-descriptionForeground); opacity: 0.3; }
 @media (hover: none), (pointer: coarse) { .band-head { min-height: 44px; } }
 .group-empty { margin: 0; padding: 6px 12px 4px 11px; color: var(--vscode-descriptionForeground); font-style: italic; }
-/* A row: the dock's three lines, each 18 px tall with 3 px between them, in its 13 px text (its pills' 12 px); the dock's 3 px stripe on its left
-   edge, inset so neighbouring stripes stay apart, in its status colour (--sb-status-* in theme.css). Colours are the dock's: the foreground for
+/* A row: three lines, each 18 px tall with 3 px between them, in its 13 px text (its pills' 12 px); a 3 px stripe on its left
+   edge, inset so neighbouring stripes stay apart, in its status colour (--sb-status-* in theme.css). Colours: the foreground for
    texts and marks, its muted grey (--sb-row-muted) for the namespace, time, comment and details, and the same colours on the selected row. */
 .row { position: relative; display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 44px; padding: 5px 8px 6px 11px; border: none; border-top: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); background: transparent; color: var(--vscode-foreground); line-height: normal; text-align: left; cursor: pointer; }
-/* The first row in its band has no rule and no rule's 1 px, as the dock's. */
+/* The first row in its band has no rule and no rule's 1 px. */
 .rows > li:first-child > .row { border-top: none; }
 .row::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; }
 .row.stripe-warning::before { background: var(--sb-status-warning); }
 .row.stripe-error::before { background: var(--sb-status-error); }
 .row.stripe-turn::before { background: var(--sb-status-turn); }
 .row:hover { background: var(--vscode-list-hoverBackground); }
-/* The selected row: the selection colour and its stripe the full height, as the dock's; no outline, so only a keyboard focus draws the focus ring. */
+/* The selected row: the selection colour and its stripe the full height; no outline, so only a keyboard focus draws the focus ring. */
 .row.selected { background: var(--sb-row-selected); }
 .row.selected::before { top: 0; bottom: 0; }
 .row.dim > * { opacity: 0.6; }
 /* A Ready for review row can be dragged to a new place (reorder.ts): a held finger opens no callout or selection, the dragged row is lifted
-   in the hover colour, and the drop line is the dock's, 2 px in the turn blue, across the edge of the row the drop lands next to. */
+   in the hover colour, and the drop line is 2 px in the turn blue, across the edge of the row the drop lands next to. */
 .row.movable { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 #list.reordering, #list.reordering .row { cursor: grabbing; }
 .row.dragging { background: var(--vscode-list-hoverBackground); }
 .row.drop-above::after, .row.drop-below::after { content: ''; position: absolute; z-index: 1; left: 0; right: 0; height: 2px; background: var(--sb-status-turn); pointer-events: none; }
 .row.drop-above::after { top: -1px; }
 .row.drop-below::after { bottom: -1px; }
-/* Line 1: the priority dot, the title, the mic mark and the time at its end, muted; its texts at the line's top, as the dock's. */
+/* Line 1: the priority dot, the title, the mic mark and the time at its end, muted; its texts at the line's top. */
 .row-head { display: flex; align-items: flex-start; gap: 6px; height: 18px; min-width: 0; }
 .row-head .priority { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: #e8820c; }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-/* The mic mark before the time on the voice target's row, as the dock's: 8 px after the title. */
+/* The mic mark before the time on the voice target's row: 8 px after the title. */
 .row-head .voice-mark { flex: none; align-self: center; margin-left: 2px; }
 .row-time { flex: none; margin-left: 2px; color: var(--sb-row-muted); }
 /* Line 3 stays one line and clips its end; line 2 wraps only where its playbook and ticket key do not fit on one line (below). */
 .row-line { display: flex; align-items: center; gap: 6px; height: 18px; min-width: 0; overflow: hidden; }
 .row-line .mark, .row-line .comment { flex: none; }
-/* The dock's marks, comment icon and mic mark sit 1 px below the middle of their line, which lines a codicon up with Segoe UI's text. */
+/* The marks, comment icon and mic mark sit 1 px below the middle of their line, which lines a codicon up with Segoe UI's text. */
 .row-line .mark, .row-line .comment, .row-head .voice-mark { position: relative; top: 1px; }
 .row-line .comment { color: var(--sb-row-muted); }
-/* Their texts sit at the line's top, as the dock's do, and their icons and pills in its middle. */
+/* Their texts sit at the line's top, and their icons and pills in its middle. */
 .row-line .playbook, .row-details .row-detail, .row-details .row-detail-separator { align-self: flex-start; }
 /* The playbook or host is never cut: one line where it fits, and wrapped where it alone is wider than the line. */
 .row-line .playbook { flex: none; max-width: 100%; overflow-wrap: anywhere; }
 /* After the 16 px comment icon and its gap, so a long name wraps beside the icon rather than under it. */
 .row-line .comment + .playbook { max-width: calc(100% - 22px); }
 .row-line .namespace, .row-line .host { color: var(--sb-row-muted); }
-/* Ticket keys, link badges and Returned as the dock's pills: 18 px tall with a 14 px icon and 12 px text, outlined with an 18% fill; the key in
+/* Ticket keys, link badges and Returned as pills: 18 px tall with a 14 px icon and 12 px text, outlined with an 18% fill; the key in
    its source's colour (GitHub's white or black, Zoho and Forum green), a pull request purple, a link the ticket's text names grey, Returned in the
    warning status colour with its text in the warning text colour; a pill that opens a link fills more under the pointer. */
 .row-line .pill { flex: none; display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; height: 18px; overflow: hidden; white-space: nowrap; border: 1px solid var(--sb-row-muted); border-radius: 9px; padding: 0 6px; font-size: 12px; line-height: 16px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-foreground); }
@@ -283,14 +283,14 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row-line .pill.link.mentioned { border-color: var(--sb-row-muted); background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--sb-row-muted); }
 .row-line .pill.link.mentioned:hover { background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
 .row-line .pill.returned { border-color: var(--sb-status-warning); background: color-mix(in srgb, var(--sb-status-warning) 18%, transparent); color: var(--vscode-editorWarning-foreground); }
-/* Line 3: the mark in the foreground colour, Failed's in the error colour, as the dock's, then the details, muted unless they warn or fail,
+/* Line 3: the mark in the foreground colour, Failed's in the error colour, then the details, muted unless they warn or fail,
    each cut with an ellipsis, with a muted · between them. */
 .row-details .mark { font-size: 14px; }
 .row-details .mark.failed, .row-details .row-detail.error { color: var(--vscode-testing-iconFailed); }
 .row-details .row-detail { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sb-row-muted); }
-/* The details before the last keep their width, as the dock's do, and the last takes the room left. */
+/* The details before the last keep their width, and the last takes the room left. */
 .row-details .row-detail:not(:last-child) { flex-shrink: 0; max-width: 100%; }
-/* The last detail ends 6 px before the line's end, where the dock's ellipsis is. */
+/* The last detail ends 6 px before the line's end, leaving room for its ellipsis. */
 .row-details .row-detail:last-child { margin-right: 6px; }
 .row-details .row-detail-separator { flex: none; color: var(--sb-row-muted); }
 .row-details .row-detail.warning { color: var(--vscode-editorWarning-foreground); }
@@ -323,9 +323,9 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 :where(html:not(.phone)) .side-sash { display: block; }
 :where(html:not(.phone)) #root.listing > .main, :where(html:not(.phone)) #root:not(.listing) > .side { display: flex; }
 /*
- * The drawer, the unpinned list, as the dock's auto-hide (architecture.md § Web page): hidden, the list keeps its layout off the page's left
+ * The drawer, the unpinned list, as an auto-hide (architecture.md § Web page): hidden, the list keeps its layout off the page's left
  * edge, and a 3 px sliver there shows each row's stripe at its height (fitSliver in main.ts). Shown, it lies over the conversation and its
- * header at the list's width and slides in; it hides at once, as the dock does. Opened by its button, a key or a swipe (#root.drawer-held),
+ * header at the list's width and slides in; it hides at once. Opened by its button, a key or a swipe (#root.drawer-held),
  * a backdrop dims the page under it and takes the press that closes it.
  */
 .header > .list-toggle, .sliver { display: none; }
@@ -351,12 +351,12 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 /* The pin at the list header's end, outside the phone's layout, where the list is its own view. */
 :where(html.phone) .list-header > .list-pin { display: none; }
 @media (prefers-reduced-motion: reduce) { #root.drawers.drawer-open:not(.listing) > .side { transition: none; } }
-/* With a mouse, the group headers can be as compact as the dock's. */
+/* With a mouse, the group headers can be more compact. */
 @media (pointer: fine) {
   :where(html:not(.phone)) .work-list { --group-head-height: 32px; }
 }
 
-/* The conversation, as the Conversation view: header, tabs, the tab's panel and the composer. */
+/* The conversation: header, tabs, the tab's panel and the composer. */
 /* The conversation's pane is a size container (conversation), so its timeline fits its own width, whatever the page's (below). */
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; container: conversation / inline-size; background: var(--sb-chat-background); }
 .header { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-bar-background); user-select: none; }
@@ -593,7 +593,7 @@ button.picker > .codicon-chevron-down { order: 2; }
 /* Background work after the turn ended: a quieter line than Thinking. */
 .working.background { color: var(--vscode-descriptionForeground); font-weight: normal; }
 
-/* Markdown, as in the Conversation view. */
+/* Markdown. */
 /* Long words, links and paths wrap anywhere; code blocks and tables scroll inside their own box, and media keeps to the width, so nothing widens
    the page. */
 .body { overflow-wrap: anywhere; }
@@ -727,7 +727,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 .radio-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-button-background); }
 .question-letter { opacity: 0.6; }
 /* The letter and its period in a column of their own, so a wrapped line starts under the option's text, and the mark centred on the first line
-   (1lh; 2 px where lh is unknown), as in the Conversation view. */
+   (1lh; 2 px where lh is unknown). */
 .question-option .question-letter { flex: none; min-width: 1.4em; }
 .question-option-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .question-other { margin-top: 6px; padding: 6px 8px; border: 1px solid var(--vscode-input-border); border-radius: 4px; outline: none; background: var(--vscode-editor-background); color: inherit; font: inherit; font-size: 0.9em; }
@@ -866,7 +866,7 @@ body.artifact-window > .artifact-view { height: 100%; }
   .message .bubble { max-width: calc(100% - 24px); }
 }
 
-/* The selected work item's row actions (architecture.md § Web page): the dock's main control as a small button and the rest under an ellipsis. */
+/* The selected work item's row actions (architecture.md § Web page): the row's main control as a small button and the rest under an ellipsis. */
 .header > button.row-main { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; white-space: nowrap; }
 .header > button.row-main:hover { background: var(--vscode-button-hoverBackground); }
 .header > button.row-main:disabled, .menu-row:disabled { opacity: 0.5; cursor: default; }
@@ -875,7 +875,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 .actions-anchor { flex: none; }
 button.actions { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 0; border-radius: 4px; cursor: pointer; }
 button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
-/* A sheet over the page asks before Stop session and Delete, picks a snooze, or shows a draft the clipboard refused, as the dock's dialogs do. */
+/* A sheet over the page asks before Stop session and Delete, picks a snooze, or shows a draft the clipboard refused. */
 .sheet-backdrop { position: fixed; inset: 0; z-index: var(--sb-z-sheet); display: flex; align-items: center; justify-content: center; padding: max(16px, var(--sb-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: rgba(0, 0, 0, 0.4); }
 .sheet { box-sizing: border-box; width: min(440px, 100%); max-height: calc(100% - 32px); overflow-y: auto; overscroll-behavior: contain; padding: 16px; border-radius: 8px; }
 .sheet-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
@@ -966,7 +966,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 .prompt-note { color: var(--vscode-descriptionForeground); font-size: 12px; }
 @media (hover: none), (pointer: coarse) { .prompt-option { min-height: 44px; } }
 
-/* The mic button, drawn as the Conversation view's (architecture.md § Dictation): one ghost icon whose glyph is its state. */
+/* The mic button (architecture.md § Dictation): one ghost icon whose glyph is its state. */
 .composer-mic { display: flex; flex: none; }
 /* One mic button, a ghost icon whose glyph is its state, each drawn apart: slashed while off, outlined after the idle timeout, filled in the
    accent colour and pulsing while it listens (faster while it hears, still while it starts), a pause badge while paused, a speaker badge while
@@ -1053,7 +1053,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 .console-foot[hidden] { display: none; }
 .console-note { flex: 1; min-width: 0; margin: 0; color: var(--vscode-errorForeground, #f85149); }
 
-/* A ticket's History tab (architecture.md § Web page), drawn as the VS Code History tab, its classes prefixed with hist- so the conversation's
+/* A ticket's History tab (architecture.md § Web page), its classes prefixed with hist- so the conversation's
    rules do not reach it. Its body scrolls in the tab's pane, so the toolbar can stick at its top. */
 .scroll.history-pane { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .hist-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 24px calc(48px + var(--sb-end)); }
@@ -1144,7 +1144,7 @@ ol.hist-timeline { list-style: none; margin: 0; padding: 4px 12px 10px; }
 /* A question card on a phone (design § 6): the full width of the timeline at 14 px. */
 :where(html.phone) .question-card.qc { max-width: none; font-size: 14px; }
 
-/* The toast (toast.tsx), as the dock's status toast: one message at a time near the page's top, below the conversation's header and tabs, in
+/* The toast (toast.tsx): one message at a time near the page's top, below the conversation's header and tabs, in
    neutral colours, or in the warning colours for a refusal or failure; above every sheet and Settings, so a failure shows whatever is open. */
 #toast { position: fixed; top: calc(var(--sb-top) + 88px); left: 50%; z-index: var(--sb-z-toast); width: max-content; max-width: min(520px, calc(100vw - 24px)); transform: translateX(-50%); }
 #toast:empty { display: none; }

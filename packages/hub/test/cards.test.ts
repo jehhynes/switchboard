@@ -30,7 +30,7 @@ function snapshot(workItems: WorkItemView[], pool: PoolView[], sources: string[]
 const issue = (n: number) => `https://github.com/o/r/issues/${n}`;
 
 describe('cardsOf', () => {
-  it("gives each work item of a polled source its playbook, panel group and the dock row's stripe", () => {
+  it("gives each work item of a polled source its playbook, panel group and the list row's stripe", () => {
     const cards = cardsOf(
       snapshot(
         [

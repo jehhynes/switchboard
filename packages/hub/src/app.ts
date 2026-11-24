@@ -59,7 +59,7 @@ const RELOAD_DEBOUNCE_MS = 300;
 /** The page's neutral note while no device has the voice because the phone was lost (`VoiceControl.phoneLost`). */
 export const PHONE_LOST_NOTE = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or Talk here on this computer.';
 
-/** Operator events `/action` takes (PRD R27). */
+/** Operator events a page's row controls may post (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
 
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
@@ -69,7 +69,7 @@ export function isLinkTarget(target: unknown): target is string {
   return typeof target === 'string' && /^https?:\/\/\S+$/i.test(target);
 }
 
-/** An approval's draft: an absolute path, which opens in VS Code (PRD R23). */
+/** An approval's draft: an absolute path, which the page opens as Open report (PRD R23). */
 function isReportPath(path: unknown): path is string {
   return typeof path === 'string' && (win32.isAbsolute(path) || posix.isAbsolute(path));
 }
@@ -150,7 +150,7 @@ export function parseReport(body: unknown): ReportBody | null {
   return { ...body, [text]: value, ...(body['kind'] === 'approval' ? { summary: body['summary'] ?? null, report: body['report'] ?? null } : {}) } as ReportBody;
 }
 
-/** An operator event from the panel. The core validates its target and refuses what does not apply; a snooze names its wake time or null. */
+/** An operator event from a page's row control. The core validates its target and refuses what does not apply; a snooze names its wake time or null. */
 export function parseAction(body: unknown): FlowEvent | null {
   if (!isRecord(body) || !OPERATOR_EVENTS.has(String(body['type']))) {
     return null;
@@ -665,7 +665,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     pollSources: () => runtime.pollNow(),
     restartHolder: (detail) => restartHolder(detail),
-    // The page's Run a schedule now runs the dock's `run-schedule` event; the run is its ticket's newest work item.
+    // The page's Run a schedule now sends the `run-schedule` event; the run is its ticket's newest work item.
     runSchedule: (name) => {
       const { refused } = runtime.send({ type: 'run-schedule', name });
 
@@ -678,7 +678,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return newest === undefined ? { refused: 'The run was not made.' } : { workItemId: newest.id };
     },
-    // The list's search further back, as the dock's (PRD R63); a row whose work item is gone meanwhile is left out.
+    // The list's search further back (PRD R63); a row whose work item is gone meanwhile is left out.
     searchDone: (text, since) => {
       const found = doneSearch.search(store, views().snapshot, runtime.snapshotInputs(), text, since, windows);
       const rows = found.rows.flatMap((row) => {
@@ -690,7 +690,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return { rows, more: found.more };
     },
-    // The page's source icons turn a source on or off as the dock's do (architecture.md § Web page).
+    // The page's source icons turn a source on or off (architecture.md § Web page).
     setSource: (name, enabled) => {
       const error = runtime.setSourceEnabled(name, enabled);
 
@@ -700,7 +700,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return error;
     },
-    // The page's row actions run as the dock's, rechecked against the row as it is now (architecture.md § Web page).
+    // The page's row actions run the hub's own controls, rechecked against the row as it is now (architecture.md § Web page).
     rowAction: (workItemId, label, extra) => {
       const row = dockRowOf(views().dock, workItemId);
       const built = row === null ? { refused: 'The work item is gone.' } : pageActionEvent(row, label, extra);
@@ -728,7 +728,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     },
     // A dismissal can leave a session waiting on questions with none open (PRD R103).
     questionsSettled: (sessionId) => runtime.questionsSettled(sessionId),
-    // A drag of a Ready for review row on the page, the same move a drag in the dock posts to `/action` (PRD R73).
+    // A drag of a Ready for review row on the page, which moves it within Ready for review (PRD R73).
     rowMove: (workItemId, after) => {
       const { dock } = views();
 
@@ -900,7 +900,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   runtime.start();
   conversation.start();
 
-  // The Settings editor's routes (PRD R54), which the web page posts as page commands (architecture.md § Settings window).
+  // The Settings editor's routes (PRD R54), which the web page posts as page commands (architecture.md § Settings).
   const settingsRoutes = {
     // settings.json with its version, and what the editor offers.
     read: async () => ({
@@ -1185,25 +1185,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/mic-timing': async (body) => (isRecord(body) ? conversation.voiceCommand('mic-timing', body) : { status: 400, body: { error: 'Expected {window, steps, outcome}.' } }),
       '/v1/conversation/composer': async (body) => (isRecord(body) ? conversation.voiceCommand('composer', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } }),
-      '/sources': async (body) => {
-        if (!isRecord(body) || typeof body['name'] !== 'string' || typeof body['enabled'] !== 'boolean') {
-          return { status: 400, body: { error: 'Expected {name, enabled}.' } };
-        }
-
-        const error = runtime.setSourceEnabled(body['name'], body['enabled']);
-
-        if (error === null) {
-          // The Settings window reads again, so its source states and checks follow the toggle (PRD R54).
-          configChanged();
-        }
-
-        return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
-      },
-      '/poll': async () => {
-        const error = runtime.pollNow();
-
-        return error === null ? { status: 200, body: { done: true } } : { status: 409, body: { error } };
-      },
       // The web page's Settings (architecture.md § Web page).
       '/v1/conversation/page-settings-read': settingsRoutes.read,
       '/v1/conversation/page-voice-enroll': settingsRoutes.enroll,
@@ -1211,17 +1192,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/v1/conversation/page-settings-save': settingsRoutes.save,
       // Brief replies, from this computer's page's view options menu.
       '/v1/conversation/brief-replies': settingsRoutes.briefReplies,
-      '/action': async (body) => {
-        const event = parseAction(body);
-
-        if (event === null) {
-          return { status: 400, body: { error: 'Unknown action.' } };
-        }
-
-        const { refused } = runtime.send(event);
-
-        return refused === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: refused } };
-      },
     },
     snapshot: () => runtime.snapshot(),
     windowClosed: (key) => {

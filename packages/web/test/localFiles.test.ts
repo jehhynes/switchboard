@@ -105,7 +105,7 @@ describe('local file link targets', () => {
   });
 });
 
-describe('web links with the Chrome pane', () => {
+describe('web links with the browser pane', () => {
   let root: HTMLElement;
   let pages: Array<{ close(): void }>;
 

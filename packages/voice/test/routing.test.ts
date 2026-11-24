@@ -57,7 +57,7 @@ describe('Router', () => {
     expect(router.target).toBeNull();
   });
 
-  it('moves at once on Talk here, refuses a session that cannot be a target, and times out from the dock with no window focused', () => {
+  it('moves at once on Talk here, refuses a session that cannot be a target, and times out with no window focused', () => {
     const { clock, changes, router, targets } = setup(1);
 
     router.update(targets, { sessionId: 'a', via: 'window' });

@@ -1,5 +1,5 @@
-/* The composer's box and footer, shared by the VS Code Conversation view and the web page, whose builds put this file before their own styles
-   (architecture.md § Conversation view), so the two cannot drift. The fill is lifted off the side bar by 7% of the foreground in dark themes,
+/* The composer's box and footer, drawn by the web page, whose build puts this file before its own styles
+   (architecture.md § Conversation view). The fill is lifted off the side bar by 7% of the foreground in dark themes,
    halfway between the side bar and the input colour of Dark Modern and level with neither, and halfway between the side bar and the input
    colour in light ones; high contrast themes keep the input colour. */
 :root {

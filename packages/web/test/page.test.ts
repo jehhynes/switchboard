@@ -13,7 +13,7 @@ import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
 import { SEND_RETRY_MS } from '../src/main.js';
-import { ADVANCE_MS, LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, FRAME_SHOW_DELAY_MS, SENT_NOTE_MS, SHOW_MARKER_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
+import { ADVANCE_MS, LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, FRAME_SHOW_DELAY_MS, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import { BACKOFF_MS, GRACE_MS, JITTER } from '../src/connection.js';
 import { NAVIGATION_MS } from '../src/request.js';
@@ -263,7 +263,7 @@ describe('drawing', () => {
     expect(spoken('interrupted')).toContain('<div class="reply-primary"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
     expect(spoken('interrupted')).not.toContain('0:07');
     expect(spoken('failed')).toContain('<span>Not spoken</span>');
-    // Not spoken is a message detail, as in the Conversation view; the dimmed part of an interrupted passage is not.
+    // Not spoken is a message detail; the dimmed part of an interrupted passage is not.
     expect(spoken('failed', false)).not.toContain('class="spoken');
     expect(spoken('interrupted', false)).toContain('<span class="unheard">ed it.</span>');
     expect(spoken('playing')).not.toContain('class="unheard"');
@@ -492,7 +492,7 @@ describe('drawing', () => {
     expect(markdownBody('---\ntitle: x\n---\n# Body')).toBe('# Body');
   });
 
-  it("draws the dock's groups with their counts and rows as the dock's: title, mark, ticket pill and playbook, stripe and the selection", () => {
+  it("draws the groups with their counts and rows: title, mark, ticket pill and playbook, stripe and the selection", () => {
     const root = document.createElement('div');
     const groups = [
       listGroup('review', [listRow(1, { title: 'Fix <the> badge', stripe: 'turn', mark: { kind: 'review', glyph: '\u{ea70}', title: 'Review, then approve' } }), listRow(2, { dim: true, stripe: 'warning', sourceKind: 'zoho', ticket: 'zd 7', playbook: 'triage' })], { title: 'Ready for review' }),
@@ -526,7 +526,7 @@ describe('drawing', () => {
     expect(root.querySelectorAll('.voice-mark')).toHaveLength(0);
     expect(root.querySelector('[data-work-item="2"] .pill')!.className).toBe('pill ticket source-zoho');
     expect(root.querySelector('[data-work-item="2"] .playbook')!.innerHTML).toBe('triage');
-    // A running mark spins, as the dock's does; a failed one is marked for the error colour, and no mark takes a tone.
+    // A running mark spins; a failed one is marked for the error colour, and no mark takes a tone.
     expect(root.querySelector('[data-work-item="3"] .mark')!.className).toBe('codicon codicon-loading mark codicon-modifier-spin');
     expect(root.querySelector('[data-work-item="4"] .mark')!.className).toBe('codicon codicon-error mark failed');
     expect(root.querySelector('[data-work-item="3"]')!.className).toBe('row selected');
@@ -548,7 +548,7 @@ describe('drawing', () => {
     expect(header.querySelector('button.picker .unread-dot')?.getAttribute('title')).toBe('Unread replies or status');
   });
 
-  it("draws a row's three lines from the dock row: priority, title and time; comment, playbook, ticket, links and Returned; mark and details", () => {
+  it("draws a row's three lines from the hub's dock row: priority, title and time; comment, playbook, ticket, links and Returned; mark and details", () => {
     const root = document.createElement('div');
     const links: PageRow['links'] = [
       { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002', kind: 'pr', badge: '19002', glyph: '\u{ea64}', mentioned: false },
@@ -571,7 +571,7 @@ describe('drawing', () => {
     expect(head!.querySelector('.row-title')!.textContent).toBe('Item 1');
     expect(head!.querySelector('.row-time')!.textContent).toBe('2h');
     expect(head!.querySelector('.row-time')!.getAttribute('title')).toBe('In queue since 11:40');
-    // Line 2 in the dock's order, each pill's whole name and URL in its tooltip.
+    // Line 2 in the row's order, each pill's whole name and URL in its tooltip.
     expect([...line2!.children].map((child) => child.className)).toEqual(['codicon comment', 'playbook', 'pill ticket source-github', 'row-links']);
     expect([...line2!.querySelectorAll('.row-links > .pill')].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned', 'pill returned']);
     expect(line2!.querySelector('.comment')!.getAttribute('title')).toBe('Nov 20\nWaits on Sam');
@@ -685,7 +685,7 @@ describe('drawing', () => {
     expect(renderVoice({ enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null })).toContain('data-voice="talk-here"');
     expect(renderVoice({ enabled: true, here: true, mic: 'idle-off', speaking: 'r1', speakReplies: false, error: null, recognizer: null })).toContain('data-voice="stop"');
     expect(renderVoice({ enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null })).toContain('Click to use voice for this session.');
-    // One renderer with the Conversation view: every mic state is drawn by the view's own button.
+    // One renderer from packages/conversation: every mic state is drawn by its own button.
     expect(renderMicButton).toBe(viewMicButton);
     expect(renderMicButton({ enabled: true, here: true, mic: 'paused-by-voice', speaking: null, speakReplies: true, error: null })).toContain('data-on="true"');
     expect(renderMicButton({ enabled: true, here: true, mic: 'hearing', speaking: 'r1', speakReplies: true, error: null, halfDuplex: 'no echo cancellation' })).toContain('class="mic held"');
@@ -701,7 +701,7 @@ describe('drawing', () => {
     expect(html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items }, newView()))).not.toContain('class="working"');
   });
 
-  it('gives a time the tooltip the VS Code view gives it: date, 24-hour time and zone', () => {
+  it('gives a time a tooltip of its date, 24-hour time and zone', () => {
     const at = Date.UTC(2026, 10, 20, 18, 30, 17);
     const markup = html(renderTimeline({ ...EMPTY, connected: true, scope, session: session({ state: 'idle' }), items: [message('m1', at - 1_000), reply('r1', at)] }, newView()));
 
@@ -2055,7 +2055,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     const open = () => [...root.querySelectorAll('.group-head')].map((head) => [head.getAttribute('data-group'), head.getAttribute('aria-expanded')]);
 
     expect(open()).toEqual([['progress', 'false'], ['snoozed', 'false'], ['done', 'true']]);
-    // The band the operator opened starts closed again after the reload, as the dock's do after it restarts.
+    // The band the operator opened starts closed again after the reload.
     expect(root.querySelector('[data-work-item="6"]')).toBeNull();
     expect(root.querySelector('[data-work-item="5"]')).not.toBeNull();
     second.page.close();
@@ -3413,7 +3413,7 @@ describe('the page in use', () => {
     expect(root.querySelector('.header .row-main .codicon-check')).not.toBeNull();
 
     click('button.actions');
-    // The dock's menu groups: main, work, state, order, what the row opens, and what asks first.
+    // The row menu's groups: main, work, state, order, what the row opens, and what asks first.
     expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Approve', 'Stop session', 'Mark done', 'Snooze…', 'Move up', 'Copy Reply', 'Delete']);
     expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(5);
     click('.actions-menu [data-label="Move up"]');
@@ -3429,7 +3429,7 @@ describe('the page in use', () => {
 
     click('button.actions');
     click('.actions-menu [data-label="Delete"]');
-    // The question starts on Cancel, and neither Enter nor Ctrl+Enter deletes, as in the dock's dialog.
+    // The question starts on Cancel, and neither Enter nor Ctrl+Enter deletes.
     expect(document.activeElement).toBe(root.querySelector('.sheet [data-action="sheet-cancel"]'));
     root.querySelector('.sheet')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     root.querySelector('.sheet')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
@@ -3473,7 +3473,7 @@ describe('the page in use', () => {
     await flush();
     expect(posts.find((post) => post.url.endsWith('/row-paste'))?.body).toMatchObject({ workItemId: 1, label: 'Reply' });
     expect(clipboard).toHaveBeenCalledWith('Dear Ana');
-    // A copy that worked says so in the neutral toast, as the dock's does.
+    // A copy that worked says so in the neutral toast.
     expect(root.querySelector('.toast.info .toast-text')?.textContent).toBe('Copied Reply.');
 
     // A draft the hub could not read says why, in the warning colours.
@@ -3532,7 +3532,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("asks for a control's text in a sheet as the dock's input dialog, with its choice, and sends the text and a changed choice by the control's label", async () => {
+  it("asks for a control's text in an input sheet, with its choice, and sends the text and a changed choice by the control's label", async () => {
     const { page, source } = start();
     const guided = { label: 'Start with guidance…', action: 'start', icon: 'comment', group: 'work' as const, confirm: null, input: { question: 'Start with guidance', detail: 'It ends the prompt.', action: 'Start', text: null, choice: { label: 'Playbook', value: 'dev:build', values: ['dev:build', 'dev:fix'] } } };
     const prompted = { label: 'Start with prompt…', action: 'start', icon: 'edit', group: 'main' as const, confirm: null, input: { question: 'Start with prompt', detail: 'The session runs it.', action: 'Start', text: 'Fix the build', choice: null } };
@@ -3559,11 +3559,11 @@ describe('the page in use', () => {
     expect(root.querySelector('.sheet')).toBeNull();
 
     click('button.actions');
-    // Add comment… is its own group, as the dock's notes.
+    // Add comment… is its own group.
     expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(2);
     click('.actions-menu [data-label="Start with guidance…"]');
     expect(root.querySelector<HTMLSelectElement>('.sheet-select')!.value).toBe('dev:build');
-    // Neither a text nor a changed choice: the button waits, as the dock's.
+    // Neither a text nor a changed choice: the button waits.
     expect(root.querySelector<HTMLButtonElement>('.sheet [data-action="sheet-go"]')!.disabled).toBe(true);
     type('.sheet-select', 'dev:fix');
     expect(root.querySelector<HTMLButtonElement>('.sheet [data-action="sheet-go"]')!.disabled).toBe(false);
@@ -3603,7 +3603,7 @@ describe('the page in use', () => {
 
     hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', opens, pastes: ['Reply'], url: 'https://github.com/o/r/issues/1' })])] });
     click('button.actions');
-    // One group: Copy, then what opens in VS Code, then the ticket, as the dock's opens.
+    // One group: Copy, then what opens in VS Code, then the ticket.
     expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code', 'Open report', 'Open ticket']);
     expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(0);
     expect(root.querySelector('.actions-menu [data-label="Open in VS Code"] .codicon-vscode')).not.toBeNull();
@@ -3727,20 +3727,12 @@ describe('the page in use', () => {
   });
 
 
-  it('says it is the installed app as it opens its stream, and shows the work item a dock click sends with its marker in the title for a while', async () => {
-    vi.useFakeTimers();
+  it('says it is the installed app as it opens its stream', async () => {
     installed = true;
 
     const { page, source } = start();
 
     expect(source.url).toBe('/v1/conversation/events?page=1&installed=1');
-    hello(source);
-    source.emit('show', { workItemId: 2, marker: '0123456789ab' });
-    expect(location.hash).toBe('#w=2');
-    expect(posts.filter((post) => post.url.endsWith('/select')).at(-1)?.body).toMatchObject({ workItemId: 2 });
-    expect(document.title).toMatch(/ \[sb-show 0123456789ab\]$/);
-    vi.advanceTimersByTime(SHOW_MARKER_MS);
-    expect(document.title).not.toContain('sb-show');
     page.close();
 
     installed = false;
@@ -3784,7 +3776,7 @@ describe('the page in use', () => {
     await flush();
     expect(posts.filter((post) => post.url.endsWith('/page-focus')).at(-1)?.body).toMatchObject({ notify: true });
     FakeNotice.permission = 'denied';
-    // Not allowed yet: no notification, but the message shows in the toast, neutral, as in the dock's.
+    // Not allowed yet: no notification, but the message shows in the toast, neutral.
     source.emit('needs', { items: [{ workItemId: 2, message: 'Switchboard: Side — Review, then approve' }], sound: false });
     expect(notices).toEqual([]);
     expect(root.querySelector('.toast.info .toast-open')?.textContent).toBe('Switchboard: Side — Review, then approve');
@@ -4424,7 +4416,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('hides the unpinned list in a drawer while a work item is open, shown by its button or a resting pointer and hidden as the dock auto-hides', () => {
+  it('hides the unpinned list in a drawer while a work item is open, shown by its button or a resting pointer and hidden as an auto-hide', () => {
     vi.useFakeTimers();
     localStorage.setItem('switchboard.listCollapsed', '1');
     window.innerWidth = 1024;
@@ -4506,7 +4498,7 @@ describe('the page in use', () => {
     sliver.dispatchEvent(new Event('pointerenter'));
     vi.advanceTimersByTime(DRAWER_REVEAL_MS);
     expect(isOpen()).toBe(true);
-    // Shown by the pointer, it has no backdrop, as the dock's auto-hide has none.
+    // Shown by the pointer, it has no backdrop.
     expect(root.classList.contains('drawer-held')).toBe(false);
     // Shown that way, it stays while the pointer is over it, and hides 0.4 s after the pointer leaves, unless the search box has the focus.
     vi.advanceTimersByTime(2_000);
@@ -5799,7 +5791,7 @@ describe('the page in use', () => {
     expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(true);
     source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
 
-    // The mic is the Conversation view's own button, and drives the computer's voice process as the view does.
+    // The mic is packages/conversation's button, and drives the computer's voice process.
     expect(root.querySelector('.composer-mic')!.innerHTML).toBe(renderMicButton({ enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null }));
     click('.composer-mic [data-voice="mic"]');
     // Starting from the click, before the hub answers.
@@ -5839,7 +5831,7 @@ describe('the page in use', () => {
     expect(worklets()).toBe(1);
     page.close();
 
-    // This computer's page shows Talk here instead, as the Conversation view does.
+    // This computer's page shows Talk here instead.
     const local = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: true });
 
     hello(FakeSource.last!);
@@ -6763,12 +6755,12 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '.list-title-text')).toEqual([expect.stringContaining('text-overflow: ellipsis')]);
   });
 
-  it('marks the selected row with only the selection colours, as the dock does, leaving the focus ring to a keyboard focus', () => {
+  it('marks the selected row with only the selection colours, leaving the focus ring to a keyboard focus', () => {
     const selected = declarationsOf((selector) => selector === '.row.selected');
 
     expect(selected).toHaveLength(1);
     expect(selected[0]).toContain('background: var(--sb-row-selected)');
-    // The dock's selection colours: the theme's in Dark Modern and its own #E4E6F1 in Light Modern (App.axaml DockSelected).
+    // The selection colours, carried over from the retired dock: the theme's in Dark Modern and #E4E6F1 in Light Modern.
     expect(css).toMatch(/:root \{[^}]*--sb-row-selected: var\(--vscode-list-activeSelectionBackground\);/);
     expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-selected: #E4E6F1;/);
     expect(selected[0]).not.toMatch(/box-shadow|outline|border/);
@@ -6776,12 +6768,12 @@ describe("the list's CSS", () => {
     // A keyboard-focused row, selected or not, shows the theme's focus ring and never the selection colour, which marks only the open work item.
     expect(declarationsOf((selector) => selector === '.row:focus-visible')).toEqual([expect.stringContaining('outline: 1px solid var(--vscode-focusBorder)')]);
     expect(declarationsOf((selector) => /^\.row:(focus|hover)/.test(selector)).join(' ')).not.toContain('--sb-row-selected');
-    // The selected row keeps the dock's text colours: no foreground and no faded muted texts.
+    // The selected row keeps the row's text colours: no foreground and no faded muted texts.
     expect(selected[0]).not.toMatch(/(^|[ ;])color:/);
     expect(css).not.toMatch(/\.row\.selected [^{]*\{[^}]*opacity/);
   });
 
-  it("draws rows in the dock's sizes and colours (MainWindow.axaml, App.axaml)", () => {
+  it("draws rows in the list's sizes and colours", () => {
     const one = (selector: string): string => {
       const found = declarationsOf((each) => each === selector);
 
@@ -6796,7 +6788,7 @@ describe("the list's CSS", () => {
     expect(one('.row-line')).not.toMatch(/font-size/);
     expect(one('.row-time')).not.toMatch(/font-size/);
     expect(one('.rows > li:first-child > .row')).toContain('border-top: none');
-    // Pills 18 px tall with 14 px icons and 12 px text; a key's logo 12 px; GitHub's key in the dock's GitHub colour, not the foreground.
+    // Pills 18 px tall with 14 px icons and 12 px text; a key's logo 12 px; GitHub's key in GitHub's colour, not the foreground.
     expect(one('.row-line .pill')).toMatch(/height: 18px;.*font-size: 12px/);
     expect(one('.row-line .pill .codicon')).toBe('flex: none; font-size: 14px;');
     // Line 2 by CSS alone: the playbook and pills keep their width and are never cut; the links' one-line box shrinks, its second line clipped,
@@ -6811,7 +6803,7 @@ describe("the list's CSS", () => {
     // An empty first item, so even the first pill wraps away rather than being cut.
     expect(one('.row-line .row-links::before')).toBe("content: ''; height: 18px;");
     expect(declarationsOf((each) => each === '.row-line .pill.ticket.source-github')).toEqual(['border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent);']);
-    // Marks in the foreground, Failed in the dock's error colour; the muted texts in the dock's grey, #717171 in Light Modern.
+    // Marks in the foreground, Failed in the error colour; the muted texts in the list's grey, #717171 in Light Modern.
     expect(one('.row-details .mark')).toBe('font-size: 14px;');
     expect(declarationsOf((each) => each === '.row-details .mark.failed')).toEqual(['color: var(--vscode-testing-iconFailed);']);
     expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-muted: #717171;/);
@@ -6874,7 +6866,7 @@ describe("the list's CSS", () => {
     expect(note).toContain('padding: 0 20px');
     expect(composer).toContain('padding: 0 20px 16px');
     expect(declarationsOf((selector) => selector === '.session-note').join(' ')).toMatch(/margin: 0 0 8px;.*border-radius: 8px;/);
-    // The composer's own corners come from the composer.css the Conversation view shares.
+    // The composer's own corners come from packages/conversation's composer.css.
     expect(readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/composer.css'), 'utf8')).toMatch(/\n\.composer \{[^}]*border-radius: 8px;/);
   });
 
@@ -6938,7 +6930,7 @@ describe("the list's CSS", () => {
     expect(css).not.toMatch(/(^|\n)#root\.drawers/);
     // Hidden, the list keeps its layout off the left edge, so its rows can be measured for the sliver.
     expect(css).toMatch(/:where\(html:not\(\.phone\)\) #root\.drawers:not\(\.listing\) > \.side \{[^}]*position: fixed;[^}]*visibility: hidden; transform: translateX\(-100%\);/);
-    // Only the shown drawer has a transition, so it slides in and hides at once, as the dock does.
+    // Only the shown drawer has a transition, so it slides in and hides at once.
     expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers:not(.listing) > .side').join(' ')).not.toContain('transition');
     expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers.drawer-open:not(.listing) > .side').join(' ')).toContain('transition: transform 0.15s ease-out');
     expect(declarationsOf((selector) => selector === '.sliver').join(' ')).toMatch(/position: fixed;.*left: env\(safe-area-inset-left\);.*width: 3px;/);

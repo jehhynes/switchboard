@@ -178,7 +178,7 @@ export function installedBuild(bundle: string): () => string | null {
 }
 
 export interface SuccessorOptions {
-  /** The runtime of this hub, VS Code's executable in Node mode or Node.js. */
+  /** The runtime of this hub: Node.js, or an Electron executable in Node mode. */
   execPath: string;
   bundle: string;
   /** This hub's arguments, without any `--takeover`; `--takeover=<this pid>` is added. */

@@ -67,8 +67,8 @@ export interface Ticket {
   /** The ad-hoc key of a ticket a ticket report moved to a source (PRD R83), so the key is not used again and the item window keeps its name. */
   adhocKey: string | null;
   /**
-   * The window binding an ad hoc conversation was started from (architecture.md § Hosted conversations): an item window's workspace file, compared
-   * by `windowFileKey`. Null for every other ticket.
+   * The VS Code window an ad hoc conversation stored by an older hub was started from (architecture.md § Hosted conversations): an item window's
+   * workspace file or a folder, compared by `hostKey`, which Open in VS Code opens. No new ticket gets one; null for every other ticket.
    */
   hostWindow?: string | null;
   /** The open issues the source lists as blocking this ticket, from the last complete poll that saw it (PRD R90); absent from an older hub's snapshot. */
@@ -179,7 +179,7 @@ export interface Link {
 export interface Paste {
   id: number;
   workItemId: number;
-  /** Names the text in the dock, such as `Customer reply`; a later paste with the same label replaces it. */
+  /** Names the text in the row's Copy menu, such as `Customer reply`; a later paste with the same label replaces it. */
   label: string;
   /** An absolute path, read when the operator copies it. */
   file: string;

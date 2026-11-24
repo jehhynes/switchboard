@@ -8,7 +8,7 @@ export interface PageState {
   key: string | null;
   connected: boolean;
   groups: PageGroup[];
-  /** What the list's header shows: the dock header's sources; null before the hub sent it. */
+  /** What the list's header shows: the sources of the hub's dock header; null before the hub sent it. */
   header: PageHeader | null;
   /** The selected work item's group, its current session and what it shows; null before the page selected one. */
   scope: ScopeView | null;
@@ -129,7 +129,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
   }
 }
 
-/** The page's title: "(2) Switchboard" while the dock's Blocked on you group holds two work items, else "Switchboard". */
+/** The page's title: "(2) Switchboard" while the Blocked on you group holds two work items, else "Switchboard". */
 export function pageTitle(groups: readonly PageGroup[]): string {
   const needs = groups.find((group) => group.key === 'blocked')?.rows.length ?? 0;
 
@@ -270,7 +270,7 @@ export function stateIcon(state: SessionView['state'] | null | undefined, waitin
   return { icon: SESSION_ICONS[kind], text: SESSION_WORDS[kind], tone: SESSION_TONES[kind] };
 }
 
-/** Each session icon in words, as the Conversation view says them. */
+/** Each session icon in words. */
 const SESSION_WORDS: Record<SessionIcon, string> = {
   question: 'Waiting for your answer',
   limited: 'Rate limited',

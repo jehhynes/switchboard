@@ -244,7 +244,7 @@ describe('linkRequest', () => {
     expect(linkRequest({ type: 'open' })).toMatchObject({ type: 'open', url: null });
   });
 
-  it("returns null for the pane's messages and anything else", () => {
+  it("returns null for wake and pair messages and anything else", () => {
     expect(linkRequest({ type: 'wake' })).toBeNull();
     expect(linkRequest({ type: 'pair', token: 't' })).toBeNull();
     expect(linkRequest(null)).toBeNull();

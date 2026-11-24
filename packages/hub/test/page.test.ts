@@ -341,7 +341,7 @@ describe('pageGroups', () => {
 describe('pageList', () => {
   const WINDOWS = 'C:/sb/windows';
 
-  it("lists the dock's groups in the dock's order with its titles and rows, work items only, hosted conversations where the dock puts them", () => {
+  it("lists the list view's groups in its order with their titles and rows, work items only, hosted conversations where the list view puts them", () => {
     const own = item(1, { ticket: { ...item(1).ticket, title: 'Fix the badge' }, sessions: [session({ id: 's1', workItemId: 1, cwd: 'D:/w1' })] });
     const byFolder = item(4, { ticket: { ...item(4).ticket, title: 'Folder chat', hostWindow: 'D:/git/support' } });
     const byWindow = item(5, { ticket: { ...item(5).ticket, title: 'Aside', hostWindow: 'C:/sb/windows/x.code-workspace' } });
@@ -352,12 +352,12 @@ describe('pageList', () => {
 
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
     expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), search: ownRow.search, band: null, voice: null, history: { ticketId: own.ticket.id, key: ownRow.ticket } });
-    // The voice target's row alone has the mic mark, as the dock's.
+    // The voice target's row alone has the mic mark.
     const marked = pageList(dock, view, { row: 'item:1', glyph: '\u{ec12}', title: 'Voice is set to this session. Mic on.' }).flatMap((group) => group.rows);
 
     expect(marked.filter((row) => row.voice !== null).map((row) => [row.workItemId, row.voice])).toEqual([[1, { glyph: '\u{ec12}', title: 'Voice is set to this session. Mic on.' }]]);
     expect(pageOpens(ownRow).map((one) => one.label)).toEqual(['Open in VS Code']);
-    // The dock's menu has Open in terminal for a session it can attach to or resume; the page leaves it out, as its Console tab shows that terminal.
+    // The list view's row offers Open in terminal for a session it can attach to or resume; the page leaves it out, as its Console tab shows that terminal.
     const codeMode = item(7, { status: 'running', sessions: [session({ id: 's7', workItemId: 7, codeMode: true, state: 'running' })] });
     const dock7 = dockView(snapshot([codeMode]), NOW, WINDOWS);
     const dockRow7 = dockRowOf(dock7, 7)!;
@@ -365,7 +365,7 @@ describe('pageList', () => {
 
     expect(dockRow7.terminal !== null || dockRow7.commands.some((one) => one.command['type'] === 'terminal')).toBe(true);
     expect([...page7.opens, ...page7.actions].map((one) => one.label)).not.toContain('Open in terminal');
-    // Each row in the dock's group, in the dock's order, a hosted conversation with its host's name.
+    // Each row in the list view's group, in its order, a hosted conversation with its host's name.
     expect(list.map((group) => group.rows.map((row) => row.workItemId))).toEqual(dock.groups.map((group) => group.rows.map((row) => Number(row.key.slice('item:'.length)))));
     expect(list.flatMap((group) => group.rows).filter((row) => row.host !== null).map((row) => [row.workItemId, row.host]).sort()).toEqual([[4, 'support'], [5, 'x']]);
     expect(list.some((group) => (group.key as string) === 'conversations')).toBe(false);
@@ -385,13 +385,13 @@ describe('pageList', () => {
 });
 
 describe('pageHeader', () => {
-  it("offers the dock's sources, repo roots and schedules", () => {
+  it("offers the list view's sources, repo roots and schedules", () => {
     const sources = [{ kind: 'github', enabled: true, title: 'gh: polled', sources: [{ name: 'gh', enabled: true }] }];
 
     expect(pageHeader({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] })).toEqual({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
   });
 
-  it("carries the dock's holder notice and restart result", () => {
+  it("carries the list view's holder notice and restart result", () => {
     const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update.', confirm: { question: 'Restart the terminal holder?', detail: 'd', action: 'Restart and resume' } };
     const holderResult = { at: 5, text: 'The terminal holder restarted.', failed: false };
     const header = pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [], holderNotice, holderResult });
@@ -400,7 +400,7 @@ describe('pageHeader', () => {
     expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('holderNotice');
   });
 
-  it("carries the dock's notes and its held-session note, which is absent while every held session has a work item", () => {
+  it("carries the list view's notes and its held-session note, which is absent while every held session has a work item", () => {
     const notes = ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'];
     const header = pageHeader({ notes, heldNote: '2 held sessions without a work item', sources: [], repoRoots: [], schedules: [] });
 
@@ -409,7 +409,7 @@ describe('pageHeader', () => {
     // The lost phone's note goes apart from the warning notes, untoned (PRD R119).
     expect(pageHeader({ notes: [], voiceNote: 'Voice stopped unexpectedly.', sources: [], repoRoots: [], schedules: [] })).toMatchObject({ notes: [], voiceNote: 'Voice stopped unexpectedly.' });
     expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('voiceNote');
-    // From the dock view itself: a settings error is the dock's note, and the page's.
+    // From the list view itself: a settings error is its note, and the page's.
     const view = snapshot([]);
     const broken = { ...view, errors: { ...view.errors, settings: 'settings.json is not valid JSON.' } };
 
@@ -418,7 +418,7 @@ describe('pageHeader', () => {
 });
 
 describe('pageList pool rows', () => {
-  it("lists a pool ticket's row where the dock puts it, by its ticket, with Start or Triage again and its menu's other controls", () => {
+  it("lists a pool ticket's row where the list view puts it, by its ticket, with Start or Triage again and its menu's other controls", () => {
     const ticket = { ...item(9).ticket, id: 9, pool: true, assigned: false, url: 'https://github.com/o/r/issues/9' };
     const picked = { ticket, triage: triage({ ticketId: 9, workItemId: null, playbook: 'dev:build' }), focus: null, links: [], returned: 0, playbookChoices: ['dev:build', 'dev:fix'] };
     const failed = { ...picked, ticket: { ...ticket, id: 10 }, triage: triage({ ticketId: 10, workItemId: null, playbook: null, error: 'Triage failed' } as never) };
@@ -437,7 +437,7 @@ describe('pageList pool rows', () => {
 });
 
 describe('pageList rows', () => {
-  it("carries the dock row's three lines as the dock built them, without a pull request's status", () => {
+  it("carries the list row's three lines as the list view built them, without a pull request's status", () => {
     const dockRow = {
       key: 'item:3', title: 'Fix it', priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, ticket: 'gh 3', sourceKind: 'github', url: 'https://github.com/o/r/issues/3', playbook: 'dev:build',
       links: [{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false, pr: { state: 'open' } }],
@@ -450,9 +450,9 @@ describe('pageList rows', () => {
 
     expect(shown).toMatchObject({ priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/3', returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Rate limited' }, details: dockRow.details });
     expect(shown!.links).toEqual([{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false }]);
-    // The list's search matches what the dock's search box matches.
+    // The list's search matches the list view row's search text.
     expect(shown!.search).toBe('Fix it · gh 3 · PR #9 · dev:build');
-    // A Done row's date band, under which the page draws it as the dock does.
+    // A Done row's date band, under which the page draws it.
     expect(shown!.band).toBe('Yesterday');
   });
 });
@@ -461,7 +461,7 @@ describe('pageActions', () => {
   const WINDOWS = 'C:/sb/windows';
   const rowOf = (one: ReturnType<typeof item>) => dockRowOf(dockView(snapshot([one]), NOW, WINDOWS), one.id)!;
 
-  it("offers the dock's Start, Approve, Retry, state controls and Delete in its menu order, its main control, and asks before Stop session and Delete", () => {
+  it("offers the row's Start, Approve, Retry, state controls and Delete in menu order, its main control, and asks before Stop session and Delete", () => {
     const unstarted = rowOf(item(1, { status: 'unstarted' }));
 
     expect(pageActions(unstarted).map((one) => one.label)).toEqual(['Start', 'Start with guidance…', 'Mark done', 'Snooze…', 'Add comment…', 'Delete']);
@@ -504,13 +504,13 @@ describe('pageActions', () => {
 
     expect(moves.map((one) => one.label)).toEqual(['Move to top', 'Move up', 'Move down', ...(middle.controls.some((one) => one.label === 'Reset position') ? ['Reset position'] : [])]);
     expect(moves.map((one) => one.icon).slice(0, 3)).toEqual(['arrow-circle-up', 'arrow-up', 'arrow-down']);
-    // The order group comes after the state controls and before Delete, as in the dock's menu.
+    // The order group comes after the state controls and before Delete.
     expect(pageActions(middle).map((one) => one.group).filter((group, index, all) => all.indexOf(group) === index)).toEqual(['main', 'work', 'state', 'notes', 'order', 'asking'].filter((group) => pageActions(middle).some((one) => one.group === group)));
     expect(pageActionEvent(middle, 'Move down', { until: null, comment: null })).toEqual({ event: { type: 'move', workItemId: ids[1], after: ids[2] } });
     expect(pageActionEvent(middle, 'Move to top', { until: null, comment: null })).toEqual({ event: { type: 'move', workItemId: ids[1], after: null } });
   });
 
-  it("asks for the dock's input text, sets it and a changed choice as the hub's own fields, and refuses a blank text or a choice not offered", () => {
+  it("asks for the control's input text, sets it and a changed choice as the hub's own fields, and refuses a blank text or a choice not offered", () => {
     const row = rowOf(item(1, { status: 'unstarted', playbook: 'dev:build', playbookChoices: ['dev:build', 'dev:fix'] }));
     const guided = pageActions(row).find((one) => one.label === 'Start with guidance…')!;
 
@@ -535,13 +535,13 @@ describe('pageActions', () => {
     }
   });
 
-  it("offers Open in VS Code for a row with a window, then the dock's Open report with its draft, never History, Open changes or Open in terminal", () => {
+  it("offers Open in VS Code for a row with a window, then the row's Open report with its draft, never History, Open changes or Open in terminal", () => {
     const worktree = { id: 1, ticketId: 1, path: 'D:/git/wt/101', branch: '101', linkedBy: 'report' as const };
     const review = rowOf(item(1, { status: 'awaiting-approval', worktree, approvalReport: 'D:/git/wt/101/report.md' }));
 
     expect(pageOpens(review)).toEqual([{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'symbol-file', file: 'D:/git/wt/101/report.md' }]);
     expect(pageReportOf(review)).toBe('D:/git/wt/101/report.md');
-    // The dock offers History and Open changes; the page shows History itself and its Changes tab replaces Open changes.
+    // The list view's row offers History and Open changes; the page shows History itself and its Changes tab replaces Open changes.
     expect(review.commands.map((one) => one.label)).toEqual(expect.arrayContaining(['History', 'Open changes']));
     expect(pageCommandOf(review, 'Open changes')).toEqual({ refused: 'The work item no longer offers this.' });
     // Open report opens on the page, never through VS Code.

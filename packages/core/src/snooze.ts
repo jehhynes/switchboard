@@ -34,7 +34,7 @@ export function nextMonday(now: Date): Date {
   return daysFrom(now, ((8 - start.getDay()) % 7) || 7);
 }
 
-/** The wake time as the snooze choices and the dock show it, such as `Mon, Oct 12, 6:00 AM`. */
+/** The wake time as the snooze choices and the list show it, such as `Mon, Oct 12, 6:00 AM`. */
 export function wakeText(time: number): string {
   return new Date(time).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }

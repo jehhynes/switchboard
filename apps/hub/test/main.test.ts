@@ -841,7 +841,7 @@ describe('hub entry point', () => {
       expect(started.stderr).toBe('');
       expect(started.code).toBe(0);
       expect(started.stdout).toBe(`Started the hub: pid ${found.pid}, build ${buildOf(hubBundlePath(home))}, config folder ${resolve(configDir)}.\n`);
-      // The hub outlives the command, runs on its runtime rather than VS Code's, and logs to hub.log.
+      // The hub outlives the command, runs on the command's runtime, and logs to hub.log.
       expect(found.pid).not.toBe(started.pid);
       expect(found.execPath).toBe(process.execPath);
       expect(await status(found)).toBe(200);

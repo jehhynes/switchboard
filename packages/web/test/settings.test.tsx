@@ -17,7 +17,7 @@ const config = (value: unknown, patch: Record<string, unknown> = {}) => ({
   ...patch,
 });
 
-describe('the Settings model (settingsModel.ts), as the dock\'s', () => {
+describe('the Settings model (settingsModel.ts)', () => {
   it('reads and sets dotted paths, list entries and a playbook persona key with a dot, leaving the input unchanged', () => {
     const root = { voice: { personas: [{ id: 'nova' }], playbookPersonas: { 'dev:a.b': 'nova' } } };
 
@@ -33,7 +33,7 @@ describe('the Settings model (settingsModel.ts), as the dock\'s', () => {
     expect(root.voice.personas).toEqual([{ id: 'nova' }]);
   });
 
-  it('reads a field\'s input as the dock does: empty removes the key, and text that is no number is kept for the check to name', () => {
+  it('reads a field\'s input: empty removes the key, and text that is no number is kept for the check to name', () => {
     expect(readField('integer', ' 3 ')).toBe(3);
     expect(readField('integer', '3.5')).toBe('3.5');
     expect(readField('integer', '')).toBeUndefined();
@@ -122,7 +122,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
   const buttonIn = (selector: string, label: string) => [...host.querySelectorAll<HTMLButtonElement>(`${selector} button`)].find((one) => one.textContent?.trim() === label)!;
   const named = (name: string) => posts.filter((one) => one.name === name);
 
-  it('reads settings.json and draws General as the dock does: its sections in order, the file, Saved, and Advanced collapsed', async () => {
+  it('reads settings.json and draws General: its sections in order, the file, Saved, and Advanced collapsed', async () => {
     await opened();
 
     expect(named('page-settings-read')).toHaveLength(1);
@@ -423,7 +423,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(pane.isOpen()).toBe(false);
   });
 
-  it('Discard drops every unsaved change and closes, as the dock\'s', async () => {
+  it('Discard drops every unsaved change and closes', async () => {
     const { pane } = await opened();
 
     type('sessions.model', 'opus');
@@ -533,7 +533,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
   });
 });
 
-describe('Settings sources (architecture.md § Settings window)', () => {
+describe('Settings sources (architecture.md § Web page)', () => {
   let host: HTMLElement;
   let posts: Array<{ name: string; body: Record<string, unknown> }>;
   let answers: Record<string, Answer | ((body: Record<string, unknown>) => Answer)>;
@@ -582,7 +582,7 @@ describe('Settings sources (architecture.md § Settings window)', () => {
     expect(entry('personal (GitHub)').querySelector('.settings-nav-note')?.textContent).toBe('off');
   });
 
-  it("draws a source page with the dock's fields: Kind, the common ones, its kind's own and a collapsed Advanced, and the triage playbooks to choose", async () => {
+  it("draws a source page with its fields: Kind, the common ones, its kind's own and a collapsed Advanced, and the triage playbooks to choose", async () => {
     await open();
     entry('GitHub').click();
     await settle();

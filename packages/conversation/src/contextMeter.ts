@@ -1,5 +1,5 @@
 /**
- * The composer's context meter (architecture.md § Context meter), drawn alike by the VS Code Conversation view and the web page: a small ring that
+ * The composer's context meter (architecture.md § Context meter), drawn by the web page: a small ring that
  * fills with the share of the session's context in use, toward its auto-compact threshold, with the numbers in its tooltip and a Compact action
  * in its menu. Also the hub's reading of a context size against the model's window. Imports nothing, for browser bundles.
  */

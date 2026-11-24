@@ -16,7 +16,7 @@ const config = (value: unknown, patch: Record<string, unknown> = {}) => ({
   ...patch,
 });
 
-describe('Settings voice and personas (architecture.md § Settings window)', () => {
+describe('Settings voice and personas (architecture.md § Web page)', () => {
   let host: HTMLElement;
   let posts: Array<{ name: string; body: Record<string, unknown> }>;
   let answers: Record<string, Answer | ((body: Record<string, unknown>) => Answer)>;

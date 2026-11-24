@@ -187,7 +187,7 @@ export interface VoiceView {
   deviceOff?: boolean;
 }
 
-/** A row of the page's list: the dock row's three lines, mark and stripe (`PageRow` in the hub's `page.ts`). */
+/** A row of the page's list: the hub's dock row's three lines, mark and stripe (`PageRow` in the hub's `page.ts`). */
 export interface PageRow {
   /** The work item's ID, or null on a pool ticket's row, which has no conversation and carries its ticket's ID instead. */
   workItemId: number | null;
@@ -212,9 +212,9 @@ export interface PageRow {
   dim: boolean;
   /** A hosted conversation's host's name; null for other work items. */
   host: string | null;
-  /** The dock's controls the page offers, in the dock's menu order. */
+  /** The row's controls the page offers, in the row menu's order. */
   actions: PageAction[];
-  /** The control the dock shows as the row's button, when the page offers it. */
+  /** The control shown as the row's button, when the page offers it. */
   main: string | null;
   /** The labels of the drafted texts Copy offers. */
   pastes: string[];
@@ -229,7 +229,7 @@ export interface PageRow {
   band: string | null;
   /** Line 1's mic mark before the time on the voice target's row: its codicon glyph and tooltip; null on the others. */
   voice: { glyph: string; title: string } | null;
-  /** The ticket whose History the row's menu opens: its ID and key; null when the dock offers none. */
+  /** The ticket whose History the row's menu opens: its ID and key; null when the row offers none. */
   history: { ticketId: number; key: string } | null;
 }
 
@@ -241,7 +241,7 @@ export interface HistoryCategory {
 }
 
 /**
- * Something a History entry names: `open` is what the VS Code History tab runs. The page opens an http or https `openUrl` in a browser tab,
+ * Something a History entry names. The page opens an http or https `openUrl` in a browser tab,
  * another `openUrl` in a file tab, an `openFolder` with Open in VS Code, and an `open` session, by its `workItemId` and Switchboard `session`
  * ID, in the conversation.
  */
@@ -305,7 +305,7 @@ export interface SourceGroup {
 
 /** What the list's header shows besides the list (`PageHeader` in the hub's `page.ts`). */
 export interface PageHeader {
-  /** The dock's notes above its groups: settings, playbook, hook, source and voice errors, then what an unconfigured home lacks. */
+  /** The notes above the list's groups: settings, playbook, hook, source and voice errors, then what an unconfigured home lacks. */
   notes: string[];
   /** "N held sessions without a work item", while a held session has none. */
   heldNote?: string;
@@ -332,24 +332,24 @@ export interface ScreenPrompt {
   next: boolean;
 }
 
-/** One of the dock's controls on the page (`PageAction` in the hub's `page.ts`), run with `row-action` by its label. */
+/** One of a row's controls on the page (`PageAction` in the hub's `page.ts`), run with `row-action` by its label. */
 export interface PageAction {
   label: string;
   action: string;
   /** Its codicon's name. */
   icon: string;
-  /** Its group in the dock's row menu, which draws a separator between groups. */
+  /** Its group in the row menu, which draws a separator between groups. */
   group: 'main' | 'work' | 'state' | 'notes' | 'order' | 'asking';
   confirm: { question: string; detail: string; action: string } | null;
-  /** The text it asks for first, as the dock's input dialog: the box's first text and a choice beside it, such as the playbook; null for none. */
+  /** The text it asks for first, in an input sheet: the box's first text and a choice beside it, such as the playbook; null for none. */
   input: { question: string; detail: string; action: string; text: string | null; choice: { label: string; value: string; values: string[] } | null } | null;
 }
 
-/** One group of the page's list: a dock group, in the dock's order, or `conversations`, the hosted conversations, last. */
+/** One group of the page's list: a work item group (PRD R27), in its order, or `conversations`, the hosted conversations, last. */
 export interface PageGroup {
   key: string;
   title: string;
-  /** The group's codicon glyph, as the dock draws it. */
+  /** The group's codicon glyph. */
   glyph: string;
   empty: string | null;
   rows: PageRow[];

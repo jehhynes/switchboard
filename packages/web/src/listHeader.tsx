@@ -28,7 +28,7 @@ export interface ListHeaderDeps {
   redraw(): void;
   /** Opens a work item's conversation, as a click on its row does. */
   select(workItemId: number): void;
-  /** Opens Settings (architecture.md § Web page), as the dock's Open Settings opens its window. */
+  /** Opens Settings (architecture.md § Web page). */
   openSettings?(): void;
   /** Reloads the page, for an installed app with no browser reload. */
   reload?(): void;
@@ -69,11 +69,11 @@ export interface Device {
 
 /** How long after the last key the New session form asks the hub about a typed folder. */
 export const FOLDER_CHECK_MS = 300;
-/** The search box searches once it holds this many characters (PRD R63), as the dock's. */
+/** The search box searches once it holds this many characters (PRD R63). */
 export const SEARCH_MINIMUM = 3;
 /** And this long after the last key. */
 export const SEARCH_DELAY_MS = 250;
-/** The searched ranges, as the dock's range menu names them; the first is the Done list's two weeks, which the page has, the others ask the hub. */
+/** The searched ranges, as the range menu names them; the first is the Done list's two weeks, which the page has, the others ask the hub. */
 export const RANGES = ['Last 2 weeks', 'Last month', 'Last 3 months', 'All time'] as const;
 
 /** A key without `gh`, `PR` or `#`, in lower case, so `#107` and `PR #107` name the row whose key is `gh 107`. */
@@ -153,7 +153,7 @@ export interface SearchView {
 }
 
 /**
- * Each source kind's logo, as the dock's header draws it (`SourceGithub`, `SourceZoho` and `SourceForum` in the dock's `App.axaml`): GitHub's
+ * Each source kind's logo, as the header draws it (carried over from the retired dock's `App.axaml`): GitHub's
  * mark, Zoho Desk's outline and Forum's letters, each in the colour of its ticket pill, grey while the kind is off.
  */
 const LOGOS: Record<string, { viewBox: string; path: string; stroke: boolean; evenOdd: boolean }> = {
@@ -202,7 +202,7 @@ function Gutter({ checked }: { checked: boolean }) {
   return <span class="menu-gutter" aria-hidden="true">{checked ? <span class="codicon codicon-check"></span> : null}</span>;
 }
 
-/** The providers a new session can start in, as the dock's provider box lists them. */
+/** The providers a new session can start in, as the provider box lists them. */
 export const PROVIDERS = [
   { provider: 'claude', name: 'Claude' },
   { provider: 'codex', name: 'Codex' },
@@ -271,7 +271,7 @@ export interface NewSessionSheet {
 }
 
 /**
- * A sheet the header opens over the page: the New session form, or a dock window the page does not have yet.
+ * A sheet the header opens over the page: the New session form, or a More Actions window the page does not have yet (`LATER`).
  */
 export type HeaderSheet =
   | NewSessionSheet
@@ -304,7 +304,7 @@ export interface HeaderView {
 }
 
 /**
- * The dock's notes above its groups, in the warning colour: settings, playbook, hook, source and voice errors and setup notes, then the held
+ * The notes above the list's groups, in the warning colour: settings, playbook, hook, source and voice errors and setup notes, then the held
  * sessions without a work item, whose click opens what Held sessions in More Actions opens; then, untoned, why no device has the voice when
  * the phone was lost.
  */
@@ -332,7 +332,7 @@ function HeaderNotes({ header }: { header: PageHeader | null }) {
 
 /**
  * The terminal holder's notice under the header while it is from an older build or restarting, with Restart and resume on this computer's page
- * only, and the last restart's result until dismissed (architecture.md § Restarting the holder), as the dock shows them above its groups.
+ * only, and the last restart's result until dismissed (architecture.md § Restarting the holder), above the list's groups.
  */
 function HolderNotices({ header, view }: { header: PageHeader | null; view: HeaderView }) {
   const notice = header?.holderNotice;
@@ -363,7 +363,7 @@ function HolderNotices({ header, view }: { header: PageHeader | null; view: Head
 }
 
 /**
- * A source kind's header icon (PRD R3, R71), as the dock's: its logo, grey while every source of the kind is off, and the hub's tooltip. With one
+ * A source kind's header icon (PRD R3, R71): its logo, grey while every source of the kind is off, and the hub's tooltip. With one
  * source a click turns it on or off; with several it opens a menu with a check row per source, which stays open so several can change.
  */
 function SourceButton({ group, view }: { group: SourceGroup; view: HeaderView }) {
@@ -394,7 +394,7 @@ function SourceButton({ group, view }: { group: SourceGroup; view: HeaderView })
 }
 
 /**
- * The list's header (architecture.md § Web page), as the dock's title row: the title, which takes what is left and ends in an ellipsis, then
+ * The list's header (architecture.md § Web page), as one title row: the title, which takes what is left and ends in an ellipsis, then
  * the source icons; a refusal shows under it.
  */
 export function renderListHeader(header: PageHeader | null, view: HeaderView): VNode {
@@ -432,14 +432,14 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           </button>
           {view.menu === 'more' ? renderMoreMenu(header, view.local === true, view.phoneVoice ?? null) : null}
         </div>
-        {/* Outside the phone's layout (page.css), as VS Code's and the dock's pin: pinned, the list is a column; unpinned, a drawer. Left out where it changes nothing (main.ts). */}
+        {/* Outside the phone's layout (page.css), as VS Code's pin: pinned, the list is a column; unpinned, a drawer. Left out where it changes nothing (main.ts). */}
         {view.pinned === undefined ? null : (
           <button type="button" class="icon list-pin" data-action="list-pin" title={view.pinned ? 'Unpin sidebar' : 'Pin sidebar'} aria-label={view.pinned ? 'Unpin sidebar' : 'Pin sidebar'} aria-controls="list">
             <span class={`codicon codicon-${view.pinned ? 'pinned' : 'pin'}`} aria-hidden="true"></span>
           </button>
         )}
       </div>
-      {/* The box and the searched range under the title row while the search is open, as the dock's. */}
+      {/* The box and the searched range under the title row while the search is open. */}
       {search.open ? (
         <div class="search-row">
           <div class="search-field">
@@ -474,7 +474,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
   );
 }
 
-/** A More Actions row: its codicon in the gutter, as the dock's menu draws its glyph, then its label. */
+/** A More Actions row: its codicon in the gutter, then its label. */
 function MoreRow({ action, icon, label }: { action: string; icon: string; label: string }) {
   return (
     <li role="none">
@@ -491,7 +491,7 @@ function MoreRow({ action, icon, label }: { action: string; icon: string; label:
 const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li class={classes} role="separator"></li>;
 
 /**
- * More Actions (PRD R71), in the dock's groups: Held sessions; Refresh sources,
+ * More Actions (PRD R71), in groups: Held sessions; Refresh sources,
  * Reload, Show hub log and Get the browser extension…; then Pair a device, Open Settings and, while the voice is not on this computer, Voice on the computer, on this computer's
  * page only, or Voice on this phone, on a paired device's.
  * On a phone, where the header has no room for them, the source icons come first as a check row per source.
@@ -549,7 +549,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
   );
 }
 
-/** The dock windows More Actions opens that the page does not have yet, by their row's action. */
+/** The windows More Actions opens that the page does not have yet, by their row's action; none now. */
 export const LATER: Record<string, string> = {};
 
 /** A QR code of `text` as an SVG of dark modules on a light square with a quiet zone of 4 modules, which phone cameras read in either theme. */
@@ -747,7 +747,7 @@ function ExtensionSheet({ remote }: { remote: boolean }) {
 
 /**
  * A sheet of the header (architecture.md § Web page), drawn as the page's other sheets: the New session form and its folder browser, Pair a
- * device, Get the browser extension, Restart the terminal holder, or a dock window the page does not have yet. `local`: whether the page is
+ * device, Get the browser extension, Restart the terminal holder, or a window the page does not have yet (`LATER`). `local`: whether the page is
  * this computer's.
  */
 export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null, now = Date.now(), read = globalThis.fetch, local = true): VNode | null {
@@ -1116,7 +1116,7 @@ export interface ListHeader {
 }
 
 /**
- * The list's header (architecture.md § Web page): the dock header's source icons and search, drawn into `host` and run from its own clicks and
+ * The list's header (architecture.md § Web page): the source icons and search, drawn into `host` and run from its own clicks and
  * keys, and the search's end, which the page draws in `list`. The page calls `draw` with each state it draws.
  */
 export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTMLElement, deps: ListHeaderDeps): ListHeader {
@@ -1155,7 +1155,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     }
   };
 
-  // ---- Search (PRD R63), as the dock's ----
+  // ---- Search (PRD R63) ----
   const dropOlder = (): void => {
     searchRun++;
     search.pending = false;
@@ -1518,7 +1518,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     redraw();
     host.querySelector<HTMLElement>('.more-actions')?.focus();
   };
-  /** Create, or Run: sends the sheet; a refusal keeps it open with the hub's reason, as the dock's windows do. */
+  /** Create, or Run: sends the sheet; a refusal keeps it open with the hub's reason. */
   const sheetGo = async (): Promise<void> => {
     const sheet = view.sheet;
 
@@ -1881,7 +1881,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   });
   host.addEventListener('keydown', (event) => {
     if (view.menu === null) {
-      // Escape in the box closes the search, as the dock's.
+      // Escape in the box closes the search.
       if (event.key === 'Escape' && (event.target as HTMLElement).classList.contains('search-box')) {
         event.stopPropagation();
         setOpen(false);

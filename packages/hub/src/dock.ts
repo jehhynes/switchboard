@@ -57,8 +57,8 @@ export interface DockText {
 }
 
 /**
- * A work item's VS Code window (PRD R71). `name` names the workspace file and ends the window title, as `sb:<name>`, by which the
- * dock finds the window; `title` is the ticket title, which starts it. The first folder never changes for a name.
+ * A work item's VS Code window (PRD R71). `name` names the workspace file and ends the window title, as `sb:<name>`, which tells the
+ * window apart; `title` is the ticket title, which starts it. The first folder never changes for a name.
  */
 export interface DockWindow {
   name: string;
@@ -192,7 +192,7 @@ export interface DockRow {
   stripe: 'error' | 'warning' | 'turn' | null;
   /** Whose turn it is on an unsnoozed active row; null for idle hosted conversations and other groups. F8 visits `operator` rows (PRD R73). */
   turn: 'operator' | 'agent' | null;
-  /** A Ready for review row on the agent's turn, which the dock dims (PRD R27). */
+  /** A Ready for review row on the agent's turn, which the list dims (PRD R27). */
   dim: boolean;
   /** Ready for review rows can be dragged to a new place (PRD R73). */
   movable: boolean;
@@ -201,7 +201,7 @@ export interface DockRow {
   /** The terminal app window Open in terminal opens (PRD R28); null when the row offers none. */
   terminal: DockTerminal | null;
   /**
-   * The hub controls in the right-click menu, each with its codicon glyph and the action the dock posts to `/action`; Snooze carries no wake time.
+   * The hub controls in the right-click menu, each with its codicon glyph and the action it runs; Snooze carries no wake time.
    * A control with `confirm` posts only after the operator confirms, such as Delete (PRD R120); one with `input` posts the text the operator
    * enters as the action's `field`, such as Start with guidance… (PRD R77), and with `choice`, a changed choice as the action's `choice.field`,
    * such as Start with guidance…'s playbook (PRD R35).
@@ -224,7 +224,7 @@ export interface DockRow {
   mainTitle: string | null;
   /** The drafted texts Copy offers on an `awaiting-approval` row (PRD R60); empty otherwise. */
   pastes: { label: string; file: string }[];
-  /** The controls that run in VS Code, each with the message a window runs: Open changes, History, Open report. */
+  /** The row's controls that open something rather than run a hub action, each with its message: Open changes, History, Open report. */
   commands: { label: string; glyph: string; command: Record<string, unknown> }[];
   /** What the search box matches: the title, key, linked pull requests and issues, playbook, group and branch (PRD R63, R71). */
   search: string;
@@ -246,19 +246,19 @@ export interface DockRow {
 export interface DockGroup {
   key: RowGroup;
   title: string;
-  /** The group's codicon glyph, as the VS Code panel showed it. */
+  /** The group's codicon glyph. */
   glyph: string;
   /** What the group says when it has no rows, or null. */
   empty: string | null;
   rows: DockRow[];
 }
 
-/** Everything the dock shows, sent whole on each change (PRD R71). */
+/** Everything the list view holds, built whole on each change (PRD R71). */
 export interface DockView {
   /** Settings, playbook, hook and source errors, then what an unconfigured home lacks. */
   notes: string[];
   groups: DockGroup[];
-  /** Snooze's choices with their wake times, (PRD R49); the dock posts the chosen `until`. */
+  /** Snooze's choices with their wake times, (PRD R49); the chosen one's `until` goes with the action. */
   snooze: SnoozeChoice[];
   /** The configured sources but ad-hoc, by kind in order of first appearance, for the header's icons (PRD R3, R71). */
   sources: DockSourceGroup[];
@@ -293,7 +293,7 @@ export interface DockHolderResult {
   failed: boolean;
 }
 
-/** The rows by group and in list order, as texts the dock draws without rules of its own (PRD R27, R71). */
+/** The rows by group and in list order, as texts the list draws without rules of its own (PRD R27, R71). */
 export function dockView(snapshot: Snapshot, now: number, windows: string): DockView {
   const groups = listGroups(snapshot);
   const keys: RowGroup[] = [
@@ -327,7 +327,7 @@ export function searchText(entry: Pick<WorkItemView, 'ticket' | 'links' | 'statu
   return [entry.ticket.title, searchDescription(entry as WorkItemView | PoolView, group, snapshot.namespaces, snapshot.repoKeys), 'status' in entry ? (entry.worktree?.branch ?? '') : ''].filter((part) => part !== '').join(' · ');
 }
 
-/** A row of `group` as the dock draws it; `order` is Ready for review's IDs in list order when the row is in that group. */
+/** A row of `group` as the list draws it; `order` is Ready for review's IDs in list order when the row is in that group. */
 export function dockRow(snapshot: Snapshot, entry: WorkItemView | PoolView, group: RowGroup, now: number, windows: string, order: number[] | null, band: string | null): DockRow {
   const kind = snapshot.sourceStates.find((source) => source.name === entry.ticket.source)?.kind;
   const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, order, snapshot.repoKeys) : poolRow(entry, now, snapshot.namespaces);
@@ -470,7 +470,7 @@ function itemRow(item: WorkItemView, now: number, namespaces: Record<string, str
     mainGlyph: main === null ? null : CONTROL_GLYPHS[main.icon],
     mainTitle: main === null ? null : mainTitle(item, main),
     pastes: item.status === 'awaiting-approval' ? item.pastes.map(({ label, file }) => ({ label, file })) : [],
-    // Open in terminal runs in the terminal app, never in a VS Code window.
+    // Open in terminal runs in the terminal app, so it is not among these.
     commands: [...windowCommands(controls.filter((control) => control.message['type'] !== 'terminal')), ...(report === null ? [] : [{ label: 'Open report', glyph: CONTROL_GLYPHS['symbol-file'], command: { type: 'openUrl', url: report } }])],
   };
 }
@@ -719,7 +719,7 @@ function terminalName(item: WorkItemView, windows: string, suffix: string): { na
   return { name, title: `${item.ticket.title} · sb:${name}` };
 }
 
-/** The controls the hub runs; Copy and the VS Code controls are in `pastes` and `commands` (PRD R71). */
+/** The controls the hub runs; Copy and the controls that open something are in `pastes` and `commands` (PRD R71). */
 function hubControls(controls: Control[]): DockRow['controls'] {
   return controls.flatMap((control) =>
     control.message['type'] === 'action'
@@ -748,7 +748,7 @@ function normalPath(path: string): string {
 }
 
 /**
- * The controls a VS Code window runs (PRD R57, R59). Copy runs in the dock, from the row's pastes; Show in Source Control is left out, because the
+ * The controls that open something for the row (PRD R57, R59). Copy is in the row's pastes; Show in Source Control is left out, because the
  * item window's Source Control view already holds the worktree (PRD R71).
  */
 function windowCommands(controls: Control[]): DockRow['commands'] {

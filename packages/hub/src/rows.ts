@@ -4,7 +4,7 @@ import { waitsOnLimit } from '@switchboard/core/limit';
 import type { Group } from '@switchboard/core/group';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 
-// Imports only types and browser-safe core modules, so the History webview bundles it through `@switchboard/hub/rows`.
+// Imports only types and browser-safe core modules, so a browser bundle can import it through `@switchboard/hub/rows`.
 
 /** A short age such as `40s`, `5m`, `2h` or `3d`. */
 export function age(since: number, now: number): string {
@@ -25,7 +25,7 @@ export function age(since: number, now: number): string {
   return hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
 }
 
-/** Each control icon's codicon glyph in codicon.ttf, which the dock draws; `symbol-file` is Open report's. */
+/** Each control icon's codicon glyph in codicon.ttf, which the list draws; `symbol-file` is Open report's. */
 export const CONTROL_GLYPHS = {
   'arrow-circle-up': '\u{ebff}',
   'arrow-down': '\u{ea9a}',
@@ -59,11 +59,11 @@ export interface Control {
   icon: ControlIcon;
   /** The message the button posts. */
   message: Record<string, unknown>;
-  /** A question the dock asks before it posts the message, with its detail and the label of the button that goes ahead. */
+  /** A question the page asks before it runs the control, with its detail and the label of the button that goes ahead. */
   confirm?: { question: string; detail: string; action: string };
   /**
-   * A text the dock asks for before it posts the message, set as the action's `field`, with the label of the button that goes ahead and `text` in
-   * the box at first; with `choice`, the dock also offers `values`, `value` selected, and sets a changed choice as the action's `choice.field`.
+   * A text the page asks for before it runs the control, set as the action's `field`, with the label of the button that goes ahead and `text` in
+   * the box at first; with `choice`, the page also offers `values`, `value` selected, and sets a changed choice as the action's `choice.field`.
    */
   input?: { question: string; detail: string; field: string; action: string; text?: string; choice?: InputChoice };
 }
@@ -76,7 +76,7 @@ export interface InputChoice {
 }
 
 /**
- * Start with guidance…: Start, after the dock asks for guidance that the task session's prompt ends with (PRD R77), and for the playbook when
+ * Start with guidance…: Start, after the page asks for guidance that the task session's prompt ends with (PRD R77), and for the playbook when
  * there is another to choose (PRD R35).
  */
 function guidedStart(message: Record<string, unknown>, playbook: string | null, playbooks: string[]): Control {
@@ -155,7 +155,7 @@ export function controlsOf(item: WorkItemView): Control[] {
     controls.push({ label: 'Approve', icon: 'check', message: action('approve') });
   }
 
-  // Runs in the extension, which reads the file and writes the clipboard (PRD R60).
+  // The page reads each paste through `row-paste` and writes it to the clipboard (PRD R60).
   if (item.status === 'awaiting-approval' && item.pastes.length > 0) {
     controls.push({ label: 'Copy', icon: 'copy', message: { type: 'copy', pastes: item.pastes.map(({ label, file }) => ({ label, file })) } });
   }
@@ -325,7 +325,7 @@ export const PROVIDER_NAMES: Record<Provider, string> = { claude: 'Claude', code
 
 /**
  * Snooze… for a ticket, and Unsnooze when it is snoozed, so a snoozed ticket can take a new wake time without waking first (PRD R49).
- * Snooze… carries no wake time or comment: the dock asks for them in its snooze dialog before it posts the action.
+ * Snooze… carries no wake time or comment: the page asks for them before it runs the action.
  */
 function snoozeControls(ticket: { id: number; snoozed: boolean }): Control[] {
   const controls: Control[] = [{ label: 'Snooze…', icon: 'clockface', message: { type: 'action', action: { type: 'snooze', ticketId: ticket.id } } }];
@@ -532,7 +532,7 @@ export function sourceLabel(source: string): string {
 
 /**
  * The ticket's source and stored key, such as `gh 18941` or `gh acme/widgets-dashboard#63`. It does not change with labels, so it names
- * VS Code windows and workspace files; rows show {@link shownKey}.
+ * item windows' workspace files; rows show {@link shownKey}.
  */
 export function ticketKey(ticket: { source: string; sourceKey: string; repoRoot?: string }): string {
   return `${sourceLabel(ticket.source)} ${ticket.sourceKey}`;
@@ -702,7 +702,7 @@ export function stripeOf(item: WorkItemView): 'error' | 'warning' | 'turn' | nul
   return 'turn';
 }
 
-/** How long a running session goes without a stage report before the dock colours the stage age (PRD R58). */
+/** How long a running session goes without a stage report before the list colours the stage age (PRD R58). */
 export const STALE_STAGE_MS = 30 * 60_000;
 
 /**
@@ -779,7 +779,7 @@ export function rowKeyOf(entry: WorkItemView | PoolView): string {
 }
 
 /**
- * The rows the dock shows, by group, each in list order (PRD R27, R49): Blocked on you oldest wait first, Ready for review by the
+ * The rows the list shows, by group, each in list order (PRD R27, R49): Blocked on you oldest wait first, Ready for review by the
  * operator's position or readyAt, In progress oldest run first.
  */
 export function listGroups(snapshot: Snapshot): Record<RowGroup, (WorkItemView | PoolView)[]> & { done: WorkItemView[] } {
@@ -813,7 +813,7 @@ function midnight(time: number, days = 0): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days).getTime();
 }
 
-/** The settings, playbook, hook and source errors the dock lists above the groups (PRD R42). */
+/** The settings, playbook, hook and source errors the list shows above the groups (PRD R42). */
 export function snapshotErrors(snapshot: Snapshot): string[] {
   return [
     snapshot.errors.settings === null ? null : `Settings: ${snapshot.errors.settings}`,

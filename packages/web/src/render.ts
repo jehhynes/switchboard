@@ -168,7 +168,7 @@ export interface View {
   personas: { items: Array<{ id: string; name: string; voice?: string; style?: string; personality?: string }> | null; error: string | null } | null;
   /** The list's collapsed groups, by key. */
   collapsed: Set<string>;
-  /** The Done bands the operator opened or closed, by `<group>:<band>`; the rest follow `OPEN_BANDS`. Kept until the page reloads, as the dock keeps them until it exits. */
+  /** The Done bands the operator opened or closed, by `<group>:<band>`; the rest follow `OPEN_BANDS`. Kept until the page reloads. */
   bands: Map<string, boolean>;
   /** Whether a narrow screen shows the list rather than the conversation: after Back, or before a work item is opened. */
   list: boolean;
@@ -222,7 +222,7 @@ export interface NewDraft {
   sending: boolean;
 }
 
-/** A sheet: Delete's or Stop session's question, Snooze…'s choices, a control's text (and choice) as the dock's input dialog asks for it, or a drafted text the clipboard refused. */
+/** A sheet: Delete's or Stop session's question, Snooze…'s choices, a control's text (and choice) as an input dialog asks for it, or a drafted text the clipboard refused. */
 export type Sheet =
   | { kind: 'input'; row: string; label: string; input: NonNullable<PageAction['input']>; text: string; picked: string }
   | { kind: 'confirm'; row: string; action: PageAction }
@@ -231,10 +231,10 @@ export type Sheet =
 
 export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, newDraft: null, side: 'status', viewMenu: false, details: false, briefReplies: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
 
-/** The longest menu label for a link, as the dock's `LinkLabelMax`; a longer one is cut with an ellipsis and shown whole in its tooltip. */
+/** The longest menu label for a link, carried over from the retired dock; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;
 
-/** A row's key in the list: `item:<work item ID>`, or a pool ticket's `ticket:<ticket ID>`, as the dock keys its rows. */
+/** A row's key in the list: `item:<work item ID>`, or a pool ticket's `ticket:<ticket ID>`. */
 export function rowKey(row: Pick<PageRow, 'workItemId' | 'ticketId'>): string {
   return row.workItemId !== null ? `item:${row.workItemId}` : `ticket:${row.ticketId ?? ''}`;
 }
@@ -266,7 +266,7 @@ export function snoozeDateUntil(date: string, choices: readonly SnoozeChoice[]):
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), wake.getHours(), wake.getMinutes()).getTime();
 }
 
-/** Whether an input sheet can go ahead: with a text, or with a choice changed from the one chosen at first, as the dock's dialog. */
+/** Whether an input sheet can go ahead: with a text, or with a choice changed from the one chosen at first. */
 export function inputReady(sheet: Extract<Sheet, { kind: 'input' }>): boolean {
   return sheet.text.trim() !== '' || (sheet.input.choice !== null && sheet.picked !== sheet.input.choice.value);
 }
@@ -291,9 +291,9 @@ export function ago(at: number, now: number): string {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / 1440)} d ago`;
 }
 
-/** The groups the list shows collapsed until the operator opens them, as the dock does. */
+/** The groups the list shows collapsed until the operator opens them. */
 export const COLLAPSED_GROUPS: readonly string[] = ['done', 'snoozed'];
-/** Where the page keeps the operator's open or closed choice per group, as the dock keeps `groups` in `dock.json`. */
+/** Where the page keeps the operator's open or closed choice per group. */
 export const GROUPS_KEY = 'switchboard.groups';
 
 /** The collapsed groups: `COLLAPSED_GROUPS`, then each choice kept under `GROUPS_KEY`, `{<group>: open}`; a kept value that does not read is ignored. */
@@ -320,7 +320,7 @@ export function collapsedGroups(kept: string | null): Set<string> {
   return collapsed;
 }
 
-/** The Done bands open until the operator closes them, as the dock's: Today and Yesterday; the older bands start closed. */
+/** The Done bands open until the operator closes them: Today and Yesterday; the older bands start closed. */
 export const OPEN_BANDS: readonly string[] = ['done:Today', 'done:Yesterday'];
 
 /** Whether a band shows its rows: the operator's choice this page load, else `OPEN_BANDS`. */
@@ -428,7 +428,7 @@ export function markdownBody(text: string): string {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
 }
 
-/** The composer footer's voice controls and mic, drawn by the Conversation view's renderer, for the page (architecture.md § Web page). */
+/** The composer footer's voice controls and mic, drawn by the renderer in packages/conversation, for the page (architecture.md § Web page). */
 export function renderVoice(voice: VoiceView | null, live = true): string {
   return renderVoiceControls(voice, live, 'page');
 }

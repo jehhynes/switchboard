@@ -1,5 +1,5 @@
 /**
- * The question card (PRD R103, architecture.md § Conversation view), drawn alike by the web page and the VS Code Conversation view as HTML
+ * The question card (PRD R103, architecture.md § Conversation view), drawn by the web page as HTML
  * strings: one question at a time, with progress dots, the topic, question and context, full-width options with their descriptions, Other, a
  * summary of the picks, Back and Next or Send; the questions already settled as rows under it. Its buttons carry `data-action`s each front end
  * handles: `card-pick`, `card-other`, `card-step`, `card-back`, `card-next`, `card-send`, `card-menu`, `card-dismiss`, `goto-card` and

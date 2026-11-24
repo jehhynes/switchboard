@@ -2042,7 +2042,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { sources: [{ enabled: false }] } });
     expect(page.frames.at(-1)!['groups']).toBeInstanceOf(Array);
 
-    // A voice problem changes the dock's notes outside a build; `pageListChanged` sends it, and nothing when nothing changed.
+    // A voice problem changes the list's notes outside a build; `pageListChanged` sends it, and nothing when nothing changed.
     setHeader({ notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item', sources: [], repoRoots: [], schedules: [] });
     service.pageListChanged();
     expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item' } });
@@ -2115,7 +2115,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.pageHistory({ window, ticketId }).status).toBe(403);
   });
 
-  it("sends the page that raises alerts, and no other page or window, the work items that started needing the operator with the dock's message (PRD R65)", () => {
+  it("sends the page that raises alerts, and no other page or window, the work items that started needing the operator with their needs-you message (PRD R65)", () => {
     const { service, openPage, scopes, view } = setup();
     const page = openPage();
     const other = openPage();
@@ -2137,11 +2137,11 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
 
     expect(scopes.isPage(page.key)).toBe(true);
     expect(page.frames[0]).toMatchObject({ type: 'hello', scope: null, key: page.key });
-    // The list is the dock's groups, with the dock's rows of the work items.
+    // The list is the list view's groups, with its rows of the work items.
     const listed = (page.frames[0]!['groups'] as Array<{ key: string; rows: Array<{ workItemId: number; title: string }> }>).flatMap((group) => group.rows);
 
     expect(listed.map((row) => row.workItemId).sort()).toEqual([1, 2, 3]);
-    // A done work item is listed in Done, as the dock lists it.
+    // A done work item is listed in Done.
     expect((page.frames[0]!['groups'] as Array<{ key: string; rows: Array<{ workItemId: number }> }>).find((group) => group.key === 'done')?.rows.map((row) => row.workItemId)).toEqual([1]);
     expect(listed.find((row) => row.workItemId === 3)?.title).toBe('Issue <3>');
     expect(service.send({ window: page.key, scopeGen: 0, opId: 'o', sessionId: 's2', launch: null, text: 'hi' }).status).toBe(403);
@@ -2170,7 +2170,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
 
     const page = openPage();
 
-    // The hosted conversation is listed in the group the dock puts it in, under its host's name, as its host is.
+    // The hosted conversation is listed in the group the list view puts it in, under its host's name, as its host is.
     expect(service.pageList().flatMap((group) => group.rows).find((row) => row.workItemId === hosted.id)).toMatchObject({ title: 'Side chat', host: expect.any(String) });
     expect(service.pageList().map((group) => group.key)).not.toContain('conversations');
     service.select({ window: page.key, opId: 'o', workItemId: hosted.id });
@@ -2257,7 +2257,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.pageUpload(page.key, 1, 'b.txt', Buffer.from('b'))).toMatchObject({ status: 409 });
   });
 
-  it("runs a VS Code control only on the page's selected work item, for its scope generation, once per opId", async () => {
+  it("runs Open in VS Code only on the page's selected work item, for its scope generation, once per opId", async () => {
     const { scopes, service, openPage, view, commands } = setup();
     const page = openPage();
     const window = 'forged';
@@ -2430,7 +2430,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(scopes.scope(page.key)).toMatchObject({ sessionId: 's4', earlier: true });
     expect(entry().sessions!.map((one) => one.sessionId)).toEqual(['s5', 's4', 's3']);
 
-    // The current session again, by naming it or none; another work item's session, or a session from a VS Code window, is refused.
+    // The current session again, by naming it or none; another work item's session, or a session from another window, is refused.
     expect(service.select({ window: page.key, opId: 'o', workItemId: 3, sessionId: 's6' }).status).toBe(200);
     expect(scopes.scope(page.key)).toMatchObject({ sessionId: 's6' });
     expect(scopes.scope(page.key)!.earlier).toBeUndefined();

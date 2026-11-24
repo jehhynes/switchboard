@@ -18,7 +18,7 @@ function waiting(h: Harness, key = '1'): { item: number; session: string } {
   return { item, session };
 }
 
-/** The work item's group and mark, as the dock shows them. */
+/** The work item's group and mark, as the list shows them. */
 function shown(h: Harness, item: number): { group: string; mark: string | null; holdsSlot: boolean } {
   const view = { ...h.item(item), sessions: h.store.sessionsFor(item), triage: h.store.triagesFor(item).at(-1) ?? null, approvalSends: false };
 

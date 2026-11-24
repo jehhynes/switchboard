@@ -11,6 +11,10 @@ import { listenHub } from '../src/server.js';
 import type { Snapshot } from '../src/snapshot.js';
 import { gitBashRoot, handledBody, isPastePath, registerTitle, reportBody, ticketBody } from '../src/report.js';
 import { tempHome, until } from './helpers.js';
+import type { HubApp } from '../src/serve.js';
+
+/** A page's source icon, which turns a source on or off as the list header posts it. */
+const toggleSource = (app: HubApp, body: Record<string, unknown>) => app.post['/v1/conversation/page-source']!({ window: app.page!.opened(false), ...body });
 
 /** The needs-you alerts the hub shows as system notifications; no test shows a real one. */
 const systemAlerts = vi.hoisted(() => [] as Array<{ alerts: unknown[]; sound: boolean }>);
@@ -304,11 +308,6 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const app = await start();
 
-    expect(await app.post['/action']!({ type: 'approve', workItemId: 9 })).toEqual({ status: 409, body: { error: 'Unknown work item 9.' } });
-    expect(await app.post['/action']!({ type: 'poll' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
-    expect(await app.post['/action']!({ type: 'retriage', workItemId: 1 })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
-    expect(await app.post['/action']!({ type: 'answer', workItemId: 9, nativeSessionId: 'n', question: 'Which?', answer: 'Birch' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
-    expect(await app.post['/action']!({ type: 'open-question', workItemId: 9, nativeSessionId: 'n' })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
     expect(await app.post['/report']!({ sessionId: 's9', kind: 'stage', stage: 'x' })).toEqual({ status: 409, body: { error: 'Unknown session s9.' } });
     expect(await app.post['/report']!({ kind: 'stage' })).toEqual({ status: 400, body: { error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' } });
     expect(await app.post['/contract']!({ nativeSessionId: 'n' })).toEqual({ status: 404, body: { error: 'No Switchboard session has this Claude session ID.' } });
@@ -414,11 +413,11 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { sessions: { installHooks: false } } })).toEqual({ status: 200, body: { errors: [], warnings: [] } });
   });
 
-  it('has no route for VS Code windows, which no longer connect: no claim, open, window command, background session, Open in Switchboard, window History or Expand replies', async () => {
+  it('has no route for VS Code windows or the dock, which no longer connect: no claim, open, window command, background session, Open in Switchboard, window History, Expand replies, action, source toggle or poll', async () => {
     writeSettings({ sessions: { installHooks: false } });
     const app = await start();
 
-    for (const route of ['/claim', '/open', '/open/withdraw', '/window', '/window/withdraw', '/background', '/background/check', '/open-url', '/history', '/v1/conversation/open-file', '/v1/conversation/new-conversation', '/v1/conversation/expand-replies']) {
+    for (const route of ['/claim', '/open', '/open/withdraw', '/window', '/window/withdraw', '/background', '/background/check', '/open-url', '/history', '/v1/conversation/open-file', '/v1/conversation/new-conversation', '/v1/conversation/expand-replies', '/action', '/sources', '/poll']) {
       expect(app.post[route], route).toBeUndefined();
     }
 
@@ -463,7 +462,7 @@ describe('createHubApp', () => {
     const source = { name: 'github', poll: async () => ({ tickets: [] }), keyOfBranch: () => null, context: async () => ({ context: '' }), assignmentAt: async () => ({ ticket: { sourceKey: '7', ref: '#7', repo: '', title: 'Fix', url, open: true }, assignmentKey: 'I:A', assigned: false }) };
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, makeSource: () => ({ source }) } });
     closers.push(() => app.close());
-    await app.post['/sources']!({ name: 'github', enabled: true });
+    await toggleSource(app, { name: 'github', enabled: true });
     app.runtime.send({ type: 'register', nativeSessionId: 'native', shortId: 'native', cwd: 'D:/repo', title: 'Prepare fix' });
     const sessionId = app.runtime.snapshot().workItems[0]!.sessions[0]!.id;
     for (const body of [{}, { sessionId, url: 'file:///x' }, { sessionId, url, releaseKey: '' }, { sessionId, url, releaseKey: 1 }]) {
@@ -486,20 +485,22 @@ describe('createHubApp', () => {
     await until(() => ((app.snapshot() as { errors: { settings: string | null } }).errors.settings?.startsWith('settings.json is not valid JSON') ? true : null));
   });
 
-  it('polls the sources that are on at POST /poll, and refuses when none is', async () => {
+  it("polls the sources that are on at the page's Refresh sources, and refuses when none is", async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { github: { repoRoot: '' } } });
     let polls = 0;
     const makeSource = () => ({ source: { name: 'github', poll: async () => (polls++, { tickets: [] }), keyOfBranch: () => null, context: async () => ({ context: '' }) } });
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, makeSource } });
     closers.push(() => app.close());
 
-    expect(await app.post['/poll']!({})).toEqual({ status: 409, body: { error: 'No source is polled. Turn one on in the header.' } });
-    expect(await app.post['/sources']!({ name: 'github', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    const page = app.page!.opened(false);
+
+    expect(await app.post['/v1/conversation/page-poll']!({ window: page })).toEqual({ status: 409, body: { error: 'No source is polled. Turn one on in the header.' } });
+    expect(await toggleSource(app, { name: 'github', enabled: true })).toEqual({ status: 200, body: { done: true } });
     // A refresh while a read is in flight does not read again, so the first read finishes first.
     await new Promise((done) => setImmediate(done));
     expect(polls).toBe(1);
 
-    expect(await app.post['/poll']!({})).toEqual({ status: 200, body: { done: true } });
+    expect(await app.post['/v1/conversation/page-poll']!({ window: page })).toEqual({ status: 200, body: { done: true } });
     expect(polls).toBe(2);
   });
 
@@ -512,13 +513,13 @@ describe('createHubApp', () => {
 
     expect(states()).toEqual([{ name: 'zoho', kind: 'zoho', enabled: false }]);
     expect(await enabled()).toEqual({ zoho: false, adhoc: false });
-    expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(await toggleSource(app, { name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
     expect(states()).toEqual([{ name: 'zoho', kind: 'zoho', enabled: true }]);
     expect(await enabled()).toEqual({ zoho: true, adhoc: false });
     expect(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8')).toBe(text);
 
-    expect(await app.post['/sources']!({ name: 'forum', kind: 'forum', enabled: true })).toEqual({ status: 409, body: { error: 'settings.json has no source named forum.' } });
-    expect(await app.post['/sources']!({ name: 'zoho', enabled: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {name, enabled}.' } });
+    expect(await toggleSource(app, { name: 'forum', kind: 'forum', enabled: true })).toEqual({ status: 409, body: { error: 'settings.json has no source named forum.' } });
+    expect(await toggleSource(app, { name: 'zoho', enabled: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {window, name, enabled}.' } });
     app.close();
 
     // The state is kept in the store, so a new hub starts the source again.
@@ -534,9 +535,9 @@ describe('createHubApp', () => {
     const configs = () => frames.filter((frame) => frame.includes('\nevent: config\n')).length;
 
     app.conversation!(app.page!.opened(false), (frame) => frames.push(frame));
-    expect(await app.post['/sources']!({ name: 'forum', kind: 'forum', enabled: true })).toMatchObject({ status: 409 });
+    expect(await toggleSource(app, { name: 'forum', kind: 'forum', enabled: true })).toMatchObject({ status: 409 });
     expect(configs()).toBe(0);
-    expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(await toggleSource(app, { name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
     expect(configs()).toBe(1);
   });
 
@@ -546,7 +547,7 @@ describe('createHubApp', () => {
     const check = async (settings: unknown) => ((await app.post['/v1/conversation/page-settings-check']!({ settings })).body as { errors: string[] }).errors;
 
     expect(await check({ sources: { zoho: { repoRoot: 'D:/support' } } })).toEqual([]);
-    expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(await toggleSource(app, { name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
     expect(await check({ sources: { zoho: { repoRoot: 'D:/support' } } })).toEqual([expect.stringMatching(/^sources\.zoho\./)]);
     expect(await check({ sources: { zoho: { enabled: true } } })).toEqual(["sources.zoho.enabled is not a setting; turn a source on and off in the list's header."]);
   });
@@ -568,7 +569,7 @@ describe('createHubApp', () => {
     );
     await until(() => ((app.snapshot() as { playbooks: unknown[] }).playbooks.length === 1 ? true : null));
 
-    expect(await app.post['/sources']!({ name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+    expect(await toggleSource(app, { name: 'zoho', kind: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
     expect((app.snapshot() as { sourceStates: unknown }).sourceStates).toEqual([{ name: 'zoho', kind: 'zoho', enabled: true }]);
     expect(JSON.parse(readFileSync(join(temp.home, '.switchboard', 'settings.json'), 'utf8'))).toEqual({ sessions: { installHooks: false } });
   });
@@ -818,7 +819,7 @@ describe('createHubApp', () => {
     writer.close();
   });
 
-  it("opens a listed row's link, runs a pool ticket's control and a VS Code control for the page only as each row offers it now (architecture.md § Web page)", async () => {
+  it("opens a listed row's link, runs a pool ticket's control and Open in VS Code for the page only as each row offers it now (architecture.md § Web page)", async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const opened: string[] = [];
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli }, launch: { openUrl: (url) => opened.push(url), openCode: (target) => { opened.push(`code ${target}`); } } });
@@ -844,7 +845,7 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o3', workItemId: 99, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 409, body: { error: 'The work item is gone.' } });
     expect(await app.post['/v1/conversation/pool-action']!({ window: page, opId: 'o4', ticketId: 99, label: 'Start' })).toEqual({ status: 409, body: { error: 'The ticket is no longer in the pool.' } });
 
-    // A VS Code control runs on the page's selected work item; an ad-hoc work item with no session has no window to open.
+    // Open in VS Code runs on the page's selected work item; an ad-hoc work item with no session has no window to open.
     expect(await app.post['/v1/conversation/select']!({ window: page, opId: 'o5', workItemId: 1 })).toMatchObject({ status: 200 });
     expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen: 1, opId: 'o6', workItemId: 1, label: 'Open in VS Code' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
     expect(opened).toHaveLength(1);
@@ -898,7 +899,7 @@ describe('createHubApp', () => {
     expect(opened).toHaveLength(1);
     expect(opened[0]).toMatch(/[\\/]\.switchboard[\\/]windows[\\/][^\\/]+\.code-workspace$/);
 
-    // The hub writes the file itself, as it did only for the dock before; VS Code runs without the extension, so nothing waits for a claim.
+    // The hub writes the file itself; VS Code runs without any Switchboard extension, so nothing waits for a claim.
     const workspace = JSON.parse(readFileSync(opened[0]!, 'utf8')) as { folders: { path: string }[]; settings: Record<string, unknown> };
 
     expect(workspace.folders).toEqual([{ path: worktree }]);
@@ -1003,7 +1004,7 @@ describe('createHubApp', () => {
     expect(opened).toEqual([]);
     rmSync(hostFile, { recursive: true });
 
-    // The host's file was never written, since no dock view went out; the hosted conversation writes it from the host's row and opens it.
+    // The host's file was never written, since no list view went out; the hosted conversation writes it from the host's row and opens it.
     expect(await run(hostedItem.id)).toEqual({ status: 200, body: { done: true } });
     expect(opened).toEqual([hostFile]);
     expect((JSON.parse(readFileSync(hostFile, 'utf8')) as { folders: unknown }).folders).toEqual([{ path: worktree }]);
@@ -1012,7 +1013,7 @@ describe('createHubApp', () => {
     expect(opened.at(-1)).toBe(aside);
   });
 
-  it("moves a Ready for review row for the page as a drag in the dock does, and refuses a row or a place outside Ready for review (PRD R73)", async () => {
+  it("moves a Ready for review row for the page as a drag does, and refuses a row or a place outside Ready for review (PRD R73)", async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
 
@@ -1165,7 +1166,7 @@ describe('createHubApp', () => {
     }
   });
 
-  it("pins a session's persona through /action and clears the pin, refusing an unknown persona and any while voice is off (architecture.md § Personas)", async () => {
+  it("pins a session's persona and clears the pin, refusing an unknown persona and any while voice is off (architecture.md § Personas)", async () => {
     const personas = [
       { id: 'nova', name: 'Nova', personality: 'Warm.' },
       { id: 'orion', name: 'Orion' },
@@ -1185,17 +1186,16 @@ describe('createHubApp', () => {
     };
 
     expect(persona()).toEqual(['nova', false]);
-    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 'orion' })).toEqual({ status: 200, body: { done: true } });
+    expect(app.runtime.send({ type: 'persona', sessionId, personaId: 'orion' }).refused).toBeNull();
     expect(persona()).toEqual(['orion', true]);
-    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: null })).toEqual({ status: 200, body: { done: true } });
+    expect(app.runtime.send({ type: 'persona', sessionId, personaId: null }).refused).toBeNull();
     expect(persona()[1]).toBe(false);
-    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 'vega' })).toEqual({ status: 409, body: { error: 'No persona vega in voice.personas.' } });
-    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 3 })).toEqual({ status: 400, body: { error: 'Unknown action.' } });
+    expect(app.runtime.send({ type: 'persona', sessionId, personaId: 'vega' }).refused).toBe('No persona vega in voice.personas.');
 
     // Personas are part of voice.
     writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: false, personas } });
-    await until(async () => ((await app.post['/action']!({ type: 'persona', sessionId, personaId: 'orion' })).status === 409 ? true : null));
-    expect(await app.post['/action']!({ type: 'persona', sessionId, personaId: 'orion' })).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
+    await until(() => (app.runtime.send({ type: 'persona', sessionId, personaId: 'orion' }).refused !== null ? true : null));
+    expect(app.runtime.send({ type: 'persona', sessionId, personaId: 'orion' }).refused).toBe('Voice is off (voice.enabled).');
   });
 
   it('attaches to a held session through the server, refusing a request without the token, a bad body and an unknown session (PRD R95)', async () => {
@@ -1288,7 +1288,7 @@ describe('createHubApp', () => {
     expect(lock).toBe(false);
   });
 
-  it("runs hub.js with sessions.nodePath as a Code Mode session's terminal in the dock view, and opens a held session's terminal in the terminal app (PRD R95)", async () => {
+  it("runs hub.js with sessions.nodePath as a Code Mode session's terminal in the list view, and opens a held session's terminal in the terminal app (PRD R95)", async () => {
     writeSettings({ sessions: { installHooks: false, nodePath: '/opt/node/bin/node' }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const logs: string[] = [];
     const entry = { session: 'held-1', label: 'l', pid: 9, cwd: 'D:/scratch', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null };
@@ -1331,8 +1331,8 @@ describe('createHubApp', () => {
     closers.push(() => server.close());
     const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
 
-    expect(await postToHub(record, '/action', { type: 'mark-done', workItemId: 1 }, 5000)).toMatchObject({ status: 409, error: 'Unknown work item 1.' });
+    expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'stage', stage: 'x' }, 5000)).toMatchObject({ status: 409, error: 'Unknown session s1.' });
     expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'nope' }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' });
-    expect(await postToHub({ ...record, port: 1 }, '/action', {}, 1000)).toBeNull();
+    expect(await postToHub({ ...record, port: 1 }, '/report', {}, 1000)).toBeNull();
   });
 });

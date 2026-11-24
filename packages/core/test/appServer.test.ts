@@ -42,9 +42,9 @@ describe('Codex app-server sessions', () => {
     expect(h.store.session('s1')).toMatchObject({releasing:true});
     h.store.close();
   });
-  it('starts hosted Codex conversations without Code Mode or hooks, and counts slots only during a turn', () => {
+  it('starts standalone Codex sessions without Code Mode or hooks, and counts slots only during a turn', () => {
     const h = new Harness({settings:settings({sessions:{provider:'codex',codeMode:false,installHooks:false}})});
-    const action = h.act({type:'new-conversation',hostWindow:'D:/folder',folder:'D:/folder'})[0] as Extract<FlowAction,{type:'start-session'}>;
+    const action = h.act({type:'new-session',repoRoot:'D:/folder'})[0] as Extract<FlowAction,{type:'start-session'}>;
     expect(action).toMatchObject({provider:'codex',execution:'app-server',prompt:''});
     expect(action.contract).not.toContain(' report done ');
     h.act({type:'session-started',sessionId:'s1',nativeSessionId:'thread-1',shortId:'thread-1'});

@@ -1,9 +1,9 @@
 import type { DoneReason, Session, Triage, WorkItem } from './model.js';
 import { SETUP_AT_LIMIT, waitsOnLimit } from './limit.js';
 
-// Imports only types and `limit.ts`, which imports only types, so the History webview and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
+// Imports only types and `limit.ts`, which imports only types, so the web page and the Chrome extension can bundle it for a browser through `@switchboard/core/group`.
 
-/** Dock groups (PRD R27): Blocked on you, Ready for review, In progress, Unstarted and Done; Snoozed is the dock's own. */
+/** The list's groups (PRD R27): Blocked on you, Ready for review, In progress, Unstarted and Done; Snoozed is the list's own. */
 export type Group = 'blocked' | 'review' | 'progress' | 'unstarted' | 'done';
 
 /** The state detail of a `waiting` Claude session that waits on a prompt before it starts, such as approving the project's MCP servers (PRD R41). */
@@ -231,7 +231,7 @@ export const MARK_TITLES: Record<Mark, string> = {
   'done-unassigned': DONE_WORDS.unassigned,
 };
 
-/** Each mark's codicon glyph in codicon.ttf, for the dock and the Chrome extension's pills; Queued's `clock` is an alias of `history`. */
+/** Each mark's codicon glyph in codicon.ttf, for the Chrome extension's pills; Queued's `clock` is an alias of `history`. */
 export const MARK_GLYPHS: Record<Mark, string> = {
   question: '\u{eb32}',
   permission: '\u{eb53}', // shield
@@ -252,8 +252,8 @@ export const MARK_GLYPHS: Record<Mark, string> = {
 };
 
 /**
- * Each mark's codicon name, the icon `MARK_GLYPHS` draws, for a webview or a page that draws codicons by class: one mapping for the dock, the
- * Switchboard pane, the Conversation view and the web page.
+ * Each mark's codicon name, the icon `MARK_GLYPHS` draws, for a page that draws codicons by class: one mapping for every
+ * place the web page draws a mark.
  */
 export const MARK_ICONS: Record<Mark, string> = {
   question: 'question',
@@ -276,8 +276,8 @@ export const MARK_ICONS: Record<Mark, string> = {
 
 /**
  * How strongly a mark or a session icon is drawn: `muted`, in the secondary text colour, for every state that needs nothing of the operator;
- * `attention`, in the warning colour, for one that waits on the operator or on a usage limit; `error` for a failure. One rule for the web page
- * and the Conversation view, so colour means the same everywhere.
+ * `attention`, in the warning colour, for one that waits on the operator or on a usage limit; `error` for a failure. One rule for every place
+ * the web page draws one, so colour means the same everywhere.
  */
 export type IconTone = 'muted' | 'attention' | 'error';
 
@@ -300,7 +300,7 @@ export const MARK_TONES: Record<Mark, IconTone> = {
   'done-unassigned': 'muted',
 };
 
-/** The marks drawn spinning, as the dock spins them: a session at work. */
+/** The marks drawn spinning: a session at work. */
 export const SPINNING_MARKS: ReadonlySet<Mark> = new Set<Mark>(['running', 'triaging']);
 
 /** A session's state as an icon: its mark's when one means the same, else `starting`, `ended` or `none` for no session. */
@@ -308,7 +308,7 @@ export type SessionIcon = 'question' | 'permission' | 'running' | 'limited' | 'i
 
 /**
  * The codicon of each session state, `~spin` for one that spins: the same icon as the mark of that meaning, so a session waiting on a question
- * shows the dock's question mark and an idle one its Idle mark. `check` is left to Done.
+ * shows the list's question mark and an idle one its Idle mark. `check` is left to Done.
  */
 export const SESSION_ICONS: Record<SessionIcon, string> = {
   question: MARK_ICONS.question,
@@ -436,13 +436,13 @@ export function urlKey(url: string): string {
 /** A ticket on the browser endpoint's `GET /cards` (PRD R67). `url` is the ticket's URL as stored. */
 export interface Card {
   url: string;
-  /** The playbook the dock shows, `<namespace>:triage` during triage, or null before triage chooses one. */
+  /** The playbook the list row shows, `<namespace>:triage` during triage, or null before triage chooses one. */
   playbook: string | null;
   group: Group;
   /** The row's mark (PRD R27), or null when the row shows none. A hub older than this field sends none. */
   mark?: Mark | null;
   snoozed: boolean;
-  /** The dock row's stripe (PRD R27), which colours the pill: null when the row has none. A hub older than this field sends none. */
+  /** The list row's stripe (PRD R27), which colours the pill: null when the row has none. A hub older than this field sends none. */
   stripe?: 'error' | 'warning' | 'turn' | null;
   /** The URLs of the ticket's links (PRD R52), so a pull request page finds its ticket (PRD R69). A hub older than R69 sends none. */
   links?: string[];

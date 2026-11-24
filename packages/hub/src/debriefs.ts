@@ -610,7 +610,7 @@ export class Debriefs {
     const result = await this.deps
       .exec(this.deps.nodePath, [this.deps.codexScript, thread, '--prompt', this.deps.promptPath, ...(since === null ? [] : ['--since', since])], {
       timeoutMs: DEBRIEF_TIMEOUT_MS,
-      // The hub runs as VS Code's executable in Node mode.
+      // Runs an Electron runtime as Node; plain Node ignores it.
       env: { ELECTRON_RUN_AS_NODE: '1', [DEBRIEF_ENV]: '1' },
     })
       .catch((error: unknown): ExecResult => ({ code: null, stdout: '', stderr: String(error), missing: false, timedOut: false }));

@@ -16,7 +16,7 @@ import { backgroundLabel } from '@switchboard/core/group';
 import type { ArtifactView, MessageView, NativeRequest, QuestionsView, ReplyView, ScreenPrompt } from '@switchboard/protocol';
 
 /**
- * One of our messages: its bubble over its meta line (`metaLine`, shared with the Conversation view). A failed delivery always shows; with
+ * One of our messages: its bubble over its meta line (`metaLine`, from packages/conversation). A failed delivery always shows; with
  * message details on, a dictated message's mark too. A message with no meta line has its time as the bubble's tooltip.
  */
 function Message({ item, stamped: shown, details, answered }: { item: MessageView; stamped: boolean; details: boolean; answered: LedgerQuestion[] }) {
@@ -67,7 +67,7 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies }: { it
     );
   }
 
-  // Focused mode, as in the Conversation view, with Brief replies on: a reply shows its primary response first, spoken or not, then the first lines of its
+  // Focused mode, with Brief replies on: a reply shows its primary response first, spoken or not, then the first lines of its
   // details fading out, and a click or a tap on it, or Enter or Space on the fade, opens it. The primary response keeps its place when the whole reply
   // shows; after the operator spoke over it, the part not heard is dimmed.
   // A reply with no [details] line is all primary response, question markup included, which shows no more than the text does.
@@ -264,7 +264,7 @@ function StillOpen({ keys, ledger, view, state, canAnswer }: { keys: string[]; l
   );
 }
 
-/** The card with this key, drawn by the renderer the Conversation view shares; null for a reply that asks no questions. */
+/** The card with this key, drawn by the renderer in packages/conversation; null for a reply that asks no questions. */
 export function cardOf(key: string, ledger: QuestionLedger, view: View, state: PageState, canAnswer: boolean): VNode | null {
   const card = ledger.cards.get(key);
 

@@ -26,7 +26,7 @@ function heldTask(h: Harness, playbook = 'dev:question'): string {
 
 const harness = (sessions: NonNullable<Parameters<typeof settings>[0]>['sessions'] = { codeMode: true }) => new Harness({ settings: settings({ sessions }), playbooks: playbooks(undefined, { 'dev:read': { description: 'Read it', template: 'Read {{ticket.title}}.' } }) });
 
-/** The row's view of the work item, as the dock groups and marks it (PRD R27). */
+/** The row's view of the work item, as the list groups and marks it (PRD R27). */
 function row(h: Harness) {
   return { ...h.item(1), sessions: h.store.sessionsFor(1), triage: null, approvalSends: false };
 }
@@ -107,9 +107,9 @@ describe('a turn that ends with an unanswered question card (PRD R103)', () => {
     expect(background.status(1)).toBe('finished');
     background.store.close();
 
-    // A hosted conversation stays open between turns and shows no question.
+    // A standalone session stays open between turns and shows no question.
     const hosted = harness();
-    const conversation = hosted.act({ type: 'new-conversation', hostWindow: 'D:/folder', folder: 'D:/folder' })[0] as Extract<FlowAction, { type: 'start-session' }>;
+    const conversation = hosted.act({ type: 'new-session', repoRoot: 'D:/folder' })[0] as Extract<FlowAction, { type: 'start-session' }>;
     hosted.act({ type: 'session-started', sessionId: conversation.sessionId, nativeSessionId: 'n', shortId: 'n-short', launchId: 'launch-1' });
     hosted.questionCards.add(conversation.sessionId);
     hosted.act({ type: 'marker', sessionId: conversation.sessionId, state: 'running', detail: null });

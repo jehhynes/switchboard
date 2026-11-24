@@ -1,5 +1,5 @@
 /**
- * The line under a message or a reply, drawn alike by the VS Code Conversation view and the web page so they cannot drift (architecture.md
+ * The line under a message or a reply, drawn by the web page for every message and reply (architecture.md
  * § Conversation view, § Web page): its marks on the left and its time at the right. The copy button and error marks always show; the
  * optional marks (a dictated message's, a reply's tone, Not spoken) and every item's time show only with Show message details on; without it only the
  * first item after a day's divider shows its time, and the others have it as their tooltip. Imports nothing, for browser bundles.

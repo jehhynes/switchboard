@@ -12,7 +12,7 @@ export interface FieldOption {
 }
 
 /**
- * A setting or playbook field, as the dock's `Field`: `path` is a dotted path from the settings root, or a playbook field name; `help` explains
+ * A setting or playbook field: `path` is a dotted path from the settings root, or a playbook field name; `help` explains
  * it, empty for none; `placeholder` is the value that applies when it is empty; `fallback` a checkbox's value when the key is absent;
  * `listDefault` a list whose default is not empty, so an absent key shows the default and an emptied list is saved as `[]`. Adjacent checkboxes
  * with the same `group` share one row under that label.
@@ -44,7 +44,7 @@ export interface SettingsFile {
   error: string | null;
 }
 
-/** What `page-settings-read` answers, as `/config/read` answers the dock. */
+/** What `page-settings-read` answers. */
 export interface EditorConfig {
   settings: SettingsFile;
   permissionModes: readonly string[];
@@ -61,7 +61,7 @@ const strings = (value: unknown): string[] => (Array.isArray(value) ? value.map(
 const isObject = (value: unknown): value is JsonObject => typeof value === 'object' && value !== null && !Array.isArray(value);
 const text = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
-/** Reads the hub's answer, as the dock's `EditorConfig.Parse`. */
+/** Reads the hub's answer. */
 export function parseConfig(body: Record<string, unknown>): EditorConfig {
   const settings = isObject(body['settings']) ? body['settings'] : {};
   const record = <T>(value: unknown, read: (entry: unknown) => T): Record<string, T> => (isObject(value) ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, read(entry)])) : {});
@@ -83,7 +83,7 @@ export function clone<T extends Json | undefined>(value: T): T {
   return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T);
 }
 
-/** A value's JSON text, `undefined` for an absent one, to compare two values as the dock does. */
+/** A value's JSON text, `undefined` for an absent one, to compare two values. */
 export const json = (value: Json | undefined): string => (value === undefined ? 'undefined' : JSON.stringify(value));
 
 export const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
@@ -212,7 +212,7 @@ export function withCurrent(options: readonly FieldOption[], current: Json | und
 export const providerName = (provider: string): string => (provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : provider);
 
 /**
- * The Settings state, as the dock's `EditorState`: settings.json as read, one unsaved draft of the whole file with the version it started
+ * The Settings state: settings.json as read, one unsaved draft of the whole file with the version it started
  * from, the page, and the errors. Pages are `general`, and those the later parts of this file add.
  */
 export class EditorState {
@@ -676,7 +676,7 @@ export const ENROLL_SENTENCES = [
   'Now keep talking about anything, in your usual voice, until the minute is up.',
 ];
 
-/** The time as the dock's `yyyy-MM-dd HH:mm`, in local time. */
+/** The time as `yyyy-MM-dd HH:mm`, in local time. */
 function localMinute(at: Date): string {
   const two = (value: number): string => String(value).padStart(2, '0');
 
@@ -684,7 +684,7 @@ function localMinute(at: Date): string {
 }
 
 /**
- * The enrolment row, as the dock's `EnrollmentRow`: how enrolment stands, with a refusal first, and Enroll my voice, Enroll again or Cancel;
+ * The enrolment row: how enrolment stands, with a refusal first, and Enroll my voice, Enroll again or Cancel;
  * the sentences show only while it records.
  */
 export function enrollmentRow(enrollment: Enrollment | null, error: string | null, now: number): { status: string; button: string; command: string; sentences: string[] } {
@@ -720,7 +720,7 @@ export function enrollmentRow(enrollment: Enrollment | null, error: string | nul
 /** Sorts as .NET's ordinal comparison does, by UTF-16 code unit. */
 export const ordinal = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
-/** A playbook entry of settings.json's `playbooks` object, as the dock's `PlaybookFields`. */
+/** A playbook entry of settings.json's `playbooks` object. */
 export interface PlaybookFields {
   description: string;
   kind: string;

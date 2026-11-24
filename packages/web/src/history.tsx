@@ -1,4 +1,4 @@
-// The web page's History tab (architecture.md § Web page): a ticket's activity as the VS Code History tab shows it (PRD R59), from the view the
+// The web page's History tab (architecture.md § Web page): a ticket's activity (PRD R59), from the view the
 // hub builds, drawn by the page's own code.
 import type { VNode } from 'preact';
 import type { HistoryCategory, HistoryEntry, HistoryLink, HistorySection, HistoryView } from '@switchboard/protocol';
@@ -258,7 +258,7 @@ function Section({ section, ui, open }: { section: HistorySection; ui: HistoryUi
 }
 
 /**
- * The page's History tab (PRD R59), what the VS Code History tab shows: the ticket's key, title, facts and links; the category chips, the filter,
+ * The page's History tab (PRD R59): the ticket's key, title, facts and links; the category chips, the filter,
  * Expand all and Collapse all; the note on reconstructed entries; and a section per work item, newest first, then the ticket's, the first open.
  * Loading… until the hub answers, and why when it cannot.
  */

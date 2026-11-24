@@ -1,5 +1,5 @@
-/* The question card (packages/conversation/src/questionCard.ts), shared by the web page and the VS Code Conversation view, whose builds put this
-   file before their own styles. Only theme variables both front ends have. The card never scrolls or takes touch gestures of its own, so a
+/* The question card (packages/conversation/src/questionCard.ts), drawn by the web page, whose build puts this
+   file before its own styles. Only the theme copy's VS Code variables. The card never scrolls or takes touch gestures of its own, so a
    vertical pan over it scrolls the conversation. */
 .question-card.qc { position: relative; --qc-border: var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); --qc-accent: var(--vscode-focusBorder, #0078d4); display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; max-width: 760px; margin: 8px 0 4px; padding: 10px 14px; border: 1px solid var(--qc-border); border-radius: 10px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-input-background)) 85%, var(--vscode-foreground) 4%); color: var(--vscode-foreground); overflow: visible; touch-action: auto; }
 /* Header labels, short questions and notes: the description colour taken a little toward the background, quieter than the answers. */

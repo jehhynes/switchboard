@@ -1,5 +1,5 @@
 /**
- * The session providers' marks for the Conversation view's and web page's headers (architecture.md § Conversation view), drawn in the current
+ * The session providers' marks for the web page's headers (architecture.md § Conversation view), drawn in the current
  * text colour. Imports nothing, for browser bundles.
  *
  * Claude: the path of resources/claude-logo.svg in the Claude Code VS Code extension (anthropic.claude-code 2.1.329).

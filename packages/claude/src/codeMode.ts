@@ -36,7 +36,7 @@ const CODE_MODE_VARIABLE = 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE';
 
 /**
  * Removed from the hub's environment: VS Code's runtime, Node.js options, credentials (mechanics M64), and the markers a parent Claude session
- * leaves, which make a child think it is a subprocess: the dock's list and claude-collab's. Other `CLAUDE_CODE_*` settings pass through.
+ * leaves, which make a child think it is a subprocess, as claude-collab's list does. Other `CLAUDE_CODE_*` settings pass through.
  * `NO_COLOR` and `FORCE_COLOR` go too: a Claude session's Bash tool sets `NO_COLOR=1`, so a hub started from one passes it on, and Claude Code
  * without colour draws its suggested prompt as plain text, which typing then reads as a draft (mechanics M149).
  */
