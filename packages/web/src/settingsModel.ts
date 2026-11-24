@@ -1076,7 +1076,7 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
   };
   const defaultProvider = setting('sessions.provider') ?? 'claude';
   const codex = (playbook.provider ?? defaultProvider) === 'codex';
-  const mode = setting(codex ? 'sessions.codex.permissionMode' : 'sessions.permissionMode') ?? (codex ? 'bypassPermissions' : 'auto');
+  const mode = setting(codex ? 'sessions.codex.permissionMode' : 'sessions.permissionMode') ?? 'auto';
   const model = setting(codex ? 'sessions.codex.model' : 'sessions.model');
   const modes = codex ? state.config.codexPermissionModes : state.config.permissionModes;
   const fields: Field[] = [
@@ -1127,7 +1127,7 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
       path: 'permissionMode',
       label: 'Permission mode',
       kind: 'select',
-      help: codex ? 'Commands in Codex’s sandbox cannot use your sign-ins, such as gh’s.' : '',
+      help: codex ? 'On Windows, commands in Codex’s sandbox can’t read your stored sign-ins: gh needs GH_TOKEN passed through your Codex shell environment, and git needs OpenSSL with gh as its credential helper. Skills that need more run in bypassPermissions.' : '',
       options: withCurrent([{ value: '', label: `Sessions setting (${mode})` }, ...modes.map((entry) => ({ value: entry, label: entry }))], playbook.permissionMode ?? undefined),
     });
     fields.push({ path: 'model', label: 'Model', kind: 'text', help: '', placeholder: `Sessions setting (${model ?? (codex ? 'Codex’s default' : 'Claude’s default')})` });
@@ -1193,7 +1193,7 @@ export function generalFields(state: EditorState): Section[] {
       heading: 'Codex sessions',
       fields: [
         { path: 'sessions.codex.model', label: 'Model', kind: 'text', help: 'A playbook can set its own.', placeholder: "Codex's default" },
-        { path: 'sessions.codex.permissionMode', label: 'Permission mode', kind: 'select', help: 'A playbook can set its own. Commands in Codex’s sandbox cannot use your sign-ins, such as gh’s, so skills that call them need bypassPermissions.', placeholder: 'bypassPermissions', options: codexModes },
+        { path: 'sessions.codex.permissionMode', label: 'Permission mode', kind: 'select', help: 'A playbook can set its own. On Windows, commands in Codex’s sandbox can’t read your stored sign-ins: gh needs GH_TOKEN passed through your Codex shell environment, and git needs OpenSSL with gh as its credential helper. Skills that need more run in bypassPermissions.', placeholder: 'auto', options: codexModes },
       ],
     },
     {

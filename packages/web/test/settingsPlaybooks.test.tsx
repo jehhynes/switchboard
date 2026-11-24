@@ -84,6 +84,20 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-page .settings-message')?.textContent).toBe('Fix this entry in settings.json in an editor, or delete it.');
   });
 
+  it("shows a Codex playbook's sessions setting as auto when settings.json sets no Codex mode, and keeps a playbook's own mode", async () => {
+    answers['page-settings-read'] = { status: 200, body: config({ sessions: { provider: 'codex' }, playbooks: { 'dev:build': { description: 'Build it', template: 'Build.' }, 'dev:gh': { description: 'Uses gh', permissionMode: 'bypassPermissions', template: 'Ship.' } } }, {}) };
+    await open();
+
+    entry('build').click();
+    await settle();
+    expect(control<HTMLSelectElement>('permissionMode').options[0]!.textContent).toBe('Sessions setting (auto)');
+    expect(control<HTMLSelectElement>('permissionMode').value).toBe('');
+
+    entry('gh').click();
+    await settle();
+    expect(control<HTMLSelectElement>('permissionMode').value).toBe('bypassPermissions');
+  });
+
   it("draws a task playbook's page: Start and Reports rows, Approve sends while Approval is on, the agent's modes, and the template's variables", async () => {
     await open();
     entry('build').click();

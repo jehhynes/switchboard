@@ -57,7 +57,7 @@ Meanwhile a feature request waits for you to press Start. Once it has a plan, th
 ## Safe by design
 
 - **Switchboard never writes to your ticket sources** and never changes git state. The sessions it starts make every change, through the skills and prompts you give them.
-- **Your permissions, your call.** Sessions run as you, with your sign-ins. Claude Code sessions default to its `auto` permission mode and Codex sessions to `bypassPermissions`; settings and each playbook can change that. What a session may do is what its prompt and permission mode allow, so keep the steps that publish behind an approval.
+- **Your permissions, your call.** Sessions run as you, with your sign-ins. Claude Code and Codex sessions both default to their `auto` permission mode, and settings or a playbook can change that. What a session may do is what its prompt and permission mode allow, so keep the steps that publish behind an approval.
 - **Nothing hidden.** Every failure shows on its work item with its cause, and failed work is never retried behind your back.
 - **Local first.** The hub, its database and your settings live on your machine. There is no Switchboard account or hosted service; your agent providers and ticket sources keep their own accounts.
 

@@ -1959,7 +1959,7 @@ describe('agents (PRD R22)', () => {
 
     const adhoc = only(h.act({ type: 'adhoc', prompt: 'Fix it', repoRoot: 'D:/git/widgets', start: true }), 'start-session');
 
-    expect(adhoc).toMatchObject({ provider: 'codex', permissionMode: 'bypassPermissions', model: null });
+    expect(adhoc).toMatchObject({ provider: 'codex', permissionMode: 'auto', model: null });
 
     const [triage] = h.poll(issue('2'));
 

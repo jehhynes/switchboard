@@ -169,7 +169,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(field<HTMLInputElement>('sessions.concurrency').placeholder).toBe('2');
     expect(field<HTMLSelectElement>('sessions.provider').value).toBe('claude');
     expect([...field<HTMLSelectElement>('sessions.provider').options].map((option) => option.textContent)).toEqual(['Claude', 'Codex']);
-    expect(field<HTMLSelectElement>('sessions.codex.permissionMode').value).toBe('bypassPermissions');
+    expect(field<HTMLSelectElement>('sessions.codex.permissionMode').value).toBe('auto');
     expect(host.querySelector('[data-path^="dock."]')).toBeNull();
     expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Web app when open', 'Web page when open', 'System notification']);
 

@@ -256,8 +256,8 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   plugins: [],
-  // Commands in Codex's sandbox cannot use the operator's credentials, such as gh's, so Codex sessions default to no sandbox (mechanics M31).
-  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codexPath: 'codex', nodePath: 'node', codex: { permissionMode: 'bypassPermissions', model: '' }, installHooks: true, debriefs: false, codeMode: false },
+  // Codex sessions default to its sandbox too; gh and git work there only with the operator's own Codex and git settings (mechanics M151).
+  sessions: { provider: 'claude', concurrency: 2, permissionMode: 'auto', model: '', claudePath: 'claude', codexPath: 'codex', nodePath: 'node', codex: { permissionMode: 'auto', model: '' }, installHooks: true, debriefs: false, codeMode: false },
   triage: { model: '', concurrency: 2, timeoutSeconds: 180 },
   sources: {},
   schedules: {},

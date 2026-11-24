@@ -37,7 +37,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
 
 - **Existing tools are context, not requirements.** The retired Ground Control and the operator's skills show how the work was done before Switchboard. Switchboard adopts a behavior from them only when it serves this PRD's goals, and states its own reason.
 - **Skills drive the work; Switchboard is the harness.** Switchboard finds tickets, triages them, starts and observes sessions, and shows their state. Every change to a source, a repository or a worktree is made by a skill a session runs. When a feature needs a write, add a session that runs a skill, not Switchboard code that writes.
-- **Least authority.** An unattended session gets the least permission mode under which it can finish. The default is `auto`, and Codex's is `bypassPermissions`, because commands in Codex's sandbox cannot use the operator's sign-ins (R22); a playbook can override it.
+- **Least authority.** An unattended session gets the least permission mode under which it can finish. The default is `auto` for Claude Code and Codex alike (R22).
 - **The work item first, sessions second.** The operator manages work items; a session is how one runs, and the list shows it as one control, not as content.
 - **Show each fact once.** The web page follows four rules:
   - What the row's group already says is not repeated on the row.
@@ -154,7 +154,7 @@ Switchboard is a local software factory for one developer. It ingests work assig
   - Each ticket records its repository, which a playbook's template can name, with the issue number.
 - R22. A session runs in Claude Code or Codex.
   - `sessions.provider` sets the agent for every session, and a playbook's provider overrides it for its work items' sessions. An ad-hoc prompt or hosted conversation uses the provider chosen for it, else `sessions.provider`, until a playbook takes its work item over. Choosing a provider never changes the configured default or an existing session. The session records its agent, and the controls that open it and History name it.
-  - Each agent has its own default permission mode and model, and a playbook's own apply to its agent. Codex sessions run without Codex's sandbox by default, because commands in the sandbox cannot use the operator's sign-ins, such as `gh`'s ([mechanics.md](mechanics.md) M31).
+  - Each agent has its own default permission mode and model, and a playbook's own apply to its agent. Codex sessions run in Codex's sandbox (`auto`) by default. On Windows, commands in the sandbox cannot read the operator's stored sign-ins or use Windows' own TLS: `gh` works when the operator's Codex shell environment passes it `GH_TOKEN`, and `git` when it uses OpenSSL and gh as its credential helper ([mechanics.md](mechanics.md) M151). Switchboard passes no credentials; a Codex playbook whose skills need more sets `bypassPermissions`.
   - A Codex session gets the same prompt, with a leading skill command written as Codex runs a skill, and the same report contract, with native questions and permissions handled by R107.
   - Triage uses `sessions.provider`, whatever a task playbook's provider. A configured triage model of the other provider falls back to the selected provider's default, with the reason logged; an unknown model name passes through unchanged.
   - A Claude session runs in Code Mode when R93 says so.
