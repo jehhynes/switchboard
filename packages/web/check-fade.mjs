@@ -3,7 +3,8 @@
 // of the lines it showed, and the newest reply shows whole until a newer one comes, when it folds with none of the lines it keeps moving.
 // Desktop and phone, light and dark.
 // Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install. --shots <dir> saves each size's
-// conversation folded and opened, and the newest reply before and after a newer one comes; --report prints the measurements.
+// conversation folded and opened, the long reply alone, and the newest reply before and after a newer one comes; --linear draws the fade's
+// box with a linear mask instead, to compare; --report prints the measurements.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -17,6 +18,8 @@ const SIZES = [
 ];
 const report = process.argv.includes('--report');
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
+// --linear draws the same fade's box with a linear mask, to compare the curve against in the shots, which it names with -linear.
+const linear = process.argv.includes('--linear');
 
 const browsers = [
   process.env.SWITCHBOARD_CHROME,
@@ -47,6 +50,7 @@ const REPLIES = [
 // The page with a fake stream and fetch in place of the hub's: one work item whose conversation is the replies above, with Collapse details on.
 const fake = '<script>' + String.raw`
 localStorage.removeItem('switchboard.route');
+${linear ? "document.head.append(Object.assign(document.createElement('style'), { textContent: '.reply-fade { --sb-fade-curve: linear-gradient(to bottom, #000 var(--sb-fade-from), transparent calc(var(--sb-fade-from) + 3lh)) !important; }' }));" : ''}
 localStorage.removeItem('switchboard.briefReplies');
 sessionStorage.removeItem('switchboard.scroll');
 const now = Date.now();
@@ -178,10 +182,10 @@ try {
     return reply.result;
   };
   const evaluate = async (expression) => (await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })).result.value;
-  const shot = async (name) => {
+  const shot = async (name, clip) => {
     if (shots === null) return;
     mkdirSync(shots, { recursive: true });
-    writeFileSync(join(shots, name + '.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+    writeFileSync(join(shots, name + (linear ? '-linear' : '') + '.png'), Buffer.from((await send('Page.captureScreenshot', clip === undefined ? { format: 'png' } : { format: 'png', clip: { ...clip, scale: 1 } })).data, 'base64'));
   };
   const results = [];
 
@@ -205,6 +209,10 @@ try {
       await evaluate('document.querySelector(\'#panel li.reply[data-id="label-list"]\').scrollIntoView({ block: "start" })');
       await wait(100);
       await shot(name + '-folded-list');
+      // The long reply alone, from its question to a little past its fade, for comparing fades.
+      await evaluate('document.querySelector(\'#panel li.reply[data-id="paragraphs"]\').scrollIntoView({ block: "center" })');
+      await wait(100);
+      await shot(name + '-reply', await evaluate('(() => { const li = document.querySelector(\'#panel li.reply[data-id="paragraphs"]\'); const ask = li.previousElementSibling.getBoundingClientRect(); const box = li.getBoundingClientRect(); const panel = document.getElementById("panel").getBoundingClientRect(); return { x: panel.left, y: ask.top - 8, width: panel.width, height: box.bottom - ask.top + 24 }; })()'));
       // Opens each folded reply as a click on its fade does, from the last up, so opening one moves none of those still to open, and measures it
       // just before and just after.
       const opened = new Map();
