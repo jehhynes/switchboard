@@ -30,6 +30,7 @@ import { listHeader } from './listHeader.js';
 import { PhoneVoice } from './phoneVoice.js';
 import { MicStart } from '@switchboard/conversation/voiceControls';
 import { browserBackPreview, swipeBack } from './swipeBack.js';
+import { realignAfterKeyboard } from './keyboardViewport.js';
 import { settings } from './settings.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
@@ -3509,6 +3510,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   });
 
   listening.signal.addEventListener('abort', stopSwipe);
+  listening.signal.addEventListener('abort', realignAfterKeyboard(window));
   listening.signal.addEventListener('abort', () => document.documentElement.classList.remove('phone'));
 
   // ---- Cards (PRD R103) ----
