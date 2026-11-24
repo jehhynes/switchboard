@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/holder",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Terminal holder: holds programs in hidden pseudo-terminals and lets clients attach over loopback. Depends on nothing in Switchboard; the client entry imports no native module.",

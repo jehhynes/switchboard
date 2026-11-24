@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/codex",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Codex runner: background exec sessions, run records, hooks and hook trust. Must not import vscode.",

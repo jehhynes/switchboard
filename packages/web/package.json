@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/web",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "The web page the hub serves (architecture.md § Web page): its own front end for the conversation API, drawn with copies of VS Code's Dark Modern and Light Modern themes, following the operating system's setting. Its build carries the page's files as strings, which the hub serves.",

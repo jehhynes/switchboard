@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/github",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "GitHub source: reads assigned issues and builds triage context through the gh CLI. Must not import vscode.",

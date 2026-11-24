@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/hub",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "The hub process: lifecycle, loopback server, and the client functions that find, start and stay connected to it. Must not import vscode.",

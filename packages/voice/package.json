@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/voice",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "The voice process: speech out through OpenAI realtime speech and decibri playback, dictation through decibri capture, sherpa-onnx recognition and a turn model, and the voice target. Holds no conversation, session or work item state; the main entry imports no native module.",

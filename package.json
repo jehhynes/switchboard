@@ -2,6 +2,7 @@
   "name": "switchboard-root",
   "private": true,
   "version": "0.0.0",
+  "license": "MIT",
   "description": "Local software factory: triages assigned tickets into playbooks and runs them in Claude Code sessions.",
   "engines": {
     "node": ">=22.13"

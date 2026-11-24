@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/firefox",
   "version": "0.0.1",
+  "license": "MIT",
   "private": true,
   "description": "Firefox build of the Chrome extension in extensions/chrome, from the same source. npm run sign gets it signed as an unlisted add-on for release Firefox; npm run dev runs it in a dev profile and reloads it on each change.",
   "scripts": {

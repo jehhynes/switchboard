@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/hub-app",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "The hub entry point, and the standalone build that npm run install-local installs (dist/install). The tsc build in dist serves spawn tests.",

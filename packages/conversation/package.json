@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/conversation",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "The conversation layer: reads a Code Mode session's replies and messages from its transcript, with the screen as an early copy. Runs in the hub; imports no native module and must not import vscode. `./questions`, `./providerIcons`, `./voiceControls`, `./messageMeta`, `./replyBody`, `./menuPlace`, `./contextMeter` and `./questionCard` import nothing, for browser bundles, and `./bubbles.css` and `./questionCard.css` are styles both front ends share.",

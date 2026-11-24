@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/zoho",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Zoho Desk source: reads the Open tickets in scope and builds triage context through the Desk API, read-only. Must not import vscode.",

@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/core",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Domain types, paths and contracts shared by the hub and the extension. Must not import vscode.",

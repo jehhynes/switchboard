@@ -1,6 +1,7 @@
 {
   "name": "@switchboard/protocol",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "The wire types of the hub's conversation API and the web page's list, types only: the web page imports them and the hub checks its views against them (architecture.md § Conversation API).",
