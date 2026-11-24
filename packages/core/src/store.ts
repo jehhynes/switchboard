@@ -1593,8 +1593,9 @@ export class Store {
     return this.#messageRows('SELECT * FROM messages WHERE id = ?', id)[0] ?? null;
   }
 
+  /** The message a transcript line added; of messages typed as one, which share the line, the last. */
   messageByTranscriptUuid(sessionId: string, uuid: string): ConversationMessage | null {
-    return this.#messageRows('SELECT * FROM messages WHERE sessionId = ? AND transcriptUuid = ?', sessionId, uuid)[0] ?? null;
+    return this.#messageRows('SELECT * FROM messages WHERE sessionId = ? AND transcriptUuid = ? ORDER BY ord DESC LIMIT 1', sessionId, uuid)[0] ?? null;
   }
 
   /** The reply read from an API message, with the UUIDs and texts of its lines, in order. */

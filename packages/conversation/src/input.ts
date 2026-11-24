@@ -1,9 +1,10 @@
 /**
  * Typing a message into a held session (architecture.md § Typing a message), from claude-collab's `session.js`: one input transaction per
- * message, serialized per session. It waits until no menu is open, the input box holds no draft and no key was typed in a terminal for
- * `TYPING_PAUSE_MS`; takes the hub's input reservation; pastes the text as a bracketed paste, waits `PASTE_SETTLE_MS`, and presses Enter as a
- * separate write, retrying Enter alone while the paste sits unsent; and counts the message sent once the transcript has it. A message the transcript
- * does not confirm is settled from the screen: still in the input box, it is cleared from there and not sent; gone from it, it was sent.
+ * message, serialized per session, which a message queued while it waits to be pasted joins. It waits until no menu is open, the input box holds
+ * no draft and no key was typed in a terminal for `TYPING_PAUSE_MS`; takes the hub's input reservation; pastes the text as a bracketed paste,
+ * waits `PASTE_SETTLE_MS`, and presses Enter as a separate write, retrying Enter alone while the paste sits unsent; and counts the message sent
+ * once the transcript has it. A message the transcript does not confirm is settled from the screen: still in the input box, it is cleared from
+ * there and not sent; gone from it, it was sent.
  */
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import headless from '@xterm/headless';
@@ -559,9 +560,44 @@ export function blockedBy(screen: InputScreen, keyAt: number | null, now: number
   return keyAt !== null && now - keyAt < TYPING_PAUSE_MS ? 'a key was typed in a terminal' : null;
 }
 
-/** One session's typed messages, typed one at a time in the order they came. */
+/**
+ * Messages typed as one paste: each as `pasteText` would paste it alone, in order, with a blank line between, so each keeps its own escape and
+ * tags at the start of its paragraph.
+ */
+export function joinMessages(texts: readonly string[]): string {
+  return texts.map((text) => pasteText(text)).join('\n\n');
+}
+
+/** A message in a session's queue. */
+interface QueuedMessage {
+  text: string;
+  done(outcome: InputOutcome): void;
+  pasting?(at: number): void;
+  steps?(steps: InputSteps): void;
+  queuedAt: number;
+}
+
+/** One input transaction: one message, or several typed as one. */
+interface Transaction {
+  messages: QueuedMessage[];
+  command: boolean;
+  combine: string | undefined;
+  check(): string | null;
+  reserve: SessionInputDeps['reserve'];
+  /** Its text is fixed: the paste is about to be written, or it ended without one. */
+  started: boolean;
+  run: Promise<void>;
+}
+
+/**
+ * One session's typed messages, typed one transaction at a time in the order they came. A message joins the transaction still waiting to be typed
+ * when both give the same `combine` key, neither is a slash command from the composer's list, and the joined text stays within
+ * `MAX_MESSAGE_CHARS`, so the queue holds at most one message not yet pasted.
+ */
 export class SessionInput {
   #tail: Promise<void> = Promise.resolve();
+  /** The last transaction queued, which a new message may join until it starts. */
+  #open: Transaction | null = null;
   /** The last screen read and what it showed, since polling while a message waits mostly reads an unchanged screen, and each replay waits on a timer. */
   #lastScreen: { data: string; cols: number; rows: number; screen: InputScreen } | null = null;
 
@@ -579,32 +615,51 @@ export class SessionInput {
 
   /**
    * Queues a message; `done` gets what became of it. `guard` replaces the check and reservation for this message, such as for the launch it names,
-   * `pasting` is told when the paste is about to be written, `command` types a slash command chosen from the composer's list as it is, and
-   * `steps` gets when each step happened, just before `done`.
+   * `pasting` is told when the paste is about to be written, `command` types a slash command chosen from the composer's list as it is,
+   * `steps` gets when each step happened, just before `done`, and `combine` lets the message join a waiting one given the same key, whose
+   * check and reservation then stand for both. Messages typed as one get the same outcome, paste time and steps, each with its own `queuedAt`.
    */
   send(
     text: string,
     done: (outcome: InputOutcome) => void,
-    guard: Partial<Pick<SessionInputDeps, 'check' | 'reserve'>> & { pasting?(at: number): void; command?: boolean; steps?(steps: InputSteps): void } = {},
+    guard: Partial<Pick<SessionInputDeps, 'check' | 'reserve'>> & { pasting?(at: number): void; command?: boolean; steps?(steps: InputSteps): void; combine?: string } = {},
   ): Promise<void> {
-    const check = guard.check ?? this.deps.check;
-    const reserve = guard.reserve ?? this.deps.reserve;
-    const steps: InputSteps = { queuedAt: this.deps.now(), startedAt: 0, readyAt: null, waited: null, reads: 0, readMs: 0, pastedAt: null, echoAt: null, missed: null, enterAt: null, enters: 0, confirmedAt: null };
-    const report = (outcome: InputOutcome): void => {
-      guard.steps?.(steps);
-      done(outcome);
-    };
+    const message: QueuedMessage = { text, done, queuedAt: this.deps.now(), ...(guard.pasting === undefined ? {} : { pasting: guard.pasting }), ...(guard.steps === undefined ? {} : { steps: guard.steps }) };
+    const command = guard.command === true;
+    const open = this.#open;
 
     this.#pending++;
 
-    const run = this.#tail
-      .then(() => this.#type(text, check, reserve, guard.pasting ?? (() => undefined), guard.command === true, steps))
+    if (open !== null && !open.started && !command && !open.command && guard.combine !== undefined && open.combine === guard.combine && joinMessages([...open.messages.map((one) => one.text), text]).length <= MAX_MESSAGE_CHARS) {
+      open.messages.push(message);
+      this.deps.log(`session ${this.sessionId}: a new message joins the ${open.messages.length === 2 ? 'message' : `${open.messages.length - 1} messages`} waiting to be typed, to go as one`);
+
+      return open.run;
+    }
+
+    const steps: InputSteps = { queuedAt: message.queuedAt, startedAt: 0, readyAt: null, waited: null, reads: 0, readMs: 0, pastedAt: null, echoAt: null, missed: null, enterAt: null, enters: 0, confirmedAt: null };
+    const transaction: Transaction = { messages: [message], command, combine: guard.combine, check: guard.check ?? this.deps.check, reserve: guard.reserve ?? this.deps.reserve, started: false, run: Promise.resolve() };
+    const report = (outcome: InputOutcome): void => {
+      transaction.started = true;
+
+      for (const one of transaction.messages) {
+        try {
+          one.steps?.({ ...steps, queuedAt: one.queuedAt });
+          one.done(outcome);
+        } catch (error) {
+          this.deps.log(`session ${this.sessionId}: a typed message's outcome could not be reported: ${String(error)}`);
+        }
+      }
+    };
+
+    transaction.run = this.#tail
+      .then(() => this.#type(transaction, steps))
       .then(report, (error: unknown) => report({ delivery: 'not-sent', error: String(error) }))
-      .finally(() => void this.#pending--);
+      .finally(() => void (this.#pending -= transaction.messages.length));
+    this.#tail = transaction.run;
+    this.#open = transaction;
 
-    this.#tail = run;
-
-    return run;
+    return transaction.run;
   }
 
   /**
@@ -622,6 +677,8 @@ export class SessionInput {
     waitMs = RESOLVE_WAIT_MS,
   ): Promise<void> {
     this.#pending++;
+    // A message queued after this one is typed after it settles.
+    this.#open = null;
 
     const run = this.#tail
       .then(async (): Promise<InputOutcome> => {
@@ -817,7 +874,8 @@ export class SessionInput {
     }
   }
 
-  async #type(text: string, check: () => string | null, reserve: SessionInputDeps['reserve'], pasting: (at: number) => void, command: boolean, steps: InputSteps): Promise<InputOutcome> {
+  async #type(transaction: Transaction, steps: InputSteps): Promise<InputOutcome> {
+    const { check, reserve } = transaction;
     let ready: { release(): void } | { refused: string };
 
     steps.startedAt = this.deps.now();
@@ -834,7 +892,12 @@ export class SessionInput {
 
     steps.readyAt = this.deps.now();
 
-    const pasted = pasteText(text, command);
+    // Messages that join from here on are typed after this one.
+    transaction.started = true;
+
+    const { messages } = transaction;
+    const pasted = messages.length === 1 ? pasteText(messages[0]!.text, transaction.command) : joinMessages(messages.map((one) => one.text));
+
     const since = this.deps.now();
     const watch = new TranscriptWatch(this.deps.transcriptPath());
     const sent = (): boolean => {
@@ -864,7 +927,11 @@ export class SessionInput {
             }
 
             if (!attempted) {
-              pasting(this.deps.now());
+              const at = this.deps.now();
+
+              for (const one of messages) {
+                one.pasting?.(at);
+              }
             }
 
             if (data === '\r' && steps.enters === 0 && steps.echoAt === null) {

@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLEAR_LINE, NOT_CLEARED, NOT_TAKEN, NotWritten, SessionInput, UNREADABLE, blockedBy, draftExcerpt, stepsText, boxHolds, isMessage, leftOfMessage, pasteAndSubmit, pasteText, readInputScreen, sentInTranscript } from '../src/input.js';
+import { CLEAR_LINE, MAX_MESSAGE_CHARS, NOT_CLEARED, NOT_TAKEN, NotWritten, SessionInput, UNREADABLE, blockedBy, draftExcerpt, stepsText, boxHolds, isMessage, leftOfMessage, pasteAndSubmit, pasteText, readInputScreen, sentInTranscript } from '../src/input.js';
 import type { InputOutcome, InputSteps, SubmitScreen } from '../src/input.js';
 
 let dir: string;
@@ -595,6 +595,128 @@ describe('SessionInput', () => {
     expect(failing.box).toBe('Hello');
     expect([gone.reservations, lost.reservations]).toEqual([{ taken: 1, released: 1 }, { taken: 1, released: 1 }]);
     expect(broken.reservations).toEqual({ taken: 1, released: 1 });
+  });
+});
+
+describe('SessionInput joining queued messages', () => {
+  const sendAll = (input: SessionInput, outcomes: string[], messages: Array<[string, { command?: boolean; combine?: string; pasting?(at: number): void }?]>): Array<Promise<void>> =>
+    messages.map(([text, guard = { combine: 'L1' }]) => input.send(text, (outcome) => outcomes.push(`${text} ${outcome.delivery}`), guard));
+
+  it('types messages queued behind a draft as one paste, each paragraph as it would go alone, and settles each with the same outcome and paste time', async () => {
+    const session = new FakeSession();
+    const { deps, logs } = session.deps();
+    const input = new SessionInput('s1', deps);
+    const outcomes: string[] = [];
+    const pasted: Array<[string, number]> = [];
+    const steps: Array<[string, InputSteps]> = [];
+
+    session.box = 'typed by hand';
+
+    const sending = ['First thought', '/compact is a word here', '[spoken] [voice] dictated after'].map((text, index) => {
+      session.clock += 100;
+      return input.send(text, (outcome) => outcomes.push(`${index} ${outcome.delivery}`), { combine: 'L1', pasting: (at) => pasted.push([text, at]), steps: (reported) => steps.push([text, reported]) });
+    });
+
+    expect(input.pending).toBe(3);
+    await vi.waitFor(() => expect(logs).toContain('session s1: a message waits, the input box holds a draft: "typed by hand"'), { timeout: 4_000 });
+    session.box = '';
+    await Promise.all(sending);
+
+    expect(session.writes).toEqual(['\u001b[200~First thought\n\n\\/compact is a word here\n\n[spoken] [voice] dictated after\u001b[201~', '\r']);
+    expect(outcomes).toEqual(['0 sent', '1 sent', '2 sent']);
+    expect(new Set(pasted.map(([, at]) => at)).size).toBe(1);
+    expect(pasted.map(([text]) => text)).toEqual(['First thought', '/compact is a word here', '[spoken] [voice] dictated after']);
+    expect(steps.map(([, one]) => one.queuedAt)).toEqual([T0 + 100, T0 + 200, T0 + 300]);
+    expect(steps.every(([, one]) => one.enters === 1 && one.confirmedAt !== null)).toBe(true);
+    expect(logs.filter((line) => line.includes('joins'))).toEqual([
+      'session s1: a new message joins the message waiting to be typed, to go as one',
+      'session s1: a new message joins the 2 messages waiting to be typed, to go as one',
+    ]);
+    expect(input.pending).toBe(0);
+  });
+
+  it('never joins a message to one already being pasted, and lets the next message join the one now waiting', async () => {
+    const session = new FakeSession();
+    const { deps } = session.deps();
+    const input = new SessionInput('s1', deps);
+    const outcomes: string[] = [];
+    const later: Array<Promise<void>> = [];
+
+    const first = input.send('one', (outcome) => outcomes.push(`one ${outcome.delivery}`), {
+      combine: 'L1',
+      pasting: () => void later.push(...sendAll(input, outcomes, [['two'], ['three']])),
+    });
+
+    await first;
+    await Promise.all(later);
+    expect(session.writes).toEqual(['\u001b[200~one\u001b[201~', '\r', '\u001b[200~two\n\nthree\u001b[201~', '\r']);
+    expect(outcomes).toEqual(['one sent', 'two sent', 'three sent']);
+  });
+
+  it('keeps slash commands from the list, messages without the same key and joins past MAX_MESSAGE_CHARS apart, in the order they came', async () => {
+    const session = new FakeSession();
+    const { deps, logs } = session.deps();
+    const input = new SessionInput('s1', deps);
+    const outcomes: string[] = [];
+    const long = 'x'.repeat(MAX_MESSAGE_CHARS - 10);
+
+    session.runsCommands = true;
+    session.box = 'typed by hand';
+
+    const sending = sendAll(input, outcomes, [
+      ['/compact keep the plan', { command: true, combine: 'L1' }],
+      ['after the command'],
+      ['/clear', { command: true, combine: 'L1' }],
+      ['other launch', { combine: 'L2' }],
+      ['no key', {}],
+      ['no key either', {}],
+      [long],
+      ['too much now'],
+      ['joins this one'],
+    ]);
+
+    await vi.waitFor(() => expect(logs).toContain('session s1: a message waits, the input box holds a draft: "typed by hand"'), { timeout: 4_000 });
+    session.box = '';
+    await Promise.all(sending);
+
+    expect(session.writes.filter((write) => write !== '\r')).toEqual([
+      '\u001b[200~/compact keep the plan\u001b[201~',
+      '\u001b[200~after the command\u001b[201~',
+      '\u001b[200~/clear\u001b[201~',
+      '\u001b[200~other launch\u001b[201~',
+      '\u001b[200~no key\u001b[201~',
+      '\u001b[200~no key either\u001b[201~',
+      `\u001b[200~${long}\u001b[201~`,
+      '\u001b[200~too much now\n\njoins this one\u001b[201~',
+    ]);
+    expect(outcomes.every((one) => one.endsWith(' sent'))).toBe(true);
+    expect(outcomes).toHaveLength(9);
+  });
+
+  it('settles every joined message not sent when the session refuses the paste, and a joined text it did not take is cleared as one', async () => {
+    const session = new FakeSession();
+    let why: string | null = null;
+    const { deps } = session.deps({ check: () => why });
+    const input = new SessionInput('s1', deps);
+    const outcomes: string[] = [];
+
+    session.menu = true;
+
+    const sending = sendAll(input, outcomes, [['one'], ['two']]);
+
+    why = 'The session ended.';
+    await Promise.all(sending);
+    expect(outcomes).toEqual(['one not-sent', 'two not-sent']);
+    expect(session.writes).toEqual([]);
+
+    const stuck = new FakeSession();
+    const stuckOutcomes: InputOutcome[] = [];
+    const stuckInput = new SessionInput('s1', stuck.deps().deps);
+
+    stuck.dropEnters = 10;
+    await Promise.all(['one', 'two'].map((text) => stuckInput.send(text, (outcome) => stuckOutcomes.push(outcome), { combine: 'L1' })));
+    expect(stuckOutcomes).toEqual([{ delivery: 'not-sent', error: NOT_TAKEN }, { delivery: 'not-sent', error: NOT_TAKEN }]);
+    expect(stuck.box).toBe('');
   });
 });
 

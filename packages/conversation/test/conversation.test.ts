@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '@switchboard/core';
-import { COPIED_HEAD_BYTES, SessionConversation } from '../src/conversation.js';
+import { COPIED_HEAD_BYTES, SessionConversation, typedTogether } from '../src/conversation.js';
 import { transcriptEnd } from '../src/transcript.js';
 import type { ConversationDeps } from '../src/conversation.js';
 import type { ConversationChange } from '../src/conversation.js';
@@ -137,6 +137,68 @@ describe('SessionConversation', () => {
       { type: 'reply', opening: 'Fixed on Ollama.', answers: 'm-rest' },
     ]);
     expect(changes.filter((change) => change.type === 'heard')).toEqual([{ type: 'heard', replyId: items()[2]!.id, heard: [{ heard: 'a llama', meant: 'Ollama' }] }]);
+  });
+
+it('confirms messages typed as one by their shared line, each in order with its own tags, without adding a terminal message, and answers the last', () => {
+    const { store, conversation, path, append, items, changes } = setup();
+    const open = { sessionId: 's1', workItemId: 7, transcriptUuid: null, provisional: true, withdrawn: false, error: null, delivery: 'open' as const, pastedAt: T0 };
+
+    store.addMessage({ ...open, id: 'm-first', at: T0 - 300, origin: 'typed', text: '/x first', opId: 'op1', spokenRequested: true });
+    store.addMessage({ ...open, id: 'm-said', at: T0 - 200, origin: 'voice', text: 'then this', opId: 'op2' });
+    store.addMessage({ ...open, id: 'm-answers', at: T0 - 100, origin: 'typed', text: '[answers]\n- keep-route: Keep it? → A) Yes', opId: 'op3' });
+    // Pasted at another time, so not one of them.
+    store.addMessage({ ...open, id: 'm-alone', at: T0, origin: 'typed', text: 'then this', opId: 'op4', pastedAt: T0 + 5_000 });
+    append(enqueue(T0 + 400, '[spoken] \\/x first\n\n[voice] then this\n\n[answers]\n- keep-route: Keep it? → A) Yes'));
+    conversation.readTranscript(path);
+    expect(['m-first', 'm-said', 'm-answers', 'm-alone'].map((id) => store.message(id)?.delivery)).toEqual(['sent', 'sent', 'sent', 'open']);
+
+    append(
+      user('u1', T0 + 500, '<pasted_content id="1">\n[spoken] \\/x first\n\n[voice] then this\n\n[answers]\n- keep-route: Keep it? → A) Yes\n</pasted_content id="1">'),
+      chained(assistant('a1', T0 + 1000, 'Done all three.'), 'u1'),
+    );
+    conversation.readTranscript(path);
+
+    expect(items()).toMatchObject([
+      { type: 'message', id: 'm-first', delivery: 'sent', transcriptUuid: 'u1', provisional: false, text: '/x first' },
+      { type: 'message', id: 'm-said', delivery: 'sent', transcriptUuid: 'u1', provisional: false, text: 'then this' },
+      { type: 'message', id: 'm-answers', delivery: 'sent', transcriptUuid: 'u1', provisional: false },
+      { type: 'reply', answers: 'm-answers', opening: 'Done all three.' },
+      { type: 'message', id: 'm-alone', delivery: 'open', provisional: true },
+    ]);
+    expect(items()).toHaveLength(5);
+    expect(changes.filter((change) => change.type === 'message').map((change) => (change as { message: { id: string } }).message.id)).toEqual(['m-first', 'm-said', 'm-answers', 'm-first', 'm-said', 'm-answers']);
+    expect(store.messageByTranscriptUuid('s1', 'u1')?.id).toBe('m-answers');
+  });
+
+  it('gives a line to the latest paste it matches, whether a message alone or messages typed as one', () => {
+    const { store, conversation, path, append } = setup();
+    const open = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null, delivery: 'open' as const };
+
+    store.addMessage({ ...open, id: 'm-alone', at: T0, text: 'one\n\ntwo', opId: 'op1', pastedAt: T0 });
+    store.addMessage({ ...open, id: 'm-one', at: T0 + 10, text: 'one', opId: 'op2', pastedAt: T0 + 1000 });
+    store.addMessage({ ...open, id: 'm-two', at: T0 + 20, text: 'two', opId: 'op3', pastedAt: T0 + 1000 });
+    append(user('u1', T0 + 1500, 'one\n\ntwo'));
+    conversation.readTranscript(path);
+    expect(['m-alone', 'm-one', 'm-two'].map((id) => store.message(id)?.transcriptUuid)).toEqual([null, 'u1', 'u1']);
+
+    // A message alone pasted after the group takes the next such line.
+    store.addMessage({ ...open, id: 'm-later', at: T0 + 30, text: 'one\n\ntwo', opId: 'op4', pastedAt: T0 + 2000 });
+    store.addMessage({ ...open, id: 'm-three', at: T0 + 40, text: 'one', opId: 'op5', pastedAt: T0 + 1900 });
+    store.addMessage({ ...open, id: 'm-four', at: T0 + 50, text: 'two', opId: 'op6', pastedAt: T0 + 1900 });
+    append(user('u2', T0 + 2500, 'one\n\ntwo'));
+    conversation.readTranscript(path);
+    expect(['m-later', 'm-three', 'm-four'].map((id) => store.message(id)?.transcriptUuid)).toEqual(['u2', null, null]);
+  });
+
+  it('reads a line as messages typed as one only when it holds each of them, in order, with nothing else', () => {
+    const message = (text: string) => ({ text }) as Parameters<typeof typedTogether>[1][number];
+    const both = [message('/one'), message('two')];
+
+    expect(typedTogether('\\/one\n\n[spoken] [voice] two', both)).toBe(true);
+    expect(typedTogether('two\n\n\\/one', both)).toBe(false);
+    expect(typedTogether('\\/one\n\ntwo and more', both)).toBe(false);
+    expect(typedTogether('\\/one\ntwo', both)).toBe(false);
+    expect(typedTogether('\\/one', both)).toBe(false);
   });
 
   it('confirms a slash command chosen from the composer by its command line, and keeps it apart from the same words sent as a message', () => {

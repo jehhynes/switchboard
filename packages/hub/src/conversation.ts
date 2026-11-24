@@ -2,7 +2,7 @@ import { countsUnread, inTranscript, summarizeMessage } from '@switchboard/core'
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
-import { ArtifactFolder, EXTERNAL_NAME, ExternalArtifacts, externalFile, inGit, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
+import { ArtifactFolder, EXTERNAL_NAME, ExternalArtifacts, externalFile, inGit, joinMessages, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
 import type { CardDraft, CarriedQuestion, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
 import type { MessageAnswer } from '@switchboard/core';
 import { carriedCards, dismissedAt, questionIndex, questionsSince } from './questions.js';
@@ -452,15 +452,21 @@ export class ConversationService {
    * (architecture.md § Typing a message). One not sent goes back to the composer of the windows showing the session, since this hub does not
    * know which window sent it.
    */
-  #settleLeftOpen(message: ConversationMessage): void {
+  #settleLeftOpen(messages: ConversationMessage[]): void {
+    const message = messages[0]!;
     const session = this.deps.store.session(message.sessionId);
-    const giveBack = (outcome: DeliveryOutcome): void => this.#delivered(message.id, outcome, true);
+    const giveBack = (outcome: DeliveryOutcome): void => {
+      for (const one of messages) {
+        this.#delivered(one.id, outcome, true);
+      }
+    };
 
-    this.deps.log(`session ${message.sessionId}: message ${message.id} left open by a stopped hub is settled from the transcript and the screen`);
+    this.deps.log(`session ${message.sessionId}: message${messages.length === 1 ? '' : 's'} ${messages.map((one) => one.id).join(', ')} left open by a stopped hub ${messages.length === 1 ? 'is' : 'are'} settled from the transcript and the screen`);
 
     if (session === null) { giveBack({delivery:'not-sent',error:RESTARTED_UNTYPED}); return; }
-    // The input box holds the message as it was typed, with its tags.
-    const typed = typedText(message, this.deps.voice?.expressive() ?? false, session.codeMode === true);
+    // The input box holds the message as it was typed, with its tags; messages typed as one, joined.
+    const expressive = this.deps.voice?.expressive() ?? false;
+    const typed = messages.length === 1 ? typedText(message, expressive, session.codeMode === true) : joinMessages(messages.map((one) => typedText(one, expressive, session.codeMode === true)));
     this.#adapter(session)?.resolve(message, typed, giveBack, {
       check: () => this.#check(message.sessionId, message.launch ?? null),
       reserve: () => this.deps.input.reserve(message.sessionId, message.launch ?? null),
@@ -1880,8 +1886,11 @@ export class ConversationService {
     if (showing !== null && left !== undefined) {
       this.#leftOpen.delete(showing);
 
-      for (const message of left) {
-        this.#settleLeftOpen(message);
+      // Only Claude's input types messages as one; another provider's sends each alone, whatever its paste time.
+      const joins = this.deps.store.session(showing)?.codeMode === true;
+
+      for (const messages of joins ? pastedTogether(left) : left.map((message) => [message])) {
+        this.#settleLeftOpen(messages);
       }
     }
 
@@ -2607,6 +2616,8 @@ export class ConversationService {
       pasting: (at) => this.deps.store.updateMessage(message.id, { pastedAt: at }),
       command: options.command,
       steps: (steps) => this.#steps.set(message.id, steps),
+      // Messages for the same launch may be typed as one; the usage limit's continue text has a guard of its own, so it goes alone.
+      ...(options.guard === undefined ? { combine: toLaunch ?? '' } : {}),
     });
 
     if (session.state !== 'ended') {
@@ -3096,6 +3107,22 @@ export class ConversationService {
 
     return { status: 200, body: { commands: list } };
   }
+}
+
+/**
+ * Open messages as their typing settles them: those pasted at the same time into the same launch were typed as one, in the order they were sent;
+ * any other alone.
+ */
+export function pastedTogether(messages: readonly ConversationMessage[]): ConversationMessage[][] {
+  const groups = new Map<string, ConversationMessage[]>();
+
+  for (const message of messages) {
+    const key = message.pastedAt === null ? `alone ${message.id}` : `${message.pastedAt} ${message.launch ?? ''}`;
+
+    groups.set(key, [...(groups.get(key) ?? []), message]);
+  }
+
+  return [...groups.values()].map((group) => [...group].sort((a, b) => a.ord - b.ord));
 }
 
 /** The text a message was typed as, with the tags Switchboard put before it (architecture.md § Voice, § Dictation). */

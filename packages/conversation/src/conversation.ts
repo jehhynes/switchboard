@@ -4,7 +4,7 @@ import { ScreenHold } from './screenHold.js';
 import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
 import { pasteText } from './input.js';
-import { drawnKeyOf, keyOf, parseReply, stripAside } from './tags.js';
+import { drawnKeyOf, keyOf, parseReply, stripAside, stripMessageTags } from './tags.js';
 import type { ArtifactTag, HeardTag } from './tags.js';
 import { parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
@@ -21,6 +21,7 @@ export interface ConversationStore {
   /** The line texts of a session's newest joined replies. */
   replyBlocks(sessionId: string, limit: number): string[];
   /** The message a transcript line added, by the line's UUID. */
+  /** The message a transcript line added; of messages typed as one, which share the line, the last. */
   messageByTranscriptUuid(sessionId: string, uuid: string): ConversationMessage | null;
   provisionalMessages(sessionId: string): ConversationMessage[];
   /** A session's typed messages that were pasted and that no transcript line has confirmed yet. */
@@ -72,6 +73,34 @@ export const TYPED_LATE_MS = 120_000;
 /** Whether a transcript entry written at `at` can be this typed message's. */
 function confirms(at: number, message: ConversationMessage): boolean {
   return message.pastedAt !== null && at >= message.pastedAt - TYPED_SLACK_MS && (message.delivery === 'sent' || at <= message.pastedAt + TYPED_LATE_MS);
+}
+
+/**
+ * Whether `text` is these messages typed as one (`joinMessages`): each pasted alone, in order, a blank line between, a message after the first
+ * with its tags at the start of its paragraph; the transcript's reading already took the first message's tags off.
+ */
+export function typedTogether(text: string, messages: readonly ConversationMessage[]): boolean {
+  let rest = text.trim();
+
+  for (const [index, message] of messages.entries()) {
+    if (index > 0) {
+      if (!rest.startsWith('\n\n')) {
+        return false;
+      }
+
+      rest = stripMessageTags(rest.slice(2));
+    }
+
+    const own = pasteText(message.text);
+
+    if (own === '' || !rest.startsWith(own)) {
+      return false;
+    }
+
+    rest = rest.slice(own.length);
+  }
+
+  return rest === '';
 }
 
 /** A typed `/clear`, which moves the session to a new transcript file that records it. */
@@ -374,13 +403,26 @@ export class SessionConversation extends ConversationLog {
     return this.deps.store.provisionalMessages(this.sessionId).find((message) => message.origin === 'terminal' && message.text === text);
   }
 
-  /** The typed message a transcript line written at `at` with `text` records: the latest attempt pasted before it, never an older one with the same words. */
-  #typed(text: string, at: number): ConversationMessage | undefined {
-    return this.deps.store
-      .typedAwaitingTranscript(this.sessionId)
+  /**
+   * The typed messages a transcript line written at `at` with `text` records: the latest attempt pasted before it, never an older one with the
+   * same words, or the messages pasted together as one, which share a paste time, in the order they were sent.
+   */
+  #typed(text: string, at: number): ConversationMessage[] {
+    const awaiting = this.deps.store.typedAwaitingTranscript(this.sessionId).filter((message) => confirms(at, message));
+    const together = new Map<number, ConversationMessage[]>();
+
+    for (const message of awaiting) {
+      together.set(message.pastedAt!, [...(together.get(message.pastedAt!) ?? []), message]);
+    }
+
+    const candidates = [
       // A message goes escaped, and a slash command chosen from the composer's list as it is.
-      .filter((message) => (pasteText(message.text) === text.trim() || pasteText(message.text, true) === text.trim()) && confirms(at, message))
-      .sort((a, b) => b.pastedAt! - a.pastedAt!)[0];
+      ...awaiting.filter((message) => pasteText(message.text) === text.trim() || pasteText(message.text, true) === text.trim()).map((message) => [message]),
+      ...[...together.values()].filter((messages) => messages.length > 1).map((messages) => [...messages].sort((a, b) => a.ord - b.ord)).filter((messages) => typedTogether(text, messages)),
+    ];
+
+    // The latest paste wins, a message alone over a group pasted at the same time.
+    return candidates.reduce<ConversationMessage[]>((best, messages) => (best.length === 0 || messages[0]!.pastedAt! > best[0]!.pastedAt! ? messages : best), []);
   }
 
   /** A sent message Claude received as something other than a message from the operator, or never received. */
@@ -412,10 +454,10 @@ export class SessionConversation extends ConversationLog {
       // The queue line of a message typed from the view: Claude has it and receives it later, where it then takes its place.
       const typed = this.#typed(entry.text, entry.at);
 
-      if (typed !== undefined) {
-        if (typed.delivery !== 'sent') {
-          this.deps.store.updateMessage(typed.id, { delivery: 'sent', error: null });
-          this.deps.onChange({ type: 'message', message: this.deps.store.message(typed.id)! });
+      if (typed.length > 0) {
+        for (const message of typed.filter((one) => one.delivery !== 'sent')) {
+          this.deps.store.updateMessage(message.id, { delivery: 'sent', error: null });
+          this.deps.onChange({ type: 'message', message: this.deps.store.message(message.id)! });
         }
 
         return;
@@ -438,18 +480,28 @@ export class SessionConversation extends ConversationLog {
       // A message typed from the view is already in the conversation: the line where Claude received it confirms it and gives it its place.
       const typed = this.#typed(entry.text, entry.at);
 
-      if (typed !== undefined) {
-        // Typed from the view, it was added when it was pasted, after the terminal messages queued before it.
-        this.#withdrawPassed(typed.ord);
-        this.deps.store.updateMessage(typed.id, { at: entry.at, transcriptUuid: entry.uuid, provisional: false, delivery: 'sent', error: null });
-        this.deps.store.placeLast(typed.id);
-        this.lastMessage = typed.id;
+      if (typed.length > 0) {
+        // Typed from the view, it was added when it was pasted, after the terminal messages queued before it. Messages typed as one share the
+        // line, and the replies to it answer the last, as `messageByTranscriptUuid` finds it after a restart.
+        this.#withdrawPassed(typed[0]!.ord);
 
-        if (entry.uuid !== null) {
-          this.#messageLines.set(entry.uuid, typed.id);
+        for (const message of typed) {
+          this.deps.store.updateMessage(message.id, { at: entry.at, transcriptUuid: entry.uuid, provisional: false, delivery: 'sent', error: null });
+          this.deps.store.placeLast(message.id);
         }
 
-        this.deps.onChange({ type: 'message', message: this.deps.store.message(typed.id)! });
+        const last = typed.at(-1)!;
+
+        this.lastMessage = last.id;
+
+        if (entry.uuid !== null) {
+          this.#messageLines.set(entry.uuid, last.id);
+        }
+
+        for (const message of typed) {
+          this.deps.onChange({ type: 'message', message: this.deps.store.message(message.id)! });
+        }
+
         return;
       }
 

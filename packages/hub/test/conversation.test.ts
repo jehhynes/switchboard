@@ -3,11 +3,12 @@ import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store, toneSection, toneVersion } from '@switchboard/core';
-import type { Interruption, Session as StoredSession } from '@switchboard/core';
+import type { ConversationMessage, Interruption, Session as StoredSession } from '@switchboard/core';
 import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, sessionView, typedText } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
-import type { ConversationChanged } from '../src/conversationAdapter.js';
+import type { ConversationAdapter, ConversationChanged } from '../src/conversationAdapter.js';
+import type { InputOutcome } from '@switchboard/conversation';
 import { dockView, windowOf } from '../src/dock.js';
 import { canonicalFolder } from '../src/folders.js';
 import { WindowScopes } from '../src/windows.js';
@@ -1153,7 +1154,39 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     store.updateSession('s2', { state: 'running' });
     held.menu = false;
     await settled(() => expect(store.message('m-2')?.delivery).toBe('sent'));
-    expect(held.writes).toEqual(['\u001b[200~Fix the build\u001b[201~', '\r', '\u001b[200~Second\u001b[201~', '\r']);
+    // The second joined the first in the queue it was kept in, so both went as one paste.
+    expect(held.writes).toEqual(['\u001b[200~Fix the build\n\nSecond\u001b[201~', '\r']);
+    expect(store.message('m-1')?.delivery).toBe('sent');
+  });
+
+  it("types messages for the same launch that queue behind one another as one, keeps the continue text apart, and confirms each by the joined line", async () => {
+    const { service, held, open, body, store, logs } = setupSend();
+    const { key } = open(2);
+
+    held.menu = true;
+    service.send(body(key));
+    expect(service.continueAfterLimit('s2', 'Continue.')).toBeNull();
+    service.send(body(key, { opId: 'op-2', text: 'Second' }));
+    service.send(body(key, { opId: 'op-3', text: '/third' }));
+    held.menu = false;
+    const items = () => store.conversation('s2', null, 10).items as Array<{ id: string; text: string; delivery: string; transcriptUuid: string | null }>;
+
+    await settled(() => expect(items().map((item) => [item.text, item.delivery])).toEqual([['Fix the build', 'sent'], ['Continue.', 'sent'], ['Second', 'sent'], ['/third', 'sent']]));
+    expect(held.writes.filter((write) => write !== '\r')).toEqual(['\u001b[200~Fix the build\u001b[201~', '\u001b[200~Continue.\u001b[201~', '\u001b[200~Second\n\n\\/third\u001b[201~']);
+    expect(logs).toContain('session s2: a new message joins the message waiting to be typed, to go as one');
+
+    const [second, third] = items().slice(2).map((item) => store.message(item.id)!);
+
+    expect(second!.pastedAt).toBe(third!.pastedAt);
+
+    // The joined line confirms both messages in place, with no terminal copy.
+    await service.poll();
+    expect(items().map((item) => [item.text, item.transcriptUuid])).toEqual([
+      ['Fix the build', 'typed-2'],
+      ['Continue.', 'typed-5'],
+      ['Second', 'typed-8'],
+      ['/third', 'typed-8'],
+    ]);
   });
 
   it('settles a spoken message a stopped hub left open by the text it typed, tags included', async () => {
@@ -1259,6 +1292,57 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     stream(third);
     await settled(() => expect(store.message('m-gone')?.delivery).toBe('sent'));
     third.stop();
+  });
+
+  it('settles messages a stopped hub left pasted together as the one text they were typed as', async () => {
+    const { store, make, held, logs, scopes, view } = setupSend();
+    const typed = { sessionId: 's2', workItemId: 2, at: NOW, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open' as const, error: null, pastedAt: NOW, launch: 'launch-1' };
+
+    store.addMessage({ ...typed, id: 'm-first', text: 'first half', opId: 'op-a' });
+    store.addMessage({ ...typed, id: 'm-second', text: 'second half', opId: 'op-b' });
+    // The box wraps the joined text, so it holds exactly what was typed.
+    held.box = 'first half second half';
+
+    const service = make();
+
+    service.open(pageOn(scopes, view.view, 2), () => undefined);
+    await settled(() => expect([store.message('m-first'), store.message('m-second')]).toEqual([null, null]));
+    service.stop();
+    expect(held.writes).toEqual(['\u0015']);
+    expect(held.box).toBe('');
+    expect(logs).toContain('session s2: messages m-first, m-second left open by a stopped hub are settled from the transcript and the screen');
+    expect(logs.filter((line) => line.includes('not-sent: Claude Code did not take the message, so Switchboard cleared it'))).toHaveLength(2);
+  });
+
+  it("settles another provider's messages a stopped hub left open one by one, whatever their paste time", async () => {
+    const resolved: string[][] = [];
+    const adapter = {
+      supports: () => true,
+      poll: async () => undefined,
+      readEnded: () => undefined,
+      send: () => undefined,
+      resolve: (message: ConversationMessage, text: string, done: (outcome: InputOutcome) => void) => {
+        resolved.push([message.id, text]);
+        done(message.id === 'm-first' ? { delivery: 'sent' } : { delivery: 'not-sent', error: 'Not in its history.' });
+      },
+      commands: () => [],
+      cannotSend: () => null,
+      close: () => undefined,
+    } as unknown as ConversationAdapter;
+    const { store, make, scopes, view } = setupSend(new FakeHeld(), undefined, undefined, { adapters: () => [adapter] });
+    const typed = { sessionId: 's2', workItemId: 2, at: NOW, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, delivery: 'open' as const, error: null, pastedAt: NOW, launch: 'launch-1' };
+
+    store.updateSession('s2', { codeMode: false });
+    store.addMessage({ ...typed, id: 'm-first', text: 'first', opId: 'op-a' });
+    store.addMessage({ ...typed, id: 'm-second', text: 'second', opId: 'op-b' });
+
+    const service = make();
+
+    service.open(pageOn(scopes, view.view, 2), () => undefined);
+    await settled(() => expect(store.message('m-second')).toBeNull());
+    service.stop();
+    expect(resolved).toEqual([['m-first', 'first'], ['m-second', 'second']]);
+    expect(store.message('m-first')?.delivery).toBe('sent');
   });
 
   describe('question cards (PRD R103)', () => {
