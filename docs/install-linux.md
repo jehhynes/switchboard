@@ -1,29 +1,26 @@
 # Install on Linux
 
-This guide covers a source build on Ubuntu 26.04 x86_64 with GNOME, Wayland with XWayland, and PipeWire; other distributions need equivalent packages. Voice recognition on Linux runs on the CPU, because the GPU recogniser needs Windows ([architecture.md § Dictation](architecture.md#dictation)).
+This guide covers a source build on Ubuntu 26.04 x86_64 with GNOME on Wayland and PipeWire; other distributions need equivalent packages. Voice recognition on Linux runs on the CPU, because the GPU recogniser needs Windows ([architecture.md § Dictation](architecture.md#dictation)).
 
 ## System dependencies
 
-Use Node.js 22.13 or newer, npm, the .NET 10 SDK, Git, VS Code and the CLI of each provider you use. Older Codex CLIs may lack the app-server protocol Switchboard uses; [mechanics.md](mechanics.md) M112 to M115 record the versions tested on Linux.
+Use Node.js 22.13 or newer, npm, Git and the CLI of each provider you use, and VS Code if you use the web page's Open in VS Code. Older Codex CLIs may lack the app-server protocol Switchboard uses; [mechanics.md](mechanics.md) M112 to M115 record the versions tested on Linux.
 
 On Ubuntu 26.04 the distribution repositories provide:
 
 ```bash
 sudo apt update
 sudo apt install git curl ca-certificates tar bzip2 python3 build-essential \
-  nodejs npm dotnet-sdk-10.0 pulseaudio-utils libasound2t64 libpulse0 \
-  libfontconfig1 libx11-6 libxext6 xwayland libglib2.0-bin ptyxis
+  nodejs npm pulseaudio-utils libasound2t64 libpulse0 libglib2.0-bin ptyxis
 ```
 
-Install [VS Code for Linux](https://code.visualstudio.com/docs/setup/linux) before running `code`. Install and sign in to the CLI of each provider you use, such as the [Codex CLI](https://developers.openai.com/codex/cli/); Claude is not needed for a Codex-only setup, and `npm ci` installs no provider CLI. For other sources, see [Node.js downloads](https://nodejs.org/en/download) and [Microsoft's Ubuntu .NET instructions](https://learn.microsoft.com/dotnet/core/install/linux-ubuntu-install); do not mix the distribution's and Microsoft's .NET package feeds.
+For Open in VS Code, install [VS Code for Linux](https://code.visualstudio.com/docs/setup/linux). Install and sign in to the CLI of each provider you use, such as the [Codex CLI](https://developers.openai.com/codex/cli/); Claude is not needed for a Codex-only setup, and `npm ci` installs no provider CLI. For other sources, see [Node.js downloads](https://nodejs.org/en/download).
 
-If Node.js comes from a version manager, keep that installation rather than adding a second one, and set `sessions.nodePath` to its absolute executable path when VS Code started from GNOME cannot find `node` on PATH. Check the versions your shell and VS Code use:
+If Node.js comes from a version manager, keep that installation rather than adding a second one, and set `sessions.nodePath` to its absolute executable path when the hub started at login cannot find `node` on PATH. Check the versions your shell uses:
 
 ```bash
 node --version
 npm --version
-dotnet --version
-code --version
 codex --version
 # If using Claude:
 claude --version
@@ -33,7 +30,7 @@ command -v claude
 pactl info
 ```
 
-`pactl` lets dictation pause while another app records audio. `gdbus` watches logind for lock, sleep and session changes. The dock runs under XWayland and uses the GNOME Shell extension to find and raise windows and to follow terminal focus. `ptyxis` is the terminal Switchboard opens. A provider sign-in does not supply the speech API key ([Speech API key and first use](#speech-api-key-and-first-use)).
+`pactl` lets dictation pause while another app records audio. `gdbus` watches logind for lock, sleep and session changes. `ptyxis` is the terminal Switchboard opens. A provider sign-in does not supply the speech API key ([Speech API key and first use](#speech-api-key-and-first-use)).
 
 ## Build and install Switchboard
 
@@ -43,27 +40,13 @@ From the repository root:
 npm ci
 npm run verify
 npm run install-local
-npm run test:integration
-npm run package --workspace switchboard
-code --install-extension extensions/switchboard/switchboard-0.0.0.vsix --force
-npm run publish --workspace @switchboard/gnome-shell
 ```
 
-`npm run install-local` builds Switchboard and installs the hub, the terminal holder, the voice process, the web page's assets and the browser extension into `~/.switchboard`, without VS Code; a running hub restarts onto the new build once it is quiet, and the command waits for that. `node ~/.switchboard/hub.js start` then starts the hub, and `node ~/.switchboard/hub.js autostart on` starts it at login.
-
-The integration tests need a graphical session: run them from your GNOME login, or in an isolated compositor as in [mechanics.md](mechanics.md) M39.
-
-Packaging does not build (`--no-dependencies`), so build before packaging. Reload VS Code when ready. GNOME Shell loads the published extension at the next login; logging out ends desktop sessions, so choose when.
-
-Publish the dock, closing it first if it is running, because it holds its files open:
-
-```bash
-npm run publish --workspace @switchboard/dock
-```
+`npm run install-local` builds Switchboard and installs the hub, the terminal holder, the voice process, the web page's assets and the browser extension into `~/.switchboard`; a running hub restarts onto the new build once it is quiet, and the command waits for that. `node ~/.switchboard/hub.js start` then starts the hub, and `node ~/.switchboard/hub.js autostart on` starts it at login.
 
 To start the hub at login and from `switchboard:` links, and have it started again if it crashes, run `node ~/.switchboard/hub.js autostart on` with the Node.js the hub should use. It writes the XDG autostart entry, the link handler and the systemd user unit `switchboard-supervisor.service`, and starts the unit. `node ~/.switchboard/hub.js autostart status` shows each entry and whether the supervisor runs; `systemctl --user status switchboard-supervisor.service` and `~/.switchboard/hub.log` show what it did. `node ~/.switchboard/hub.js autostart off` removes them, leaving the hub running.
 
-Start `~/.switchboard/dock/Switchboard.Dock`. To reinstall after a change, see [AGENTS.md § Reinstalling after a change](../AGENTS.md#reinstalling-after-a-change); for checks, see [testing.md](testing.md).
+Run `node ~/.switchboard/hub.js web` for a sign-in link to the web page, and open it in your browser. To reinstall after a change, see [AGENTS.md § Reinstalling after a change](../AGENTS.md#reinstalling-after-a-change); for checks, see [testing.md](testing.md).
 
 Optional native npm dependencies must install: without `node-pty` there are no held terminals, and without the voice native packages there is no voice. If npm blocks an install script, read its warning and approve that package before rebuilding; do not turn off script checks globally.
 
@@ -77,7 +60,7 @@ Load `extensions/chrome/dist` unpacked in Chrome, or `extensions/firefox/dist/ma
 
 ## Local voice models
 
-The models are not in the npm packages or the VSIX. They go in `~/.switchboard/voice/models/`, or `voice/models` in an isolated Switchboard home, never inside a voice build folder.
+The models are not in the npm packages. They go in `~/.switchboard/voice/models/`, or `voice/models` in an isolated Switchboard home, never inside a voice build folder.
 
 Allow at least 3 GB free while downloading and extracting; the recognition and speaker downloads total about 468 MiB. The commands add only the named files, keeping existing models and voiceprints. The recognition archive and speaker model come from [sherpa-onnx's releases](https://github.com/k2-fsa/sherpa-onnx/releases); see the [Nemotron documentation](https://k2-fsa.github.io/sherpa/onnx/nemo/nemotron-streaming.html) for the model. Each model has its own upstream licence.
 
@@ -186,7 +169,7 @@ The voice process picks up new models as follows:
 - Recognition model: stop listening and start again.
 - Speaker model added after the voice process first needed it, or the turn model: restart the voice process.
 
-To restart the voice process, check that no reply is playing and no capture is in use, read the PID from `~/.switchboard/voice.json`, check that it is Switchboard's voice process, and send it `SIGTERM`. The hub starts it again within a minute. Restarting VS Code alone may leave it running. `~/.switchboard/voice.log` shows which recogniser loaded and any missing-file errors. Never delete models, voiceprints or your running voice process as a test cleanup step.
+To restart the voice process, check that no reply is playing and no capture is in use, read the PID from `~/.switchboard/voice.json`, check that it is Switchboard's voice process, and send it `SIGTERM`. The hub starts it again within a minute. `~/.switchboard/voice.log` shows which recogniser loaded and any missing-file errors. Never delete models, voiceprints or your running voice process as a test cleanup step.
 
 ## Verification and troubleshooting
 
@@ -194,8 +177,7 @@ To restart the voice process, check that no reply is playing and no capture is i
 - No recognition: check the exact directory name and its four files (`encoder.int8.onnx`, `decoder.int8.onnx`, `joiner.int8.onnx`, `tokens.txt`). An empty directory, or an ONNX file saved as a Git LFS pointer, is not a model.
 - Turn-model errors: check the pinned revision, all five checksums and the `onnx/model_q8.onnx` path. Without separate permission, leave the model out and use the pause timer.
 - Dictation does not pause for another app: `pactl -f json list source-outputs` and `pactl subscribe` must work in the environment that starts the voice process; a user-local `pactl` must be on that process's PATH.
-- Terminal voice focus stale: publish the GNOME Shell extension and log in again; its D-Bus interface must include `TerminalUnfocused`.
 - Missing native library: run `ldd` on the failing `.node` or `.so` file and install the distribution package for each `not found` entry. Do not copy Windows DLLs into a Linux build.
 - Playback fails with no key: configure the speech API key; reinstalling models does not fix authentication.
 
-For live acceptance, test a short dictated phrase, a reply through the chosen speakers, another app taking the microphone, and leaving a session terminal; then enrolment, barge-in and room hold. Model-loading checks do not validate recognition accuracy, speaker identity or echo cancellation. See [testing.md](testing.md) and [mechanics.md](mechanics.md) for the recorded checks and their limits.
+For live acceptance, test a short dictated phrase, a reply through the chosen speakers, and another app taking the microphone; then enrolment, barge-in and room hold. Model-loading checks do not validate recognition accuracy, speaker identity or echo cancellation. See [testing.md](testing.md) and [mechanics.md](mechanics.md) for the recorded checks and their limits.
