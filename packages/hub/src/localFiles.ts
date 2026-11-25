@@ -35,8 +35,13 @@ export interface LocalRoots {
   never?: string[];
   /** Whether a folder's entries may be listed; false for a paired device. */
   listFolders?: boolean;
-  /** The temporary folder Claude Code keeps its `claude` folder in; the system's by default. */
+  /** The temporary folder Claude Code keeps its own folder in ({@link claudeTempName}); the system's by default. */
   temp?: string;
+}
+
+/** The name of Claude Code's folder in the temporary folder: `claude` on Windows, `claude-<user ID>` elsewhere. */
+export function claudeTempName(platform: NodeJS.Platform = process.platform, uid: number | undefined = process.getuid?.()): string {
+  return platform === 'win32' || uid === undefined ? 'claude' : `claude-${uid}`;
 }
 
 /**
@@ -232,7 +237,7 @@ export async function allowedPath(roots: LocalRoots, target: string): Promise<st
     }
   }
 
-  const claude = await realpath(join(roots.temp ?? tmpdir(), 'claude')).catch(() => null);
+  const claude = await realpath(join(roots.temp ?? tmpdir(), claudeTempName())).catch(() => null);
   const inside = claude === null ? null : relative(claude, real);
 
   if (claude === null || inside === null || inside === '' || inside.startsWith('..') || isAbsolute(inside)) {
