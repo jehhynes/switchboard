@@ -1,13 +1,8 @@
-/* The Changes tab (architecture.md § Web page): its tab at the end of a tab strip, its bar above the diffs, and its Files menu under the bar, as
+/* The Changes tab (architecture.md § Web page): its tab after the file tabs, its bar above the diffs, and its Files menu under the bar, as
    wide as a path needs up to the pane's width. Status letters and counts take VS Code's default git decoration colours, Dark Modern's and Light
    Modern's. */
 :root { --sb-git-added: #81b88b; --sb-git-modified: #e2c08d; --sb-git-deleted: #c74e39; --sb-git-untracked: #73c991; --sb-git-renamed: #73c991; --sb-git-conflict: #e4676b; }
 @media (prefers-color-scheme: light) { :root { --sb-git-added: #587c0c; --sb-git-modified: #895503; --sb-git-deleted: #ad0707; --sb-git-untracked: #007100; --sb-git-renamed: #007100; --sb-git-conflict: #ad0707; } }
-.tab.changes-tab { border-right: none; border-left: 1px solid var(--vscode-panel-border); }
-/* The file tabs and the Changes tab sit at the strip's end, after the Artifacts menu where it shows. A tab pushed there has a left border
-   of its own, as the Changes tab has, since the tab before it is not beside it. */
-.tab.push { margin-left: auto; border-left: 1px solid var(--vscode-panel-border); }
-.artifact-more + .tab.push { margin-left: 0; }
 /* The bar above the diffs, on the pane's surface: Files, the note, then the toggles. */
 /* A size container, for its Files label; a stacking context too, raised so its menu lies over the diffs. */
 .changes-bar { position: relative; z-index: 3; container-type: inline-size; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; box-sizing: border-box; min-height: 32px; padding: 2px 6px; border-bottom: 1px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); font-size: 13px; }

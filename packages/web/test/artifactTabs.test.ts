@@ -147,7 +147,8 @@ describe('the artifact tabs', () => {
     const markup = html(renderSideSwitch('artifacts', state, false, { open: 'chat/a5.md', fit: 3, menu: true, now: 2_000, closed }));
     const menu = new DOMParser().parseFromString(markup, 'text/html').querySelector('.artifact-menu')!;
 
-    expect(tabPaths(markup)).toEqual(['chat/a6.md', 'chat/a4.md', 'chat/a5.md']);
+    // The open one takes the last tab's place, and the tabs stay newest first.
+    expect(tabPaths(markup)).toEqual(['chat/a6.md', 'chat/a5.md', 'chat/a4.md']);
     expect(menu.querySelector('[data-path="chat/a7.md"]')!.className).toBe('menu-row');
     expect(menu.querySelector('[data-path="chat/a7.md"] .menu-note')!.textContent).toBe('just now');
     expect(menu.textContent).not.toContain('Closed');
@@ -214,8 +215,8 @@ describe('the tab strip on a narrow screen', () => {
     expect(css).toContain('.tab .tab-label, .tab.diff-tab .tab-badge { display: var(--sb-tab-label-display, block); }');
     // The Changes tab is never hidden; a file tab keeps its icon and close mark whole.
     expect(narrow).not.toMatch(/\.changes-tab(?![^{]*\.tab-label)[^{]*\{[^}]*display: none/);
-    expect(narrow).toContain('.tab.diff-tab.selected { border-left: 1px solid var(--vscode-panel-border); }');
-    expect(narrow).toContain('.tab.diff-tab:not(.selected) { display: none; }');
+    // The chosen file tab stays in its place in the strip's order, with no border or push of its own.
+    expect(narrow).toBe('  .tab.diff-tab:not(.selected) { display: none; }');
     // Conversation, Status, Console and Browser are never hidden.
     expect(narrow).not.toMatch(/\.tab(\[data-tab|\.selected|:not\(\.diff-tab)[^{]*\{[^}]*display: none/);
     expect(css).toMatch(/@container \(max-width: 360px\) \{\n  \.tab, \.artifact-more \{ --sb-tab-pad: 9px; \}/);

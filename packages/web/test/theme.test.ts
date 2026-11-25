@@ -184,9 +184,13 @@ describe('the theme copy', () => {
     expect(css).not.toMatch(/\.detail-head \.tab \{/);
     expect(css).toMatch(/\.tab \{[^}]*height: 35px;[^}]*border-top: 1px solid transparent;/);
     expect(css).toMatch(/\.tab\.selected \{[^}]*border-top-color: var\(--vscode-panelTitle-activeBorder\);/);
-    // A tab pushed to the strip's end has its own left border, since the tab before it is not beside it, as a diff tab is on a narrow strip.
-    expect(css).toMatch(/\.tab\.push \{[^}]*margin-left: auto;[^}]*border-left: 1px solid var\(--vscode-panel-border\);/);
-    expect(css).toMatch(/\.tab\.diff-tab\.selected \{[^}]*border-left: 1px solid var\(--vscode-panel-border\);/);
+    // The tabs are one group: only Artifacts and the maximize button sit apart, at the strip's end, each with its own left border, since the tab
+    // before it is not beside it; no tab is pushed there or borders its left.
+    expect(css).toMatch(/\.artifact-more \{[^}]*margin-left: auto;/);
+    expect(css).toMatch(/\.tab\.artifact-menu-button \{[^}]*border-left: 1px solid var\(--vscode-panel-border\);/);
+    expect(css).toMatch(/\.tab\.panel-max \{[^}]*margin-left: auto;[^}]*border-left: 1px solid var\(--vscode-panel-border\);/);
+    expect(css).toContain('.artifact-more + .tab.panel-max { margin-left: 0; }');
+    expect(css).not.toMatch(/\.tab\.push|\.tab:is\(\[data-tab="console"\]|\.tab\.(?:changes-tab|diff-tab\.selected) \{[^}]*(?:border-left|margin-left)/);
     // The console's typing border is drawn inside its own box, dimmed, on all four sides, above xterm.js's layers.
     expect(css).toMatch(/\.console \{[^}]*position: relative;[^}]*isolation: isolate;/);
     expect(css).toMatch(/\.console\.typing::after \{[^}]*inset: 0;[^}]*z-index: 50;[^}]*border: 1px solid color-mix\(in srgb, var\(--vscode-focusBorder\) 45%, transparent\);/);

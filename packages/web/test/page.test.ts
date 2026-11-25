@@ -2780,7 +2780,7 @@ describe('the page in use', () => {
     again.page.close();
   });
 
-  it("shows History as a tab of the column after Status only once the Actions menu opens it, with Console in the right-hand group, and an artifact's tab replaces it", () => {
+  it("shows History as a tab of the column after Status only once the Actions menu opens it, with Console last, and an artifact's tab replaces it", () => {
     window.innerWidth = 1920;
     history.replaceState(null, '', '#w=1');
     onTestFinished(() => {
@@ -2878,7 +2878,7 @@ describe('the page in use', () => {
     strip()[0]!.focus();
     strip()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[1]);
-    // The right-hand group follows the artifact tabs in the keyboard's order as on screen: Changes, then Console last.
+    // The keyboard follows the strip's order (tabs.ts) as on screen: after the artifact tabs, Changes, then Console last.
     strip()[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     expect(document.activeElement).toBe(root.querySelector('#detail [data-side="console"]'));
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));

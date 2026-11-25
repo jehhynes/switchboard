@@ -157,10 +157,10 @@ function totals(list: ChangesList): { viewed: number; additions: number; deletio
 }
 
 /**
- * The Changes tab, the strip's one Changes item, after its other tabs and any file tabs: how many files are viewed of all once the list was read.
- * Choosing it opens the diffs; it has no close mark, as the other fixed tabs have none. `push` when nothing comes between it and the tabs before.
+ * The Changes tab, the strip's one Changes item, after the file tabs and before Console (tabs.ts): how many files are viewed of all once the list
+ * was read. Choosing it opens the diffs; it has no close mark, as the other fixed tabs have none.
  */
-export function changesTab(changes: ChangesView, shown: boolean, push = true): VNode {
+export function changesTab(changes: ChangesView, shown: boolean): VNode {
   const list = changes.list;
   const viewed = list === null ? 0 : totals(list).viewed;
   const kind = scopeKind(changes.range, list?.commits ?? [], list?.base ?? null);
@@ -168,7 +168,7 @@ export function changesTab(changes: ChangesView, shown: boolean, push = true): V
   const title = kind === 'all' ? "Every changed file's diff since the base" : kind === 'uncommitted' ? "Every uncommitted file's diff" : `Every changed file's diff: ${scopeTitle(changes.range, list?.commits ?? [], list?.base ?? null)}`;
 
   return (
-    <button class={`tab changes-tab${push ? ' push' : ''}${shown ? ' selected' : ''}`} type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title={title} aria-label={list === null ? 'Changes' : `Changes, ${viewed} of ${list.total} ${files} viewed`}>
+    <button class={`tab changes-tab${shown ? ' selected' : ''}`} type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title={title} aria-label={list === null ? 'Changes' : `Changes, ${viewed} of ${list.total} ${files} viewed`}>
       <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
       <span class="tab-label">Changes</span>
       {list === null ? null : <span class="tab-badge muted">{`${viewed}/${list.total}`}</span>}

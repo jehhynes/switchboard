@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '../src/island.js';
 import { renderHeader, renderSideSwitch, renderTabs } from '../src/header.js';
-import { changesTab, newChanges } from '../src/changes.js';
+import { newChanges } from '../src/changes.js';
 import { EMPTY } from '../src/model.js';
 import type { PageState } from '../src/model.js';
 import { newView, TABS } from '../src/render.js';
@@ -14,7 +14,7 @@ const artifact = (n: number): ArtifactView => ({ path: `chat/a${n}.${n % 2 === 0
 const session: SessionView = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
 const state: PageState = { ...EMPTY, connected: true, scope, session, artifacts: [1, 2, 3, 4].map(artifact), status: { id: 'st', sessionId: 's', at: 1, markdown: 'Done.', fallback: false, unread: true } };
-const changes = changesTab({ ...newChanges(), list: { total: 2, rows: [] } as never }, false);
+const changes = { ...newChanges(), list: { total: 2, rows: [] } as never };
 
 function draw(tree: ComponentChild): HTMLElement {
   const host = document.createElement('div');
@@ -33,8 +33,8 @@ function labelSelector(): string {
 
 describe('the tab strips', () => {
   const strips = [
-    draw(renderTabs(newView(), state, true, { open: null, fit: 2, menu: false, now: 0 }, changes, true, true)),
-    draw(renderSideSwitch('status', state, true, { open: 'chat/a2.md', fit: 2, menu: false, now: 0 }, changes, true, true)),
+    draw(renderTabs(newView(), state, true, { open: null, fit: 2, menu: false, now: 0, changes }, true, true)),
+    draw(renderSideSwitch('status', state, true, { open: 'chat/a2.md', fit: 2, menu: false, now: 0, changes }, true, true)),
   ];
 
   it('TabStrips_EveryTab_ShowsAnIcon', () => {
@@ -51,16 +51,16 @@ describe('the tab strips', () => {
   it('FixedTabs_Drawn_NameTheirIconAndKeepTheirNameWithoutTheLabel', () => {
     const tabs = [...strips[0]!.querySelectorAll<HTMLElement>('[data-tab]')];
 
-    // In the strip's order: Console in the right-hand group, after Changes.
+    // In the strip's order (tabs.ts): History before the links, Console last, after Changes.
     expect(tabs.map((tab) => [tab.dataset['tab'], tab.querySelector('.codicon')!.className, tab.querySelector('.tab-label')!.textContent, tab.title])).toEqual([
       ['conversation', 'codicon codicon-comment-discussion', 'Conversation', 'Conversation'],
       ['status', 'codicon codicon-pulse', 'Status', 'Status'],
-      ['browser', 'codicon codicon-globe', 'Browser', 'Browser'],
       ['history', 'codicon codicon-history', 'History', 'History'],
+      ['browser', 'codicon codicon-globe', 'Browser', 'Browser'],
       ['console', 'codicon codicon-terminal', 'Console', 'Console'],
     ]);
     // Status's unread dot stays in its name once the label is hidden.
-    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Conversation', 'Status, unread', 'Browser', 'History', 'Console']);
+    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Conversation', 'Status, unread', 'History', 'Browser', 'Console']);
     expect(strips[0]!.querySelector('.changes-tab ~ [data-tab="console"]')).not.toBeNull();
     // History has a close mark, as a file tab has.
     expect(strips.map((strip) => strip.querySelector('.history-tab [data-action="close-history"]')?.getAttribute('aria-label'))).toEqual(['Close History', 'Close History']);
@@ -71,8 +71,8 @@ describe('the tab strips', () => {
     const links = [{ url: 'https://github.com/o/r/issues/1', label: 'Issue 1' }, { url: 'https://example.com/', label: 'example.com' }];
 
     for (const strip of [
-      draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { links, link: links[0]!.url, open: null, fit: 2, menu: false, now: 0 }, changes, true, true)),
-      draw(renderSideSwitch('browser', state, true, { links, link: links[0]!.url, open: null, fit: 2, menu: false, now: 0 }, changes, true, true)),
+      draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { links, link: links[0]!.url, open: null, fit: 2, menu: false, now: 0, changes }, true, true)),
+      draw(renderSideSwitch('browser', state, true, { links, link: links[0]!.url, open: null, fit: 2, menu: false, now: 0, changes }, true, true)),
     ]) {
       const tabs = [...strip.querySelectorAll<HTMLElement>('.link-tab .tab-open')];
 
@@ -176,7 +176,7 @@ describe('the label beside an icon', () => {
   it('IconRows_EveryTextBesideAnIcon_IsTrimmedToItsCapHeight', () => {
     const selector = labelSelector();
     const hosts = [
-      draw(renderTabs(newView(), state, true, { open: null, fit: 2, menu: true, now: 0 }, changes, true)),
+      draw(renderTabs(newView(), state, true, { open: null, fit: 2, menu: true, now: 0, changes }, true)),
       draw(renderHeader(state, { ...newView(), picker: true })),
       draw(renderHeader(state, { ...newView(), viewMenu: true })),
     ];

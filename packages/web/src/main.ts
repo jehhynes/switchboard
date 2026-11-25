@@ -49,8 +49,8 @@ import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
 import type { HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
-import { ChangesController, changesTab } from './changes.js';
-import { LocalFilesController, localTabs } from './localFiles.js';
+import { ChangesController } from './changes.js';
+import { LocalFilesController } from './localFiles.js';
 import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
@@ -2424,14 +2424,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       artifactsOpened([shownArtifact]);
     }
 
-    const strip = { ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), open: shownArtifact, fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen) };
-
-    // The file tabs, then the one Changes tab, last so it keeps its place as file tabs come and go.
-    const changeTabs = (shown: Tab): ComponentChild[] => [localTabs(localFiles.view, shown === 'file', true), changesTab(changes.view, shown === 'diff', localFiles.view.tabs.length === 0)];
+    const strip = { ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), open: shownArtifact, fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen), files: localFiles.view, changes: changes.view };
 
     // The History tab reads the hub only while it shows.
     followHistory((side ? sideTab() : mainTab()) === 'history' && !(isPhone() && root.classList.contains('listing')));
-    mount(head, [renderHeader(state, view, deps.now()), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, changeTabs(mainTab()), showConsole(), showHistory())]);
+    mount(head, [renderHeader(state, view, deps.now()), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, showConsole(), showHistory())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -2508,7 +2505,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
       }
 
-      mount(detailHead, renderSideSwitch(sideTab(), state, showBrowser(), strip, changeTabs(sideTab()), showConsole(), showHistory(), renderMaximize(panelMaximized)));
+      mount(detailHead, renderSideSwitch(sideTab(), state, showBrowser(), strip, showConsole(), showHistory(), renderMaximize(panelMaximized)));
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.

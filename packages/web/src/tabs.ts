@@ -1,0 +1,73 @@
+// The tabs of a strip as one ordered list (architecture.md § Web page), which the conversation's strip and the side column's switch both draw, so
+// both show the same tabs in the same order at every width.
+import type { ArtifactView } from '@switchboard/protocol';
+import type { LocalFilesView, LocalTab } from './localFiles.js';
+import type { Tab } from './render.js';
+
+/** Which strip: the side column's on a wide page, or the conversation's on a narrower one, which adds Conversation. */
+export type StripLayout = 'wide' | 'narrow';
+
+/** What a strip can show: which tab shows, and each tab's source. */
+export interface StripState {
+  /** The tab the pane under the strip shows. */
+  shown: Tab;
+  /** Whether the work item's status is unread. */
+  statusUnread: boolean;
+  /** Whether the Browser tab shows, which it does only while the strip has no link tabs (`links`). */
+  browser: boolean;
+  /** The embedded link tabs, while the page has them (architecture.md § Embedded link tabs). */
+  links?: ReadonlyArray<{ url: string; label: string }> | undefined;
+  /** The link the Browser pane shows. */
+  link?: string | null | undefined;
+  /** Whether History is open. */
+  history: boolean;
+  artifacts: readonly ArtifactView[];
+  /** The artifact the Artifacts pane shows. */
+  open: string | null;
+  /** The artifacts whose tabs are closed (`closedArtifacts`). */
+  closed: ReadonlySet<string>;
+  files: LocalFilesView;
+  changes: boolean;
+  console: boolean;
+}
+
+interface TabBase {
+  /** `status`, `history`, `changes`, `console`, `conversation` and `browser` for the fixed tabs, `link:<url>`, `artifact:<path>` or `file:<path>`. */
+  id: string;
+  selected: boolean;
+}
+
+/** A strip's tab: a fixed tab, History, a link, an artifact, a file or Changes. */
+export type DocTab =
+  | (TabBase & { kind: 'fixed'; tab: 'conversation' | 'status' | 'browser' | 'console'; unread: boolean })
+  | (TabBase & { kind: 'history' })
+  | (TabBase & { kind: 'link'; url: string; label: string })
+  | (TabBase & { kind: 'artifact'; artifact: ArtifactView })
+  | (TabBase & { kind: 'file'; file: LocalTab })
+  | (TabBase & { kind: 'changes' });
+
+/** A file tab's path: the file's own once read, else the target its link named. */
+const filePath = (tab: LocalTab): string => (tab.entry.state === 'ok' ? tab.entry.data.path : tab.target);
+
+/**
+ * The strip's tabs in order, each only while it applies: Conversation (narrow strip only), Status, History while open, the links (or Browser),
+ * the artifacts newest first but those closed, unless shown, the file tabs in the order they were opened, Changes, then Console.
+ */
+export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
+  const { shown } = state;
+  const fixed = (tab: 'conversation' | 'status' | 'browser' | 'console'): DocTab => ({ id: tab, kind: 'fixed', tab, selected: shown === tab, unread: tab === 'status' && state.statusUnread });
+  const artifacts = [...state.artifacts]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .filter((artifact) => !state.closed.has(artifact.path) || (shown === 'artifacts' && artifact.path === state.open));
+
+  return [
+    ...(layout === 'narrow' ? [fixed('conversation')] : []),
+    fixed('status'),
+    ...(state.history ? [{ id: 'history', kind: 'history' as const, selected: shown === 'history' }] : []),
+    ...(state.links === undefined ? (state.browser ? [fixed('browser')] : []) : state.links.map((link): DocTab => ({ id: `link:${link.url}`, kind: 'link', url: link.url, label: link.label, selected: shown === 'browser' && state.link === link.url }))),
+    ...artifacts.map((artifact): DocTab => ({ id: `artifact:${artifact.path}`, kind: 'artifact', artifact, selected: shown === 'artifacts' && artifact.path === state.open })),
+    ...state.files.tabs.map((file): DocTab => ({ id: `file:${filePath(file)}`, kind: 'file', file, selected: shown === 'file' && file.id === state.files.open })),
+    ...(state.changes ? [{ id: 'changes', kind: 'changes' as const, selected: shown === 'diff' }] : []),
+    ...(state.console ? [fixed('console')] : []),
+  ];
+}

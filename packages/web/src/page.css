@@ -468,9 +468,7 @@ button.picker > .codicon-chevron-down { order: 2; }
 .tab-close:hover { background: color-mix(in srgb, var(--vscode-foreground) 15%, transparent); }
 /* History, once opened from an actions menu, has a close mark as a file tab has. */
 .tab.history-tab { box-sizing: border-box; }
-/* Console sits in the strip's right-hand group, after Changes, so it takes that group's left border. */
-.tab:is([data-tab="console"], [data-side="console"]) { border-right: none; border-left: 1px solid var(--vscode-panel-border); }
-/* Artifacts and its count, at the strip's end after the artifact tabs that fit, opening a menu of every artifact. */
+/* Artifacts and its count, at the strip's end after its tabs, while some artifacts have no tab, opening a menu of every artifact. */
 .artifact-more { position: relative; display: flex; margin-left: auto; }
 .artifact-more { padding-inline: var(--sb-tab-pad); }
 .artifact-more > .tab { flex: 1 1 auto; max-width: none; margin-inline: calc(-1 * var(--sb-tab-pad)); }
@@ -504,12 +502,9 @@ button.picker > .codicon-chevron-down { order: 2; }
 @container (width < 1740px) { .tabs:has(> :nth-child(15 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
 @container (width < 1856px) { .tabs:has(> :nth-child(16 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
 .tabs:has(> :nth-child(17 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; }
-/* Under 600 px, a file tab shows only while chosen, at the strip's end. Under 360 px the tabs' padding shrinks. */
+/* Under 600 px, a file tab shows only while chosen. Under 360 px the tabs' padding shrinks. */
 @container (max-width: 600px) {
   .tab.diff-tab:not(.selected) { display: none; }
-  .tab.diff-tab.selected { border-left: 1px solid var(--vscode-panel-border); }
-  .tab.diff-tab.selected, .tab.changes-tab { margin-left: auto; }
-  .tab.diff-tab.selected ~ .tab.changes-tab, .artifact-more ~ .tab.diff-tab.selected, .artifact-more ~ .tab.changes-tab { margin-left: 0; }
 }
 @container (max-width: 360px) {
   .tab, .artifact-more { --sb-tab-pad: 9px; }
@@ -1021,7 +1016,9 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 :where(html:not(.phone)) #root.wide > .detail { display: flex; flex: 1 1 360px; flex-direction: column; min-width: 360px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
 /* Maximized (main.ts), the column covers the whole page, the list and the conversation too, which keep their places under it; its strip's last
    button restores it. */
-.tab.panel-max { flex: none; justify-content: center; padding: 0 10px; border-right: none; border-left: 1px solid var(--vscode-panel-border); cursor: pointer; }
+.tab.panel-max { flex: none; justify-content: center; margin-left: auto; padding: 0 10px; border-right: none; border-left: 1px solid var(--vscode-panel-border); cursor: pointer; }
+/* At the strip's end; after Artifacts, which already sits there, it needs no push of its own. */
+.artifact-more + .tab.panel-max { margin-left: 0; }
 @media (hover: none), (pointer: coarse) { .tab.panel-max { min-width: 44px; } }
 /* The maximize button is no tab: it keeps the strip's background when focused or pressed, so it never looks chosen, shows the focus outline
    alone for the keyboard, and takes an icon button's hover where the pointer can hover. */

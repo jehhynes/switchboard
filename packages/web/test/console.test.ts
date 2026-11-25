@@ -6,6 +6,7 @@ import { startPage } from '../src/main.js';
 import type { ConsoleModule } from '../src/main.js';
 import { consoleNote, newView } from '../src/render.js';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
+import { newChanges } from '../src/changes.js';
 import { html } from './html.js';
 import { EMPTY } from '../src/model.js';
 import type { SessionView } from '@switchboard/protocol';
@@ -929,16 +930,18 @@ describe('the Console tab', () => {
     vi.restoreAllMocks();
   });
 
-  it('is a tab of the right-hand group, after Changes, in both strips', () => {
+  it('is the last tab, after Changes, in both strips', () => {
     const state = { ...EMPTY, connected: true, scope, session: session() };
 
     expect([...html(renderTabs(newView(), state)).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'status', 'console']);
     expect([...html(renderSideSwitch('console', state)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'console']);
     expect(html(renderSideSwitch('console', state))).toMatch(/aria-selected="true"[^>]*aria-label="Console">/);
     expect([...html(renderSideSwitch('browser', state, true)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'browser', 'console']);
-    // After what comes before the column's end, as Changes, and before its end, as the maximize button.
-    expect(html(renderSideSwitch('status', state, false, undefined, h('b', { class: 'changes' }), true, false, h('i', { class: 'end' })))).toMatch(/class="changes"[\s\S]*data-side="console"[\s\S]*class="end"/);
-    expect(html(renderTabs(newView(), state, false, undefined, h('b', { class: 'changes' })))).toMatch(/class="changes"[\s\S]*data-tab="console"/);
+    // After Changes, and before the column's end, as the maximize button.
+    const strip = { open: null, fit: 0, menu: false, now: 0, changes: newChanges() };
+
+    expect(html(renderSideSwitch('status', state, false, strip, true, false, h('i', { class: 'end' })))).toMatch(/changes-tab[\s\S]*data-side="console"[\s\S]*class="end"/);
+    expect(html(renderTabs(newView(), state, false, strip))).toMatch(/changes-tab[\s\S]*data-tab="console"/);
   });
 
   it('says why a session has no console without loading it', () => {

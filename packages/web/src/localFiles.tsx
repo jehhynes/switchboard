@@ -39,29 +39,23 @@ function tabName(tab: LocalTab): string {
   return tab.entry.state === 'ok' ? tab.entry.data.name : baseName(tab.target);
 }
 
-/**
- * The file tabs, after the diff tabs and before the Changes button, each with its file's icon and a close mark, as a diff's tab is drawn; `push`
- * when no diff tab comes before them, so the first starts the strip's right-hand group.
- */
-export function localTabs(files: LocalFilesView, shown: boolean, push: boolean): ComponentChildren {
-  return files.tabs.map((tab, index) => {
-    const selected = shown && tab.id === files.open;
-    const name = tabName(tab);
-    const dir = tab.entry.state === 'ok' && tab.entry.data.kind === 'dir';
-    const title = tab.entry.state === 'ok' ? tab.entry.data.path : tab.target;
+/** A file's tab, after the artifact tabs and before Changes (tabs.ts), with its file's icon and a close mark. */
+export function LocalTabButton({ tab, selected }: { tab: LocalTab; selected: boolean }) {
+  const name = tabName(tab);
+  const dir = tab.entry.state === 'ok' && tab.entry.data.kind === 'dir';
+  const title = tab.entry.state === 'ok' ? tab.entry.data.path : tab.target;
 
-    return (
-      <span class={`tab diff-tab local-tab${push && index === 0 ? ' push' : ''}${selected ? ' selected' : ''}`} role="presentation">
-        <button class="tab-open" type="button" role="tab" data-action="local-tab" data-local={String(tab.id)} aria-selected={selected} tabindex={selected ? 0 : -1} title={tab.line === null ? title : `${title}:${tab.line}`}>
-          {dir ? <span class="codicon codicon-folder" aria-hidden="true"></span> : <FileIcon path={name} />}
-          <span class="tab-label">{name}</span>
-        </button>
-        <button class="tab-close" type="button" data-action="local-close" data-local={String(tab.id)} aria-label={`Close ${name}`} title="Close" tabindex={selected ? 0 : -1}>
-          <span class="codicon codicon-close" aria-hidden="true"></span>
-        </button>
-      </span>
-    );
-  });
+  return (
+    <span class={`tab diff-tab local-tab${selected ? ' selected' : ''}`} role="presentation">
+      <button class="tab-open" type="button" role="tab" data-action="local-tab" data-local={String(tab.id)} aria-selected={selected} tabindex={selected ? 0 : -1} title={tab.line === null ? title : `${title}:${tab.line}`}>
+        {dir ? <span class="codicon codicon-folder" aria-hidden="true"></span> : <FileIcon path={name} />}
+        <span class="tab-label">{name}</span>
+      </button>
+      <button class="tab-close" type="button" data-action="local-close" data-local={String(tab.id)} aria-label={`Close ${name}`} title="Close" tabindex={selected ? 0 : -1}>
+        <span class="codicon codicon-close" aria-hidden="true"></span>
+      </button>
+    </span>
+  );
 }
 
 /** What the file tab says in place of the file: a read on its way, why it failed, a binary file or one too large. */
