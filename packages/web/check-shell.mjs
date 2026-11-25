@@ -173,6 +173,7 @@ const measure = `(() => {
       return { name: null, hit: hit && name(hit) };
     })(),
     bar: (() => { const probe = document.createElement('div'); probe.style.background = 'var(--sb-bar-background)'; document.body.append(probe); const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour; })(),
+    histEnd: (() => { const body = document.querySelector('.hist-body'); return body === null ? null : parseFloat(getComputedStyle(body).paddingBottom); })(),
     band: document.getElementById('safe-top').getBoundingClientRect().height,
     // Line 2 of each shown row: a pill is whole inside its line and its box, its text shown whole; its icon alone, its text not shown; or wholly
     // outside them, left out. The unseen boxes that decide which texts fit (page.css, Line 2) are not pills shown.
@@ -364,6 +365,9 @@ function failures(view, size, m) {
 
     if (m.pills.filter((pill) => pill.ticket).length !== keys) out.push('line 2 shows ' + m.pills.filter((pill) => pill.ticket).length + ' ticket keys, not ' + keys);
   }
+  // History's last entry scrolls clear of the home indicator.
+  if (view === 'history' && m.histEnd === null) out.push('History drew no entries');
+  if (view === 'history' && m.histEnd !== null && m.histEnd < 48 + size.insets.bottom - 0.5) out.push('History ends ' + m.histEnd + ' px under its last entry, inside the home indicator\'s ' + size.insets.bottom + ' px');
   for (const name of m.names) {
     if (name.cut) out.push('line 2\'s playbook or host ' + name.text + ' is cut');
     if (name.alone) out.push('line 2\'s comment icon is alone on a line above ' + name.text);

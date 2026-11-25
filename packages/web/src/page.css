@@ -1183,7 +1183,7 @@ ol.hist-timeline { list-style: none; margin: 0; padding: 4px 12px 10px; }
 .hist-run ol.hist-timeline { padding: 0; }
 /* The time column keeps its width, which "09:00:00" needs; only the gap column goes. */
 @media (max-width: 560px) {
-  .hist-body { padding: 12px 12px 48px; }
+  .hist-body { padding: 12px 12px calc(48px + var(--sb-end)); }
   .hist-entry { grid-template-columns: 62px 24px minmax(0, 1fr); }
   .hist-gap { display: none; }
 }
