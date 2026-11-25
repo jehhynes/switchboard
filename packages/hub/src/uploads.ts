@@ -1,13 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { lstatSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /**
- * Where the files a web page attaches are written, so a message can mention them (architecture.md § Web page): the folder the Conversation view
- * writes pasted images to, so both front ends leave their files in one place.
+ * Where the files a web page attaches are written, so a message can mention them (architecture.md § Web page). Outside Windows the temporary
+ * folder is shared by every user, so the folder name carries the user ID.
  */
-export const UPLOAD_DIR = join(tmpdir(), 'switchboard-pasted');
+export const UPLOAD_DIR = join(tmpdir(), process.platform === 'win32' || process.getuid === undefined ? 'switchboard-pasted' : `switchboard-pasted-${process.getuid()}`);
 /** The largest file a page attaches, the Conversation view's limit for a pasted image. */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const UPLOAD_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
@@ -61,7 +61,7 @@ export function safeName(name: string): string {
  * empty file, one larger than 10 MB, one named as a picture that is not one Claude can read, and a folder that is a link or junction, which could
  * point the cleanup elsewhere. Deletes the files it and the Conversation view wrote there that are older than a week, and only those.
  */
-export function writeUpload(name: string, bytes: Uint8Array, now: number, dir = UPLOAD_DIR): { path: string; image: boolean } | { error: string } {
+export function writeUpload(name: string, bytes: Uint8Array, now: number, dir = UPLOAD_DIR, uid: number | undefined = process.platform === 'win32' ? undefined : process.getuid?.()): { path: string; image: boolean } | { error: string } {
   const shown = name.trim() === '' ? 'The file' : name;
 
   if (bytes.length === 0) {
@@ -79,12 +79,23 @@ export function writeUpload(name: string, bytes: Uint8Array, now: number, dir = 
     return { error: `${shown} is not a PNG, JPEG, GIF or WebP image.` };
   }
 
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
 
   const folder = lstatSync(dir);
 
   if (folder.isSymbolicLink() || !folder.isDirectory()) {
     return { error: `${shown} was not saved: ${dir} is not a plain folder.` };
+  }
+
+  // Outside Windows, only this user may own or read the folder: another user could have made it first in a shared temporary folder.
+  if (uid !== undefined) {
+    if (folder.uid !== uid) {
+      return { error: `${shown} was not saved: ${dir} belongs to another user.` };
+    }
+
+    if ((folder.mode & 0o077) !== 0) {
+      chmodSync(dir, 0o700);
+    }
   }
 
   for (const old of readdirSync(dir).filter((one) => UPLOADED_NAME.test(one))) {
@@ -105,6 +116,6 @@ export function writeUpload(name: string, bytes: Uint8Array, now: number, dir = 
   const path = join(dir, image === null ? `attached-${stamp}-${safeName(name)}` : `pasted-${stamp}.${image}`);
 
   // A new file only: never one already there.
-  writeFileSync(path, bytes, { flag: 'wx' });
+  writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 });
   return { path, image: image !== null };
 }

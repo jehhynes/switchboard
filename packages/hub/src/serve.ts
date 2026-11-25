@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -96,11 +97,12 @@ export const DEFAULT_WAIT_MS = 5000;
 /** How long a stopping hub waits for the requests it is answering before it closes the app. */
 export const STOP_REQUESTS_MS = 5000;
 
-/** Write through a temporary file, so a reader never sees a partial record. */
+/** Write through a temporary file, so a reader never sees a partial record; only its user may read it, since it holds the hub's token. */
 function writeRecord(path: string, record: HubRecord): void {
-  const temporary = `${path}.${process.pid}.tmp`;
+  // A new file only, since a mode applies only when a file is made: an old one left with a wider mode would keep it.
+  const temporary = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
 
-  writeFileSync(temporary, JSON.stringify(record, null, 2));
+  writeFileSync(temporary, JSON.stringify(record, null, 2), { mode: 0o600, flag: 'wx' });
   renameSync(temporary, path);
 }
 
