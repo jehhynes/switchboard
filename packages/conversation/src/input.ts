@@ -9,7 +9,7 @@
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import headless from '@xterm/headless';
 import type { Line } from './screenReader.js';
-import { typedText, unwrapPasted } from './transcript.js';
+import { imagePasted, typedText, unwrapPasted } from './transcript.js';
 
 /** Gap between a paste and its Enter; an Enter too soon after a paste can be dropped, and is retried. */
 export const PASTE_SETTLE_MS = 60;
@@ -173,7 +173,7 @@ export function sentInTranscript(lines: string[], text: string, since: number): 
       continue;
     }
 
-    let entry: { type?: unknown; operation?: unknown; content?: unknown; isSidechain?: unknown; timestamp?: unknown; message?: { content?: unknown } };
+    let entry: { type?: unknown; operation?: unknown; content?: unknown; isSidechain?: unknown; isMeta?: unknown; origin?: { kind?: unknown }; timestamp?: unknown; message?: { content?: unknown } };
 
     try {
       entry = JSON.parse(line) as typeof entry;
@@ -198,8 +198,12 @@ export function sentInTranscript(lines: string[], text: string, since: number): 
       return false;
     }
 
-    // A slash command is recorded in tags, which read back as `/name args`.
-    if (typeof said === 'string' && (unwrapPasted(said).trim() === want || typedText(said) === want)) {
+    // A slash command is recorded in tags, which read back as `/name args`; image paths pasted on lines of their own as images, only in a
+    // line from the operator, not Claude Code's meta line beside it (mechanics M159). The exact text counts from any line, as the continue text
+    // the hub types after a usage limit comes back as a meta line (mechanics M140).
+    const operator = entry.isMeta !== true && (entry.origin === undefined || entry.origin?.kind === 'human');
+
+    if (typeof said === 'string' && (unwrapPasted(said).trim() === want || typedText(said) === want || (operator && imagePasted(unwrapPasted(said), want)))) {
       return true;
     }
   }

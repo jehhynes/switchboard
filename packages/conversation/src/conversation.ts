@@ -6,7 +6,7 @@ import { ScreenReader } from './screenReader.js';
 import { pasteText } from './input.js';
 import { drawnKeyOf, keyOf, parseReply, stripAside, stripMessageTags } from './tags.js';
 import type { ArtifactTag, HeardTag } from './tags.js';
-import { parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from './transcript.js';
+import { imageLines, imagePasted, parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
 import type { ScreenRead } from './screen.js';
 import { ConversationLog } from './log.js';
@@ -72,8 +72,11 @@ export const TYPED_LATE_MS = 120_000;
 
 /** Whether a transcript entry written at `at` can be this typed message's. */
 function confirms(at: number, message: ConversationMessage): boolean {
-  return message.pastedAt !== null && at >= message.pastedAt - TYPED_SLACK_MS && (message.delivery === 'sent' || at <= message.pastedAt + TYPED_LATE_MS);
+  return message.pastedAt !== null && at >= message.pastedAt - TYPED_SLACK_MS && (message.delivery === 'sent' || message.delivery === 'unconfirmed' || at <= message.pastedAt + TYPED_LATE_MS);
 }
+
+/** Why a typed message is `unconfirmed`. */
+export const UNCONFIRMED = 'The transcript does not show this message. Check the terminal, and send it again if Claude did not get it.';
 
 /**
  * Whether `text` is these messages typed as one (`joinMessages`): each pasted alone, in order, a blank line between, a message after the first
@@ -251,11 +254,17 @@ export class SessionConversation extends ConversationLog {
         return at !== null && previous.lastAt !== null && at < previous.lastAt;
       });
 
-      // A message typed into the earlier transcript is never confirmed by an entry of this one, so it keeps its place; a typed `/clear` is the
-      // first line of the file it starts (mechanics M88), so it waits for that line.
+      // A message typed into the earlier transcript is never confirmed by an entry of this one, so it keeps its place, unconfirmed if it was
+      // counted as sent; a typed `/clear` is the first line of the file it starts (mechanics M88), so it waits for that line.
       for (const message of this.deps.store.typedAwaitingTranscript(this.sessionId)) {
-        if (copied || !CLEAR.test(message.text.trim())) {
-          this.deps.store.updateMessage(message.id, { pastedAt: null, provisional: false });
+        // One still being typed goes to whichever transcript is current, so its paste time still places it.
+        if (message.delivery !== 'open' && (copied || !CLEAR.test(message.text.trim()))) {
+          this.deps.store.updateMessage(message.id, { pastedAt: null, provisional: false, ...(message.delivery === 'sent' ? { delivery: 'unconfirmed' as const, error: UNCONFIRMED } : {}) });
+
+          if (message.delivery === 'sent') {
+            this.#logUnconfirmed(message, 'its session moved to another transcript');
+            this.deps.onChange({ type: 'message', message: this.deps.store.message(message.id)! });
+          }
         }
       }
 
@@ -311,7 +320,10 @@ export class SessionConversation extends ConversationLog {
     this.#reader.read(screen.lines, bullet);
   }
 
-  /** Withdraws screen copies that got no transcript copy in time; `busy` says whether the session is in a turn. */
+  /**
+   * Withdraws screen copies that got no transcript copy in time; `busy` says whether the session is in a turn. A typed message counted as sent
+   * that no transcript line has shown `TYPED_LATE_MS` after its paste, and no queue line either, is `unconfirmed`.
+   */
   tick(busy: boolean): void {
     for (const handle of this.#reader.unconfirmed(this.#lastAssistantAt, busy)) {
       const id = this.#hold.withdraw(handle);
@@ -320,6 +332,13 @@ export class SessionConversation extends ConversationLog {
         this.withdraw(id);
       }
     }
+
+    const now = this.deps.now();
+
+    this.#unconfirm(
+      this.deps.store.typedAwaitingTranscript(this.sessionId).filter((message) => message.pastedAt! + TYPED_LATE_MS < now && !this.#queued.has(message.id)),
+      `not in the transcript ${TYPED_LATE_MS / 1000} s after its paste`,
+    );
   }
 
   /**
@@ -339,6 +358,24 @@ export class SessionConversation extends ConversationLog {
     for (const message of this.deps.store.provisionalMessages(this.sessionId)) {
       this.#withdrawSent(message.text);
     }
+
+    this.#unconfirm(this.deps.store.typedAwaitingTranscript(this.sessionId), 'not in the transcript when the session ended');
+  }
+
+  /**
+   * Marks typed messages counted as sent `unconfirmed`, so none looks sent, or waits last in the conversation, without a transcript line; a line
+   * that shows one later still confirms it.
+   */
+  #unconfirm(messages: ConversationMessage[], why: string): void {
+    for (const message of messages.filter((one) => one.delivery === 'sent')) {
+      this.deps.store.updateMessage(message.id, { delivery: 'unconfirmed', error: UNCONFIRMED, provisional: false });
+      this.#logUnconfirmed(message, why);
+      this.deps.onChange({ type: 'message', message: this.deps.store.message(message.id)! });
+    }
+  }
+
+  #logUnconfirmed(message: ConversationMessage, why: string): void {
+    this.deps.log(`session ${this.sessionId}: typed message ${message.id} is unconfirmed: ${why}`);
   }
 
   /**
@@ -376,8 +413,14 @@ export class SessionConversation extends ConversationLog {
     return null;
   }
 
-  /** Adds a line to the index `#answered` follows; a message line already stored names its message. */
+  /** Adds a line to the index `#answered` follows; a message line already stored names its message. A queue line names the typed messages it queued. */
   #index({ entry, uuid, parent }: ReturnType<typeof parseLine>): void {
+    if (entry?.kind === 'sent') {
+      for (const message of this.#typed(entry.text, entry.at)) {
+        this.#queued.add(message.id);
+      }
+    }
+
     if (uuid === null) {
       return;
     }
@@ -397,6 +440,11 @@ export class SessionConversation extends ConversationLog {
   readonly #parents = new Map<string, string | null>();
   readonly #messageLines = new Map<string, string>();
   #indexed = false;
+  /**
+   * Typed messages whose queue line was read: Claude Code has them and takes them later, however long its turn runs, so time alone never makes
+   * one `unconfirmed`. After a hub restart, only the queue lines among those indexed count.
+   */
+  readonly #queued = new Set<string>();
 
   /** The oldest sent message with `text` that Claude has not received yet, typed in a terminal; a typed message is matched by `#typed`. */
   #sent(text: string): ConversationMessage | undefined {
@@ -415,9 +463,15 @@ export class SessionConversation extends ConversationLog {
       together.set(message.pastedAt!, [...(together.get(message.pastedAt!) ?? []), message]);
     }
 
+    // A message goes escaped, and a slash command chosen from the composer's list as it is.
+    const exact = awaiting.filter((message) => pasteText(message.text) === text.trim() || pasteText(message.text, true) === text.trim());
+    // An image path pasted on a line of its own is an image in the line's text (mechanics M159). The line does not name the images, so messages
+    // with its words and other images cannot be told apart, and none of them is taken.
+    const pictured = awaiting.filter((message) => !exact.includes(message) && imagePasted(text, pasteText(message.text)));
+    const images = new Set(pictured.map((message) => imageLines(pasteText(message.text)).join('\n')));
+
     const candidates = [
-      // A message goes escaped, and a slash command chosen from the composer's list as it is.
-      ...awaiting.filter((message) => pasteText(message.text) === text.trim() || pasteText(message.text, true) === text.trim()).map((message) => [message]),
+      ...[...exact, ...(images.size > 1 ? [] : pictured)].map((message) => [message]),
       ...[...together.values()].filter((messages) => messages.length > 1).map((messages) => [...messages].sort((a, b) => a.ord - b.ord)).filter((messages) => typedTogether(text, messages)),
     ];
 
@@ -456,7 +510,8 @@ export class SessionConversation extends ConversationLog {
 
       if (typed.length > 0) {
         for (const message of typed.filter((one) => one.delivery !== 'sent')) {
-          this.deps.store.updateMessage(message.id, { delivery: 'sent', error: null });
+          // An unconfirmed one queued after all waits last again, as Claude has not received it yet.
+          this.deps.store.updateMessage(message.id, { delivery: 'sent', error: null, provisional: true });
           this.deps.onChange({ type: 'message', message: this.deps.store.message(message.id)! });
         }
 
@@ -484,6 +539,11 @@ export class SessionConversation extends ConversationLog {
         // Typed from the view, it was added when it was pasted, after the terminal messages queued before it. Messages typed as one share the
         // line, and the replies to it answer the last, as `messageByTranscriptUuid` finds it after a restart.
         this.#withdrawPassed(typed[0]!.ord);
+        // Claude Code takes messages in the order they were typed, so a typed message pasted before these that no line has shown never will be.
+        this.#unconfirm(
+          this.deps.store.typedAwaitingTranscript(this.sessionId).filter((message) => message.pastedAt! < typed[0]!.pastedAt! && !typed.some((one) => one.id === message.id)),
+          'a message typed after it reached the transcript first',
+        );
 
         for (const message of typed) {
           this.deps.store.updateMessage(message.id, { at: entry.at, transcriptUuid: entry.uuid, provisional: false, delivery: 'sent', error: null });

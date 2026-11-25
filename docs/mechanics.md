@@ -1890,3 +1890,11 @@ The offline startup limitation below is superseded by M145's verified-origin she
 - **Read-ahead:** before that run, with the diff reads already reused, reading the next three files rather than the next one, two rounds each in turn, left placeholders on screen 4.2 and 0 s in all against 8.3 and 5.1 s, at most 0.7 s against 0.8 s.
 - **Not verified:** a real large checkout and the live hub, a phone or a remote device over Tailscale, where the viewer's modules' transfer may count, and a quiet machine.
 - **Current use:** the Changes tab's diff and file reads ([architecture.md](architecture.md) § Web page, Diffs) and `READ_AHEAD` in `packages/web/src/changesWindow.ts`.
+
+## M159. A paste of image paths becomes images in the message, 2026-11-25
+
+- **Versions:** Claude Code CLI 2.1.332, Opus 5.5, on Windows 11 Pro 10.0.26300.
+- **Source:** the operator's held Code Mode session's transcript, read after a message typed from the web page stayed provisional, and the hub's log of its typing. No experiment was run.
+- **Result:** the page pasted one bracketed paste: a line of text ending in a quoted image path, then two lines that each held only a quoted absolute path to a PNG. Claude Code attached the two files as images and removed their lines; the path inside the first line stayed text. The user line (`promptSource: "typed"`, `imagePasteIds: [4, 5]`) held one text block, `[Image #4] [Image #5]` followed by the first line, then the two `image` blocks; an `isMeta` companion line written at the same time named each image as `[Image: source: <path>]`. The placeholders went where the paste began, with a space between them and none before the text. The input box was empty afterwards, so the hub counted the message sent, but its text matched no transcript line.
+- **Not established:** a paste whose path lines name a file that cannot be read, other image types, unquoted paths, a path pasted between other lines, and the queue line of such a paste typed while Claude works.
+- **Current use:** a typed message matches a line whose placeholders replace as many path-only lines of its text, with the rest of the text the same (architecture.md § Typing a message, Matching); `packages/conversation/test/fixtures/transcripts/image-paste.jsonl` records the lines, scrubbed. M86 and M88 record earlier paste shapes.

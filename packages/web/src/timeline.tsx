@@ -20,9 +20,10 @@ import type { ArtifactView, MessageView, NativeRequest, QuestionsView, ReplyView
  * message details on, a dictated message's mark too. A message with no meta line has its time as the bubble's tooltip.
  */
 function Message({ item, stamped: shown, details, answered }: { item: MessageView; stamped: boolean; details: boolean; answered: LedgerQuestion[] }) {
-  const meta = metaLine([voiceMark(item, details), deliveryMark(item)], item.at, shown);
   // An answer message shows as the Answers bubble; any other message that answered questions, as one typed "slug B", quotes them above it.
   const bubble = isAnswerMessage(item.text);
+  // An answer's questions are answered again on their card, not from the composer.
+  const meta = metaLine([voiceMark(item, details), deliveryMark(item, !bubble)], item.at, shown);
 
   return (
     <li class={`message${item.provisional ? ' provisional' : ''}`} data-id={item.id}>
@@ -213,7 +214,7 @@ function carriedInto(ledger: QuestionLedger, carried: readonly LedgerQuestion[],
   }
 
   for (const item of items) {
-    if (item.type !== 'message' || item.withdrawn || item.delivery === 'not-sent' || item.delivery === 'refused') {
+    if (item.type !== 'message' || item.withdrawn || item.delivery === 'not-sent' || item.delivery === 'refused' || item.delivery === 'unconfirmed') {
       continue;
     }
 

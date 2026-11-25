@@ -114,11 +114,11 @@ export class QuestionIndex {
 
   #carry(sessionId: string, items: LedgerItem[]): void {
     const ids = new Set(items.map((item) => item.id));
-    // A dismissal whose answer message could still come back not sent is untold, so a failed send can tell it again.
+    // A dismissal whose answer message could still come back not sent, or that the transcript does not show, is untold, so a send can tell it again.
     const told = (messageId: string | null): boolean => {
       const delivery = messageId === null ? 'none' : this.#store.message(messageId)?.delivery;
 
-      return delivery !== 'none' && delivery !== 'open' && delivery !== 'uncertain' && delivery !== 'not-sent';
+      return delivery !== 'none' && delivery !== 'open' && delivery !== 'uncertain' && delivery !== 'unconfirmed' && delivery !== 'not-sent';
     };
     const untold = new Set(this.#store.dismissals(sessionId).flatMap((one) => (told(one.reportedIn) ? [] : [questionKey(one.replyId, one.slug)])));
     const carried = carriedQuestions(items, {

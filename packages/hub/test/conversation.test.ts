@@ -1529,6 +1529,22 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
       expect(service.waitingQuestions(running)).toBe(1);
     });
 
+    it('counts the questions of an answer that becomes unconfirmed as waiting again, until a line confirms it (PRD R103)', () => {
+      const { service, store, open, body } = setupCards();
+      const running = { status: 'running', sessions: [{ id: 's2' }] };
+      const mine = open(2);
+
+      expect(service.waitingQuestions(running)).toBe(2);
+      const answer = messageOf(service.send(body(mine.key, { text: undefined, answers: [card()] })));
+
+      store.updateMessage(answer.id, { delivery: 'sent' });
+      expect(service.waitingQuestions(running)).toBe(1);
+      store.updateMessage(answer.id, { delivery: 'unconfirmed', error: 'Not in the transcript.' });
+      expect(service.waitingQuestions(running)).toBe(2);
+      store.updateMessage(answer.id, { delivery: 'sent', error: null });
+      expect(service.waitingQuestions(running)).toBe(1);
+    });
+
     it('builds one ledger per conversation change, shared with the runtime, and reads it again only once the conversation changes', () => {
       const { service, store, open, view } = setupCards();
       const mine = open(2);
@@ -1616,6 +1632,22 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
         { replyId: 'q1', slug: 'keep-route', letters: [], other: '', via: 'card', dismissed: true },
       ]);
       expect(store.dismissals('s2')[0]?.reportedIn).toBe(sent.id);
+    });
+
+    it('tells a dismissal again with the next answer when the answer message that told it is unconfirmed', () => {
+      const { service, store, open, body } = setupCards();
+      const mine = open(2);
+
+      service.cardCommand('card-dismiss', { window: mine.key, scopeGen: 1, opId: 'x1', sessionId: 's2', card: 'reply:q1', slug: 'keep-route' });
+      const first = messageOf(service.send(body(mine.key, { text: undefined, answers: [card()] })));
+
+      expect(store.dismissals('s2')[0]?.reportedIn).toBe(first.id);
+      store.updateMessage(first.id, { delivery: 'unconfirmed', error: 'Not in the transcript.' });
+
+      const second = messageOf(service.send(body(mine.key, { text: undefined, answers: [card()], opId: 'op-second' })));
+
+      expect(store.message(second.id)?.answers).toContainEqual({ replyId: 'q1', slug: 'keep-route', letters: [], other: '', via: 'card', dismissed: true });
+      expect(store.dismissals('s2')[0]?.reportedIn).toBe(second.id);
     });
 
     it('tells a dismissal again after retention when the answer message that told it comes back not sent', () => {

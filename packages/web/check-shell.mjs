@@ -102,6 +102,8 @@ for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
   items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : i === 28 ? '\\n\\n~~~\\nnpm run build\\n~~~' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
 }
+// The conversation ends with a message the transcript did not show, so its Send again is measured as a touch target.
+if (open && view === 'conversation') items.push({ type: 'message', id: 'm-lost', sessionId: 's', workItemId: 1, at: now - 30000, ord: 100, provisional: false, withdrawn: false, origin: 'typed', text: 'Can we make these notices bigger?', delivery: 'unconfirmed', error: 'The transcript does not show this message.' });
 history.replaceState(null, '', location.search + (open ? '#w=1' : '#'));
 // The tabs view's work item has more artifacts, with long titles but the newest's, than any strip here fits.
 const artifacts = view === 'tabs' ? Array.from({ length: 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: i === 9 ? 'Plan' : 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
@@ -673,7 +675,8 @@ try {
           if (view === 'conversation' && !(scrolled.panel < before.panel)) found.push('a drag on the conversation did not scroll it: ' + before.panel + ' to ' + scrolled.panel);
           // A drag that starts on a table in a reply scrolls the conversation too: no box inside it keeps the drag (mechanics.md M125).
           if (view === 'conversation') {
-            await evaluate('(() => { const panel = document.getElementById("panel"); panel.scrollTop = panel.scrollHeight; })()');
+            // The table's bottom at the conversation's, so its top is on screen whatever follows it.
+            await evaluate('(() => { const panel = document.getElementById("panel"); const table = panel.querySelector(".body table"); panel.scrollTop += table.getBoundingClientRect().bottom - panel.getBoundingClientRect().bottom + 8; })()');
             await wait(100);
             const { x, top } = await box('#panel .body table');
             const end = JSON.parse(await state()).panel;

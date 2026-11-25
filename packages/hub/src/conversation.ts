@@ -942,9 +942,10 @@ export class ConversationService {
       return { refused: 'Pick an answer first.' };
     }
 
+    // A dismissal told in an answer the transcript does not show is told again.
     const dismissals = this.deps.store
       .dismissals(sessionId)
-      .filter((one) => one.reportedIn === null)
+      .filter((one) => one.reportedIn === null || this.deps.store.message(one.reportedIn)?.delivery === 'unconfirmed')
       .flatMap((one) => {
         const asked = ledger.questions.get(questionKey(one.replyId, one.slug));
 

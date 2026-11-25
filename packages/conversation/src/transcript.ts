@@ -39,6 +39,34 @@ function fromHuman(origin: unknown): boolean {
   return isObject(origin) && origin['kind'] === 'human';
 }
 
+/** The placeholder Claude Code puts in a message's text for each image it attached (mechanics M159). */
+const IMAGE_PLACEHOLDER = /\[Image #\d+\]/g;
+
+/** A pasted line that holds only an image file's path, quoted or not, which Claude Code takes as an image (mechanics M159). */
+const IMAGE_PATH_LINE = /^\s*(["']?)(?:[A-Za-z]:[\\/]|[\\/]|~[\\/])[^"'\n]*\.(?:png|jpe?g|gif|webp)\1\s*$/i;
+
+/** The lines of a paste that hold only an image file's path, trimmed, which Claude Code takes as images (mechanics M159). */
+export function imageLines(pasted: string): string[] {
+  return pasted.split('\n').filter((line) => IMAGE_PATH_LINE.test(line)).map((line) => line.trim());
+}
+
+/**
+ * Whether a transcript line's text `said` is the `pasted` text after Claude Code took its image path lines as images: each such line removed
+ * and an `[Image #N]` placeholder put in the text for it (mechanics M159). Spacing and the tags Switchboard typed are ignored, since the placeholders go where the paste began, before the tags.
+ */
+export function imagePasted(said: string, pasted: string): boolean {
+  const placeholders = said.match(IMAGE_PLACEHOLDER)?.length ?? 0;
+  const lines = pasted.split('\n');
+  const images = lines.filter((line) => IMAGE_PATH_LINE.test(line)).length;
+
+  const rest = (text: string): string => stripMessageTags(text.replace(/\s+/g, ' ').trim());
+
+  const kept = rest(lines.filter((line) => !IMAGE_PATH_LINE.test(line)).join('\n'));
+
+  // Text besides the images tells this paste from another of as many images.
+  return placeholders > 0 && placeholders === images && kept !== '' && rest(said.replace(IMAGE_PLACEHOLDER, ' ')) === kept;
+}
+
 /** The text of a message's content: a string, or its text blocks beside images; null for anything else, such as a tool result. */
 function contentText(content: unknown): string | null {
   if (typeof content === 'string') {

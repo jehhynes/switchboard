@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -131,6 +131,26 @@ describe('sentInTranscript', () => {
     expect(sentInTranscript([user('<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args>keep the plan</command-args>', T0)], '/compact keep the plan', T0)).toBe(true);
     expect(sentInTranscript([user('<command-name>/compact</command-name>\n<command-args>other</command-args>', T0)], '/compact keep the plan', T0)).toBe(false);
     expect(sentInTranscript([user('<command-name>/hello7</command-name>', T0 - 1)], '/hello7', T0)).toBe(false);
+  });
+
+  it("finds a paste whose image path lines Claude Code took as images, from the operator's line only (mechanics M159)", () => {
+    const lines = readFileSync(join(import.meta.dirname, 'fixtures', 'transcripts', 'image-paste.jsonl'), 'utf8').split('\n');
+    const shot = (n: number): string => `"C:\\Users\\Operator\\Pictures\\shot-${n}.png"`;
+    const since = Date.parse('2026-11-25T14:18:35.742Z');
+
+    expect(sentInTranscript(lines, `make the notices bigger. ${shot(1)}\n${shot(2)}\n${shot(3)}`, since)).toBe(true);
+    // One image line fewer than placeholders is another paste.
+    expect(sentInTranscript(lines, `make the notices bigger. ${shot(1)}\n${shot(2)}`, since)).toBe(false);
+    expect(sentInTranscript(lines, `make the notices smaller. ${shot(1)}\n${shot(2)}\n${shot(3)}`, since)).toBe(false);
+    // The meta line beside it names the paths, never the operator's words.
+    expect(sentInTranscript(lines.slice(1), `${shot(2)}\n${shot(3)}`, since)).toBe(false);
+    // The same line from another origin, or marked meta, is not the operator's paste.
+    const prompt = JSON.parse(lines[0]!) as Record<string, unknown>;
+    const pasteText = `make the notices bigger. ${shot(1)}\n${shot(2)}\n${shot(3)}`;
+
+    expect(sentInTranscript([JSON.stringify({ ...prompt, origin: { kind: 'task-notification' } })], pasteText, since)).toBe(false);
+    expect(sentInTranscript([JSON.stringify({ ...prompt, isMeta: true })], pasteText, since)).toBe(false);
+    expect(sentInTranscript([JSON.stringify({ ...prompt, origin: undefined })], pasteText, since)).toBe(true);
   });
 });
 

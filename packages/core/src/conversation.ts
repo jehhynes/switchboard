@@ -2,10 +2,11 @@ import type { Session, SessionState } from './model.js';
 
 /**
  * What became of a message typed from the view (architecture.md § Typing a message): `open` while it waits or is being typed, `sent` once the
- * transcript has it or Claude Code's input box no longer holds it, and `not-sent` when nothing was typed or Claude Code did not take it. `refused`
+ * transcript has it or Claude Code's input box no longer holds it, and `not-sent` when nothing was typed or Claude Code did not take it. A Claude
+ * message counted as sent that no transcript line shows in time is `unconfirmed`, until a line shows it. `refused`
  * is never stored: a spoken turn the hub refused before typing, sent to its window once (architecture.md § Dictation).
  */
-export type MessageDelivery = 'open' | 'sent' | 'not-sent' | 'uncertain' | 'refused';
+export type MessageDelivery = 'open' | 'sent' | 'not-sent' | 'uncertain' | 'unconfirmed' | 'refused';
 
 /** A message to a session: typed in its terminal and read from the transcript, or typed from the view (architecture.md § Conversation). */
 export interface ConversationMessage {

@@ -348,8 +348,17 @@ export function withoutQuestions(source: string, key: string, open: ReadonlySet<
     .join('');
 }
 
-/** A message's mark for an uncertain delivery, for its meta line (`metaLine` takes HTML); empty otherwise. */
-export function deliveryMark(item: MessageView): string {
+/**
+ * A message's mark for an uncertain or unconfirmed delivery, for its meta line (`metaLine` takes HTML); empty otherwise. An unconfirmed one
+ * offers Send again, which puts its text back in the composer and sends nothing, unless `resend` is false.
+ */
+export function deliveryMark(item: MessageView, resend = true): string {
+  if (item.delivery === 'unconfirmed') {
+    const again = resend ? '<button class="resend" type="button" data-action="resend-message">Send again</button>' : '';
+
+    return `<span class="delivery uncertain" title="${escape(item.error ?? '')}">not confirmed</span>${again}`;
+  }
+
   return item.delivery === 'uncertain' ? `<span class="delivery uncertain" title="${escape(item.error ?? '')}">uncertain</span>` : '';
 }
 

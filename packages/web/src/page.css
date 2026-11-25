@@ -558,6 +558,8 @@ button.picker > .codicon-chevron-down { order: 2; }
 .meta .copy .codicon { font-size: 14px; }
 .timeline > li.reply:has(> .meta) { padding-bottom: 0; }
 .delivery.uncertain { color: var(--vscode-editorWarning-foreground); }
+.meta .resend { flex: none; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground); font: inherit; cursor: pointer; }
+.meta .resend:hover { text-decoration: underline; }
 .day { display: flex; align-items: center; gap: 10px; color: var(--vscode-disabledForeground); font-size: 0.9em; }
 .day::before, .day::after { content: ""; flex: 1; height: 1px; background: currentColor; opacity: 0.5; }
 .message { display: flex; flex-direction: column; align-items: flex-end; }
@@ -840,6 +842,7 @@ body.artifact-window > .artifact-view { height: 100%; }
   .voice-controls .ghost.talk-here { line-height: 44px; }
   .attachments { gap: 12px 8px; }
   .attachment { min-height: 28px; }
+  .meta .resend { min-width: 44px; min-height: 44px; }
   .attachment-remove { position: relative; }
   .attachment-remove::after { content: ""; position: absolute; inset: -11px; }
   .menu-row { height: 44px; }

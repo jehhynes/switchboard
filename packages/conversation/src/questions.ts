@@ -975,9 +975,9 @@ export function carriedQuestions(
 /** The key of a reply's question. */
 export const questionKey = (replyId: string, slug: string): string => `reply:${replyId}#${slug}`;
 
-/** Whether a message counts for questions: not withdrawn, and not one that was never sent. */
+/** Whether a message counts for questions: not withdrawn, and not one that was never sent or that the transcript does not show, whose questions are answered again on their card. */
 function counts(item: Extract<LedgerItem, { type: 'message' }>): boolean {
-  return !item.withdrawn && item.delivery !== 'not-sent' && item.delivery !== 'refused';
+  return !item.withdrawn && item.delivery !== 'not-sent' && item.delivery !== 'refused' && item.delivery !== 'unconfirmed';
 }
 
 /**

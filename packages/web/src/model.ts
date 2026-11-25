@@ -268,7 +268,8 @@ export function awaitingReply(items: readonly ItemView[], session: SessionView |
   }
 
   const lastIndex = <T,>(list: readonly T[], test: (one: T) => boolean): number => list.reduce((found, one, index) => (test(one) ? index : found), -1);
-  const latest = lastIndex(items, (item) => item.type === 'message' && !item.withdrawn);
+  // An unconfirmed message may never have reached the session, so it waits for no reply.
+  const latest = lastIndex(items, (item) => item.type === 'message' && !item.withdrawn && item.delivery !== 'unconfirmed');
   const at = new Map(items.map((item, index) => [item.id, index]));
   const replied = items.some((item, index) => item.type === 'reply' && item.kind === 'reply' && !item.withdrawn && (item.answers === null ? index > latest : (at.get(item.answers) ?? -1) >= latest));
 

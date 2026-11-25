@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '@switchboard/core';
-import { COPIED_HEAD_BYTES, SessionConversation, typedTogether } from '../src/conversation.js';
+import { COPIED_HEAD_BYTES, SessionConversation, TYPED_LATE_MS, UNCONFIRMED, typedTogether } from '../src/conversation.js';
 import { transcriptEnd } from '../src/transcript.js';
 import type { ConversationDeps } from '../src/conversation.js';
 import type { ConversationChange } from '../src/conversation.js';
@@ -251,14 +251,15 @@ it('confirms messages typed as one by their shared line, each in order with its 
     append(user('u1', T0 + 30_100, 'Yes'));
     conversation.readTranscript(path);
     expect(store.message('m-second')?.transcriptUuid).toBe('u1');
-    expect(store.message('m-first')).toMatchObject({ delivery: 'sent', transcriptUuid: null });
+    // Claude Code takes messages in order, so the earlier attempt no line showed is unconfirmed.
+    expect(store.message('m-first')).toMatchObject({ delivery: 'unconfirmed', transcriptUuid: null });
 
     // After /clear the session writes a new transcript; the earlier "Yes" it never placed is never confirmed by it.
     const cleared = join(dir, 'native-2.jsonl');
 
     writeFileSync(cleared, `${user('u2', T0 + 40_000, 'Yes')}\n`);
     conversation.readTranscript(cleared);
-    expect(store.message('m-first')).toMatchObject({ delivery: 'sent', transcriptUuid: null });
+    expect(store.message('m-first')).toMatchObject({ delivery: 'unconfirmed', transcriptUuid: null });
     expect(items().filter((item) => item.type === 'message')).toHaveLength(3);
   });
 
@@ -1072,5 +1073,160 @@ it('confirms messages typed as one by their shared line, each in order with its 
     appendFileSync(path, '\n');
     conversation.readTranscript(path);
     expect(items()).toHaveLength(1);
+  });
+});
+
+describe('a typed message no transcript line confirms', () => {
+  const typed = { sessionId: 's1', workItemId: 7, origin: 'typed' as const, transcriptUuid: null, provisional: true, withdrawn: false, error: null, delivery: 'sent' as const };
+  const fixture = (name: string): string => join(import.meta.dirname, 'fixtures', 'transcripts', name);
+  const pasted = (at: number): number => Date.parse('2026-11-25T14:18:35.742Z') + at;
+  const shots = ['"C:\\Users\\Operator\\Pictures\\shot-1.png"', '"C:\\Users\\Operator\\Pictures\\shot-2.png"', '"C:\\Users\\Operator\\Pictures\\shot-3.png"'];
+
+  it('is confirmed by the line Claude Code wrote after taking its image path lines as images (M159), with no terminal copy', () => {
+    const { store, conversation, path, items } = setup();
+
+    store.addMessage({ ...typed, id: 'm-shots', at: pasted(0), text: `make the notices bigger. ${shots[0]}\n${shots[1]}\n${shots[2]}`, opId: 'op1', pastedAt: pasted(0) });
+    copyFileSync(fixture('image-paste.jsonl'), path);
+    conversation.readTranscript(path);
+
+    expect(items()).toMatchObject([
+      { type: 'message', id: 'm-shots', delivery: 'sent', provisional: false, transcriptUuid: 'u0000000-0000-4000-8000-000000000002' },
+      { type: 'reply', answers: 'm-shots', opening: 'A subagent is now working on the notices.' },
+    ]);
+    expect(items()).toHaveLength(2);
+  });
+
+  it('takes no message for a line of images when messages with its words name other images, and the latest of the same paste', () => {
+    const { store, conversation, path, append, items } = setup();
+
+    store.addMessage({ ...typed, id: 'm-one', at: T0, text: `Look\n${shots[0]}`, opId: 'op1', pastedAt: T0 });
+    store.addMessage({ ...typed, id: 'm-two', at: T0 + 1000, text: `Look\n${shots[1]}`, opId: 'op2', pastedAt: T0 + 1000 });
+    append(user('u1', T0 + 1200, '[Image #1]Look', { origin: { kind: 'human' } }));
+    conversation.readTranscript(path);
+    expect(store.message('m-one')?.transcriptUuid).toBeNull();
+    expect(store.message('m-two')?.transcriptUuid).toBeNull();
+    expect(items().filter((item) => item.type === 'message' && item.origin === 'terminal')).toHaveLength(1);
+
+    // Sent again with the same image, the latest attempt takes the line.
+    store.addMessage({ ...typed, id: 'm-again', at: T0 + 2000, text: `Again\n${shots[2]}`, opId: 'op3', pastedAt: T0 + 2000 });
+    store.addMessage({ ...typed, id: 'm-again-2', at: T0 + 3000, text: `Again\n${shots[2]}`, opId: 'op4', pastedAt: T0 + 3000 });
+    append(user('u2', T0 + 3200, '[Image #2]Again', { origin: { kind: 'human' } }));
+    conversation.readTranscript(path);
+    expect(store.message('m-again-2')).toMatchObject({ delivery: 'sent', transcriptUuid: 'u2' });
+    expect(store.message('m-again')).toMatchObject({ delivery: 'unconfirmed', transcriptUuid: null });
+  });
+
+  it('is unconfirmed, not sent and not last, once TYPED_LATE_MS pass with no line, and a line in another form never confirms it', () => {
+    const { store, clock, conversation, path, append, items, changes, logs } = setup();
+
+    // The same words with one of its two image lines: Claude Code left a path it could not read as text, so this is not the paste.
+    store.addMessage({ ...typed, id: 'm-shots', at: T0, text: `look ${shots[0]}\n${shots[1]}\n${shots[2]}`, opId: 'op1', pastedAt: T0 });
+    append(user('u1', T0 + 200, `[Image #1]look ${shots[0]}\n${shots[2]}`, { origin: { kind: 'human' } }), assistant('a1', T0 + 900, 'One image.'));
+    conversation.readTranscript(path);
+    clock.t = T0 + TYPED_LATE_MS - 1;
+    conversation.tick(false);
+    expect(store.message('m-shots')).toMatchObject({ delivery: 'sent', provisional: true });
+    expect(items().map((item) => item.id).at(-1)).toBe('m-shots');
+
+    clock.t = T0 + TYPED_LATE_MS + 1;
+    conversation.tick(false);
+    expect(store.message('m-shots')).toMatchObject({ delivery: 'unconfirmed', error: UNCONFIRMED, provisional: false, transcriptUuid: null });
+    // It keeps the place where it was sent, before the terminal message and the reply that came after it.
+    expect(items().map((item) => [item.type, item.type === 'message' ? item.origin : null])).toEqual([['message', 'typed'], ['message', 'terminal'], ['reply', null]]);
+    expect(changes.filter((change) => change.type === 'message' && change.message.id === 'm-shots').at(-1)).toMatchObject({ message: { delivery: 'unconfirmed' } });
+    expect(logs.some((line) => line.includes('m-shots is unconfirmed'))).toBe(true);
+  });
+
+  it('waits however long once its queue line is read, also after a hub restart, and is unconfirmed when the session ends without it', () => {
+    const { store, clock, conversation, path, append, changes } = setup();
+
+    store.addMessage({ ...typed, id: 'm-queued', at: T0, text: 'After the agents', opId: 'op1', pastedAt: T0 });
+    append(user('u0', T0 - 1000, 'Start the agents'), enqueue(T0 + 100, 'After the agents'));
+    conversation.readTranscript(path);
+    clock.t = T0 + 3_600_000;
+    conversation.tick(true);
+    expect(store.message('m-queued')).toMatchObject({ delivery: 'sent', provisional: true });
+
+    // A new hub indexes the lines read before it and finds the queue line.
+    const again = new SessionConversation('s1', 7, { store, now: () => clock.t, newId: () => 'x', onChange: (change) => changes.push(change), log: () => {} });
+
+    again.readTranscript(path);
+    again.tick(true);
+    expect(store.message('m-queued')).toMatchObject({ delivery: 'sent', provisional: true });
+
+    again.end();
+    expect(store.message('m-queued')).toMatchObject({ delivery: 'unconfirmed', provisional: false });
+  });
+
+  it('is unconfirmed at once when a message typed after it reaches the transcript, and still confirmed by its own line if that comes later', () => {
+    const { store, conversation, path, append, items } = setup();
+
+    store.addMessage({ ...typed, id: 'm-lost', at: T0, text: 'First words', opId: 'op1', pastedAt: T0 });
+    store.addMessage({ ...typed, id: 'm-next', at: T0 + 5_000, text: 'Second words', opId: 'op2', pastedAt: T0 + 5_000 });
+    append(user('u2', T0 + 5_200, 'Second words'));
+    conversation.readTranscript(path);
+
+    expect(store.message('m-next')).toMatchObject({ delivery: 'sent', provisional: false, transcriptUuid: 'u2' });
+    expect(store.message('m-lost')).toMatchObject({ delivery: 'unconfirmed', provisional: false, transcriptUuid: null });
+
+    // Its line after all, however late: it is sent and takes that line's place.
+    append(user('u3', T0 + 600_000, 'First words'));
+    conversation.readTranscript(path);
+    expect(store.message('m-lost')).toMatchObject({ delivery: 'sent', error: null, transcriptUuid: 'u3' });
+    expect(items().map((item) => item.id)).toEqual(['m-next', 'm-lost']);
+  });
+
+  it('waits last again when its queue line comes after it was unconfirmed, until Claude receives it', () => {
+    const { store, clock, conversation, path, append, items } = setup();
+
+    append(user('u0', T0 - 1000, 'Start'));
+    conversation.readTranscript(path);
+    store.addMessage({ ...typed, id: 'm-late', at: T0, text: 'Slow one', opId: 'op1', pastedAt: T0 });
+    clock.t = T0 + TYPED_LATE_MS + 1;
+    conversation.tick(true);
+    expect(store.message('m-late')).toMatchObject({ delivery: 'unconfirmed', provisional: false });
+
+    append(enqueue(T0 + 200_000, 'Slow one'), assistant('a1', T0 + 200_100, 'Still busy.'));
+    conversation.readTranscript(path);
+    expect(store.message('m-late')).toMatchObject({ delivery: 'sent', error: null, provisional: true });
+    expect(items().map((item) => item.id).at(-1)).toBe('m-late');
+
+    append(queued('q1', T0 + 300_000, 'Slow one'));
+    conversation.readTranscript(path);
+    expect(store.message('m-late')).toMatchObject({ delivery: 'sent', provisional: false, transcriptUuid: 'q1' });
+  });
+
+  it("is never confirmed by Claude Code's meta line or a line from another origin with its words", () => {
+    const { store, clock, conversation, path, append } = setup();
+
+    store.addMessage({ ...typed, id: 'm-words', at: T0, text: 'Same words', opId: 'op1', pastedAt: T0 });
+    append(user('u1', T0 + 100, 'Same words', { isMeta: true }), user('u2', T0 + 200, 'Same words', { origin: { kind: 'task-notification' } }));
+    conversation.readTranscript(path);
+    expect(store.message('m-words')).toMatchObject({ delivery: 'sent', transcriptUuid: null });
+    clock.t = T0 + TYPED_LATE_MS + 1;
+    conversation.tick(false);
+    expect(store.message('m-words')).toMatchObject({ delivery: 'unconfirmed', transcriptUuid: null });
+  });
+
+  it('is unconfirmed when the session moves to another transcript before a line shows it', () => {
+    const { store, clock, conversation, path, append, changes } = setup();
+
+    append(user('u0', T0 - 1000, 'Hello'));
+    conversation.readTranscript(path);
+    store.addMessage({ ...typed, id: 'm-gone', at: T0, text: 'Never shown', opId: 'op1', pastedAt: T0 });
+    store.addMessage({ ...typed, id: 'm-open', at: T0, text: 'Still typing', delivery: 'open', opId: 'op2', pastedAt: T0 });
+
+    const next = join(dir, 'native-2.jsonl');
+
+    writeFileSync(next, `${user('u1', T0 + 1000, 'Something else')}\n`);
+    conversation.readTranscript(next);
+    expect(store.message('m-gone')).toMatchObject({ delivery: 'unconfirmed', error: UNCONFIRMED, pastedAt: null });
+    expect(changes.some((change) => change.type === 'message' && change.message.id === 'm-gone' && change.message.delivery === 'unconfirmed')).toBe(true);
+    // One still being typed keeps its paste time: its typing counts it sent, and with no line it is unconfirmed in time.
+    expect(store.message('m-open')).toMatchObject({ delivery: 'open', pastedAt: T0 });
+    store.updateMessage('m-open', { delivery: 'sent' });
+    clock.t = T0 + TYPED_LATE_MS + 1;
+    conversation.tick(false);
+    expect(store.message('m-open')).toMatchObject({ delivery: 'unconfirmed', error: UNCONFIRMED });
   });
 });

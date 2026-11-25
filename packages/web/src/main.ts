@@ -4886,6 +4886,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         place?.scrollIntoView?.({ block: 'start' });
         break;
       }
+      case 'resend-message': {
+        // Back in the composer to read and send again; never sent from here, since Claude may have it.
+        const id = button!.closest<HTMLElement>('li[data-id]')?.dataset['id'];
+        const message = state.items.find((item) => item.id === id && item.type === 'message');
+
+        if (message?.type === 'message') {
+          giveBack(message.workItemId, message.text, 'Check the terminal first: Claude may have this message already.');
+        }
+
+        break;
+      }
       case 'copy-code':
       case 'copy-reply': {
         const id = button!.closest<HTMLElement>('li[data-id]')?.dataset['id'];

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from '../src/transcript.js';
+import { imagePasted, parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from '../src/transcript.js';
 
 describe('parseLine', () => {
   it('reads nothing from what is not an entry object', () => {
@@ -136,5 +136,25 @@ describe('reading part of a transcript', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('imagePasted', () => {
+  const shot = (n: number): string => `"C:\\Users\\Operator\\Pictures\\shot-${n}.png"`;
+
+  it('matches a paste whose image path lines became placeholders, ignoring spacing and typed tags (mechanics M159)', () => {
+    expect(imagePasted(`[Image #4] [Image #5]Look at these. ${shot(1)}`, `Look at these. ${shot(1)}\n${shot(2)}\n${shot(3)}`)).toBe(true);
+    expect(imagePasted('[Image #1] [spoken] Look', `[spoken] Look\n${shot(2)}`)).toBe(true);
+    expect(imagePasted('[Image #1]Look', '/home/operator/shot.JPG\nLook')).toBe(true);
+  });
+
+  it('refuses another count of images, other words, no placeholder, and a paste of images alone', () => {
+    expect(imagePasted('[Image #1]Look', `Look\n${shot(2)}\n${shot(3)}`)).toBe(false);
+    expect(imagePasted('[Image #1]Look here', `Look\n${shot(2)}`)).toBe(false);
+    expect(imagePasted('Look', `Look\n${shot(2)}`)).toBe(false);
+    expect(imagePasted('Look [Image #1]', 'Look [Image #1]')).toBe(false);
+    expect(imagePasted('[Image #1] [Image #2]', `${shot(1)}\n${shot(2)}`)).toBe(false);
+    // A line with more than a path is text.
+    expect(imagePasted('[Image #1]Look', `Look\nsee ${shot(2)}`)).toBe(false);
   });
 });

@@ -250,6 +250,13 @@ describe('the question ledger (design § 5.2)', () => {
     expect(ledger.answers.get('m1')!.map((one) => one.key)).toEqual(['reply:r1#phone-layout']);
   });
 
+  it('leaves the questions of an answer the transcript does not show open, to answer again on the card, until a line confirms it', () => {
+    const answer = (delivery: 'unconfirmed' | 'sent') => questionLedger([reply('r1', NEW), message('m1', '[answers]', { delivery, answers: [stored('r1', 'phone-layout', ['B'])] })]);
+
+    expect(states(answer('unconfirmed'))['reply:r1#phone-layout']).toBe('open');
+    expect(states(answer('sent'))['reply:r1#phone-layout']).toBe('answered');
+  });
+
   it('resolves a message stored without links by its text, and ignores one not sent', () => {
     const ledger = questionLedger([reply('r1', NEW), message('m0', 'design-first B', { delivery: 'not-sent' }), message('m1', 'persona-registered B, design-first A')]);
 

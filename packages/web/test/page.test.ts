@@ -496,6 +496,24 @@ describe('drawing', () => {
     expect(draw([message('m1', 1), reply('r1', 2, { answers: 'm1' }), message('m2', 3), reply('r2', 4, { answers: 'm2' })]).querySelector('.working.background')?.textContent).toBe('1 agent running');
   });
 
+  it('shows no Thinking for an unconfirmed message, which may never have reached the session, and no Send again on an answer message', () => {
+    const draw = (items: Array<MessageView | ReplyView>): HTMLElement => {
+      const host = document.createElement('div');
+      const state = applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session({ state: 'running', background: { agents: 1, shells: 0, other: 0 } })], items, more: false, status: null, artifacts: [] });
+
+      host.innerHTML = html(renderTimeline(state, newView()));
+      return host;
+    };
+    const lost = message('m2', 3, { delivery: 'unconfirmed', error: 'Not in the transcript.' });
+
+    // Session bfd12580: the message stuck at the bottom with Thinking under it while background agents ran.
+    expect(draw([message('m1', 1), reply('r1', 2, { answers: 'm1' }), lost]).querySelector('.working:not(.background)')).toBeNull();
+    expect(draw([message('m1', 1), reply('r1', 2, { answers: 'm1' }), lost]).querySelector('li[data-id="m2"] [data-action="resend-message"]')).not.toBeNull();
+    // A message sent after it still waits for its reply.
+    expect(draw([message('m1', 1), reply('r1', 2, { answers: 'm1' }), lost, message('m3', 4)]).querySelector('.working:not(.background)')?.textContent).toBe('Thinking…');
+    expect(draw([message('m4', 1, { delivery: 'unconfirmed', text: '[answers]\n- pick: Pick: → A) x' })]).querySelector('[data-action="resend-message"]')).toBeNull();
+  });
+
   it('says what the turn waits for: Starting or Thinking with the spinner, and the answer or permission the terminal asks for instead of Thinking', () => {
     expect(html(turnRow(session({ state: 'starting' }), true))).toContain('Starting…');
     expect(html(turnRow(session({ state: 'running' }), true))).toContain('codicon-modifier-spin');
@@ -5959,6 +5977,10 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.querySelector('li[data-id="m1"] .answers-answer')!.textContent).toBe('Yes');
     expect(root.querySelector('li[data-id="m1"] .box')!.textContent).not.toMatch(/\[answers\]|code-mode-session/);
     expect(root.querySelector('.question-card.qc-collapsed .qc-progress')!.textContent).toBe('Question answered');
+    // An Answers message the transcript does not show leaves its question open on the card, to answer again there.
+    hello(source, { questions, items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Working on it.' }), message('m1', 4, { delivery: 'unconfirmed', text: '[answers]\n- code-mode-session: Move this work to a Code Mode session? → B) Yes', answers: [{ replyId: 'r1', slug: 'move-work-code', letters: ['B'], other: '', via: 'card' }] })] });
+    expect(root.querySelector('.question-card.qc-collapsed')).toBeNull();
+    expect(root.querySelector('.question-card [data-action="card-send"]')).not.toBeNull();
     delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
     page.close();
   });
@@ -7176,6 +7198,22 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     box.blur();
     await flush();
     expect(posts.filter((post) => post.url.endsWith('/composer')).map((post) => post.body['focused'])).toEqual([true, false]);
+    page.close();
+  });
+
+  it('offers Send again on an unconfirmed message, which puts its text in the composer and sends nothing', async () => {
+    const { page, source } = start();
+
+    hello(source);
+    source.emit('message', { message: message('m7', 7, { delivery: 'unconfirmed', error: 'The transcript does not show this message.', text: 'lost words' }) });
+    await flush();
+    expect(root.querySelector('li[data-id="m7"] .delivery')!.textContent).toBe('not confirmed');
+    expect(root.querySelector('li[data-id="m7"] .delivery')!.getAttribute('title')).toBe('The transcript does not show this message.');
+    click('li[data-id="m7"] [data-action="resend-message"]');
+    await flush();
+    expect(root.querySelector('textarea')!.value).toBe('lost words');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('Check the terminal first: Claude may have this message already.');
+    expect(posts.some((post) => post.url.endsWith('/send'))).toBe(false);
     page.close();
   });
 
