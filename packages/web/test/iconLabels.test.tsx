@@ -217,9 +217,16 @@ describe("Claude's provider mark", () => {
   it('ClaudeMark_AnyContext_HasNoBackgroundAndTakesTheTextColourWhereOrangeLacksContrast', () => {
     expect(rules).toEqual([
       [':is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: #D97757;'],
-      [':is(.menu-row:hover, .menu-row:focus, [aria-pressed="true"]) :is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: inherit;'],
+      ['[aria-pressed="true"] :is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: inherit;'],
       [':is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: inherit;'],
     ]);
     expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{ :is\(\.provider, \.provider-option-mark\)\[aria-label="Claude"\] \{ color: inherit; \} \}/);
+  });
+
+  it('ClaudeMark_HoveredOrFocusedMenuRow_KeepsItsColour', () => {
+    // No rule recolours a provider's mark on a hovered or focused row, so it stays orange in the dark theme, as Codex's mark keeps its colour.
+    const markRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector]) => selector!.replace(/\/\*[\s\S]*?\*\//g, '').trim()).filter((selector) => /\.provider/.test(selector));
+    expect(markRules.length).toBeGreaterThan(3);
+    expect(markRules.filter((selector) => /:hover|:focus/.test(selector) && /\.provider(-option-mark)?\b/.test(selector.split(/[ >+~]/).pop() ?? ''))).toEqual([]);
   });
 });
