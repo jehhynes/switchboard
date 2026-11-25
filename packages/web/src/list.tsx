@@ -39,7 +39,8 @@ function Pill({ classes, glyph, logo, label, text, title, opens }: { classes: st
  */
 function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, position, icons }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; menuPoint: { x: number; y: number } | undefined; pillsOpen: boolean; movable: boolean; drag: DragView | null; position?: { index: number; total: number }; icons: Readonly<Record<string, SourceIcon>> }) {
   const kind = row.mark?.kind;
-  // The questions waiting on the operator, after the title on line 1, where only the title gives up room, so the count is never cut or left out.
+  // The questions waiting on the operator: an icon after the title on line 1, where only the title gives up room, so it is never cut or left out;
+  // its name and tooltip say how many.
   const waiting = row.workItemId === null ? 0 : (row.questions ?? 0);
   const waitingText = `${waiting} question${waiting === 1 ? '' : 's'} waiting`;
   const mark =
@@ -92,7 +93,6 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
           {waiting === 0 ? null : (
             <span class="questions" role="button" tabIndex={-1} aria-label={waitingText} aria-description="Opens the work item at its card" title={`${waitingText}\nOpens the work item at its card`} data-action="goto-questions" data-work-item={String(row.workItemId)}>
               <span class="codicon codicon-question" aria-hidden="true"></span>
-              <span class="count" aria-hidden="true">{waiting}</span>
             </span>
           )}
           {row.voice === null ? null : (

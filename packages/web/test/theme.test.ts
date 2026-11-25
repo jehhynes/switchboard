@@ -60,6 +60,15 @@ function contrast(text: string, background: string): number {
   return (high! + 0.05) / (low! + 0.05);
 }
 
+/** A translucent #rrggbbaa or rgba() colour laid over an opaque #rrggbb one, as #rrggbb. */
+function over(top: string, under: string): string {
+  const rgba = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(top);
+  const [r, g, b, a] = rgba !== null ? [Number(rgba[1]), Number(rgba[2]), Number(rgba[3]), Number(rgba[4])] : [1, 3, 5, 7].map((at) => (top.length > at ? parseInt(top.slice(at, at + 2), 16) : 255)).map((value, index) => (index === 3 ? value / 255 : value));
+  const base = [1, 3, 5].map((at) => parseInt(under.slice(at, at + 2), 16));
+
+  return '#' + [r!, g!, b!].map((value, index) => Math.round(value * a! + base[index]! * (1 - a!)).toString(16).padStart(2, '0')).join('');
+}
+
 describe('the theme copy', () => {
   it('sets every Dark Modern variable again for the light scheme, and only those', () => {
     const { dark, light } = blocks();
@@ -159,6 +168,23 @@ describe('the theme copy', () => {
     // Returned's outline and fill take the warning status colour; warning text keeps the readable editorWarning colour.
     expect(page).toContain('.row-line .pill.returned { border-color: var(--sb-status-warning); background: color-mix(in srgb, var(--sb-status-warning) 18%, transparent); color: var(--vscode-editorWarning-foreground); }');
     expect(page).toContain('.row-details .row-detail.warning { color: var(--vscode-editorWarning-foreground); }');
+
+    // A row's waiting questions: the question icon in the warning text colour, no fill, 3:1 or more on every row background and kept out of a
+    // dimmed row's opacity.
+    expect(page).toContain('.row-head .questions { flex: none; align-self: center; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 3px; color: var(--vscode-editorWarning-foreground); cursor: pointer; }');
+    expect(page).toContain('.row-head .questions:hover { background: var(--vscode-toolbar-hoverBackground); }');
+    expect(page).toContain('.row.dim > :not(.row-head), .row.dim > .row-head > :not(.questions) { opacity: 0.6; }');
+    for (const [scheme, { backgrounds }] of Object.entries(schemes)) {
+      const warning = (scheme === 'dark' ? dark : light).get('--vscode-editorWarning-foreground')!;
+
+      const hover = (scheme === 'dark' ? dark : light).get('--vscode-toolbar-hoverBackground')!;
+
+      for (const background of backgrounds) {
+        expect(contrast(warning, background), `editorWarning on ${background} in ${scheme}`).toBeGreaterThanOrEqual(3);
+        // Under the indicator's own hover fill too.
+        expect(contrast(warning, over(hover, background)), `editorWarning on ${hover} over ${background} in ${scheme}`).toBeGreaterThanOrEqual(3);
+      }
+    }
   });
 
   it("draws the page's own colours, its surfaces and the composer's light fill from variables that follow the scheme", () => {

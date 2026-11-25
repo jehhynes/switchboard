@@ -6,7 +6,7 @@
 // where it does not fit beside the comment icon and the key; a key shows its source's logo, GitHub's, Zoho's or a plugin's, in place of its source's label; every pill, the key included, shows its text where line 2 is 300 px wide or more and its icon alone under that,
 // its text kept for screen readers; the key never drops out; a link pill is whole, its icon alone or left out whole, never cut, the last
 // first; a pill left out is no keyboard stop, and a pill shown is one only in the list's Tab stop row; the pills change with the list's width alone, without a redraw; and line 2 paints the same while
-// the same list is sent again. A row's waiting questions show on line 1 after the title, whole, their count never cut, the title cut before them. Every control shown is a touch target of at least 44 px each way.
+// the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them. Every control shown is a touch target of at least 44 px each way.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -192,14 +192,25 @@ const measure = `(() => {
     // Line 2 of each shown row: a pill is whole inside its line and its box, its text shown whole; its icon alone, its text hidden from view
     // but kept for screen readers; or wholly outside them, left out.
     line2: window.__line2 ? { samples: window.__line2.length, ways: new Set(window.__line2).size } : null,
-    // Line 1's waiting questions: whole inside line 1 and the row, after the title, which is cut before them where it does not fit, never the count.
+    // Line 1's waiting questions: whole inside line 1 and the row, after the title, which is cut before them where it does not fit; their icon
+    // alone, whole inside them, visible in the warning text colour with a loaded codicon face and a glyph to draw, and no visible text.
     questions: [...document.querySelectorAll('#list .row-head .questions')].filter(shown).map((badge) => {
       const box = badge.getBoundingClientRect();
       const head = badge.closest('.row-head').getBoundingClientRect();
       const row = badge.closest('.row').getBoundingClientRect();
       const title = badge.closest('.row-head').querySelector('.row-title');
-      const count = badge.querySelector('.count');
-      return { text: badge.getAttribute('aria-label'), whole: box.left >= head.left - 0.5 && box.right <= head.right + 0.5 && box.right <= row.right + 0.5 && box.top >= head.top - 0.5 && box.bottom <= head.bottom + 0.5, after: title.getBoundingClientRect().right <= box.left + 0.5, count: count.getBoundingClientRect().width > 4 && count.scrollWidth <= count.clientWidth + 0.5, titleCut: title.scrollWidth > title.clientWidth + 0.5 };
+      const icon = badge.querySelector('.codicon-question');
+      const glyph = icon === null ? null : icon.getBoundingClientRect();
+      const style = icon === null ? null : getComputedStyle(icon);
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--vscode-editorWarning-foreground)';
+      document.body.append(probe);
+      const warning = getComputedStyle(probe).color;
+      probe.remove();
+      const face = [...document.fonts].some((one) => one.family.replaceAll('"', '') === 'codicon' && one.status === 'loaded');
+      const visible = [badge, icon].every((one) => one !== null && getComputedStyle(one).visibility === 'visible' && getComputedStyle(one).opacity === '1');
+      const drawn = icon !== null && visible && face && style.color === warning && /codicon/.test(style.fontFamily) && glyph.width > 8 && glyph.height > 8 && glyph.left >= box.left - 0.5 && glyph.right <= box.right + 0.5 && glyph.top >= box.top - 0.5 && glyph.bottom <= box.bottom + 0.5 && !['none', 'normal', '""'].includes(getComputedStyle(icon, '::before').content);
+      return { text: badge.getAttribute('aria-label'), whole: box.left >= head.left - 0.5 && box.right <= head.right + 0.5 && box.right <= row.right + 0.5 && box.top >= head.top - 0.5 && box.bottom <= head.bottom + 0.5, after: title.getBoundingClientRect().right <= box.left + 0.5, icon: drawn && badge.children.length === 1 && badge.textContent === '', titleCut: title.scrollWidth > title.clientWidth + 0.5 };
     }),
     // Each line 2's items in order, each starting after the one before, so none sits below another.
     // Line 2 never wraps: the line is 18 px tall and every item lies inside it, none taller than one line.
@@ -408,13 +419,13 @@ function failures(view, size, m) {
 
     if (m.pills.filter((pill) => pill.ticket).length !== keys) out.push('line 2 shows ' + m.pills.filter((pill) => pill.ticket).length + ' ticket keys, not ' + keys);
   }
-  // Line 1's waiting questions show on both rows that have them, whole, after the title, their count never cut; the long title gives way.
+  // Line 1's waiting questions show on both rows that have them, whole, after the title, as their icon alone; the long title gives way.
   if (m.line2 !== null) {
     if (m.questions.length !== 2) out.push('line 1 shows waiting questions on ' + m.questions.length + ' rows, not 2');
     for (const one of m.questions) {
       if (!one.whole) out.push('line 1\'s ' + one.text + ' is cut or passes its line');
       if (!one.after) out.push('line 1\'s ' + one.text + ' overlaps the title');
-      if (!one.count) out.push('line 1\'s ' + one.text + ' does not show its count whole');
+      if (!one.icon) out.push('line 1\'s ' + one.text + ' does not show its question icon alone and whole');
     }
     const width = view === 'narrow' ? 200 : view.startsWith('narrow-') ? Number(view.slice(7)) : null;
 

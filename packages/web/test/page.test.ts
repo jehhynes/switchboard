@@ -734,7 +734,7 @@ describe('drawing', () => {
     expect(root.querySelector('[data-work-item="2"] .voice-mark')).toBeNull();
   });
 
-  it('puts the waiting questions after the title on line 1 as a button named by their count, on any row that has them', () => {
+  it('puts the waiting questions after the title on line 1 as an icon alone, a button named by their count, on any row that has them', () => {
     const root = document.createElement('div');
 
     root.innerHTML = html(renderList([listGroup('progress', [listRow(1, { time: { text: '2h', title: 'In queue' }, questions: 2 }), listRow(2, { questions: 1 }), listRow(3, { questions: 0 }), listRow(4)])], null, new Set()));
@@ -743,8 +743,9 @@ describe('drawing', () => {
     const badge = root.querySelector<HTMLElement>('[data-work-item="1"] .questions')!;
 
     expect([badge.getAttribute('role'), badge.getAttribute('aria-label'), badge.getAttribute('title'), badge.dataset['action'], badge.dataset['workItem'], badge.tabIndex]).toEqual(['button', '2 questions waiting', '2 questions waiting\nOpens the work item at its card', 'goto-questions', '1', -1]);
-    expect(badge.querySelector('.codicon-question')!.getAttribute('aria-hidden')).toBe('true');
-    expect(badge.querySelector('.count')!.textContent).toBe('2');
+    // The icon alone shows (the operator's decision, 2026-11-25); the count is in its name and tooltip only.
+    expect([...badge.children].map((child) => [child.className, child.getAttribute('aria-hidden')])).toEqual([['codicon codicon-question', 'true']]);
+    expect(badge.textContent).toBe('');
     expect(root.querySelector('[data-work-item="2"] .questions')!.getAttribute('aria-label')).toBe('1 question waiting');
     expect(root.querySelectorAll('[data-work-item="3"] .questions, [data-work-item="4"] .questions')).toHaveLength(0);
   });
