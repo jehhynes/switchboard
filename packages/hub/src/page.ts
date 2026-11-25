@@ -5,7 +5,7 @@ import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { hostKey, isFolderHost } from '@switchboard/core';
 import type { PageDevice, Store } from '@switchboard/core';
 import type { IncomingHttpHeaders } from 'node:http';
-import { artifactType } from '@switchboard/conversation';
+import { ARTIFACT_SEGMENT, artifactType } from '@switchboard/conversation';
 import { PAGE_SCRIPT_HASHES } from '@switchboard/web';
 import { hostIsPath, windowOf } from './dock.js';
 import type { DockHolderNotice, DockHolderResult, DockRow, DockSourceGroup, DockView } from './dock.js';
@@ -817,13 +817,6 @@ export function poolRowOf(dock: Pick<DockView, 'groups'>, ticketId: number): Doc
 export function dockRowOf(dock: Pick<DockView, 'groups'>, workItemId: number): DockRow | null {
   return dock.groups.flatMap((group) => group.rows).find((row) => row.key === `item:${workItemId}`) ?? null;
 }
-
-/**
- * A segment of an artifact's file, or of a file an artifact uses, as the page names it. It does not start with a dot, end with a dot or a space,
- * which Windows drops, hold a backslash, a colon (a drive or an NTFS stream) or a control character, or name a Windows device such as `nul.png`;
- * spaces, `#` and other letters are allowed, as in a screenshot's name.
- */
-const ARTIFACT_SEGMENT = /^(?!(?:con|prn|aux|nul|com\d|lpt\d|conin\$|conout\$)(?:\.|$))[^./\\:\x00-\x1f](?:[^/\\:\x00-\x1f]*[^/\\:\x00-\x1f. ])?$/i;
 
 /** An artifact's file, or a file an artifact uses: `<owner>/<file>` or deeper, each segment an `ARTIFACT_SEGMENT`. */
 const artifactFileName = (name: string): boolean => {

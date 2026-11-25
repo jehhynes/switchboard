@@ -2025,7 +2025,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const response = await readFetch(artifactUrl(key, path), { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
     const text = response?.ok === true ? await response.text() : null;
     /** Where a relative target lies: in the artifact route, or a local file by its absolute path (`artifactTarget`). */
-    const place = (target: string): { name: string } | { path: string } | null => artifactTarget(artifact, state.artifactsDir ?? null, decodedTarget(target));
+    const place = (target: string, isLink = false): { name: string } | { path: string } | null => artifactTarget(artifact, state.artifactsDir ?? null, decodedTarget(target), isLink);
     const base = (src: string): string | null => {
       const to = place(src.split(/[?#]/)[0]!);
 
@@ -2033,7 +2033,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     };
     const link = (href: string): string | null => {
       const at = href.indexOf('#');
-      const to = href.startsWith('#') ? null : place(href.slice(0, at === -1 ? undefined : at));
+      const to = href.startsWith('#') ? null : place(href.slice(0, at === -1 ? undefined : at), true);
 
       if (to === null) {
         return null;

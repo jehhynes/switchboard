@@ -406,7 +406,7 @@ export interface ExternalEntry {
 export const EXTERNAL_OWNER = 'external';
 
 /**
- * An external artifact's name, `@<id>/<file name>`, which a file it uses extends, as `@<id>/<stem>/a.png`. No owner folder starts with `@`,
+ * An external artifact's name, `@<id>/<file name>`, which a file it uses extends, as `@<id>/screenshots/a.png`. No owner folder starts with `@`,
  * so it never names an artifact of the folder.
  */
 export const externalName = (entry: ExternalEntry): string => `@${entry.id}/${basename(entry.path)}`;
@@ -418,32 +418,28 @@ export const EXTERNAL_NAME = /^@(\d{1,15})\/(.+)$/;
 export const inGit = (real: string): boolean => real.split(/[\\/]/).some((part) => part.toLowerCase() === '.git');
 
 /**
- * The real path of a file an external artifact uses: `rest` is the artifact's own file name, or a path under the folder beside it named
- * after its stem (`<stem>/...`), as in the artifact folder. Null for any other path, a dot segment, a backslash, colon (an NTFS stream) or control
- * character, a link out of that folder, or a `.git` path.
+ * A segment of an artifact's file, or of a file an artifact uses, as the page names it. It does not start with a dot, end with a dot or a space,
+ * which Windows drops, hold a backslash, a colon (a drive or an NTFS stream) or a control character, or name a Windows device such as `nul.png`;
+ * spaces, `#` and other letters are allowed, as in a screenshot's name.
+ */
+export const ARTIFACT_SEGMENT = /^(?!(?:con|prn|aux|nul|com\d|lpt\d|conin\$|conout\$)(?:\.|$))[^./\\:\x00-\x1f](?:[^/\\:\x00-\x1f]*[^/\\:\x00-\x1f. ])?$/i;
+
+/**
+ * The real path of a file an external artifact uses: `rest` is a path under the folder the artifact's file is in, the file itself included,
+ * as an HTML page's pictures beside it (the operator's decision, architecture.md § Artifacts). Null for a segment that is no
+ * `ARTIFACT_SEGMENT`, so no `..` or dot segment, a link or junction out of that folder, or a `.git` path.
  */
 export function externalFile(entry: ExternalEntry, rest: string): string | null {
   const parts = rest.split('/');
-  const name = basename(entry.path);
 
-  if (parts.some((part) => part === '' || part.startsWith('.') || /[\\:\x00-\x1f]/.test(part))) {
+  if (!parts.every((part) => ARTIFACT_SEGMENT.test(part))) {
     return null;
   }
 
-  if (parts.length === 1) {
-    return parts[0] === name ? entry.path : null;
-  }
-
-  const stem = name.replace(/\.[^.]+$/, '');
-
-  if (parts[0] !== stem) {
-    return null;
-  }
-
-  // Resolved inside the file's own folder, so a link or junction at `<stem>` leads nowhere else.
+  // Resolved inside the file's own folder, so a link or junction in it leads nowhere else.
   const real = realInside(dirname(entry.path), parts.join('/'));
 
-  return real === null || inGit(real) || relative(join(dirname(entry.path), stem), real).startsWith('..') ? null : real;
+  return real === null || inGit(real) ? null : real;
 }
 
 /** The most files and folders of an external artifact's `<stem>/` folder read for its version; a change past them shows only with the artifact's own. */

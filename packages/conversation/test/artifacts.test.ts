@@ -237,7 +237,7 @@ describe('ExternalArtifacts', () => {
     expect(external([{ id: 1, path: join(real, '.git', 'config') }, { id: 2, path: join(real, 'link.md') }]).list.list()).toEqual([]);
   });
 
-  it("reads only the artifact's own file and the files under the folder named after its stem", async () => {
+  it("reads the artifact's own file and any file under the folder it is in, never .git, a dot or parent segment, a Windows alias, or a link out", async () => {
     const real = realpathSync.native(root);
     const entry = { id: 1, path: join(real, 'report.html'), title: null, kind: null };
 
@@ -248,10 +248,20 @@ describe('ExternalArtifacts', () => {
 
     expect(externalFile(entry, 'report.html')).toBe(entry.path);
     expect(externalFile(entry, 'report/img/a.png')).toBe(join(real, 'report', 'img', 'a.png'));
-    expect(externalFile(entry, 'secret.txt')).toBeNull();
-    expect(externalFile(entry, 'report/../secret.txt')).toBeNull();
-    expect(externalFile(entry, 'report/.hidden')).toBeNull();
+    // The operator's decision: the whole folder the file is in, as an HTML report's screenshots/ beside it.
+    expect(externalFile(entry, 'secret.txt')).toBe(join(real, 'secret.txt'));
     expect(externalFile(entry, 'other/a.png')).toBeNull();
+    expect(externalFile(entry, 'report/../secret.txt')).toBeNull();
+    expect(externalFile(entry, '../outside.txt')).toBeNull();
+    expect(externalFile(entry, 'report/.hidden')).toBeNull();
+    expect(externalFile(entry, 'report/img/a.png.')).toBeNull();
+    expect(externalFile(entry, 'report/img/NUL.png')).toBeNull();
+    // A .git folder is never read, by its name or through a junction to it.
+    mkdirSync(join(real, '.git'));
+    writeFileSync(join(real, '.git', 'config'), '');
+    symlinkSync(join(real, '.git'), join(real, 'repo'), 'junction');
+    expect(externalFile(entry, '.git/config')).toBeNull();
+    expect(externalFile(entry, 'repo/config')).toBeNull();
     // An NTFS stream, a backslash or a control character is no file it uses.
     expect(externalFile(entry, 'report/img/a.png:x')).toBeNull();
     expect(externalFile(entry, 'report/img\\a.png')).toBeNull();

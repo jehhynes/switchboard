@@ -109,16 +109,18 @@ export function fileTabLink(target: string): string {
   return `class="path-link" title="${escape(target)}" tabindex="0" role="link" data-action="local-file" data-target="${escape(target)}"`;
 }
 
-/** A segment of a name the artifact route serves, as `ARTIFACT_SEGMENT` in packages/hub/src/page.ts reads it. */
+/** A segment of a name the artifact route serves, as `ARTIFACT_SEGMENT` in packages/conversation/src/artifacts.ts reads it. */
 const SERVED = /^(?!(?:con|prn|aux|nul|com\d|lpt\d|conin\$|conout\$)(?:\.|$))[^./\\:\x00-\x1f](?:[^/\\:\x00-\x1f]*[^/\\:\x00-\x1f. ])?$/i;
 
 /**
  * Where a Markdown artifact's picture or link lies (architecture.md § Artifacts): `name`, for the artifact route, when it is in the artifact
- * folder, or, for an external artifact (`@<id>/<file>`), its own file or one in the folder beside it named after its stem; otherwise `path`,
+ * folder, or, for an external artifact (`@<id>/<file>`), a file under the folder its file is in; otherwise `path`,
  * its absolute path, read as a local file under that route's rules, resolved against the artifact's own folder (`artifactsDir`, or an external
  * artifact's `file`). `target` is decoded once, a `file:` URI too, and has no fragment. Null when the folder is unknown or the target is another scheme.
+ * A link (`link`) in an external artifact takes the route only to the artifact itself, so a link to another file beside it opens a file tab,
+ * at its line, or that file's own artifact tab when it is one.
  */
-export function artifactTarget(artifact: { path: string; file?: string }, artifactsDir: string | null, target: string): { name: string } | { path: string } | null {
+export function artifactTarget(artifact: { path: string; file?: string }, artifactsDir: string | null, target: string, link = false): { name: string } | { path: string } | null {
   if (/^file:/i.test(target)) {
     return { path: fileUriPath(target) };
   }
@@ -132,7 +134,7 @@ export function artifactTarget(artifact: { path: string; file?: string }, artifa
   }
 
   const relative = target.replaceAll('\\', '/');
-  const [first = '', ...rest] = artifact.path.split('/');
+  const first = artifact.path.split('/')[0] ?? '';
   const external = first.startsWith('@');
   const parts = external ? [] : artifact.path.split('/').slice(0, -1);
   let outside = false;
@@ -146,14 +148,13 @@ export function artifactTarget(artifact: { path: string; file?: string }, artifa
     }
   }
 
-  const fileName = rest.join('/');
   const served = !outside && parts.every((part) => SERVED.test(part));
 
   if (external) {
-    const stem = fileName.replace(/\.[^.]+$/, '');
+    const name = `${first}/${parts.join('/')}`;
 
-    if (served && ((parts.length === 1 && parts[0] === fileName) || (parts.length > 1 && parts[0] === stem))) {
-      return { name: `${first}/${parts.join('/')}` };
+    if (served && parts.length > 0 && (!link || name === artifact.path)) {
+      return { name };
     }
 
     return artifact.file === undefined ? null : { path: joinPath(artifact.file.replaceAll('\\', '/').replace(/\/[^/]*$/, ''), relative) };

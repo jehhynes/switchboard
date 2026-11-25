@@ -53,13 +53,17 @@ describe("an artifact's picture and link targets", () => {
     expect(artifactTarget(plan, 'D:/w/a', 'mailto:a@b.c')).toBeNull();
   });
 
-  it("serves an external artifact's own file and its stem folder by the route, and reads a file beside it by path", () => {
+  it("serves an external artifact's folder by the route, and reads a file outside it by path", () => {
     expect(artifactTarget(review, null, 'review/a.png')).toEqual({ name: '@7/review/a.png' });
     expect(artifactTarget(review, null, 'review.md')).toEqual({ name: '@7/review.md' });
-    expect(artifactTarget(review, null, 'screenshots/a.png')).toEqual({ path: 'D:/wt/.wip/review-pr/screenshots/a.png' });
+    expect(artifactTarget(review, null, 'screenshots/a b.png')).toEqual({ name: '@7/screenshots/a b.png' });
+    expect(artifactTarget(review, null, 'screenshots/NUL.png')).toEqual({ path: 'D:/wt/.wip/review-pr/screenshots/NUL.png' });
     expect(artifactTarget(review, null, '../../docs/a.png')).toEqual({ path: 'D:/wt/docs/a.png' });
     expect(artifactTarget(review, null, 'review/../../x.png')).toEqual({ path: 'D:/wt/.wip/x.png' });
-    expect(artifactTarget({ path: '@7/review.md' }, null, 'screenshots/a.png')).toBeNull();
+    expect(artifactTarget({ path: '@7/review.md' }, null, '../a.png')).toBeNull();
+    // A link goes to a file tab, but for one to the artifact itself.
+    expect(artifactTarget(review, null, 'notes.md', true)).toEqual({ path: 'D:/wt/.wip/review-pr/notes.md' });
+    expect(artifactTarget(review, null, 'review.md', true)).toEqual({ name: '@7/review.md' });
   });
 });
 

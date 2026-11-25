@@ -3214,11 +3214,11 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("reads an external artifact's own pictures by the artifact route and a picture beside it, as a review's screenshots/, as a local file, and links to it in a file tab", async () => {
+  it("reads an external artifact's pictures in its folder, as a review's screenshots/, by the artifact route, and one outside it as a local file, with a link to it in a file tab", async () => {
     const { page, source } = start();
     const review = { ...artifact('@7/review.md', 'markdown', 'md'), file: 'D:/wt/.wip/review-pr/round-1/review.md' };
 
-    answers['/artifact/'] = { status: 200, body: {}, text: '# Review\n\n![own](review/a.png) ![shot](screenshots/uat-1.png) [shot](screenshots/my%20shot%20%231.png#L2) ![readme](../../../docs/images/x.png) ![uri](file:///D:/x/a%2520b.png)' };
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Review\n\n![own](review/a.png) ![shot](screenshots/uat-1.png) [shot](shots/my%20shot%20%231.png#L2) ![readme](../../../docs/images/x.png) ![uri](file:///D:/x/a%2520b.png)' };
     hello(source, { artifacts: [review], artifactsDir: 'D:/wt/.wip/artifacts/w1' });
     click('#head .artifact-tab[data-path="@7/review.md"]');
     await flush();
@@ -3228,14 +3228,14 @@ describe('the page in use', () => {
 
     expect([...doc.querySelectorAll('img')].map((img) => img.getAttribute('src'))).toEqual([
       '/v1/conversation/artifact/pk/%407/review/a.png',
-      `/v1/conversation/local-file-raw?window=pk&path=${encodeURIComponent('D:/wt/.wip/review-pr/round-1/screenshots/uat-1.png')}`,
+      '/v1/conversation/artifact/pk/%407/screenshots/uat-1.png',
       `/v1/conversation/local-file-raw?window=pk&path=${encodeURIComponent('D:/wt/docs/images/x.png')}`,
       `/v1/conversation/local-file-raw?window=pk&path=${encodeURIComponent('D:/x/a%20b.png')}`,
     ]);
-    // The file tab reads the link as written: its name's # is not its fragment.
+    // A link to a file beside it opens a file tab at its line, which reads the link as written: its name's # is not its fragment.
     const target = doc.querySelector<HTMLElement>('a.path-link')!.dataset['target']!;
 
-    expect(linkTarget(target)).toEqual({ path: 'D:/wt/.wip/review-pr/round-1/screenshots/my shot #1.png', line: 2 });
+    expect(linkTarget(target)).toEqual({ path: 'D:/wt/.wip/review-pr/round-1/shots/my shot #1.png', line: 2 });
     page.close();
   });
 

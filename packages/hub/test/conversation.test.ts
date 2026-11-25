@@ -1883,7 +1883,7 @@ describe('ConversationService artifacts', () => {
     return { w12, w3, view, service, open, put, scopes, store, openPage, tag, logged };
   }
 
-  it("lists the files a reply's artifact tags name on its work item's pages only, follows their changes, and serves only them and the files beside them they use", async () => {
+  it("lists the files a reply's artifact tags name on its work item's pages only, follows their changes, and serves only them and the files under their folders", async () => {
     const { service, store, openPage, tag, logged } = setup();
     const real = realpathSync.native(dir);
     const report = join(real, 'research', 'report', 'summary.md');
@@ -1935,8 +1935,16 @@ describe('ConversationService artifacts', () => {
     expect(served('@1/summary.md')).toEqual({ path: report, mime: 'text/markdown; charset=utf-8', sandboxed: false, fd: expect.any(Number), size: readFileSync(report).length });
     expect(served('@2/page.html')).toMatchObject({ path: page, sandboxed: true });
     expect(served('@2/page/a.png')).toMatchObject({ path: join(real, 'w12', 'plans', 'page', 'a.png'), mime: 'image/png', size: 0 });
-    expect(service.artifactFile(mine.key, '@2/secret.txt')).toBeNull();
+    // The operator's decision: any file under the tagged file's folder, never .git, the Switchboard home, or a parent segment.
+    expect(served('@2/secret.txt')).toMatchObject({ path: join(real, 'w12', 'plans', 'secret.txt') });
     expect(service.artifactFile(mine.key, '@2/page/../secret.txt')).toBeNull();
+    expect(service.artifactFile(mine.key, '@2/../.git/config')).toBeNull();
+    writeFileSync(join(real, 'top.md'), '# Top');
+    tag('s2', [{ path: join(real, 'top.md') }]);
+    expect(store.externalArtifacts(2).map((one) => one.path)).toEqual([report, page, join(real, 'top.md')]);
+    expect(served('@3/w12/plans/secret.txt')).toMatchObject({ path: join(real, 'w12', 'plans', 'secret.txt') });
+    expect(service.artifactFile(mine.key, '@3/home/hub.json')).toBeNull();
+    expect(service.artifactFile(mine.key, '@3/w12/.git/config')).toBeNull();
     expect(service.artifactFile(mine.key, '@9/summary.md')).toBeNull();
     expect(service.artifactFile(others.key, '@1/summary.md')).toBeNull();
 
