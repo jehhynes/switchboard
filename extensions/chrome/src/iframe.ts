@@ -50,12 +50,12 @@ export async function iframeEnabled(fetchUrl: (url: string) => Promise<Response>
   return await iframeAccess(fetchUrl, origin, remote) === 'enabled';
 }
 
-/** Header changes stay inside a verified extension host; its Switchboard child keeps its CSP. */
+/** Header changes stay inside a verified extension host, except the service-worker rule for IFRAME_WORKER_HOSTS; its Switchboard child keeps its CSP. */
 export interface IframeRule {
   id: number;
   priority: number;
   action: { type: 'modifyHeaders'; responseHeaders: Array<{ header: string; operation: 'remove' }> } | { type: 'allow' };
-  condition: { tabIds: number[]; topDomains: string[]; regexFilter?: string; urlFilter?: string; initiatorDomains?: string[]; resourceTypes: ['sub_frame'] };
+  condition: { tabIds: number[]; topDomains: string[]; regexFilter?: string; urlFilter?: string; initiatorDomains?: string[]; resourceTypes: ['sub_frame'] | ['xmlhttprequest'] };
 }
 export interface IframeSender {
   origin?: string;
@@ -95,6 +95,28 @@ export function iframeRule(tabId: number, host: string, id: number): IframeRule 
     },
     // topDomains (Chrome 145+) keeps the rule from applying after the tab navigates away, before onUpdated runs.
     condition: { tabIds: [tabId], topDomains: [BROWSER_EXTENSION_ID], initiatorDomains: [BROWSER_EXTENSION_ID, hostname], regexFilter: `^https?://${escaped}/`, resourceTypes: ['sub_frame'] },
+  };
+}
+
+/** The exact hosts whose own service worker gets the X-Frame-Options exception below, because the exception is not bound to the tab (operator decision 2026-11-24). */
+export const IFRAME_WORKER_HOSTS: readonly string[] = ['desk.zoho.com'];
+
+/**
+ * Zoho Desk answers navigations in its scope from its own service worker. That worker's network fetch has no tab (-1), the
+ * xmlhttprequest type, and the site's own domain as its top domain when the site navigates its frame, so the frame's rule misses it and the
+ * response keeps its X-Frame-Options refusal (mechanics M153). This rule removes only X-Frame-Options and leaves CSP alone, so a
+ * CSP frame-ancestors refusal served this way still refuses. A worker fetch has no tab, and Chrome takes its top domain from its initiator, so
+ * the rule cannot tell this frame from the same site framed elsewhere: while the lease lasts, any page of that exact host its worker serves can
+ * be framed by any site, and its other worker fetches lose the header too.
+ */
+export function iframeWorkerRule(host: string, id: number): IframeRule {
+  const hostname = new URL(`http://${host}`).hostname;
+  const escaped = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return {
+    id,
+    priority: 1,
+    action: { type: 'modifyHeaders', responseHeaders: [{ header: 'x-frame-options', operation: 'remove' }] },
+    condition: { tabIds: [-1], topDomains: [BROWSER_EXTENSION_ID, hostname], initiatorDomains: [BROWSER_EXTENSION_ID, hostname], regexFilter: `^https?://${escaped}/`, resourceTypes: ['xmlhttprequest'] },
   };
 }
 
@@ -168,8 +190,13 @@ export class IframeRules {
       const previous: number[] = leases[String(id)]?.rules ?? [];
       const used = new Set((await this.deps.rules()).map((rule) => rule.id).filter((ruleId) => !previous.includes(ruleId)));
       const ids: number[] = [];
-      for (let i = 0, next = 1; i <= hosts.length; i++) { while (used.has(next)) next++; ids.push(next); used.add(next++); }
-      await this.deps.update(previous, [...hosts.map((host, i) => iframeRule(id!, host, ids[i]!)), iframePageRule(id!, origin, ids[hosts.length]!)]);
+      const workers = hosts.filter((host) => IFRAME_WORKER_HOSTS.includes(host));
+      for (let i = 0, next = 1; i <= hosts.length + workers.length; i++) { while (used.has(next)) next++; ids.push(next); used.add(next++); }
+      await this.deps.update(previous, [
+        ...hosts.map((host, i) => iframeRule(id!, host, ids[i]!)),
+        ...workers.map((host, i) => iframeWorkerRule(host, ids[hosts.length + i]!)),
+        iframePageRule(id!, origin, ids[hosts.length + workers.length]!),
+      ]);
       leases[String(id)] = { origin, until: this.deps.now() + IFRAME_LEASE_MS, rules: ids };
       try {
         await this.deps.save(leases);

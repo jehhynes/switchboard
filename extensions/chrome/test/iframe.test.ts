@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { IframeRules, iframePage, iframeRule, iframePageRule, iframeTab, iframeEnabled, IFRAME_LEASE_MS } from '../src/iframe.js';
+import { IframeRules, iframePage, iframeRule, iframePageRule, iframeTab, iframeEnabled, iframeWorkerRule, IFRAME_LEASE_MS } from '../src/iframe.js';
 import type { IframeLease, IframeRule, IframeSender } from '../src/iframe.js';
 
 const sender: IframeSender = { origin: 'https://pc.tail.ts.net', url: 'https://pc.tail.ts.net/page/', frameId: 1, tab: { id: 7 } };
@@ -59,6 +59,25 @@ describe('iframe header exceptions', () => {
       },
       condition: { tabIds: [7], topDomains: ['hlbibnhgkgnjkbfledhgjblacloneije'], initiatorDomains: ['hlbibnhgkgnjkbfledhgjblacloneije', 'github.com'], regexFilter: '^https?://github\\.com/', resourceTypes: ['sub_frame'] },
     });
+  });
+  it("lifts only X-Frame-Options on a site's own service-worker fetches, under the extension or the site as top domain", () => {
+    expect(iframeWorkerRule('desk.zoho.com', 4)).toEqual({
+      id: 4,
+      priority: 1,
+      action: { type: 'modifyHeaders', responseHeaders: [{ header: 'x-frame-options', operation: 'remove' }] },
+      condition: {
+        tabIds: [-1],
+        topDomains: ['hlbibnhgkgnjkbfledhgjblacloneije', 'desk.zoho.com'],
+        initiatorDomains: ['hlbibnhgkgnjkbfledhgjblacloneije', 'desk.zoho.com'],
+        regexFilter: '^https?://desk\\.zoho\\.com/',
+        resourceTypes: ['xmlhttprequest'],
+      },
+    });
+    const match = new RegExp(iframeWorkerRule('desk.zoho.com', 4).condition.regexFilter!);
+    expect(match.test('https://desk.zoho.com/agent/x')).toBe(true);
+    expect(match.test('https://accounts.zoho.com/')).toBe(false);
+    expect(match.test('https://desk.zoho.com.evil.test/')).toBe(false);
+    expect(iframeWorkerRule('localhost:5000', 4).condition.topDomains).toEqual(['hlbibnhgkgnjkbfledhgjblacloneije', 'localhost']);
   });
   it('matches exact request hosts and ports, including broad domain names and IPv6', () => {
     for (const [host, allowed, refused] of [
@@ -145,12 +164,19 @@ describe('iframe header exceptions', () => {
     const r = rig();
     const sender = { origin: 'https://pc.tail.ts.net', url: 'https://pc.tail.ts.net/page/', frameId: 1, tab: { id: 2147483640 } };
     expect(await r.rules.external({ type: 'iframe-enable', urls: ['https://desk.zoho.com/one', 'https://desk.zoho.com/two', 'http://localhost:5000/'] }, sender)).toEqual({ ok: true });
-    expect(r.state.rules.map((rule) => rule.id)).toEqual([1, 2, 3]);
+    expect(r.state.rules.map((rule) => rule.id)).toEqual([1, 2, 3, 4]);
     expect(r.state.rules[0]?.condition.regexFilter).toBe('^https?://desk\\.zoho\\.com/');
     expect(r.state.rules[1]?.condition.regexFilter).toBe('^https?://localhost:5000/');
+    // Only Zoho Desk, of the listed hosts, also gets its service-worker rule, before the hub's allow rule.
+    expect(r.state.rules.map((rule) => [rule.condition.tabIds, rule.condition.resourceTypes])).toEqual([
+      [[2147483640], ['sub_frame']], [[2147483640], ['sub_frame']], [[-1], ['xmlhttprequest']], [[2147483640], ['sub_frame']],
+    ]);
+    expect(r.state.rules[2]?.condition.regexFilter).toBe('^https?://desk\\.zoho\\.com/');
     expect(await r.rules.external({ type: 'iframe-enable', urls: ['https://forum.example.com/'] }, sender)).toEqual({ ok: true });
     expect(r.state.rules.map((rule) => rule.id)).toEqual([1, 2]);
     expect(r.state.rules[0]?.condition.regexFilter).toBe('^https?://forum\\.example\\.com/');
+    // A site off the list, such as a forum, gets no service-worker rule.
+    expect(r.state.rules.some((rule) => rule.condition.tabIds.includes(-1))).toBe(false);
     for (const urls of [undefined, ['javascript:alert(1)'], ['https://pc.tail.ts.net/page/'], ['http://localhost:47615/']]) expect(await r.rules.external({ type: 'iframe-enable', urls }, sender)).toHaveProperty('error');
     r.state.rules.pop(); await r.rules.sweep();
     expect(r.state.rules).toEqual([]); expect(r.state.leases).toEqual({});
