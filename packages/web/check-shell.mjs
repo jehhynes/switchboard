@@ -31,7 +31,9 @@ const SETTINGS_PAGES = {
   'settings-display': ['display'],
   'settings-devices': ['devices'],
   'settings-advanced': ['advanced'],
-  'settings-voice': ['voice'],
+  'settings-speaking': ['speaking'],
+  'settings-listening': ['listening'],
+  'settings-personas': ['personas', 'personas/page'],
   'settings-persona': ['personas', 'persona:0'],
 };
 /**
@@ -46,7 +48,7 @@ const SIZES = [
   { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-table'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
-const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-devices', 'settings-advanced', 'settings-voice'];
+const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-speaking', 'settings-listening'];
 const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
@@ -437,7 +439,7 @@ const OPEN = {
   history: ['[data-action=actions]', '[data-action=row-history]'],
   // Settings as it opens: on a phone its navigation's categories alone.
   'settings-nav': ['[data-action=list-more]', '[data-action=list-settings]'],
-  ...Object.fromEntries(Object.entries(SETTINGS_PAGES).map(([view, keys]) => [view, ['[data-action=list-more]', '[data-action=list-settings]', ...keys.map((key) => '.settings-nav-entry[data-key="' + key + '"]')]])),
+  ...Object.fromEntries(Object.entries(SETTINGS_PAGES).map(([view, keys]) => [view, ['[data-action=list-more]', '[data-action=list-settings]', ...keys.map((key) => (key.endsWith('/page') ? '.settings-nav-entry[data-key="' + key + '"], .settings-page-title h2' : '.settings-nav-entry[data-key="' + key + '"]'))]])),
   // A namespace's playbooks table.
   // On a phone Playbooks and the namespace drill into their lists, the namespace's starting with its table; on a desktop they open in place.
   'settings-table': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="playbooks"]', '.settings-nav-entry[data-key="namespace:dev"]', '.settings-nav-entry.item[data-page="namespace:dev"], .settings-page-title h2'],

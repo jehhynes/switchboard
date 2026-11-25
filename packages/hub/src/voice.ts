@@ -79,7 +79,7 @@ interface Composer {
 const joinText = (draft: string, text: string): string => (draft === '' || /\s$/.test(draft) ? `${draft}${text}` : `${draft} ${text}`);
 
 /**
- * Voiceprint enrolment as the Settings Voice page shows it (architecture.md § Voice check and barge-in): `idle` before any this run, `starting`
+ * Voiceprint enrolment as Settings' Listening page shows it (architecture.md § Voice check and barge-in): `idle` before any this run, `starting`
  * while the voice process starts, `recording` until `endsAt`, then how it ended; `enrolledAt` when the saved voiceprint was made, or null.
  */
 export interface EnrollmentView {
@@ -1244,7 +1244,7 @@ export class VoiceControl {
   }
 
   /**
-   * Voiceprint enrolment from the Settings Voice page (architecture.md § Voice check and barge-in): `start` starts the voice process if it is not
+   * Voiceprint enrolment from Settings' Listening page (architecture.md § Voice check and barge-in): `start` starts the voice process if it is not
    * running and has it record; `cancel` stops a recording. Why not, or null.
    */
   enroll(action: 'start' | 'cancel'): string | null {

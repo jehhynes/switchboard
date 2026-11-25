@@ -112,13 +112,15 @@ describe('the Settings model (settingsModel.ts)', () => {
   it("places an error that names a settings.json section but no field on the page that shows that section's settings", () => {
     const state = new EditorState(parseConfig(config({})));
 
-    state.errors = ['web must be an object.', 'sessions must be an object.', 'triage must be an object.', 'alerts must be an object.', 'voice must be an object.', 'Unknown key: extra.'];
+    state.errors = ['web must be an object.', 'sessions must be an object.', 'triage must be an object.', 'alerts must be an object.', 'voice must be an object.', 'voice.pitchLowFactor must be a number from 1 to 3.', 'Unknown key: extra.'];
     expect([...errorPages(state).entries()]).toEqual([
       ['web must be an object.', 'advanced'],
       ['sessions must be an object.', 'sessions'],
       ['triage must be an object.', 'triage'],
       ['alerts must be an object.', 'display'],
-      ['voice must be an object.', 'voice'],
+      ['voice must be an object.', 'speaking'],
+      // The pitch check's factors are settings.json only, so their errors go to Listening, which has the voice check.
+      ['voice.pitchLowFactor must be a number from 1 to 3.', 'listening'],
       ['Unknown key: extra.', null],
     ]);
   });
@@ -200,7 +202,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     expect(named('page-settings-read')).toHaveLength(1);
     expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
-    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['Sessions', 'Triage', 'Sources', 'Playbooks', 'Schedules', 'Alerts and display', 'Devices', 'Advanced', 'Voice settings', 'Personas']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['Sessions', 'Triage', 'Sources', 'Playbooks', 'Schedules', 'Alerts and display', 'Devices', 'Advanced', 'Speaking', 'Listening', 'Personas']);
     expect(texts('.settings-nav-entry.group[aria-expanded="false"] .settings-nav-label')).toEqual(['Sources', 'Playbooks', 'Schedules', 'Personas']);
     expect(host.querySelector('.settings-nav-entry.current')?.textContent).toContain('Sessions');
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
@@ -228,7 +230,13 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     expect(await shown('triage')).toEqual({ title: 'Triage', headings: ['Classifier', 'Advanced'], labels: ['Model', 'Concurrency'] });
     expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Timeout (seconds)');
-    expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Diffs'], labels: ['Needs-you alerts from', 'Layout', 'Wrap long lines'] });
+    expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Replies', 'Diffs'], labels: ['Needs-you alerts from', 'Needs-you sound', 'Collapse details', 'Layout', 'Wrap long lines'] });
+    // Spoken alerts are on Speaking, which a line in Notifications opens.
+    expect(host.querySelector('.settings-link-row')?.textContent).toBe('Spoken alerts, which the voice says, are on Speaking.Open Speaking');
+    host.querySelector<HTMLButtonElement>('.settings-link-row button')!.click();
+    await settle();
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Speaking');
+    await go('display');
     expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Web app when open', 'Web page when open', 'System notification']);
     // The diff viewer's layout and wrapping, set once for every page.
     expect([...field<HTMLSelectElement>('web.diffLayout').options].map((one) => one.value)).toEqual(['auto', 'split', 'stacked']);
@@ -262,6 +270,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
       ['display', 'alerts.surface', 'system', 'system'],
       ['display', 'web.diffLayout', 'split', 'split'],
       ['display', 'web.diffWrap', 'on', 'on'],
+      ['display', 'voice.needsYouSound', false, false],
+      ['display', 'voice.briefReplies', true, true],
       ['devices', 'web.tailscale', true, true],
       ['devices', 'web.remoteHosts', 'pc.tail.ts.net', ['pc.tail.ts.net']],
       ['devices', 'web.remoteLogins', 'a@b.c', ['a@b.c']],
@@ -597,11 +607,11 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     answers['page-settings-check'] = { status: 200, body: { errors: ['Unknown key: extra.', 'triage.timeoutSeconds must be a whole number from 10 to 3600.', 'sessions.nodePath must not contain spaces.'] } };
     await opened();
 
-    expect(texts('.settings-page > .settings-error')).toEqual(['Unknown key: extra.']);
+    expect(texts('.settings-page > .settings-error')).toEqual(['Unknown key: extra. Fix it in settings.json: C:/home/.switchboard/settings.json']);
     // Each field's error marks its own page: Triage and Advanced, not Sessions, though nodePath sits in the sessions object.
     expect(texts('.settings-nav-entry:has(.settings-errors) .settings-nav-label')).toEqual(['Triage', 'Advanced']);
     await go('triage');
-    expect(texts('.settings-page > .settings-error')).toEqual(['Unknown key: extra.']);
+    expect(texts('.settings-page > .settings-error')).toEqual(['Unknown key: extra. Fix it in settings.json: C:/home/.switchboard/settings.json']);
     expect(host.querySelector('.settings-toggle')?.getAttribute('aria-expanded')).toBe('true');
     expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-field-error')?.textContent).toBe('triage.timeoutSeconds must be a whole number from 10 to 3600.');
     // The operator can close it again.

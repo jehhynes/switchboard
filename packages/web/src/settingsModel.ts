@@ -23,6 +23,8 @@ export interface Field {
   kind: FieldKind;
   help: string;
   placeholder?: string;
+  /** For a select, the choice shown while the value is not a string, such as a number or null. */
+  invalidChoice?: string;
   options?: readonly FieldOption[];
   fallback?: boolean;
   listDefault?: readonly string[];
@@ -31,14 +33,18 @@ export interface Field {
 
 /**
  * A page section; an `advanced` one starts collapsed, showing `summary`, or else its fields' labels, beside its heading. A `block` section
- * holds what Settings draws besides fields: the paired devices, or where settings.json and the config folder are.
+ * holds what Settings draws besides fields: the paired devices, where settings.json and the config folder are, or the voice enrolment.
  */
 export interface Section {
   heading: string;
   fields: readonly Field[];
   advanced?: boolean;
   summary?: string;
-  block?: 'devices' | 'file';
+  block?: 'devices' | 'file' | 'enroll';
+  /** Whether its settings do nothing while the voice is off, so it is dimmed then. */
+  needsVoice?: boolean;
+  /** A line in its card that leads to another page, such as Speaking for the spoken alerts. */
+  link?: { text: string; label: string; page: string };
 }
 
 /** settings.json as the hub read it: its value, or null and the error when it is not valid JSON. */
@@ -237,12 +243,15 @@ export const providerName = (provider: string): string => (provider === 'claude'
 export const HOME = 'sessions';
 
 /** The settings pages of no list, each with its title, the line under it, and its sections. */
-const PAGES: Readonly<Record<string, { title: string; lede: string; sections: (state: EditorState) => Section[] }>> = {
+const PAGES: Readonly<Record<string, { title: string; lede: string; sections: (state: EditorState) => Section[]; needsVoice?: boolean }>> = {
   sessions: { title: 'Sessions', lede: 'How playbook and ad-hoc sessions run. A playbook can set its own agent, model and permission mode.', sections: (state) => sessionsFields(state) },
   triage: { title: 'Triage', lede: 'How Switchboard chooses a playbook for each new ticket.', sections: () => triageFields() },
   display: { title: 'Alerts and display', lede: 'How the pages on this computer tell you that work needs you, and how they show diffs.', sections: () => displayFields() },
   devices: { title: 'Devices', lede: 'Phones and other computers that open this page through your tailnet.', sections: () => devicesFields() },
   advanced: { title: 'Advanced', lede: 'Experiments, the programs Switchboard runs, and where settings.json is.', sections: () => advancedFields() },
+  speaking: { title: 'Speaking', lede: 'What the voice says: replies read aloud and spoken alerts.', sections: (state) => speakingFields(state) },
+  listening: { title: 'Listening', lede: 'Dictation from the microphone. It needs the voice on, on Speaking.', sections: () => listeningFields(), needsVoice: true },
+  personas: { title: 'Personas', lede: 'The persona each playbook’s sessions take, unless one is pinned to the session.', sections: (state) => personasFields(state), needsVoice: true },
 };
 
 export class EditorState {
@@ -520,7 +529,7 @@ export class EditorState {
     if (persona !== null && (persona >= this.personas.length || this.personaId(persona) !== id)) {
       const moved = id === null ? -1 : this.personas.findIndex((entry) => personaIdOf(entry) === id);
 
-      this.page = moved >= 0 ? `persona:${moved}` : 'voice';
+      this.page = moved >= 0 ? `persona:${moved}` : 'personas';
     }
   }
 
@@ -574,85 +583,127 @@ export function personaOptions(state: EditorState): FieldOption[] {
   return [...new Set(state.personaIds)].map((id) => ({ value: id, label: `${state.personaName(id)} (${id})` }));
 }
 
-/** The task playbooks with no persona yet, which the Voice page's Assign offers. */
-export function unassignedPlaybooks(state: EditorState): string[] {
-  const assigned = getAt(state.value ?? undefined, 'voice.playbookPersonas');
+/** The choice that stands for a value that is not a string; a colon keeps it apart from any persona ID (`SEGMENT`). */
+const INVALID_CHOICE = ':invalid';
 
-  return state.playbookNames.filter((name) => state.playbookValue(name)?.kind === 'task' && !(isObject(assigned) && Object.hasOwn(assigned, name)));
+/** Whether an error names exactly `playbook`'s persona assignment, not one whose playbook name merely starts with it. */
+const assignmentError = (error: string, playbook: string): boolean => error.startsWith(`${ASSIGNMENTS}${playbook} `) || error.startsWith(`${ASSIGNMENTS}${playbook}: `);
+
+/** Whether the voice process is off (`voice.enabled`), so the pages that need it say so and dim what it governs. */
+export const voiceOff = (state: EditorState): boolean => getAt(state.value ?? undefined, 'voice.enabled') !== true;
+
+/** A playbook's persona select (`voice.playbookPersonas`): None, which removes the assignment, and the roster's personas. */
+export function personaField(state: EditorState, playbook: string, label: string, help = ''): Field {
+  const path = `voice.playbookPersonas.${playbook}`;
+  const current = getAt(state.value ?? undefined, path);
+  // A value that is not an ID shows as itself, under a value no ID can take, so None or a persona is a change that replaces it.
+  const invalid = current === undefined || typeof current === 'string' ? [] : [{ value: INVALID_CHOICE, label: `${JSON.stringify(current)} (invalid)` }];
+
+  return { path, label, kind: 'select', help, options: [...withCurrent([{ value: '', label: 'None' }, ...personaOptions(state)], current), ...invalid], ...(invalid.length === 0 ? {} : { invalidChoice: INVALID_CHOICE }) };
 }
 
 /**
- * The Voice page (PRD R105, R106): speech settings, then a select per playbook with a persona (`voice.playbookPersonas`), each offering the
- * roster's personas and None, which removes the assignment.
+ * The Speaking page (PRD R105): the voice process's switch and the speaker, how replies are read, and the spoken alerts, which need the voice
+ * on. Needs-you sound is on Alerts and display, since the page and system notifications play it too.
  */
-export function voiceFields(state: EditorState): Section[] {
+export function speakingFields(state: EditorState): Section[] {
   const value = state.value ?? undefined;
-  const personas = personaOptions(state);
-  const map = getAt(value, 'voice.playbookPersonas');
-  const assigned = isObject(map) ? Object.keys(map) : [];
-  const playbooks = state.playbookNames;
 
   return [
     {
-      heading: 'Speech',
+      heading: 'Voice',
       fields: [
         { path: 'voice.enabled', label: 'Enabled', kind: 'boolean', help: 'Read replies aloud: the voice process, Speak replies, Talk here and personas. Off, nothing is spoken and no session gets a persona.', fallback: false },
-        { path: 'voice.voice', label: 'Voice', kind: 'select', help: 'The voice replies are read in when no persona applies. OpenAI recommends Marin and Cedar.', placeholder: 'marin', options: withCurrent(choices(TTS_VOICES), getAt(value, 'voice.voice')) },
-        { path: 'voice.style', label: 'Style', kind: 'select', help: 'How replies are read when no persona applies, unless Expressive delivery is on.', placeholder: 'none', options: withCurrent(choices(SPEECH_STYLES), getAt(value, 'voice.style')) },
-        { path: 'voice.speed', label: 'Speed', kind: 'number', help: '0.25 to 1.5; 1 is the voice’s own pace.', placeholder: '1' },
-        { path: 'voice.expressive', label: 'Expressive delivery', kind: 'boolean', help: 'Ask Claude for a tone line with each spoken reply, and read the reply in that tone instead of the style.', fallback: false },
-        { path: 'voice.briefReplies', label: 'Collapse details', kind: 'boolean', help: "Fold a reply's details, the part after its primary response, under a fade until the reply is opened. The newest reply shows in full until a newer one comes. Off, replies show in full.", fallback: false },
-        { path: 'voice.awayMinutes', label: 'Away timeout (minutes)', kind: 'integer', help: '1 to 1440. With the focus outside every Switchboard window for this long, the voice stops speaking for its session.', placeholder: '2' },
-        { path: 'voice.needsYouSound', label: 'Needs-you sound', kind: 'boolean', help: 'Play a short sound between spoken replies when another work item starts needing you.', fallback: true },
         { path: 'voice.outputDevice', label: 'Output device', kind: 'text', help: 'Part of the playback device’s name, such as Speakers. Empty uses the system default.', placeholder: 'System default' },
       ],
     },
     {
+      heading: 'Replies',
+      fields: [
+        { path: 'voice.voice', label: 'Voice', kind: 'select', help: 'The voice replies are read in when no persona applies. OpenAI recommends Marin and Cedar.', placeholder: 'marin', options: withCurrent(choices(TTS_VOICES), getAt(value, 'voice.voice')) },
+        { path: 'voice.style', label: 'Style', kind: 'select', help: 'How replies are read when no persona applies, unless Expressive delivery is on.', placeholder: 'none', options: withCurrent(choices(SPEECH_STYLES), getAt(value, 'voice.style')) },
+        { path: 'voice.speed', label: 'Speed', kind: 'number', help: '0.25 to 1.5; 1 is the voice’s own pace.', placeholder: '1' },
+        { path: 'voice.expressive', label: 'Expressive delivery', kind: 'boolean', help: 'Ask Claude for a tone line with each spoken reply, and read the reply in that tone instead of the style.', fallback: false },
+        { path: 'voice.awayMinutes', label: 'Away timeout (minutes)', kind: 'integer', help: '1 to 1440. With the focus outside every Switchboard window for this long, the voice stops speaking for its session.', placeholder: '2' },
+      ],
+    },
+    {
       heading: 'Spoken alerts',
+      needsVoice: true,
       fields: [
         { path: 'voice.spokenAlerts', label: 'Spoken alerts', kind: 'boolean', help: 'When a session the voice is not speaking for finishes or waits on you, say so, as in “Hey Alex? Tinker finished Fix the badge.”, and read its reply if you answer “yes” or “tell me”.', fallback: true },
         { path: 'voice.operatorName', label: 'Your name', kind: 'text', help: 'The name alerts call you by. Empty says only “Hey?”.', placeholder: 'No name' },
-        { path: 'voice.alertOn.finished', label: 'Alert when a turn finishes', kind: 'boolean', help: '', fallback: true },
-        { path: 'voice.alertOn.question', label: 'Alert on a question', kind: 'boolean', help: '', fallback: true },
-        { path: 'voice.alertOn.permission', label: 'Alert on a permission prompt', kind: 'boolean', help: '', fallback: true },
+        { path: 'voice.alertOn.finished', label: 'A turn finishes', kind: 'boolean', help: '', fallback: true, group: 'Alert when' },
+        { path: 'voice.alertOn.question', label: 'A question', kind: 'boolean', help: '', fallback: true, group: 'Alert when' },
+        { path: 'voice.alertOn.permission', label: 'A permission prompt', kind: 'boolean', help: '', fallback: true, group: 'Alert when' },
         { path: 'voice.alertAnswerSeconds', label: 'Answer window (seconds)', kind: 'integer', help: '3 to 60. How long the voice listens for your answer after an alert, even after the away or mic idle timeout; the mic must be on.', placeholder: '10' },
       ],
     },
+  ];
+}
+
+const DUPLEX_INFO_TAIL = ' Used while Switchboard runs in a Remote Desktop session.';
+
+/**
+ * The Listening page (architecture.md § Dictation, § Voice check and barge-in): the microphone with the voice enrolment, dictation, talking
+ * over replies, holding dictation while someone else speaks, and under Advanced the voice match threshold. The pitch check's two factors are
+ * settings.json only (operator decision 2026-11-25).
+ */
+export function listeningFields(): Section[] {
+  return [
+    { heading: 'Microphone', block: 'enroll', needsVoice: true, fields: [{ path: 'voice.inputDevice', label: 'Input device', kind: 'text', help: 'Part of the capture device’s name, such as Headset. Empty uses the system default.', placeholder: 'System default' }] },
     {
       heading: 'Dictation',
+      needsVoice: true,
       fields: [
-        { path: 'voice.micIdleMinutes', label: 'Mic idle timeout (minutes)', kind: 'integer', help: '0 to 1440. After this many minutes of silence the mic stops listening, even with the voice here; 0 never stops it.', placeholder: '10' },
         { path: 'voice.endPauseMs', label: 'End-of-message pause (ms)', kind: 'integer', help: '500 to 20000. How long a pause ends a dictated message; turn detection shortens it when the words look finished.', placeholder: '3000' },
-        { path: 'voice.inputDevice', label: 'Input device', kind: 'text', help: 'Part of the capture device’s name, such as Headset. Empty uses the system default.', placeholder: 'System default' },
-        { path: 'voice.halfDuplexTailMs', label: 'Listening pause after speech (ms)', kind: 'integer', help: '0 to 5000. With no echo cancellation, as over Remote Desktop, the mic stops listening while the voice speaks and for this long after, and talking over a reply does not stop it.', placeholder: '800' },
-        { path: 'voice.duplex.local', label: 'Duplex on this computer', kind: 'select', help: DUPLEX_INFO, placeholder: 'auto', options: DUPLEX_MODES },
-        { path: 'voice.duplex.remote', label: 'Duplex over Remote Desktop', kind: 'select', help: `${DUPLEX_INFO} Used while Switchboard runs in a Remote Desktop session.`, placeholder: 'auto', options: DUPLEX_MODES },
+        { path: 'voice.micIdleMinutes', label: 'Mic idle timeout (minutes)', kind: 'integer', help: '0 to 1440. After this many minutes of silence the mic stops listening, even with the voice here; 0 never stops it.', placeholder: '10' },
       ],
     },
     {
-      heading: 'Voice check',
-      advanced: true,
+      heading: 'Talking over replies',
+      needsVoice: true,
       fields: [
-        { path: 'voice.matchThreshold', label: 'Voice match', kind: 'number', help: '0 to 1. A dictated piece that matches your enrolled voice less than this is dropped as someone else’s; one or two words get 0.15 less.', placeholder: '0.6' },
-        { path: 'voice.pitchLowFactor', label: 'Low pitch factor', kind: 'number', help: '1 to 3. A voiced moment at or under this many times your enrolled voice’s 90th-percentile pitch counts as low.', placeholder: '1.22' },
-        { path: 'voice.pitchMinLowShare', label: 'Least low share', kind: 'number', help: '0 to 1. A piece with a smaller share of low moments is dropped as someone else’s; 0 turns the pitch check off.', placeholder: '0.2' },
+        { path: 'voice.duplex.local', label: 'Duplex on this computer', kind: 'select', help: DUPLEX_INFO, placeholder: 'auto', options: DUPLEX_MODES },
+        { path: 'voice.duplex.remote', label: 'Duplex over Remote Desktop', kind: 'select', help: `${DUPLEX_INFO}${DUPLEX_INFO_TAIL}`, placeholder: 'auto', options: DUPLEX_MODES },
+        { path: 'voice.halfDuplexTailMs', label: 'Listening pause after speech (ms)', kind: 'integer', help: '0 to 5000. With no echo cancellation, as over Remote Desktop, the mic stops listening while the voice speaks and for this long after, and talking over a reply does not stop it.', placeholder: '800' },
+      ],
+    },
+    {
+      heading: 'Someone else speaking',
+      needsVoice: true,
+      fields: [
         { path: 'voice.roomHold', label: 'Hold dictation when another person speaks', kind: 'boolean', help: 'When Switchboard detects another voice, it keeps dictated messages in the composer until you press Enter. Turn this off if other people often speak nearby.', fallback: true },
         { path: 'voice.roomHoldSeconds', label: 'Dictation hold time (seconds)', kind: 'integer', help: 'Keep dictated messages in the composer for 1 to 3600 seconds after another voice was last detected.', placeholder: '60' },
       ],
     },
     {
-      heading: 'Playbook personas',
-      fields: assigned.map(
-        (playbook): Field => ({
-          path: `voice.playbookPersonas.${playbook}`,
-          label: playbooks.includes(playbook) ? playbook : `${playbook} (missing)`,
-          kind: 'select',
-          help: '',
-          options: withCurrent([{ value: '', label: 'None' }, ...personas], getAt(value, `voice.playbookPersonas.${playbook}`)),
-        }),
-      ),
+      heading: 'Advanced',
+      advanced: true,
+      needsVoice: true,
+      fields: [{ path: 'voice.matchThreshold', label: 'Voice match', kind: 'number', help: '0 to 1. A dictated piece that matches your enrolled voice less than this is dropped as someone else’s; one or two words get 0.15 less.', placeholder: '0.6' }],
     },
   ];
+}
+
+/**
+ * The Personas page (PRD R106): a persona select for each task playbook, by namespace (`voice.playbookPersonas`), and the assignments whose
+ * playbook no longer exists, marked missing; None removes an assignment. A playbook's own page edits the same key.
+ */
+export function personasFields(state: EditorState): Section[] {
+  const map = getAt(state.value ?? undefined, 'voice.playbookPersonas');
+  const assigned = isObject(map) ? Object.keys(map) : [];
+  const tasks = state.playbookNames.filter((name) => state.playbookValue(name)?.kind === 'task');
+  const sections: Section[] = state.namespaces
+    .map((space) => ({ heading: space, needsVoice: true, fields: tasks.filter((name) => name.split(':')[0] === space).map((name) => personaField(state, name, name.slice(name.indexOf(':') + 1))) }))
+    .filter((section) => section.fields.length > 0);
+  const missing = assigned.filter((name) => !tasks.includes(name));
+
+  if (missing.length > 0) {
+    sections.push({ heading: 'Missing playbooks', needsVoice: true, fields: missing.map((name) => personaField(state, name, `${name} (missing)`, 'This playbook is not in settings.json, or is not a task playbook. Choose None to remove its persona.')) });
+  }
+
+  return sections;
 }
 
 /** A persona's fields (PRD R106); its ID is set by New persona and not edited, because sessions and assignments store it. */
@@ -1240,6 +1291,7 @@ export function displayFields(): Section[] {
   return [
     {
       heading: 'Notifications',
+      link: { text: 'Spoken alerts, which the voice says, are on Speaking.', label: 'Open Speaking', page: 'speaking' },
       fields: [
         {
           path: 'alerts.surface',
@@ -1253,6 +1305,13 @@ export function displayFields(): Section[] {
             { value: 'system', label: 'System notification' },
           ],
         },
+        { path: 'voice.needsYouSound', label: 'Needs-you sound', kind: 'boolean', help: 'Play a short sound when another work item starts needing you: between spoken replies, or with a page or system notification when the voice does not play it.', fallback: true },
+      ],
+    },
+    {
+      heading: 'Replies',
+      fields: [
+        { path: 'voice.briefReplies', label: 'Collapse details', kind: 'boolean', help: "Fold a reply's details, the part after its primary response, under a fade until the reply is opened. The newest reply shows in full until a newer one comes. Off, replies show in full. A paired device keeps its own choice.", fallback: false },
       ],
     },
     {
@@ -1506,9 +1565,6 @@ export function pageSections(state: EditorState, page: string): Section[] {
     return scheduleFields(state, page.slice('schedule:'.length));
   }
 
-  if (page === 'voice') {
-    return voiceFields(state);
-  }
 
   if (/^persona:\d+$/.test(page)) {
     return personaFields(state, Number(page.slice('persona:'.length)));
@@ -1519,7 +1575,7 @@ export function pageSections(state: EditorState, page: string): Section[] {
 
 /** The settings pages the navigation offers, each of which owns the errors that name its fields. */
 export function settingsPages(state: EditorState): string[] {
-  return [...Object.keys(PAGES), ...state.sourceNames.map((name) => `source:${name}`), ...state.scheduleNames.map((name) => `schedule:${name}`), 'voice', ...state.personas.map((_, index) => `persona:${index}`)];
+  return [...Object.keys(PAGES), ...state.sourceNames.map((name) => `source:${name}`), ...state.scheduleNames.map((name) => `schedule:${name}`), ...state.personas.map((_, index) => `persona:${index}`)];
 }
 
 /** Every settings field path, with the page that shows it. */
@@ -1553,7 +1609,7 @@ export function fieldOfError(error: string, paths: readonly string[]): string | 
 function sectionPage(error: string): string | null {
   const section = /^([a-z]+)\b/i.exec(error)?.[1];
 
-  return section === 'voice' ? 'voice' : section === 'sessions' ? HOME : section === 'triage' ? 'triage' : section === 'alerts' ? 'display' : section === 'web' ? 'advanced' : null;
+  return section === 'voice' ? (/^voice\.pitch/.test(error) ? 'listening' : 'speaking') : section === 'sessions' ? HOME : section === 'triage' ? 'triage' : section === 'alerts' ? 'display' : section === 'web' ? 'advanced' : null;
 }
 
 /** The page that holds each error's field; an error with no field, or whose page the navigation does not offer, maps to null and shows on every page. */
@@ -1581,7 +1637,7 @@ export function errorPages(state: EditorState): Map<string, string | null> {
  * no field for included, and otherwise each of its fields' keys, since pages such as Sessions and Advanced share the `sessions` object.
  */
 export function pagePaths(state: EditorState, page: string): string[] {
-  return page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : page.startsWith('schedule:') ? [`schedules.${page.slice('schedule:'.length)}`] : PAGES[page] === undefined ? [] : pageSections(state, page).flatMap((section) => section.fields.map((field) => field.path));
+  return page === 'personas' ? ['voice.playbookPersonas'] : page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : page.startsWith('schedule:') ? [`schedules.${page.slice('schedule:'.length)}`] : PAGES[page] === undefined ? [] : pageSections(state, page).flatMap((section) => section.fields.map((field) => field.path));
 }
 
 export function pageDirty(state: EditorState, page: string): boolean {
@@ -1590,16 +1646,14 @@ export function pageDirty(state: EditorState, page: string): boolean {
   }
 
   if (page.startsWith('playbook:')) {
-    return state.playbookDirty(page.slice('playbook:'.length));
+    const path = `${ASSIGNMENTS}${page.slice('playbook:'.length)}`;
+
+    // Its page edits its persona too, which settings.json keeps under voice.playbookPersonas.
+    return state.playbookDirty(page.slice('playbook:'.length)) || (state.draft !== null && json(getAt(state.draft, path)) !== json(getAt(state.config.settings.value, path)));
   }
 
   if (state.draft === null) {
     return false;
-  }
-
-  // The Voice page edits the voice section but the personas, which have pages of their own.
-  if (page === 'voice') {
-    return json(withoutPersonas(state.draft['voice'])) !== json(withoutPersonas(isObject(state.config.settings.value) ? state.config.settings.value['voice'] : undefined));
   }
 
   if (page.startsWith('persona:')) {
@@ -1612,17 +1666,6 @@ export function pageDirty(state: EditorState, page: string): boolean {
   return state.draft !== null && pagePaths(state, page).some((path) => json(getAt(state.draft!, path)) !== json(getAt(state.config.settings.value, path)));
 }
 
-/** The voice section without its roster; one that holds only personas, or none, is no change to the Voice page. */
-function withoutPersonas(voice: Json | undefined): Json | undefined {
-  if (!isObject(voice)) {
-    return voice;
-  }
-
-  const { personas: _, ...rest } = voice;
-
-  return Object.keys(rest).length === 0 ? undefined : rest;
-}
-
 export function pageHasErrors(state: EditorState, page: string): boolean {
   if (page.startsWith('namespace:')) {
     return state.namespacePlaybooks(page.slice('namespace:'.length)).some((name) => pageHasErrors(state, `playbook:${name}`));
@@ -1631,7 +1674,8 @@ export function pageHasErrors(state: EditorState, page: string): boolean {
   if (page.startsWith('playbook:')) {
     const name = page.slice('playbook:'.length);
 
-    return state.playbookErrors(name).length > 0 || (state.hasPlaybook(name) && state.playbookValue(name) === null);
+    // Its persona's errors too, since its page shows that select.
+    return state.playbookErrors(name).length > 0 || (state.hasPlaybook(name) && state.playbookValue(name) === null) || state.settingsErrors.some((error) => assignmentError(error, name));
   }
 
   return [...errorPages(state).values()].includes(page);
@@ -1727,7 +1771,11 @@ export function nav(state: EditorState): NavCategory[] {
     { label: 'App', entries: [item(state, 'display', 'Alerts and display'), item(state, 'devices', 'Devices'), item(state, 'advanced', 'Advanced')] },
     {
       label: 'Voice',
-      entries: [item(state, 'voice', 'Voice settings'), group(state, 'personas', 'Personas', [...state.personas.map((_, index) => item(state, `persona:${index}`, state.personaLabel(index))), add(state, 'New persona', 'new-persona')], undefined, 'voice.personas')],
+      entries: [
+        item(state, 'speaking', 'Speaking'),
+        item(state, 'listening', 'Listening'),
+        group(state, 'personas', 'Personas', [...state.personas.map((_, index) => item(state, `persona:${index}`, state.personaLabel(index))), add(state, 'New persona', 'new-persona')], { page: 'personas', label: 'Playbook personas' }, 'voice.personas'),
+      ],
     },
   ];
 }
@@ -1795,7 +1843,10 @@ export interface FieldView {
 export interface SectionView {
   heading: string;
   advanced: boolean;
-  block?: 'devices' | 'file';
+  block?: 'devices' | 'file' | 'enroll';
+  link?: { text: string; label: string; page: string };
+  /** Dimmed, since the voice is off and its settings need it. */
+  dimmed: boolean;
   /** What a collapsed Advanced section holds, beside its heading. */
   summary: string;
   fields: FieldView[];
@@ -1832,8 +1883,8 @@ export interface PlaybookTable {
 }
 
 export interface PageView {
-  /** The Voice page's Assign row: the task playbooks with no persona yet and the roster's personas. */
-  assign?: { playbooks: string[]; personas: FieldOption[] };
+  /** Whether the voice is off and the whole page needs it, so it says so above its dimmed settings. */
+  voiceOff?: boolean;
   newName?: NewNameView;
   table?: PlaybookTable;
   title: string;
@@ -1892,13 +1943,6 @@ export function pageView(state: EditorState): PageView {
     return state.scheduleNames.includes(name)
       ? settingsPage(state, name, scheduleFields(state, name), [{ command: 'remove-schedule', label: 'Remove schedule', argument: name }], [])
       : { title: name, lede: null, buttons: [], notes: [], errors: [], message: 'This schedule no longer exists.', sections: [] };
-  }
-
-  if (page === 'voice') {
-    const voice = settingsPage(state, 'Voice', voiceFields(state), [], []);
-    const personas = personaOptions(state);
-
-    return voice.message === null ? { ...voice, assign: { playbooks: personas.length === 0 ? [] : unassignedPlaybooks(state), personas } } : voice;
   }
 
   if (page.startsWith('persona:')) {
@@ -1975,14 +2019,16 @@ export function pageView(state: EditorState): PageView {
       return { title: name, lede: null, buttons, errors: errors.length > 0 ? errors : [read.error!], message: FIX_ENTRY, ...blank };
     }
 
-    const { loose, sections } = playbookSections(state, read.fields, errors);
+    const { loose, sections } = playbookSections(state, read.fields, [...errors, ...state.settingsErrors.filter((error) => assignmentError(error, name))], name);
 
     return { title: name, lede: null, buttons, notes: [], errors: loose, message: null, sections };
   }
 
   const fixed = PAGES[page] ?? PAGES[HOME]!;
+  const view = settingsPage(state, fixed.title, fixed.sections(state), [], [], fixed.lede);
+  const shown = fixed.needsVoice === true && voiceOff(state) && view.message === null ? { ...view, voiceOff: true } : view;
 
-  return settingsPage(state, fixed.title, fixed.sections(state), [], [], fixed.lede);
+  return page === 'personas' && shown.message === null && state.personaIds.length === 0 ? { ...shown, sections: [], message: 'Add a persona with New persona to give a playbook its own.' } : shown;
 }
 
 const FIX_ENTRY = 'Fix this entry in settings.json in an editor, or delete it.';
@@ -2016,8 +2062,11 @@ function personaPage(state: EditorState, at: string): PageView {
  * A playbook page's sections: what it is for, when it starts, what it reports, what it runs as and its prompt, then the rarely changed kind,
  * returns and focus page under Advanced; a triage playbook's are what it is for, its instructions and its kind.
  */
-export function playbookPageSections(state: EditorState, playbook: PlaybookFields): Section[] {
-  const fields = playbookFields(state, playbook);
+export function playbookPageSections(state: EditorState, playbook: PlaybookFields, name: string | null = null): Section[] {
+  // A saved task playbook's persona, kept under voice.playbookPersonas, which the Personas page edits too.
+  // It shows with no roster too while the playbook has an assignment, so None can remove one that names a missing persona.
+  const persona = name !== null && playbook.kind === 'task' && (state.personaIds.length > 0 || getAt(state.value ?? undefined, `${ASSIGNMENTS}${name}`) !== undefined) ? [personaField(state, name, 'Persona', 'Its sessions take this persona unless one is pinned to the session.')] : [];
+  const fields = [...playbookFields(state, playbook), ...persona];
   const pick = (test: (path: string) => boolean): Field[] => fields.filter((field) => test(field.path));
   const of = (...paths: string[]): Field[] => paths.flatMap((path) => fields.filter((field) => field.path === path));
 
@@ -2033,22 +2082,23 @@ export function playbookPageSections(state: EditorState, playbook: PlaybookField
     { heading: 'About', fields: of('description') },
     { heading: 'Start', fields: of('autoStart', 'requiresWorktree') },
     { heading: 'Reports', fields: pick((path) => path.startsWith('reports.') || path === 'approvalSends') },
-    { heading: 'Run as', fields: of('provider', 'permissionMode', 'model', 'workdir') },
+    { heading: 'Run as', fields: of('provider', 'permissionMode', 'model', ...persona.map((field) => field.path), 'workdir') },
     { heading: 'Prompt', fields: of('template') },
     { heading: 'Advanced', advanced: true, fields: of('kind', 'returnOf', 'focus') },
   ];
 }
 
 /** The errors that name no field, and the playbook's sections with the errors that name each field. */
-function playbookSections(state: EditorState, playbook: PlaybookFields, errors: readonly string[]): { loose: string[]; sections: SectionView[] } {
-  const sections = playbookPageSections(state, playbook);
+function playbookSections(state: EditorState, playbook: PlaybookFields, errors: readonly string[], name: string | null = null): { loose: string[]; sections: SectionView[] } {
+  const sections = playbookPageSections(state, playbook, name);
   const paths = sections.flatMap((section) => section.fields.map((field) => field.path));
   const loose = errors.filter((error) => playbookFieldOfError(error, paths) === null);
   const views = sections.map((section) => ({
     heading: section.heading,
     advanced: section.advanced === true,
     summary: section.fields.map((field) => field.label).join(', '),
-    fields: section.fields.map((field) => fieldView(field, playbookFieldValue(playbook, field.path), errors.filter((error) => playbookFieldOfError(error, paths) === field.path))),
+    dimmed: false,
+    fields: section.fields.map((field) => fieldView(field, field.path.startsWith(ASSIGNMENTS) ? getAt(state.value ?? undefined, field.path) : playbookFieldValue(playbook, field.path), errors.filter((error) => playbookFieldOfError(error, paths) === field.path))),
   }));
 
   return { loose, sections: views };
@@ -2098,16 +2148,21 @@ export function settingsPage(state: EditorState, title: string, sections: readon
   const pages = errorPages(state);
   // Errors on no page show on every page; one that names no field but belongs to this page shows here.
   const errors = state.settingsErrors;
-  const loose = errors.filter((error) => {
-    const on = pages.get(error) ?? null;
+  // An error that names no field on any page can be fixed only in the file, so it says where that is.
+  const loose = errors
+    .filter((error) => {
+      const on = pages.get(error) ?? null;
 
-    return on === null || (on === state.page && fieldOfError(error, paths) === null);
-  });
+      return on === null || (on === state.page && fieldOfError(error, paths) === null);
+    })
+    .map((error) => `${error} Fix it in settings.json: ${settings.path}`);
   const views = sections.map((section) => ({
     heading: section.heading,
     advanced: section.advanced === true,
     summary: section.summary ?? section.fields.map((field) => field.label).join(', '),
     ...(section.block === undefined ? {} : { block: section.block }),
+    ...(section.link === undefined ? {} : { link: section.link }),
+    dimmed: section.needsVoice === true && voiceOff(state),
     fields: section.fields.map((field) => fieldView(field, getAt(value, field.path), errors.filter((error) => fieldOfError(error, paths) === field.path))),
   }));
 
@@ -2127,7 +2182,7 @@ export function fieldView(field: Field, value: Json | undefined, errors: string[
             ? value
             : JSON.stringify(value);
   const checked = typeof value === 'boolean' ? value : field.fallback === true;
-  const selected = typeof value === 'string' ? value : (field.placeholder ?? '');
+  const selected = typeof value === 'string' ? value : value !== undefined && field.invalidChoice !== undefined ? field.invalidChoice : (field.placeholder ?? '');
 
   return { field, text: shown, checked, selected, errors };
 }

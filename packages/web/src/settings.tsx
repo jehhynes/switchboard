@@ -6,7 +6,7 @@ import { isPhone } from './layout.js';
 import { QrCode, usedText } from './listHeader.js';
 import type { Device, Pairing } from './listHeader.js';
 import { applyPlaybookCell, configFolderHelp, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, HOME, nav, navEntry, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
-import type { Enrollment, Field, FieldOption, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
+import type { Enrollment, Field, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -50,7 +50,7 @@ interface View {
   /** The text typed in each field since the page was drawn, so a field shows what was typed, not the value read from it. */
   typing: Map<string, string>;
   ask: Ask | null;
-  /** Voiceprint enrolment as the hub last said, or null before the Voice page asked. */
+  /** Voiceprint enrolment as the hub last said, or null before Listening asked. */
   enrollment: Enrollment | null;
   /** Why the last enrolment request was refused or failed, or null. */
   enrollError: string | null;
@@ -213,8 +213,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       void devices();
     }
 
-    // The Voice page reads how enrolment stands when it first shows.
-    if (state?.page === 'voice' && !asked) {
+    // Listening reads how enrolment stands when it first shows.
+    if (state?.page === 'listening' && !asked) {
       asked = true;
       void enroll('status');
     }
@@ -383,7 +383,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       return;
     }
 
-    if (current.page.startsWith('playbook:')) {
+    // A playbook page's persona is a setting, kept under voice.playbookPersonas, not part of the playbook's entry.
+    if (current.page.startsWith('playbook:') && !field.path.startsWith('voice.playbookPersonas.')) {
       if (setPlaybook(current.page.slice('playbook:'.length), (playbook) => applyPlaybookField(playbook, field.path, input, checked))) {
         view.typing.set(field.path, input);
         edited();
@@ -392,7 +393,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       return;
     }
 
-    if (pageSections(current, current.page).length === 0) {
+    if (pageSections(current, current.page).length === 0 && !current.page.startsWith('playbook:')) {
       return;
     }
 
@@ -595,20 +596,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       }
     }
 
-    change(tidy(current, next), 'voice');
-  };
-
-  /** Gives a playbook a persona on the Voice page; the playbook's row then offers None to remove it. */
-  const assignPersona = (playbook: string, persona: string): void => {
-    const current = state;
-    const value = current?.value ?? null;
-
-    if (current === null || value === null || playbook === '' || !current.personaIds.includes(persona)) {
-      return;
-    }
-
-    current.setDraft(setAt(value, `voice.playbookPersonas.${playbook}`, persona));
-    edited();
+    change(tidy(current, next), 'personas');
   };
 
   /** A page's header button: Create, or the remove of the page's own entry, which only changes the draft. */
@@ -856,8 +844,11 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     saveStay: () => void save(),
     discard: closeNow,
     editCell,
-    assignPersona,
     enroll: (action) => void enroll(action),
+    voiceSwitch: () => {
+      navigate('speaking');
+      host.querySelector<HTMLElement>('[data-path="voice.enabled"] input')?.focus();
+    },
     pair: () => void devices({ pair: true }),
     signOut: (id) => void devices({ revoke: id }),
     deviceVoice: (id, allow) => void devices({ voice: { id, allow } }),
@@ -975,7 +966,8 @@ interface Handlers {
   discard(): void;
   answer(choice: 'save' | 'discard' | 'keep' | 'delete'): void;
   editCell(name: string, path: string, checked: boolean): void;
-  assignPersona(playbook: string, persona: string): void;
+  /** Opens Speaking with the focus on the voice's switch. */
+  voiceSwitch(): void;
   enroll(action: string): void;
   pair(): void;
   signOut(id: string): void;
@@ -1168,29 +1160,41 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
           {error}
         </p>
       ))}
+      {page.voiceOff === true ? <VoiceOff on={on} /> : null}
       {page.message === null ? null : <p class="settings-message">{page.message}</p>}
       {page.newName === undefined ? null : <NameFields names={page.newName} on={on} />}
       {page.table === undefined ? null : <Table table={page.table} on={on} />}
       {page.sections.map((section) => (
-        <SectionBlock state={state} section={section} view={view} on={on} />
+        <SectionBlock state={state} section={section} pageOff={page.voiceOff === true} view={view} on={on} />
       ))}
-      {page.assign === undefined ? null : <AssignRow assign={page.assign} on={on} />}
-      {state.page === 'voice' && page.message === null ? <EnrollRow view={view} on={on} /> : null}
     </>
   );
 }
 
-function SectionBlock({ state, section, view, on }: { state: EditorState; section: SectionView; view: View; on: Handlers }) {
+function SectionBlock({ state, section, pageOff, view, on }: { state: EditorState; section: SectionView; pageOff: boolean; view: View; on: Handlers }) {
   const rows = runs(section.fields).map((run) => (run.length > 1 || run[0]!.field.group !== undefined ? <GroupRow views={run} heading={section.heading} on={on} /> : <FieldRow field={run[0]!} view={view} on={on} />));
 
   if (!section.advanced) {
     return (
       <section class="settings-section">
         {section.heading === '' ? null : <h3 class="settings-section-heading">{section.heading}</h3>}
-        <div class="settings-card">
+        {/* A page the voice needs as a whole says it is off once, above its sections. */}
+        {section.dimmed && !pageOff ? <VoiceOff on={on} /> : null}
+        <div class={`settings-card${section.dimmed ? ' dimmed' : ''}`}>
           {rows}
+          {section.block === 'enroll' ? <EnrollRow view={view} on={on} /> : null}
           {section.block === 'devices' ? <DevicesBlock remote={view.remote} on={on} /> : null}
           {section.block === 'file' ? <FileBlock state={state} /> : null}
+          {section.link === undefined ? null : (
+            <div class="settings-row action settings-link-row">
+              <p class="settings-help">{section.link.text}</p>
+              <div class="settings-input">
+                <button type="button" class="link" onClick={() => on.navigate(section.link!.page)}>
+                  {section.link.label}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </section>
     );
@@ -1224,7 +1228,7 @@ function SectionBlock({ state, section, view, on }: { state: EditorState; sectio
           {open ? null : <span class="settings-toggle-summary">{section.summary}</span>}
         </button>
       </h3>
-      {open ? <div class="settings-card">{rows}</div> : null}
+      {open ? <div class={`settings-card${section.dimmed ? ' dimmed' : ''}`}>{rows}</div> : null}
     </section>
   );
 }
@@ -1303,47 +1307,6 @@ function Table({ table, on }: { table: PlaybookTable; on: Handlers }) {
           </tbody>
         ))}
       </table>
-    </div>
-  );
-}
-
-/** The Voice page's row that gives a task playbook a persona, or a line saying why it cannot. */
-function AssignRow({ assign, on }: { assign: { playbooks: string[]; personas: FieldOption[] }; on: Handlers }) {
-  if (assign.personas.length === 0 || assign.playbooks.length === 0) {
-    return <p class="settings-assign-note">{assign.personas.length === 0 ? 'Add a persona under Personas to give a playbook its own.' : 'Every task playbook has a persona.'}</p>;
-  }
-
-  const field: Field = { path: 'assign', label: 'Assign', kind: 'select', help: 'The playbook’s sessions take this persona unless one is pinned to the session.' };
-
-  return (
-    <div class="settings-row" data-path="assign">
-      <div class="settings-caption">
-        <label for="settings-assign-playbook">Assign</label>
-        <p class="settings-help">{field.help}</p>
-      </div>
-      <div class="settings-input settings-assign">
-        <select id="settings-assign-playbook" class="sheet-select settings-select" aria-label="Playbook">
-          {assign.playbooks.map((playbook) => (
-            <option value={playbook}>{playbook}</option>
-          ))}
-        </select>
-        <select id="settings-assign-persona" class="sheet-select settings-select" aria-label="Persona">
-          {assign.personas.map((persona) => (
-            <option value={persona.value}>{persona.label}</option>
-          ))}
-        </select>
-        <button
-          type="button"
-          class="sheet-button secondary"
-          onClick={(event) => {
-            const row = (event.currentTarget as HTMLElement).parentElement!;
-
-            on.assignPersona(row.querySelector<HTMLSelectElement>('#settings-assign-playbook')!.value, row.querySelector<HTMLSelectElement>('#settings-assign-persona')!.value);
-          }}
-        >
-          Assign
-        </button>
-      </div>
     </div>
   );
 }
@@ -1431,17 +1394,16 @@ function FileBlock({ state }: { state: EditorState }) {
   );
 }
 
-/** The Voice page's enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read. */
+/** Listening's voice enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read. */
 function EnrollRow({ view, on }: { view: View; on: Handlers }) {
   const row = enrollmentRow(view.enrollment, view.enrollError, Date.now());
 
   return (
-    <section class="settings-section settings-enroll">
-      <h3 class="settings-section-heading">Your voice</h3>
-      <div class="settings-card">
+    <div class="settings-enroll">
         <div class="settings-row action">
           <div class="settings-caption">
-            <p class="settings-enroll-status">{row.status}</p>
+            <span class="settings-label">Your voice</span>
+            <p class="settings-help settings-enroll-status">{row.status}</p>
           </div>
           <div class="settings-input">
             <button type="button" class="sheet-button secondary" title="Records a minute of your speech through the voice process; nothing of it reaches a session." onClick={() => on.enroll(row.command)}>
@@ -1456,8 +1418,19 @@ function EnrollRow({ view, on }: { view: View; on: Handlers }) {
             </div>
           )}
         </div>
-      </div>
-    </section>
+    </div>
+  );
+}
+
+/** Says the voice is off, above settings that need it, with a link to its switch on Speaking. */
+function VoiceOff({ on }: { on: Handlers }) {
+  return (
+    <p class="settings-voice-off">
+      Voice is off, so these settings do nothing until you turn it on.{' '}
+      <button type="button" class="link" onClick={on.voiceSwitch}>
+        Turn on voice
+      </button>
+    </p>
   );
 }
 
@@ -1618,7 +1591,7 @@ function GroupRow({ views, heading, on }: { views: FieldView[]; heading: string;
       )}
       <div class="settings-input settings-group">
         {views.map((shown) => (
-          <span class="settings-check" title={shown.field.help === '' ? undefined : shown.field.help}>
+          <span class="settings-check" data-path={shown.field.path} title={shown.field.help === '' ? undefined : shown.field.help}>
             <label class="settings-box"><input type="checkbox" id={inputId(shown.field.path)} checked={shown.checked} onChange={(event) => on.edit(shown.field, '', (event.currentTarget as HTMLInputElement).checked)} /></label>
             <label for={inputId(shown.field.path)}>{shown.field.label}</label>
             <Errors errors={shown.errors} />
