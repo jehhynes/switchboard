@@ -649,7 +649,7 @@ describe('the Changes list', () => {
     visible = { first: 0, last: 2 };
     await openRow(0);
     await flush();
-    // On screen 0 to 2 and the next: four wanted, three read at once.
+    // On screen 0 to 2 and the next three: six wanted, three read at once.
     expect(diffGets()).toHaveLength(3);
 
     // Scrolled far down before they answer: the rows wanted then are read next, never the ones left behind.
@@ -660,7 +660,7 @@ describe('the Changes list', () => {
       await flush();
     }
 
-    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f0.ts', 'f1.ts', 'f2.ts', 'f9.ts', 'f10.ts']);
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f0.ts', 'f1.ts', 'f2.ts', 'f9.ts', 'f10.ts', 'f11.ts']);
   });
 
   it('ChangesTab_With142Files_ReadsNothingUpFrontAndOnlyTheViewAndTheNext', async () => {
@@ -678,14 +678,14 @@ describe('the Changes list', () => {
     expect(changesMounts[0]!.rows).toHaveLength(142);
     expect(diffGets()).toEqual([]);
 
-    // Laid out with two files on screen: those and the next one, nothing more however long it waits.
+    // Laid out with two files on screen: those and the next three, nothing more however long it waits.
     visible = { first: 0, last: 1 };
     changesMounts[0]!.want();
     for (let index = 0; index < 10; index++) {
       await flush();
     }
 
-    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f0.ts', 'f1.ts', 'f2.ts']);
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1])).toEqual(['f0.ts', 'f1.ts', 'f2.ts', 'f3.ts', 'f4.ts']);
 
     // A jump from the list far down reads only there.
     visible = { first: 100, last: 100 };
@@ -694,7 +694,7 @@ describe('the Changes list', () => {
       await flush();
     }
 
-    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1]).slice(3)).toEqual(['f100.ts', 'f101.ts']);
+    expect(diffGets().map((one) => /path=([^&]*)/.exec(one)![1]).slice(5)).toEqual(['f100.ts', 'f101.ts', 'f102.ts', 'f103.ts']);
   });
 
   it('ChangesTab_WhenAFileChanges_ReadsItAgainWithItsETagAndKeepsItOn304', async () => {
@@ -1410,7 +1410,8 @@ describe('the Changes list', () => {
     root.querySelectorAll<HTMLElement>('.change-viewed input')[2]!.click();
     await flush();
     await flush();
-    expect(gets.slice(before)).toEqual(['VIEWED logo.png h-logo true 3', '/v1/conversation/changes?window=pk']);
+    // logo.png is among the files read ahead, so its diff may be read too.
+    expect(gets.slice(before).filter((one) => !one.startsWith('/v1/conversation/diff?'))).toEqual(['VIEWED logo.png h-logo true 3', '/v1/conversation/changes?window=pk']);
   });
 
   it('sends a file\'s ticks one at a time, ending on the last click', async () => {

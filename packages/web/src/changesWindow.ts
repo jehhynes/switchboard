@@ -1,11 +1,11 @@
-// Which files' diffs the Changes tab reads and holds (architecture.md § Web page, Changes tab): the files on screen and the next one, three
+// Which files' diffs the Changes tab reads and holds (architecture.md § Web page, Changes tab): the files on screen and the next three, three
 // reads at a time, nothing before the view has a size, and at most DIFF_BUDGET characters of patch and side text held, the furthest from the
 // view given up first.
 
 /** The most diff reads on their way at once. */
 export const MAX_IN_FLIGHT = 3;
-/** How many rows past the last on screen, and before the first, are read ahead. */
-export const READ_AHEAD = 1;
+/** How many rows past the last on screen, and before the first, are read ahead: three rather than one cut the time placeholders showed while scrolling at 6,000 px/s (mechanics M158). */
+export const READ_AHEAD = 3;
 export const READ_BEHIND = 0;
 /** The most characters of patch and side text the page holds for the Changes tab, about 24 MB. */
 export const DIFF_BUDGET = 24 * 1024 * 1024;
@@ -18,7 +18,7 @@ export function rowKey(base: string | null, row: { path: string; from?: string; 
   return JSON.stringify([base, row.path, row.from ?? null, row.status, row.hash]);
 }
 
-/** The rows to read, by index, in the order to read them: those on screen, then the next one. */
+/** The rows to read, by index, in the order to read them: those on screen, then the next {@link READ_AHEAD}. */
 export function wantedIndexes(visible: { first: number; last: number } | null, count: number): number[] {
   if (visible === null || count === 0) {
     return [];

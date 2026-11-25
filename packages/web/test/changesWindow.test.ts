@@ -3,8 +3,8 @@ import { evictions, largeReason, rowKey, wantedIndexes } from '../src/changesWin
 
 describe("the Changes tab's reads", () => {
   it('WantedIndexes_ForTheView_ListsOnScreenThenTheNextOne', () => {
-    expect(wantedIndexes({ first: 4, last: 6 }, 20)).toEqual([4, 5, 6, 7]);
-    expect(wantedIndexes({ first: 0, last: 0 }, 20)).toEqual([0, 1]);
+    expect(wantedIndexes({ first: 4, last: 6 }, 20)).toEqual([4, 5, 6, 7, 8, 9]);
+    expect(wantedIndexes({ first: 0, last: 0 }, 20)).toEqual([0, 1, 2, 3]);
     expect(wantedIndexes({ first: 18, last: 19 }, 20)).toEqual([18, 19]);
     expect(wantedIndexes({ first: 0, last: 30 }, 3)).toEqual([0, 1, 2]);
     expect(wantedIndexes(null, 20)).toEqual([]);
