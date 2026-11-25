@@ -51,14 +51,15 @@ export function renderComposer(): VNode {
         <span>Sent. Its reply shows on the Conversation tab.</span>
       </div>
       <div class="composer">
-        <div class="glass composer-menu" role="listbox" hidden></div>
+        <div class="glass composer-menu" id="composer-list" role="listbox" hidden></div>
         <div class="attachments" role="list" aria-label="Attached files" hidden></div>
         <div class="composer-input">
           <div class="live-mirror">
             <span class="mirror-text" aria-hidden="true"></span>
             <span class="live-words" aria-live="polite" hidden></span>
           </div>
-          <textarea rows={1} aria-label="Message"></textarea>
+          {/* The box names the list it completes from and its active option, as a combobox does; a textarea may not take that role. */}
+          <textarea rows={1} aria-label="Message" aria-autocomplete="list" aria-controls="composer-list"></textarea>
         </div>
         {/* While the box has the focus and the mic is on here: dictation joins the draft and waits for Send (architecture.md § Dictation). */}
         <div class="composer-hint" hidden>
@@ -91,23 +92,30 @@ export function renderComposer(): VNode {
 /** What the composer's list shows: files and folders after `@`, or the session's slash commands after `/`, the active one marked. */
 export type ComposerMenu = { kind: 'files'; items: Array<{ path: string; dir: boolean }> } | { kind: 'commands'; items: Array<{ name: string; description: string }> };
 
-/** The composer's `@` or `/` list, or what found nothing. */
+/** The id of the composer list's option at `index`, which the box names as its active one. */
+export const composerOptionId = (index: number): string => `composer-option-${index}`;
+
+/** The composer's `@` or `/` list, or what found nothing as an option that cannot be chosen. */
 export function renderComposerMenu(menu: ComposerMenu, active: number): VNode {
   if (menu.items.length === 0) {
-    return <div class="menu-empty">{menu.kind === 'files' ? 'No matching files' : 'No matching commands'}</div>;
+    return (
+      <div class="menu-empty" role="option" aria-disabled="true" aria-selected="false">
+        {menu.kind === 'files' ? 'No matching files' : 'No matching commands'}
+      </div>
+    );
   }
 
   return (
     <>
       {menu.kind === 'files'
         ? menu.items.map((item, index) => (
-            <div class={`menu-item${index === active ? ' active' : ''}`} role="option" data-index={String(index)}>
+            <div class={`menu-item${index === active ? ' active' : ''}`} id={composerOptionId(index)} role="option" aria-selected={index === active} data-index={String(index)}>
               <span class={`codicon codicon-${item.dir ? 'folder' : 'file'}`}></span>
               <span class="menu-name">{item.path}</span>
             </div>
           ))
         : menu.items.map((item, index) => (
-            <div class={`menu-item command${index === active ? ' active' : ''}`} role="option" data-index={String(index)}>
+            <div class={`menu-item command${index === active ? ' active' : ''}`} id={composerOptionId(index)} role="option" aria-selected={index === active} data-index={String(index)}>
               <span class="menu-label">/{item.name}</span>
               {item.description === '' ? null : <span class="menu-description">{item.description}</span>}
             </div>

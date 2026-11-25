@@ -25,7 +25,7 @@ import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from '
 import { renderPersonaDialog } from './personas.js';
 import { renderSheet } from './sheet.js';
 import { toast } from './toast.js';
-import { renderComposer, renderComposerMenu, renderDraftNote, renderEndedNote, renderFrame, renderShared } from './composer.js';
+import { composerOptionId, renderComposer, renderComposerMenu, renderDraftNote, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { composerInput } from './composerInput.js';
 import { listHeader } from './listHeader.js';
 import { PhoneVoice } from './phoneVoice.js';
@@ -1165,6 +1165,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     menuOpen = null;
     menu.hidden = true;
     mount(menu, null);
+    input.removeAttribute('aria-activedescendant');
   };
   const drawMenu = (): void => {
     if (menuOpen === null) {
@@ -1173,7 +1174,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     mount(menu, renderComposerMenu(menuOpen, active));
+    menu.setAttribute('aria-label', menuOpen.kind === 'files' ? 'Files' : 'Slash commands');
     menu.hidden = false;
+
+    if (menuOpen.items.length > 0) {
+      input.setAttribute('aria-activedescendant', composerOptionId(active));
+    } else {
+      input.removeAttribute('aria-activedescendant');
+    }
   };
   /** The `@` picker and the `/` list follow the text before the caret. */
   const follow = async (): Promise<void> => {

@@ -8153,6 +8153,36 @@ describe('the page against late answers', () => {
     expect(sends().map((one) => one['text'])).toEqual(['fix it', 'fix it and more']);
     page.close();
   });
+  it("names the composer list and its active option for screen readers, as the box's list", async () => {
+    const { page, source } = start(/commands/);
+    const input = root.querySelector('textarea')!;
+    const menu = root.querySelector<HTMLElement>('.composer-menu')!;
+    const selected = () => [...menu.querySelectorAll('[role="option"]')].map((option) => option.getAttribute('aria-selected'));
+
+    helloFor(source, 1, 3);
+    expect(input.getAttribute('aria-autocomplete')).toBe('list');
+    expect(input.getAttribute('aria-controls')).toBe(menu.id);
+    expect(menu.getAttribute('role')).toBe('listbox');
+    typeIn('/c');
+    pending.shift()!.resolve(commands);
+    await flush();
+    expect(menu.getAttribute('aria-label')).toBe('Slash commands');
+    expect(selected()).toEqual(['true', 'false']);
+    expect(document.getElementById(input.getAttribute('aria-activedescendant')!)!.textContent).toContain('/compact');
+    key('ArrowDown');
+    expect(selected()).toEqual(['false', 'true']);
+    expect(document.getElementById(input.getAttribute('aria-activedescendant')!)!.textContent).toContain('/clear');
+    key('Escape');
+    expect(input.hasAttribute('aria-activedescendant')).toBe(false);
+
+    // Nothing found is an option that cannot be chosen, and no option is active.
+    typeIn('/z');
+    pending.shift()!.resolve({ status: 200, body: { commands: [] } });
+    await flush();
+    expect(menu.querySelector('[role="option"]')!.getAttribute('aria-disabled')).toBe('true');
+    expect(input.hasAttribute('aria-activedescendant')).toBe(false);
+    page.close();
+  });
 });
 
 describe("the list's CSS", () => {
