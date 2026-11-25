@@ -8082,6 +8082,39 @@ describe('the page against late answers', () => {
     expect(menu.hidden).toBe(true);
     page.close();
   });
+  it('picks from the composer list only on a bare Enter or Tab, and leaves keys an input method composes with to it', async () => {
+    const { page, source } = start(/commands/);
+    const input = root.querySelector('textarea')!;
+    const menu = root.querySelector<HTMLElement>('.composer-menu')!;
+
+    helloFor(source, 1, 3);
+    typeIn('/co');
+    pending.shift()!.resolve(commands);
+    await flush();
+    expect(menu.hidden).toBe(false);
+
+    // Shift+Enter and Shift+Tab keep their own meaning, a new line and the focus moving back.
+    expect(key('Enter', { shiftKey: true })).toBe(true);
+    expect(key('Tab', { shiftKey: true })).toBe(true);
+    // Ctrl, Alt or Meta with Enter or Tab do nothing.
+    for (const modifier of ['ctrlKey', 'altKey', 'metaKey']) {
+      expect(key('Enter', { [modifier]: true })).toBe(false);
+      expect(key('Tab', { [modifier]: true })).toBe(false);
+    }
+
+    // An input method's Enter, marked as composing or only by key code 229, is its own, with the list open or not.
+    key('Enter', { isComposing: true });
+    key('Enter', { keyCode: 229 });
+    expect(input.value).toBe('/co');
+    expect(menu.hidden).toBe(false);
+    key('Escape');
+    key('Enter', { isComposing: true });
+    key('Enter', { keyCode: 229 });
+    await flush();
+    expect(input.value).toBe('/co');
+    expect(sends()).toEqual([]);
+    page.close();
+  });
 });
 
 describe("the list's CSS", () => {

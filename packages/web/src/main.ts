@@ -1381,6 +1381,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     void follow();
   });
   input.addEventListener('keydown', (event) => {
+    // Keys an input method composes with are its own: they neither pick from the list nor send. Some browsers mark its Enter only with key code 229.
+    if (event.isComposing || event.keyCode === 229) {
+      return;
+    }
+
     if (menuOpen !== null && menuOpen.items.length > 0 && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       active = (active + (event.key === 'ArrowDown' ? 1 : menuOpen.items.length - 1)) % menuOpen.items.length;
       drawMenu();
@@ -1388,8 +1393,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    if (menuOpen !== null && (event.key === 'Enter' || event.key === 'Tab') && menuOpen.items.length > 0) {
-      choose(active);
+    // Only a bare Enter or Tab picks: Shift+Enter adds a line and Shift+Tab moves the focus, and with Ctrl, Alt or Meta the key does nothing,
+    // so a half-typed query is never sent.
+    if (menuOpen !== null && (event.key === 'Enter' || event.key === 'Tab') && menuOpen.items.length > 0 && !event.shiftKey) {
+      if (!event.ctrlKey && !event.altKey && !event.metaKey) {
+        choose(active);
+      }
+
       event.preventDefault();
       return;
     }
