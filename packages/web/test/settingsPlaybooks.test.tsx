@@ -131,7 +131,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect(checked().playbooks['dev:build']).toEqual(file.playbooks['dev:build']);
     expect(entry('build').querySelector('.settings-dirty')).toBeNull();
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('');
   });
 
   it("shows a triage playbook's few fields, and changing the kind to triage drops the task's reports", async () => {
@@ -207,7 +207,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     const press = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((one) => one.textContent?.trim() === label)!.click();
 
     type('[data-path="description"] input', 'Review it');
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('');
     press('Create');
     await settle();
     expect(host.querySelector('[data-path="new-name"] .settings-field-error')?.textContent).toBe('Namespace and name must be lowercase letters, digits and hyphens.');

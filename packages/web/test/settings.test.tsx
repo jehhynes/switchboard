@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { CHECK_DELAY_MS, settings } from '../src/settings.js';
-import { EditorState, fieldOfError, getAt, parseConfig, readField, setAt, withCurrent, sourceFields, sourceTitle } from '../src/settingsModel.js';
+import { bar, EditorState, fieldOfError, getAt, parseConfig, readField, setAt, withCurrent, sourceFields, sourceTitle } from '../src/settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -78,6 +78,29 @@ describe('the Settings model (settingsModel.ts)', () => {
     expect(fieldOfError('sources.gh: unknown key x.', paths)).toBe('sources.gh.kind');
     expect(fieldOfError('sessions.modelx is unknown.', paths)).toBeNull();
     expect(withCurrent([{ value: 'a', label: 'A' }], 'b')).toEqual([{ value: 'a', label: 'A' }, { value: 'b', label: 'b (missing)' }]);
+  });
+
+  it('says Saved only after a save since Settings opened, Unsaved changes while a draft differs, and the errors alone otherwise', () => {
+    const state = new EditorState(parseConfig(config({ sessions: { concurrency: 2 } })));
+
+    expect(bar(state).status).toBe('');
+    state.errors = ['x'];
+    expect(bar(state).status).toBe('1 error');
+    state.errors = [];
+    state.setDraft({ sessions: { concurrency: 3 } });
+    expect(bar(state).status).toBe('Unsaved changes');
+    // A read of the file that changes nothing is no save.
+    state.refresh(parseConfig(config({ sessions: { concurrency: 2 } })));
+    expect(bar(state).status).toBe('Unsaved changes');
+    state.dropDraft();
+    expect(bar(state).status).toBe('');
+    state.setDraft({ sessions: { concurrency: 3 } });
+    state.wrote({ sessions: { concurrency: 3 } }, 'v2');
+    expect(bar(state).status).toBe('Saved');
+    state.setDraft({ sessions: { concurrency: 4 } });
+    expect(bar(state).status).toBe('Unsaved changes');
+    state.dropDraft();
+    expect(bar(state).status).toBe('Saved');
   });
 
   it('keeps a draft over a read unless it holds no edit, and marks a draft whose file changed on disk', () => {
@@ -162,7 +185,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect([...field<HTMLSelectElement>('web.diffLayout').options].map((one) => one.value)).toEqual(['auto', 'split', 'stacked']);
     expect([...field<HTMLSelectElement>('web.diffWrap').options].map((one) => one.textContent)).toContain('Off');
     expect(host.querySelector('.settings-toggle')?.getAttribute('aria-expanded')).toBe('false');
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('');
     expect(button('Save').disabled).toBe(true);
     expect(button('Discard').disabled).toBe(true);
     // A field shows its default as its placeholder, and a select its default choice.
@@ -216,7 +239,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     await opened();
 
     expect(texts('.settings-bar .settings-warning')).toEqual([retired]);
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('');
 
     type('sessions.concurrency', '3');
     await settle(CHECK_DELAY_MS);
@@ -295,7 +318,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-devices .pair strong')?.textContent).toBe('https://pc.tail.ts.net/');
     expect(button('New code')).toBeDefined();
     // Pairing changes nothing in settings.json.
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('');
 
     // Closing drops the code; opening again lists the devices again.
     pane.requestClose();
@@ -318,7 +341,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     type('sessions.concurrency', '');
     await settle(CHECK_DELAY_MS);
     expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, playbooks: { 'dev:x': { description: 'X', template: 'Do' } } });
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('');
   });
 
   it('saves the whole draft at the version it started from, reads the file again and closes; Ctrl+S saves and stays open', async () => {
@@ -505,7 +528,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     expect(host.querySelectorAll('.settings-page .settings-error')).toHaveLength(0);
     expect(host.querySelector('.settings-nav-entry.current .settings-errors')).toBeNull();
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved · 1 error');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('1 error');
     expect(field<HTMLInputElement>('sessions.model').value).toBe('');
 
     host = document.createElement('div');
@@ -655,7 +678,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
     expect(texts('.settings-nav-entry .settings-nav-label')).toContain('+ New Zoho Desk source');
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('');
 
     entry('GitHub').click();
     await settle();
@@ -690,7 +713,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
     name('adhoc');
     expect(host.querySelector('[data-path="new-name"] .settings-field-error')?.textContent).toBe("adhoc names Switchboard's own tickets; choose another name.");
     name('widgets-dashboard');
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('');
 
     const kind = host.querySelector<HTMLSelectElement>('#settings-new-kind')!;
 

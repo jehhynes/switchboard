@@ -154,7 +154,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Voice');
     expect(checked().voice).toBeUndefined();
-    expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
+    expect(host.querySelector('.settings-status')?.textContent).toBe('');
   });
 
   it("shows a persona entry's error at the top of its page and a Voice error on its field", async () => {

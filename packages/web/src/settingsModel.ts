@@ -241,6 +241,8 @@ export class EditorState {
   /** A refused save's errors, or the check errors that stopped a save; shown in the bar until the next edit, discard or successful save. */
   barErrors: string[] = [];
   saving = false;
+  /** Whether a save succeeded since Settings opened, so the bar says Saved only after one. */
+  saved = false;
   /** The name typed and kind chosen on the New source page, empty for the first kind, and whether Create was pressed. */
   newSource = { name: '', kind: '', touched: false };
 
@@ -475,6 +477,7 @@ export class EditorState {
 
   /** Takes a successful save of `sent` at `version`; a draft edited since continues from that version. */
   wrote(sent: JsonObject, version: string): void {
+    this.saved = true;
     this.config = { ...this.config, settings: { ...this.config.settings, version, value: clone(sent), error: null } };
 
     if (this.draft !== null && JSON.stringify(this.draft) === JSON.stringify(sent)) {
@@ -1637,7 +1640,7 @@ export function bar(state: EditorState): BarView {
     ? 'Saving…'
     : state.value === null
       ? 'settings.json cannot be read'
-      : [state.dirty ? 'Unsaved changes' : 'Saved', ...(count === 0 ? [] : [count === 1 ? '1 error' : `${count} errors`])].join(' · ');
+      : [...(state.dirty ? ['Unsaved changes'] : state.saved ? ['Saved'] : []), ...(count === 0 ? [] : [count === 1 ? '1 error' : `${count} errors`])].join(' · ');
   const warning = state.changedOnDisk ? 'settings.json changed on disk, so your changes cannot be saved. Discard them and open Settings again to load it.' : null;
 
   return { status, warning, warnings: state.warnings, errors: state.barErrors, canSave: state.dirty && !state.changedOnDisk && !state.saving, canDiscard: (state.dirty || state.changedOnDisk) && !state.saving };
