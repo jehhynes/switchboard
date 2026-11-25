@@ -6159,7 +6159,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     }
 
     // The composer's file list and the context meter's menu too.
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
     answers['/files'] = { status: 200, body: { files: [{ path: 'src/a.ts', dir: false }] } };
     input.value = '@a';
@@ -6854,7 +6854,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click('#detail .panel-max');
     expect(root.classList.contains('maximized')).toBe(true);
 
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
     const escape = (target: HTMLElement) => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     const stops = () => posts.filter((post) => post.url.endsWith('/stop-speaking')).length;
 
