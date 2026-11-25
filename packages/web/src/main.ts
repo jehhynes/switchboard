@@ -2,7 +2,7 @@ import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, ro
 import { snoozeChoices } from '@switchboard/core/snooze';
 import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 import type { PageState } from './model.js';
-import { MENU_MAX_WIDTH, placeMenus } from '@switchboard/conversation/menuPlace';
+import { MENU_MAX_WIDTH, menuPlace, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
 import { ARTIFACTS_SEEN, artifactShow, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unknownSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, NewDraft, SideTab, Tab, View } from './render.js';
@@ -2738,10 +2738,34 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       anchor.style.top = `${Math.round(height === 0 ? y : Math.min(Math.max(0, y), height))}px`;
     }
   };
+  /**
+   * Opens a question card's menu above its button where the conversation's visible room below it is short and the room above is longer
+   * (`menuPlace`, measured in the conversation's box as far as the viewport shows it, since that box clips the card). The card never scrolls, so
+   * its menu, a row or two, keeps its height.
+   */
+  const placeCardMenus = (): void => {
+    for (const cardMenu of panel.querySelectorAll<HTMLElement>('.qc-menu')) {
+      cardMenu.classList.remove('flip-y');
+
+      const box = panel.getBoundingClientRect();
+      const top = Math.max(box.top, 0);
+      const bottom = Math.min(box.bottom, document.documentElement.clientHeight);
+
+      if (bottom <= top || cardMenu.parentElement === null) {
+        continue;
+      }
+
+      const inBox = (rect: DOMRect) => ({ left: rect.left - box.left, right: rect.right - box.left, top: rect.top - top, bottom: rect.bottom - top, width: rect.width, height: rect.height });
+      const place = menuPlace(inBox(cardMenu.parentElement.getBoundingClientRect()), inBox(cardMenu.getBoundingClientRect()), { width: box.width, height: bottom - top });
+
+      cardMenu.classList.toggle('flip-y', place.flipY);
+    }
+  };
   /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Conversation view, Menus). */
   // A menu may set a wider max-width of its own, as the More menu does for its kind column.
   const fitMenus = (): void => {
     placeRowMenus();
+    placeCardMenus();
     placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }, (menu) => parseFloat(getComputedStyle(menu as unknown as Element).maxWidth) || MENU_MAX_WIDTH);
   };
   /**
@@ -4836,6 +4860,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
 
+    // A question card's menu closes on a press outside it and its button; the button's own click toggles it.
+    if (closeCardMenus(event.target instanceof Element ? event.target.closest('.qc-menu-anchor') : null)) {
+      draw();
+    }
+
     if ((view.picker || view.actions || view.viewMenu) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
       view.picker = false;
       view.actions = false;
@@ -4846,7 +4875,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   root.addEventListener('keydown', (event) => {
     // A question card's keys while it has the focus (design § 6): 1–8 pick by place, Down and Up move between options, Enter goes on or sends
     // (Shift+Enter adds a line to the comment), Backspace goes back.
-    const cardEl = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('.question-card.qc') : null;
+    // Not in the card's menu or on its button, whose keys are the menu's.
+    const cardEl = event.target instanceof HTMLElement && event.target.closest('.qc-menu-anchor') === null ? event.target.closest<HTMLElement>('.question-card.qc') : null;
 
     if (cardEl !== null && !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing) {
       const key = cardEl.dataset['card']!;
@@ -4937,6 +4967,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     let changesClosed: 'files' | 'scope' | null = null;
+    let cardMenu: HTMLElement | null = null;
+    // A question card's open menu that holds the focus, or whose button does, for Up and Down.
+    const cardAnchor = document.activeElement instanceof HTMLElement && document.activeElement.closest('.qc-menu-anchor')?.querySelector('.qc-menu') != null ? document.activeElement.closest<HTMLElement>('.qc-menu-anchor') : null;
 
     if (event.key === 'Escape' && view.personas !== null) {
       closePersonas();
@@ -4968,6 +5001,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
       event.stopImmediatePropagation();
+    } else if (event.key === 'Escape' && (cardMenu = root.querySelector<HTMLElement>('.qc-menu-button[aria-expanded="true"]')) !== null) {
+      const card = cardMenu.dataset['card']!;
+
+      closeCardMenus(null);
+      draw();
+      [...root.querySelectorAll<HTMLElement>('.qc-menu-button')].find((button) => button.dataset['card'] === card)?.focus();
+      event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && (changesClosed = changes.escape()) !== null) {
       draw();
       root.querySelector<HTMLElement>(changesClosed === 'scope' ? '.changes-scope' : '.changes-files')?.focus();
@@ -4979,9 +5019,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // A console typing into its session stops its keys first (console.ts), so its Escape stays the session's.
       maximizePanel(false);
       event.stopImmediatePropagation();
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.viewMenu || view.rowMenu !== null || view.tabMenu)) {
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.viewMenu || view.rowMenu !== null || view.tabMenu || cardAnchor !== null)) {
       // Up and Down move between the open menu's enabled rows.
-      const rows = [...(view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row:not(:disabled)') : view.tabMenu ? root.querySelectorAll<HTMLElement>('.tab-menu .menu-row') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row:not(:disabled)'))];
+      const rows = [...(cardAnchor !== null ? cardAnchor.querySelectorAll<HTMLElement>('.qc-menu [role="menuitem"]:not(:disabled)') : view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row:not(:disabled)') : view.tabMenu ? root.querySelectorAll<HTMLElement>('.tab-menu .menu-row') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row:not(:disabled)'))];
       const at = rows.indexOf(document.activeElement as HTMLElement);
 
       if (rows.length > 0) {
@@ -5258,6 +5298,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     },
     { signal: listening.signal },
   );
+  /** Closes each question card's open menu but the one whose anchor is `keep`; true when one closed. */
+  const closeCardMenus = (keep: Element | null): boolean => {
+    let closed = false;
+
+    for (const button of root.querySelectorAll<HTMLElement>('.qc-menu-button[aria-expanded="true"]')) {
+      if (keep === null || !keep.contains(button)) {
+        cardUi(button.dataset['card']!).menuOpen = false;
+        closed = true;
+      }
+    }
+
+    return closed;
+  };
   /** Closes the header's actions menu and the list's row menu. */
   const closeMenus = (): void => {
     view.actions = false;

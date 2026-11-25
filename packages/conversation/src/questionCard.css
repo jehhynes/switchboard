@@ -20,6 +20,8 @@
 .qc-menu-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; }
 .qc-menu-button:hover, .qc-menu-button:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15)); color: var(--vscode-foreground); }
 .qc-menu { position: absolute; z-index: 3; top: 100%; right: 0; margin-top: 4px; padding: 4px; border: 1px solid var(--vscode-menu-border, var(--qc-border)); border-radius: 6px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); white-space: nowrap; }
+/* Above its button where the conversation's room below is short (main.ts, placeCardMenus). */
+.qc-menu.flip-y { top: auto; bottom: 100%; margin: 0 0 4px; }
 .qc-menu button { display: block; width: 100%; padding: 4px 10px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-menu-foreground, var(--vscode-foreground)); font: inherit; text-align: left; cursor: pointer; }
 .qc-menu button:hover, .qc-menu button:focus-visible { outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, var(--vscode-foreground)); }
 .qc-topic { color: var(--vscode-textLink-foreground, var(--qc-accent)); font-size: 0.85em; font-weight: 600; }

@@ -6088,6 +6088,62 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     }
   });
 
+  it("closes a card's menu on Escape, before the maximized column, and on a press outside it, moves through it with Down, and opens it above its button where the conversation has no room below", async () => {
+    const width = window.innerWidth;
+
+    window.innerWidth = 1440;
+
+    const { page, source } = start();
+    const asked = '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2';
+    const menuOpen = () => root.querySelector('.qc-menu') !== null;
+
+    hello(source, { items: [reply('r1', 2, { opening: asked })], questions: { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] } });
+    click('#detail .panel-max');
+    click('[data-action="card-menu"]');
+    expect(menuOpen()).toBe(true);
+    // Down from its button reaches Dismiss.
+    root.querySelector<HTMLElement>('[data-action="card-menu"]')!.focus();
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(root.querySelector('[data-action="card-dismiss"]'));
+    // A letter there is the menu's, not an answer.
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true }));
+    expect(root.querySelector('[data-letter="A"]')!.getAttribute('aria-checked')).toBe('false');
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(menuOpen()).toBe(false);
+    expect(root.classList.contains('maximized')).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector('[data-action="card-menu"]'));
+
+    // A press inside keeps it, one outside closes it.
+    click('[data-action="card-menu"]');
+    root.querySelector('.qc-menu')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(menuOpen()).toBe(true);
+    root.querySelector('.qc-head')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(menuOpen()).toBe(false);
+
+    // Placed in the conversation's box (top 100, bottom 400 on a 600 px page): its button 30 px above the box's bottom opens it upward.
+    const rect = (top: number, height: number) => ({ left: 300, right: 340, top, bottom: top + height, width: 40, height, x: 300, y: top, toJSON: () => ({}) }) as DOMRect;
+
+    Object.defineProperty(document.documentElement, 'clientWidth', { value: 1440, configurable: true });
+    Object.defineProperty(document.documentElement, 'clientHeight', { value: 600, configurable: true });
+    vi.spyOn(root.querySelector('#panel')!, 'getBoundingClientRect').mockReturnValue(rect(100, 300));
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('qc-menu-anchor') ? rect(346, 24) : this.classList.contains('qc-menu') ? rect(374, 60) : rect(0, 0);
+    });
+    click('[data-action="card-menu"]');
+    expect(root.querySelector('.qc-menu')!.classList.contains('flip-y')).toBe(true);
+    // Near the box's top it opens down, as drawn.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('qc-menu-anchor') ? rect(120, 24) : this.classList.contains('qc-menu') ? rect(148, 60) : rect(0, 0);
+    });
+    root.querySelector('#panel')!.dispatchEvent(new Event('scroll'));
+    expect(root.querySelector('.qc-menu')!.classList.contains('flip-y')).toBe(false);
+    // The page's own size again, for the tests after this one.
+    delete (document.documentElement as { clientWidth?: number }).clientWidth;
+    delete (document.documentElement as { clientHeight?: number }).clientHeight;
+    window.innerWidth = width;
+    page.close();
+  });
+
   it('answers a card from the keyboard: numbers pick by place, arrows move between options, Enter goes on and sends, Backspace goes back', async () => {
     const { page, source } = start();
     const asked = '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove';
