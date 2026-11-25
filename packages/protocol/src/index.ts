@@ -236,6 +236,8 @@ export interface PageRow {
   band: string | null;
   /** Line 1's mic mark before the time on the voice target's row: its codicon glyph and tooltip; null on the others. */
   voice: { glyph: string; title: string } | null;
+  /** Line 1's waiting questions after the title: how many of the work item's questions wait on the operator (PRD R103); missing or 0 for none. */
+  questions?: number;
   /** The ticket whose History the row's menu opens: its ID and key; null when the row offers none. */
   history: { ticketId: number; key: string } | null;
 }

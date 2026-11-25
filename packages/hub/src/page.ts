@@ -488,6 +488,8 @@ export interface PageRow {
   band: string | null;
   /** Line 1's mic mark, before the time, on the voice target's row; null on the others. */
   voice: { glyph: string; title: string } | null;
+  /** Line 1's waiting questions after the title: how many of the work item's questions wait on the operator (PRD R103); 0 on a pool ticket's row. */
+  questions: number;
   /** The ticket whose History the row's menu opens, as the row's History command names it: its ID and key; null when the row offers none. */
   history: { ticketId: number; key: string } | null;
 }
@@ -707,9 +709,10 @@ function hostTitle(host: string): string {
 /**
  * The page's list (architecture.md § Web page): the list view's groups in its order, with their titles, glyphs and empty texts, holding the
  * list view's rows where it puts them: the work items', hosted conversations included (every conversation is a work item), and the pool
- * tickets' in Unstarted and Snoozed; `voice` names the voice target's row, which gets the mic mark.
+ * tickets' in Unstarted and Snoozed; `voice` names the voice target's row, which gets the mic mark, and `questions` counts a work item's waiting
+ * questions (`ConversationService.waitingQuestions`).
  */
-export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot, 'workItems' | 'pool'>, voice: PageVoiceMark | null = null): PageListGroup[] {
+export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot, 'workItems' | 'pool'>, voice: PageVoiceMark | null = null, questions: (item: Snapshot['workItems'][number]) => number = () => 0): PageListGroup[] {
   const items = new Map(snapshot.workItems.map((item) => [item.id, item]));
   const pool = new Set(snapshot.pool.map((entry) => entry.ticket.id));
 
@@ -722,7 +725,7 @@ export function pageList(dock: Pick<DockView, 'groups'>, snapshot: Pick<Snapshot
       const ticketId = Number(/^ticket:(\d+)$/.exec(row.key)?.[1] ?? NaN);
 
       if (item !== undefined) {
-        rows.push({ ...pageRow(row, item.id, item.ticket.hostWindow ?? null), voice: row.key === voice?.row ? { glyph: voice.glyph, title: voice.title } : null });
+        rows.push({ ...pageRow(row, item.id, item.ticket.hostWindow ?? null), voice: row.key === voice?.row ? { glyph: voice.glyph, title: voice.title } : null, questions: questions(item) });
       } else if (pool.has(ticketId)) {
         rows.push(pageRow(row, null, null, ticketId));
       }
@@ -762,6 +765,7 @@ export function pageRow(row: DockRow, workItemId: number | null, host: string | 
     search: row.search,
     band: row.band,
     voice: null,
+    questions: 0,
     history: historyOf(row),
   };
 }

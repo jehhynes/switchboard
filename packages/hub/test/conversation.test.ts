@@ -1440,6 +1440,95 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     };
     const messageOf = (answer: { body: unknown }) => (answer.body as { message: { id: string; text: string } }).message;
 
+    it("counts a work item's waiting questions for its list row, as the chip does, and sends the pages their list again when the count changes (PRD R103)", () => {
+      let counter: ConversationService | null = null;
+      const item2 = (status = 'running') => ({ status, sessions: [{ id: 's2' }] });
+      const context = setupSend(new FakeHeld(), undefined, undefined, {
+        pageList: () => [{ key: 'progress', title: 'In progress', glyph: '', empty: null, rows: [{ workItemId: 2, questions: counter!.waitingQuestions(item2()) } as never] }],
+      });
+      const { service, store, open, body } = context;
+
+      counter = service;
+      store.setPagePref('questionsLedgerSince', '1');
+      ask(store);
+
+      // A page that connects while a card waits is listed with its count; the dismissal of a question then lists the new count.
+      const mine = open(2);
+      const listed = () => mine.frames.flatMap((frame) => (Array.isArray(frame['groups']) ? [(frame['groups'] as Array<{ rows: Array<{ questions: number }> }>)[0]!.rows[0]!.questions] : []));
+
+      expect(listed()).toEqual([2]);
+      expect(service.questionsView('s2').open).toBe(2);
+
+      // A later card adds its questions, which reach this page though another page's hello listed them first.
+      ask(store, 'q2', '1. Another? {#another-one}\n   - A) x\n   - B) y');
+      const theirs = open(2);
+
+      service.questionsChangedNow('s2');
+      expect(listed()).toEqual([2, 3]);
+      expect(theirs.frames.filter((frame) => Array.isArray(frame['groups']))).toHaveLength(1);
+
+      // A card draft changes no count and sends no list.
+      expect(service.cardCommand('card-draft', { window: mine.key, scopeGen: 1, opId: 'd1', sessionId: 's2', card: 'reply:q1', draft: { step: 'keep-route', picks: {} } }).status).toBe(200);
+      expect(listed()).toEqual([2, 3]);
+
+      // A partial answer leaves the card's other question waiting.
+      expect(service.send(body(mine.key, { text: undefined, answers: [card()] })).status).toBe(200);
+      service.questionsChangedNow('s2');
+      expect(listed()).toEqual([2, 3, 2]);
+
+      // A dismissal, then a withdrawal, clear the rest.
+      expect(service.cardCommand('card-dismiss', { window: mine.key, scopeGen: 1, opId: 'x1', sessionId: 's2', card: 'reply:q1', slug: 'keep-route' }).status).toBe(200);
+      expect(listed()).toEqual([2, 3, 2, 1]);
+      ask(store, 'q3', 'Not needed after all.\n\n[withdraw: another-one]');
+      service.questionsChangedNow('s2');
+      expect(listed()).toEqual([2, 3, 2, 1, 0]);
+      expect(service.questionsView('s2').open).toBe(0);
+
+      // A page whose hello listed a question that is withdrawn before the change settles gets the list again, though the count is back where it was.
+      ask(store, 'q4', '1. Last one? {#last-one}\n   - A) x\n   - B) y');
+      const late = open(2);
+
+      ask(store, 'q5', 'Never mind.\n\n[withdraw: last-one]');
+      service.questionsChangedNow('s2');
+      expect(late.frames.flatMap((frame) => (Array.isArray(frame['groups']) ? [(frame['groups'] as Array<{ rows: Array<{ questions: number }> }>)[0]!.rows[0]!.questions] : []))).toEqual([1, 0]);
+      expect(listed()).toEqual([2, 3, 2, 1, 0]);
+    });
+
+    it('counts no waiting questions on a done work item or for a session the page cannot answer, but does for an ended thread a message resumes (PRD R103)', () => {
+      const { service, store } = setupCards();
+      const running = { status: 'running', sessions: [{ id: 's2' }] };
+
+      expect(service.waitingQuestions(running)).toBe(2);
+      expect(service.waitingQuestions({ status: 'done', sessions: [{ id: 's2' }] })).toBe(0);
+      expect(service.waitingQuestions({ status: 'running', sessions: [] })).toBe(0);
+
+      // An ended Code Mode session is read-only until Resume; an ended app-server thread takes a message, which resumes it.
+      store.updateSession('s2', { state: 'ended' });
+      expect(service.waitingQuestions(running)).toBe(0);
+      store.updateSession('s2', { codeMode: false, execution: 'app-server', provider: 'codex' });
+      expect(service.waitingQuestions(running)).toBe(2);
+    });
+
+    it("keeps a session's count while its conversation is unchanged, so a list build reads no ledger again (PRD R103)", () => {
+      const { service, store } = setupCards();
+      const running = { status: 'running', sessions: [{ id: 's2' }] };
+
+      expect(service.waitingQuestions(running)).toBe(2);
+
+      const reads = vi.spyOn(store, 'conversation');
+
+      // More sessions than the question index keeps leave its ledger out; the count stays without a read.
+      for (let index = 0; index < 40; index++) {
+        questionIndex(store).ledger(`other-${index}`);
+      }
+
+      reads.mockClear();
+      expect(service.waitingQuestions(running)).toBe(2);
+      expect(reads.mock.calls.filter(([id]) => id === 's2')).toHaveLength(0);
+      store.addDismissal('s2', 'q1', 'keep-route', NOW);
+      expect(service.waitingQuestions(running)).toBe(1);
+    });
+
     it('builds one ledger per conversation change, shared with the runtime, and reads it again only once the conversation changes', () => {
       const { service, store, open, view } = setupCards();
       const mine = open(2);

@@ -676,7 +676,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       const mark = row === null ? null : voiceMark(voice.micLive, voice.speakReplies, voice.device === 'phone');
 
-      return pageList(built.dock, built.snapshot, row === null || mark === null ? null : { row, ...mark });
+      return pageList(built.dock, built.snapshot, row === null || mark === null ? null : { row, ...mark }, (item) => conversation.waitingQuestions(item));
     },
     pageHeader: () => {
       const built = views();

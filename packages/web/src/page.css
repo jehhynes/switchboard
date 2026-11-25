@@ -240,6 +240,11 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 /* The mic mark before the time on the voice target's row: 8 px after the title. */
 .row-head .voice-mark { flex: none; align-self: center; margin-left: 2px; }
 .row-time { flex: none; margin-left: 2px; color: var(--sb-row-muted); }
+/* The questions waiting on the operator (PRD R103), after the title: a solid badge in the warning colour, the question stripe's, with dark text, so it
+   reads apart from line 2's outlined pills and the accent unread badge; its click opens the work item at its card. */
+.row-head .questions { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 2px; box-sizing: border-box; height: 16px; padding: 0 5px 0 3px; border-radius: 8px; background: var(--sb-status-warning); color: #000; font-size: 11px; font-weight: 600; line-height: 16px; cursor: pointer; }
+.row-head .questions .codicon { font-size: 12px; }
+.row-head .questions:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 /* Lines 2 and 3 stay one line; line 3 clips its end. */
 .row-line { display: flex; align-items: center; gap: 6px; height: 18px; min-width: 0; overflow: hidden; }
 .row-line .mark, .row-line .comment { flex: none; }

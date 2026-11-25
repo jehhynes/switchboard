@@ -716,6 +716,21 @@ describe('drawing', () => {
     expect(root.querySelector('[data-work-item="2"] .voice-mark')).toBeNull();
   });
 
+  it('puts the waiting questions after the title on line 1 as a button named by their count, on any row that has them', () => {
+    const root = document.createElement('div');
+
+    root.innerHTML = html(renderList([listGroup('progress', [listRow(1, { time: { text: '2h', title: 'In queue' }, questions: 2 }), listRow(2, { questions: 1 }), listRow(3, { questions: 0 }), listRow(4)])], null, new Set()));
+    expect([...root.querySelector('[data-work-item="1"] .row-head')!.children].map((child) => child.className)).toEqual(['row-title', 'questions', 'row-time']);
+
+    const badge = root.querySelector<HTMLElement>('[data-work-item="1"] .questions')!;
+
+    expect([badge.getAttribute('role'), badge.getAttribute('aria-label'), badge.getAttribute('title'), badge.dataset['action'], badge.dataset['workItem'], badge.tabIndex]).toEqual(['button', '2 questions waiting', '2 questions waiting\nOpens the work item at its card', 'goto-questions', '1', -1]);
+    expect(badge.querySelector('.codicon-question')!.getAttribute('aria-hidden')).toBe('true');
+    expect(badge.querySelector('.count')!.textContent).toBe('2');
+    expect(root.querySelector('[data-work-item="2"] .questions')!.getAttribute('aria-label')).toBe('1 question waiting');
+    expect(root.querySelectorAll('[data-work-item="3"] .questions, [data-work-item="4"] .questions')).toHaveLength(0);
+  });
+
   it("draws Done's rows under their date bands, Today and Yesterday open and the older ones closed, each with its count and a rule", () => {
     const root = document.createElement('div');
     const done = listGroup('done', [listRow(5, { band: 'Today' }), listRow(6, { band: 'Today' }), listRow(7, { band: 'Yesterday' }), listRow(8, { band: 'Last week' }), listRow(9, { band: 'Last week' })]);
@@ -5946,6 +5961,98 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.querySelector('.question-card.qc-collapsed .qc-progress')!.textContent).toBe('Question answered');
     delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
     page.close();
+  });
+
+  it("opens a row's work item at its oldest open card when its waiting questions are pressed, by click or by key", async () => {
+    window.innerWidth = 700;
+
+    const { page, source } = start();
+    const scrolled: string[] = [];
+    const asked = '1. Port?\n   - A) 1\n   - B) 2';
+
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.dataset['cardKey'] ?? '');
+    };
+
+    try {
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+
+      hello(source, { groups: [listGroup('progress', [listRow(1, { questions: 1 }), listRow(2, { questions: 3 })])], questions, items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Checking.', kind: 'aside' })] });
+      click('[data-work-item="1"] .questions');
+      await flush();
+      expect(scrolled).toEqual(['reply:r1']);
+      expect(document.activeElement).toBe(root.querySelector('.question-card.qc'));
+      // The row's waiting questions are a keyboard stop with its row, and Enter on them does the same.
+      const badge = root.querySelector<HTMLElement>('[data-work-item="1"] .questions')!;
+
+      root.querySelector<HTMLElement>('[data-work-item="1"]')!.focus();
+      expect(badge.tabIndex).toBe(0);
+      expect(root.querySelector<HTMLElement>('[data-work-item="2"] .questions')!.tabIndex).toBe(-1);
+      badge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await flush();
+      expect(scrolled).toEqual(['reply:r1', 'reply:r1']);
+      badge.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+      await flush();
+      expect(scrolled).toEqual(['reply:r1', 'reply:r1', 'reply:r1']);
+      // With no question open any more, a press opens the work item and goes to no card.
+      source.emit('questions', { questions: { ...questions, open: 0, oldest: null } });
+      click('[data-work-item="1"] .questions');
+      await flush();
+      expect(scrolled).toEqual(['reply:r1', 'reply:r1', 'reply:r1']);
+    } finally {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+      page.close();
+    }
+  });
+
+  it('shows the conversation and reads it back to an older card a waiting-questions press goes to, and says so when it cannot', async () => {
+    window.innerWidth = 700;
+
+    const { page, source } = start();
+    const scrolled: string[] = [];
+    const asked = '1. Port?\n   - A) 1\n   - B) 2';
+    const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.dataset['cardKey'] ?? '');
+    };
+
+    try {
+      hello(source, { groups: [listGroup('progress', [listRow(1, { questions: 1 })])], questions, items: [reply('r2', 3, { opening: 'Checking.', kind: 'aside' })], more: true });
+      root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
+      expect(root.classList.contains('off-conversation')).toBe(true);
+      // A read slower than the jump's wait still ends at the card.
+      let answer = (): void => {};
+
+      answers['/history'] = { status: 200, body: { items: [reply('r1', 2, { opening: asked })], more: false }, wait: new Promise<void>((done) => (answer = done)) };
+      click('[data-work-item="1"] .questions');
+      await flush();
+      await flush();
+      const later = Date.now() + 60_000;
+
+      vi.spyOn(Date, 'now').mockReturnValue(later);
+      answer();
+      await flush();
+      await flush();
+      await flush();
+      expect(root.classList.contains('off-conversation')).toBe(false);
+      expect(posts.filter((post) => post.url.includes('/history'))).toHaveLength(1);
+      expect(scrolled).toEqual(['reply:r1']);
+
+      // A read the hub refuses ends the jump with a warning, and asks no more.
+      hello(source, { groups: [listGroup('progress', [listRow(1, { questions: 1 })])], questions: { ...questions, oldest: 'reply:r0' }, items: [reply('r2', 3, { opening: 'Checking.', kind: 'aside' })], more: true });
+      answers['/history'] = { status: 409, body: { error: 'Stale.' } };
+      click('[data-work-item="1"] .questions');
+      await flush();
+      await flush();
+      await flush();
+      expect(posts.filter((post) => post.url.includes('/history'))).toHaveLength(2);
+      expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Switchboard could not read the conversation back to its question card.');
+      expect(scrolled).toEqual(['reply:r1']);
+    } finally {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+      page.close();
+    }
   });
 
   it('shows how many questions wait over the composer while the answerable card is off screen, and goes to it on a click', () => {

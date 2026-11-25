@@ -679,10 +679,46 @@ export class ConversationService {
   readonly #questionTimers = new Map<string, NodeJS.Timeout>();
   /** The questions each window was last sent, by window key. */
   readonly #questionsShown = new Map<string, string>();
+  /** Each session's open question count, with the conversation revision and cutover it was counted at. */
+  readonly #openCounts = new Map<string, { revision: string; since: number; count: number }>();
 
   /** A session's question ledger, from the store, shared with the runtime until the conversation changes. */
   ledger(sessionId: string): QuestionLedger {
     return questionIndex(this.deps.store, this.deps.now).ledger(sessionId, questionsSince(this.deps.store, this.deps.now()));
+  }
+
+  /**
+   * How many of a work item's questions wait on the operator, for its list row (PRD R103): the open questions of its latest session's cards, the
+   * number the conversation's chip shows, while the page can answer them; none on a done work item.
+   */
+  waitingQuestions(item: { status: string; sessions: ReadonlyArray<{ id: string }> }): number {
+    const latest = item.sessions.at(-1);
+    const session = item.status === 'done' || latest === undefined ? null : this.deps.store.session(latest.id);
+
+    if (session === null || sessionView(session, true, this.deps.hooks()).conversation !== 'full') {
+      return 0;
+    }
+
+    return this.#openCount(session.id);
+  }
+
+  /**
+   * A session's open question count, kept per conversation revision and cutover, so a list build reads no ledger again for a conversation that
+   * has not changed, even one the question index no longer keeps.
+   */
+  #openCount(sessionId: string): number {
+    const revision = this.deps.store.conversationRevision(sessionId);
+    const since = questionsSince(this.deps.store, this.deps.now());
+    const kept = this.#openCounts.get(sessionId);
+
+    if (kept !== undefined && kept.revision === revision && kept.since === since) {
+      return kept.count;
+    }
+
+    const count = this.ledger(sessionId).open.length;
+
+    this.#openCounts.set(sessionId, { revision, since, count });
+    return count;
   }
 
   /** A session's card drafts, by card key. */
@@ -773,10 +809,18 @@ export class ConversationService {
     this.#questionTimers.set(sessionId, timer);
   }
 
-  /** Sends the windows showing a session its questions now, each only when they changed for it. */
-  questionsChangedNow(sessionId: string): void {
+  /**
+   * Sends the windows showing a session its questions now, each only when they changed for it, and, unless `counts` is false for a change that
+   * leaves every count as it was, each page its list when that changed for it.
+   */
+  questionsChangedNow(sessionId: string, counts = true): void {
     if (this.#closed) {
       return;
+    }
+
+    // The list's rows count each work item's open questions, so a change sends each page its list again when it differs from the one it has.
+    if (counts) {
+      this.#listChanged();
     }
 
     const keys = this.deps.windows.showing(sessionId).filter((key) => this.#streams.has(key));
@@ -832,7 +876,8 @@ export class ConversationService {
     if (name === 'card-draft') {
       this.drafts(sessionId).set(card, parsed!);
       this.#lastCard.set(sessionId, card);
-      this.questionsChangedNow(sessionId);
+      // A draft changes no count, so the list stays.
+      this.questionsChangedNow(sessionId, false);
       return { status: 200, body: { done: true } };
     }
 

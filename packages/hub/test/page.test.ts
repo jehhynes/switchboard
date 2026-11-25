@@ -351,7 +351,11 @@ describe('pageList', () => {
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
     expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, ticketNumber: ownRow.ticket.slice('gh '.length), sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), search: ownRow.search, band: null, voice: null, history: { ticketId: own.ticket.id, key: ownRow.ticket } });
+    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, ticketNumber: ownRow.ticket.slice('gh '.length), sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), search: ownRow.search, band: null, voice: null, questions: 0, history: { ticketId: own.ticket.id, key: ownRow.ticket } });
+    // Each work item's row carries its waiting questions as counted.
+    const counted = pageList(dock, view, null, (one) => (one.id === 4 ? 3 : 0)).flatMap((group) => group.rows);
+
+    expect(counted.map((row) => [row.workItemId, row.questions]).sort()).toEqual([[1, 0], [4, 3], [5, 0]]);
     // The voice target's row alone has the mic mark.
     const marked = pageList(dock, view, { row: 'item:1', glyph: '\u{ec12}', title: 'Voice is set to this session. Mic on.' }).flatMap((group) => group.rows);
 

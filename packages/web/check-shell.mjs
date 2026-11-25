@@ -6,7 +6,7 @@
 // where it does not fit beside the comment icon and the key; a key shows its source's logo, GitHub's, Zoho's or a plugin's, in place of its source's label; every pill, the key included, shows its text where line 2 is 300 px wide or more and its icon alone under that,
 // its text kept for screen readers; the key never drops out; a link pill is whole, its icon alone or left out whole, never cut, the last
 // first; a pill left out is no keyboard stop, and a pill shown is one only in the list's Tab stop row; the pills change with the list's width alone, without a redraw; and line 2 paints the same while
-// the same list is sent again. Every control shown is a touch target of at least 44 px each way.
+// the same list is sent again. A row's waiting questions show on line 1 after the title, whole, their count never cut, the title cut before them. Every control shown is a touch target of at least 44 px each way.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -85,7 +85,7 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 // The header's sources: GitHub's and Zoho's logos are the page's own; the DPAF plugin gives its own, a made-up mark here.
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 const header = { notes: [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [approve, remove], details: [state('2/5 fixing tests · 4m', 'dim')] }), row(2, 'Another thing', crowded), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', short), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [approve, remove], details: [state('2/5 fixing tests · 4m', 'dim')] }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
@@ -190,6 +190,15 @@ const measure = `(() => {
     // Line 2 of each shown row: a pill is whole inside its line and its box, its text shown whole; its icon alone, its text hidden from view
     // but kept for screen readers; or wholly outside them, left out.
     line2: window.__line2 ? { samples: window.__line2.length, ways: new Set(window.__line2).size } : null,
+    // Line 1's waiting questions: whole inside line 1 and the row, after the title, which is cut before them where it does not fit, never the count.
+    questions: [...document.querySelectorAll('#list .row-head .questions')].filter(shown).map((badge) => {
+      const box = badge.getBoundingClientRect();
+      const head = badge.closest('.row-head').getBoundingClientRect();
+      const row = badge.closest('.row').getBoundingClientRect();
+      const title = badge.closest('.row-head').querySelector('.row-title');
+      const count = badge.querySelector('.count');
+      return { text: badge.getAttribute('aria-label'), whole: box.left >= head.left - 0.5 && box.right <= head.right + 0.5 && box.right <= row.right + 0.5 && box.top >= head.top - 0.5 && box.bottom <= head.bottom + 0.5, after: title.getBoundingClientRect().right <= box.left + 0.5, count: count.getBoundingClientRect().width > 4 && count.scrollWidth <= count.clientWidth + 0.5, titleCut: title.scrollWidth > title.clientWidth + 0.5 };
+    }),
     // Each line 2's items in order, each starting after the one before, so none sits below another.
     // Line 2 never wraps: the line is 18 px tall and every item lies inside it, none taller than one line.
     lines: [...document.querySelectorAll('#list .row-line:not(.row-details)')].filter(shown).map((line) => { const edge = line.getBoundingClientRect(); const items = [...line.children].map((one) => one.getBoundingClientRect()); return { row: line.closest('.row').querySelector('.row-title').textContent, oneLine: items.every((box, i) => i === 0 || box.left >= items[i - 1].right - 0.5), wrapped: edge.height > 18.5 || items.some((box) => box.height > 18.5 || box.top < edge.top - 0.5 || box.bottom > edge.top + 18.5) }; }),
@@ -317,7 +326,8 @@ const TOUCH = `(() => {
     // every ancestor that clips without scrolling. Not held to it: line 2's pills, whose press is an open question; links inside prose; and a
     // tab's own buttons, which fill their tab between its 1 px top and bottom borders, its whole height less those.
   return [...document.querySelectorAll('button, a[href], [role="tab"], [role="menuitem"], [role="link"], [role="button"], input[type="checkbox"], input[type="radio"], select, summary')].filter(shown).flatMap((node) => {
-      if (node.matches('.row .pill, :is(.body, .artifact-doc, .sheet-detail, .hist-body p, .group-empty) a')) return [];
+      // A row's waiting questions are held to it no more than its pills: a press that misses them opens the work item, whose conversation offers the card.
+      if (node.matches('.row .pill, .row-head .questions, :is(.body, .artifact-doc, .sheet-detail, .hist-body p, .group-empty) a')) return [];
       // A checkbox or radio takes presses on its label too, which holds it (settings.tsx).
       const target = node.matches('input[type="checkbox"], input[type="radio"]') ? (node.closest('label') ?? node) : node;
       const whole = target.getBoundingClientRect();
@@ -395,6 +405,18 @@ function failures(view, size, m) {
     const keys = view.startsWith('narrow') ? 4 : 7;
 
     if (m.pills.filter((pill) => pill.ticket).length !== keys) out.push('line 2 shows ' + m.pills.filter((pill) => pill.ticket).length + ' ticket keys, not ' + keys);
+  }
+  // Line 1's waiting questions show on both rows that have them, whole, after the title, their count never cut; the long title gives way.
+  if (m.line2 !== null) {
+    if (m.questions.length !== 2) out.push('line 1 shows waiting questions on ' + m.questions.length + ' rows, not 2');
+    for (const one of m.questions) {
+      if (!one.whole) out.push('line 1\'s ' + one.text + ' is cut or passes its line');
+      if (!one.after) out.push('line 1\'s ' + one.text + ' overlaps the title');
+      if (!one.count) out.push('line 1\'s ' + one.text + ' does not show its count whole');
+    }
+    const width = view === 'narrow' ? 200 : view.startsWith('narrow-') ? Number(view.slice(7)) : null;
+
+    if (width !== null && width <= 330 && !m.questions.some((one) => one.titleCut)) out.push('no title is cut before its waiting questions at ' + width + ' px');
   }
   // History's last entry scrolls clear of the home indicator.
   if (view === 'history' && m.histEnd === null) out.push('History drew no entries');

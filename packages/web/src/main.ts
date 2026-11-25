@@ -120,6 +120,10 @@ export const LINK_ANSWER_MS = 2_000;
 /** How much sooner the extension stops starting a link the page asked for than the page stops waiting. */
 const LINK_MARGIN_MS = 500;
 const HISTORY_CHANGE_MS = 1_000;
+/** How long a press on a row's waiting questions waits for its work item's card to be drawn before it leaves the conversation where it opened. */
+const CARD_WAIT_MS = 5_000;
+/** At most this many earlier pages of the conversation are read to reach that card. */
+const CARD_PAGES_MAX = 20;
 /** The mark on the history entry a phone's conversation adds over the list, so the browser's back returns to the list (architecture.md § Web page). */
 const CONVERSATION_ENTRY = 'switchboardConversation';
 /** Where the page keeps the `opId` of each message sent without a settled answer, over a reload. */
@@ -2194,6 +2198,90 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     chip.hidden = card !== undefined && inView(card, panel);
   };
 
+  /**
+   * The work item whose row's waiting questions were pressed, until its oldest open card is shown or `until` passes; `pages` counts the earlier
+   * pages read to reach the card, `reading` is set while one is read, and `selected` once its selection is past any comment it waited for. A new
+   * selection drops it (`select`, `selectSession`).
+   */
+  let cardWanted: { workItemId: number; until: number; pages: number; reading: boolean; selected: boolean } | null = null;
+  /** Shows the oldest open card of the work item whose row's waiting questions were pressed, once its current session's questions have come. */
+  const showWantedCard = (): void => {
+    if (cardWanted === null) {
+      return;
+    }
+
+    // Its selection has not finished, or an earlier page is being read, which refreshes the deadline when it comes.
+    if (!cardWanted.selected || cardWanted.reading) {
+      return;
+    }
+
+    if (Date.now() > cardWanted.until) {
+      cardWanted = null;
+      return;
+    }
+
+    const scope = state.scope;
+    const session = scope?.workItemId === cardWanted.workItemId && scope.earlier !== true ? state.session : null;
+    const key = session != null && state.questions?.sessionId === session.id ? state.questions.oldest : undefined;
+    const find = (): HTMLElement | null => [...document.querySelectorAll<HTMLElement>('.question-card')].find((card) => card.dataset['cardKey'] === key) ?? null;
+
+    // Its current session, or its questions, have not come yet.
+    if (key === undefined) {
+      return;
+    }
+
+    if (key === null) {
+      cardWanted = null;
+      return;
+    }
+
+    if (find() === null) {
+      // The conversation is shown first, then read back a page at a time while the card is older than the items the page holds.
+      if (mainTab() !== 'conversation') {
+        leaving('conversation');
+        chooseTab('conversation');
+        view.artifact = null;
+        draw();
+        saveTab();
+        return;
+      }
+
+      const wanting = cardWanted;
+
+      if (!state.more || wanting.pages >= CARD_PAGES_MAX) {
+        cardWanted = null;
+        return;
+      }
+
+      wanting.reading = true;
+      wanting.pages++;
+      void earlier().then(
+        (read) => read,
+        () => false,
+      ).then((read) => {
+        wanting.reading = false;
+
+        if (cardWanted !== wanting) {
+          return;
+        }
+
+        if (!read) {
+          cardWanted = null;
+          showError('Switchboard could not read the conversation back to its question card.');
+          return;
+        }
+
+        wanting.until = Date.now() + CARD_WAIT_MS;
+        showWantedCard();
+      });
+      return;
+    }
+
+    cardWanted = null;
+    showLinked('conversation', find);
+    [...document.querySelectorAll<HTMLElement>('.question-card.qc')].find((card) => card.dataset['cardKey'] === key)?.focus({ preventScroll: true });
+  };
+
   panel.addEventListener('scroll', showWaiting);
   window.addEventListener('resize', showWaiting, { signal: listening.signal });
   panel.addEventListener('scroll', () => {
@@ -2249,7 +2337,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Set only where it changes, so a redraw that changes nothing writes nothing.
     const set = (one: HTMLElement, index: number): void => { if (one.tabIndex !== index) one.tabIndex = index; };
     for (const one of stops) set(one, one === stop ? 0 : -1);
-    for (const pill of list.querySelectorAll<HTMLElement>('.pill[data-action="open-link"]')) set(pill, pill.closest('.row') === stop ? 0 : -1);
+    for (const pill of list.querySelectorAll<HTMLElement>('.pill[data-action="open-link"], .row-head .questions')) set(pill, pill.closest('.row') === stop ? 0 : -1);
     fitListLinks();
   };
   window.addEventListener('resize', fitListLinks, { signal: listening.signal });
@@ -2765,6 +2853,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     rememberTabs();
     checkSeen();
     showWaiting();
+    showWantedCard();
     dropConsoles();
     changes.drop();
     localFiles.drop();
@@ -3585,6 +3674,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const select = async (workItemId: number, sameHead = false, sessionId: string | null = null): Promise<void> => {
     const mine = ++selecting;
 
+    cardWanted = null;
+
     // comment still waiting goes to its conversation before the page moves on, while the hub still takes it from this page; a later choice
     // wins over this one while it waits.
     if (commentTimers.size > 0) {
@@ -3672,6 +3763,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    * one, through the same requests as `select`, keeping the tab, the artifact and the places shown.
    */
   const selectSession = (workItemId: number, sessionId: string | null): void => {
+    cardWanted = null;
     closeMenus();
     leaveDraft();
     selections++;
@@ -4293,7 +4385,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   list.addEventListener('keydown', (event) => {
     if (event.defaultPrevented || view.rowMenu !== null) return;
     const target = event.target as HTMLElement;
-    if (target.matches('.pill[data-action="open-link"]') && (event.key === 'Enter' || event.key === ' ')) {
+    if (target.matches('.pill[data-action="open-link"], .row-head .questions') && (event.key === 'Enter' || event.key === ' ')) {
       event.preventDefault();
       target.click();
       return;
@@ -4746,6 +4838,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           });
         }
 
+        break;
+      }
+      case 'goto-questions': {
+        // A row's waiting questions open its work item at its oldest open card (PRD R103), within a few seconds of its conversation coming.
+        const workItemId = Number(button!.dataset['workItem']);
+
+        listFocus = `item:${workItemId}`;
+        const selection = select(workItemId);
+        const wanting = { workItemId, until: Date.now() + CARD_WAIT_MS, pages: 0, reading: false, selected: false };
+
+        cardWanted = wanting;
+        void selection.then(() => {
+          wanting.selected = true;
+          wanting.until = Date.now() + CARD_WAIT_MS;
+          showWantedCard();
+        });
         break;
       }
       case 'goto-card': {
@@ -5589,11 +5697,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   sheetHost.addEventListener('input', keepSheet);
   sheetHost.addEventListener('change', keepSheet);
 
-  const earlier = async (): Promise<void> => {
+  /** Reads the page of items before the oldest the page holds; whether it added any. */
+  const earlier = async (): Promise<boolean> => {
     const oldest = state.items[0];
 
     if (state.session === null) {
-      return;
+      return false;
     }
 
     const shown = `${state.key} ${state.scope?.scopeGen} ${state.session.id}`;
@@ -5601,9 +5710,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     // A page that moved on meanwhile never takes another conversation's history.
     if (answer.status === 200 && shown === `${state.key} ${state.scope?.scopeGen} ${state.session?.id}`) {
+      const before = state.items.length;
+
       state = withEarlier(state, answer.body['items'] as ItemView[], answer.body['more'] === true);
       draw();
+      return state.items.length > before;
     }
+
+    return false;
   };
 
   /** The view options menu's persona row: the roster in the persona dialog, from which a pick pins a persona to the session. */

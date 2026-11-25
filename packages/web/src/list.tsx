@@ -31,7 +31,7 @@ function Pill({ classes, glyph, logo, label, text, title, opens }: { classes: st
 }
 
 /**
- * A row of the list, drawn in three lines from the hub's dock row: line 1 the priority dot, the title and the time; line 2 the
+ * A row of the list, drawn in three lines from the hub's dock row: line 1 the priority dot, the title, the questions waiting, the mic mark and the time; line 2 the
  * comment icon, the playbook with its namespace muted (or a hosted conversation's host), the ticket key as a pill in its source's colour with
  * its source's logo in place of its source's label, the link pills and Returned; the page's CSS shrinks every pill to its icon where line 2 is narrow and leaves out the link
  * pills and Returned whole, from the last, where they do not fit (page.css, Line 2); line 3 the mark and the
@@ -39,6 +39,9 @@ function Pill({ classes, glyph, logo, label, text, title, opens }: { classes: st
  */
 function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, position, icons }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; menuPoint: { x: number; y: number } | undefined; pillsOpen: boolean; movable: boolean; drag: DragView | null; position?: { index: number; total: number }; icons: Readonly<Record<string, SourceIcon>> }) {
   const kind = row.mark?.kind;
+  // The questions waiting on the operator, after the title on line 1, where only the title gives up room, so the count is never cut or left out.
+  const waiting = row.workItemId === null ? 0 : (row.questions ?? 0);
+  const waitingText = `${waiting} question${waiting === 1 ? '' : 's'} waiting`;
   const mark =
     row.mark === null || kind === undefined ? null : (
       <span class={`codicon codicon-${MARK_ICONS[kind]} mark${SPINNING_MARKS.has(kind) ? ' codicon-modifier-spin' : ''}${kind === 'failed' ? ' failed' : ''}`} role="img" title={row.mark.title} aria-label={row.mark.title}></span>
@@ -86,6 +89,12 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
         <span class="row-head">
           {row.priority === null ? null : <span class="priority" role="img" title={row.priority} aria-label={row.priority}></span>}
           <span class="row-title">{row.title}</span>
+          {waiting === 0 ? null : (
+            <span class="questions" role="button" tabIndex={-1} aria-label={waitingText} aria-description="Opens the work item at its card" title={`${waitingText}\nOpens the work item at its card`} data-action="goto-questions" data-work-item={String(row.workItemId)}>
+              <span class="codicon codicon-question" aria-hidden="true"></span>
+              <span class="count" aria-hidden="true">{waiting}</span>
+            </span>
+          )}
           {row.voice === null ? null : (
             <span class="codicon voice-mark" role="img" title={row.voice.title} aria-label={row.voice.title}>
               {row.voice.glyph}
