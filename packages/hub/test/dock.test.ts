@@ -546,13 +546,14 @@ describe('dockView held sessions (PRD R94)', () => {
   const owner = item(7, { sessions: [session({ codeMode: true, state: 'idle' })] });
   const base = windowOf(owner, W)!.name;
 
-  it('lists each held session with its columns and the attach terminal of a session the store has', () => {
+  it('lists each held session with its columns, its work item by key and title, and the attach terminal of a session the store has', () => {
+    expect(owner.ticket.title).not.toBe('');
     const view = dockView(snapshot([owner], { held: [entry()] }), NOW, W);
 
     expect(view.held).toEqual([
       {
         session: 's1',
-        item: 'gh 107',
+        item: `gh 107 · ${owner.ticket.title}`,
         nativeSessionId: 'aaaa1111-native',
         cwd: 'D:/git/widgets',
         state: 'idle',

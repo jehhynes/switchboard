@@ -343,7 +343,8 @@ function heldRow(snapshot: Snapshot, one: HeldSession, now: number, windows: str
   // A Codex terminal has no attach command yet, since `hub.js attach` takes only Code Mode sessions.
   const terminal = owner === undefined || session === undefined || one.orphan || session.execution === 'app-server' ? null : codeModeDockTerminal(owner, session, windows);
 
-  return { session: one.session, item, nativeSessionId, cwd: one.cwd, state: one.state, idle, memory, clients: one.clients, orphan: one.orphan, exited: one.exitedAt !== null, terminal };
+  // The page names the work item by its key and title; `hub.js holder list` keeps the key alone.
+  return { session: one.session, item: owner === undefined ? item : `${item} · ${owner.ticket.title}`, nativeSessionId, cwd: one.cwd, state: one.state, idle, memory, clients: one.clients, orphan: one.orphan, exited: one.exitedAt !== null, terminal };
 }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
