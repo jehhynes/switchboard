@@ -530,8 +530,6 @@ try {
           await wait(150);
         }
 
-        // The toast and the console's foot, which the fake hub never raises, drawn with their own classes so their touch targets are measured.
-        if (view === 'conversation') await evaluate(PROBES);
         await wait(200);
         const m = await evaluate(measure);
 
@@ -613,6 +611,9 @@ try {
 
           if (dragged.page !== 0 || dragged.header !== before.header || dragged.panel !== scrolled.panel) found.push('a drag on the header moved the page: ' + JSON.stringify(dragged));
         }
+
+        // The toast and the console's foot, which the fake hub never raises, drawn with their own classes so their touch targets are measured.
+        if (view === 'conversation') await evaluate(PROBES);
 
         // Every control's touch target, where the view opened and then down each scroller, a view's height at a time, so a control out of
         // view at first is measured too.
