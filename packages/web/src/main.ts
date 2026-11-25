@@ -884,11 +884,42 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     },
     { signal: listening.signal },
   );
-  // The draft the hub last sent for dictation, per session, so a newer one replaces it in the box but never text typed over it, and one that came
-  // while a message was being sent, which fills the box once the send answered.
+  // The draft the hub last sent for dictation, per session, so a newer one replaces it in the box but never text typed over it.
   const hubDrafts = new Map<string, string>();
-  let heldDraft: { sessionId: string; text: string } | null = null;
-  const takeHubDraft = (sessionId: string, text: string, added: string | null = null): void => {
+  // The number of the last dictated piece joined to the box, per session, which `send` carries as `heard`, so the hub takes with the message
+  // only the pieces its text holds (architecture.md § Dictation).
+  const heardPieces = new Map<string, number>();
+  // While a message is on its way: the pieces heard meanwhile, which fill the box once the hub took it or join its text when refused, and the
+  // hub's other drafts, applied once it answered.
+  let heardWhileSending: { sessionId: string; text: string } | null = null;
+  const draftsWhileSending: Array<{ sessionId: string; text: string; added: string | null; piece: number | null }> = [];
+  // The session the message on its way goes to, whose pieces are kept for its box even when the page shows another work item meanwhile.
+  let sendingTo: string | null = null;
+  const takeHubDraft = (sessionId: string, text: string, added: string | null = null, piece: number | null = null): void => {
+    // The hub's text still holds the message until it takes it, so only the piece is kept; an older draft of the session waiting for the
+    // answer would now drop it, so it is dropped instead.
+    if (sending && added !== null && sessionId === sendingTo) {
+      hubDrafts.set(sessionId, text);
+
+      if (piece !== null) {
+        heardPieces.set(sessionId, piece);
+      }
+
+      for (let i = draftsWhileSending.length - 1; i >= 0; i--) {
+        if (draftsWhileSending[i]!.sessionId === sessionId) draftsWhileSending.splice(i, 1);
+      }
+
+      const so = heardWhileSending?.text ?? '';
+
+      heardWhileSending = { sessionId, text: so === '' || /\s$/.test(so) ? `${so}${added.trimStart()}` : `${so} ${added.trimStart()}` };
+      return;
+    }
+
+    if (sending) {
+      draftsWhileSending.push({ sessionId, text, added, piece });
+      return;
+    }
+
     const before = hubDrafts.get(sessionId) ?? '';
 
     hubDrafts.set(sessionId, text);
@@ -898,9 +929,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    if (sending) {
-      heldDraft = { sessionId, text };
-      return;
+    if (piece !== null) {
+      heardPieces.set(sessionId, piece);
     }
 
     // Each piece the hub names joins the end of what the box holds now, so the operator's edits since stay, as while the box has the focus
@@ -1262,6 +1292,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const from = draftOf;
 
     sending = true;
+    sendingTo = target.sessionId;
     input.readOnly = true;
     composerHost.classList.add('sending');
     // A list open or asked for belongs to the text being sent.
@@ -1276,15 +1307,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     keepSendOp(from, { key: sendKey, opId: op });
 
-    const sent = command('send', { ...target, text, ...(asCommand ? { command: true } : {}) }, { timeout: SEND_TRY_MS, retryFor: SEND_RETRY_MS, opId: op });
+    // The hub takes its draft with the message, the pieces up to `heard` as its dictation, so no composer update has to empty it first, and
+    // `composerSeq` puts every update posted before it behind it (architecture.md § Dictation). While dictating, the box keeps the focus
+    // until the hub takes the message, so what is heard meanwhile joins the draft rather than sending.
+    clearTimeout(composerTimer);
+    const sent = command('send', { ...target, text, ...(asCommand ? { command: true } : {}), heard: heardPieces.get(target.sessionId) ?? 0, composerSeq: ++composerSeq }, { timeout: SEND_TRY_MS, retryFor: SEND_RETRY_MS, opId: op });
 
     toEnd();
-
-    // While dictating, the box keeps the focus until the hub takes the message, so what is heard meanwhile joins the draft rather than
-    // sending; the hub's draft starts empty, and what it hears waits for the answer (architecture.md § Dictation).
-    if (state.voice?.here === true && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic) && document.activeElement === input) {
-      tellHub();
-    }
 
     const answer = await sent;
 
@@ -1295,9 +1324,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     sending = false;
-    const dictated = heldDraft;
+    sendingTo = null;
+    const dictated = heardWhileSending?.text ?? '';
 
-    heldDraft = null;
+    heardWhileSending = null;
     input.readOnly = false;
     composerHost.classList.remove('sending');
 
@@ -1311,7 +1341,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
 
       if (from === draftOf) {
-        input.value = dictated !== null && dictated.sessionId === target.sessionId ? dictated.text : '';
+        input.value = dictated;
         box.changed(input.value);
         showError(null);
         confirmSent();
@@ -1320,7 +1350,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const all = drafts();
 
       if (from !== null) {
-        delete all[from];
+        // Shown elsewhere meanwhile, the work item's draft becomes what was heard while it was on its way.
+        if (from !== draftOf && dictated !== '') {
+          all[from] = dictated;
+          hubDrafts.set(target.sessionId, dictated);
+        } else {
+          delete all[from];
+        }
+
         localStorage.setItem(DRAFTS, JSON.stringify(all));
         // Files attached while it was sent stay for the next message.
         attachedFiles.sent(from, files);
@@ -1336,12 +1373,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         showError(late.error);
       } else {
         // Its files stay attached, so only the typed text goes back.
-        giveBack(from, typed, late.error);
+        giveBack(from, dictated.trim() === '' ? typed : `${typed.replace(/\s+$/, '')} ${dictated.trim()}`, late.error);
       }
     } else if (from === draftOf) {
       showError(notSent(answer));
     } else {
-      giveBack(from, '', notSent(answer));
+      giveBack(from, dictated.trim(), notSent(answer));
     }
 
     if (from === draftOf && answer.status === 200 && late === undefined) {
@@ -1351,7 +1388,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
     } else if (from === draftOf) {
       // Not taken: the box keeps its text and the focus, dictation heard meanwhile joins its end, and the hub's draft becomes the box's.
-      const heard = dictated !== null && dictated.sessionId === target.sessionId ? dictated.text.trim() : '';
+      const heard = dictated.trim();
 
       if (heard !== '') {
         input.value = input.value === '' || /\s$/.test(input.value) ? `${input.value}${heard}` : `${input.value} ${heard}`;
@@ -1360,6 +1397,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       tellHub();
+    }
+
+    // The box now holds the hub's draft: taken, the pieces heard meanwhile; refused, the box's text, told to the hub. The hub's other drafts
+    // that came meanwhile apply now, as any other.
+    if (from === draftOf) {
+      hubDrafts.set(target.sessionId, input.value);
+    }
+
+    for (const one of draftsWhileSending.splice(0)) {
+      takeHubDraft(one.sessionId, one.text, one.added, one.piece);
     }
 
     for (const one of held.splice(0)) {
@@ -1777,14 +1824,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The box's focus and draft, for the focus rule of dictation (architecture.md § Dictation). The box keeps
   // dictation listening while it has the focus (`listen`): spoken turns join its draft and wait for Send.
   let composerTimer: ReturnType<typeof setTimeout> | undefined;
+  // Each `composer` and `send` is numbered, so the hub ignores an update that arrives after a newer one (architecture.md § Dictation).
+  let composerSeq = 0;
   const tellHub = (): void => {
     clearTimeout(composerTimer);
 
     if (state.scope !== null && state.voice?.enabled === true) {
-      // New conversation…'s box is not the session's: the hub sees it unfocused, its draft for the session as it was.
+      // New conversation…'s box is not the session's: the hub sees it unfocused, its draft for the session as it was. While a message is on
+      // its way only the focus goes: the hub takes its draft with the message.
       const drafting = draftShown();
+      const draft = drafting ? (hubDrafts.get(state.session?.id ?? '') ?? '') : sending ? null : input.value;
 
-      void command('composer', { focused: !drafting && document.activeElement === input, draft: drafting ? (hubDrafts.get(state.session?.id ?? '') ?? '') : sending ? '' : input.value, listen: true });
+      void command('composer', { focused: !drafting && document.activeElement === input, ...(draft === null ? {} : { draft }), listen: true, seq: ++composerSeq, heard: heardPieces.get(state.session?.id ?? '') ?? 0 });
     }
   };
   /** The hint that dictation joins the draft and waits for Send, while the box has the focus and the mic is on here. */
@@ -5983,7 +6034,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         liveWords.hidden = liveWords.textContent === '';
         showLive();
       } else if (type === 'draft' && typeof data['sessionId'] === 'string') {
-        takeHubDraft(data['sessionId'], String(data['text'] ?? ''), typeof data['added'] === 'string' ? data['added'] : null);
+        takeHubDraft(data['sessionId'], String(data['text'] ?? ''), typeof data['added'] === 'string' ? data['added'] : null, typeof data['piece'] === 'number' ? data['piece'] : null);
       }
 
       // A message this page sent that was not sent: a card's answer goes back to its card, any other text to its own work item's draft.

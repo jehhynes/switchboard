@@ -864,19 +864,21 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const pieces = [{ text: 'fix the build', score: null, f0: null, dropped: false }];
     let held = pieces as typeof pieces | null;
 
-    voice.dictated = (key) => {
-      calls.push(`dictated ${key}`);
+    voice.take = (key, _sessionId, heard, seq) => {
+      calls.push(`take ${key} ${heard} ${seq}`);
       const taken = held;
 
       held = null;
-      return taken;
+      return taken === null ? null : { pieces: taken, interrupted: null };
     };
     voice.delivered = (message) => void calls.push(`delivered ${message.id} ${message.delivery}`);
 
     const { service, held: holder, open, body, view, store } = setupSend(new FakeHeld(), undefined, voice);
     const mine = open(2);
 
-    expect(service.send(body(mine.key, { text: 'Fix the build, please' }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', origin: 'voice', pieces, spokenRequested: true } } });
+    // The send says which pieces its text holds (`heard`) and orders itself after the composer's updates (`composerSeq`).
+    expect(service.send(body(mine.key, { text: 'Fix the build, please', heard: 7, composerSeq: 3 }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', origin: 'voice', pieces, spokenRequested: true } } });
+    expect(calls).toContain(`take ${mine.key} 7 3`);
     await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
     expect(holder.writes[0]).toBe('\u001b[200~[spoken] [voice] Fix the build, please\u001b[201~');
     expect(calls).toContain('delivered m-1 sent');
@@ -898,7 +900,42 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
       { message: { origin: 'voice', text: 'hello', delivery: 'refused', error: "The voice's session is no longer this window's." } },
     ]);
     expect(store.conversation('s3', null, 10).items).toEqual([]);
-    expect(service.voiceCommand('composer', { window: mine.key, scopeGen: 1, opId: 'o', focused: 'yes', draft: '' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } });
+    expect(service.voiceCommand('composer', { window: mine.key, scopeGen: 1, opId: 'o', focused: 'yes', draft: '' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft?, listen?, seq?, heard?}.' } });
+  });
+
+  it("takes the window's draft only with a message it accepts: never for a refusal, a repeat, a card's answers or a bad number, and a slash command goes untagged (architecture.md § Dictation)", async () => {
+    const { voice, calls } = fakeVoice({ spoken: false, expressive: false });
+    const pieces = [{ text: 'compact it', score: null, f0: null, dropped: false }];
+
+    voice.take = (key, sessionId, heard, seq) => (calls.push(`take ${key} ${sessionId} ${heard} ${seq}`), { pieces, interrupted: null });
+
+    const { service, held: holder, open, body, store } = setupSend(new FakeHeld(), undefined, voice);
+    const mine = open(2);
+    const takes = () => calls.filter((call) => call.startsWith('take'));
+
+    expect(service.send(body(mine.key, { text: 'x', scopeGen: 0, heard: 1, composerSeq: 1 })).status).toBe(409);
+    expect(service.send(body(mine.key, { text: 'x', heard: -1 })).status).toBe(400);
+    expect(service.send(body(mine.key, { text: 'x', composerSeq: 'two' })).status).toBe(400);
+    expect(service.send(body(mine.key, { text: ' ', heard: 1 })).status).toBe(400);
+    expect(takes()).toEqual([]);
+
+    // A slash command takes the draft, as the box empties, but its pieces do not tag it.
+    expect(service.send(body(mine.key, { text: '/compact', command: true, heard: 2, composerSeq: 2 }))).toMatchObject({ status: 200, body: { message: { origin: 'typed' } } });
+    expect(takes()).toEqual([`take ${mine.key} s2 2 2`]);
+    await settled(() => expect(store.message('m-1')?.delivery).toBe('sent'));
+    expect(holder.writes[0]).toBe('\u001b[200~/compact\u001b[201~');
+    // Sent again with the same opId, as after a lost answer: the first message, and nothing taken again.
+    expect(service.send(body(mine.key, { text: '/compact', command: true, heard: 3, composerSeq: 3 }))).toMatchObject({ status: 200, body: { message: { id: 'm-1' } } });
+    expect(takes()).toHaveLength(1);
+
+    // A card's answers are not the draft, which stays.
+    store.setPagePref('questionsLedgerSince', '1');
+    store.addReply({ id: 'q1', sessionId: 's2', workItemId: store.session('s2')!.workItemId, at: NOW, kind: 'reply', answers: null, opening: '1. Which port? {#port-choice}\n   - A) 8765\n   - B) 8799', source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: 'q1' });
+    const answered = service.send(body(mine.key, { opId: 'op-card', text: undefined, answers: [{ card: 'reply:q1', slug: 'port-choice', letters: ['B'], other: '' }], heard: 4, composerSeq: 4 }));
+
+    expect(answered.status).toBe(200);
+    expect(takes()).toHaveLength(1);
+    await settled(() => expect(store.message((answered.body as { message: { id: string } }).message.id)?.delivery).toBe('sent'));
   });
 
   it("passes a page's Mic on timing to the voice for the hub log, and refuses a malformed or unknown one (architecture.md § Dictation)", () => {
@@ -934,12 +971,11 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const interrupted = { replyId: 'r1', said: 'The session token', rest: 'is refreshed in two places.' };
     let held: Interruption | null = interrupted;
 
-    voice.dictated = () => pieces;
-    voice.interruption = () => {
+    voice.take = () => {
       const taken = held;
 
       held = null;
-      return taken;
+      return { pieces, interrupted: taken };
     };
 
     const { service, held: holder, open, body, view, store } = setupSend(new FakeHeld(), undefined, voice);
@@ -959,7 +995,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(service.dictate(mine.key, 's2', 'stop', pieces, false, { replyId: 'r2', said: '', rest: 'Done.' })).toMatchObject({ message: { interrupted: { replyId: 'r2' } } });
     await settled(() => expect(holder.writes.some((write) => write.includes('[voice] [interrupted your reply before its first words] stop'))).toBe(true));
     // A typed message holds no dictation, and so names no reply.
-    voice.dictated = () => null;
+    voice.take = () => null;
     held = interrupted;
     const typed = service.send(body(mine.key, { text: 'typed', opId: 'o-typed' }));
 
@@ -988,7 +1024,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     // The mic and the composer reach the voice; a hub with no mic says so.
     expect(command('mic', { on: true })).toEqual({ status: 409, body: { error: 'This hub has no voice.' } });
     voice.mic = (key, on) => (key === mine.key ? (calls.push(`mic ${on}`), null) : 'Voice is off (voice.enabled).');
-    voice.composer = (key, focused, draft, listen) => void calls.push(`composer ${focused} ${draft}${listen === true ? ' listen' : ''}`);
+    voice.composer = (key, focused, draft, listen, seq) => void calls.push(`composer ${focused} ${draft}${listen === true ? ' listen' : ''}${seq === undefined ? '' : ` seq ${seq}`}`);
     expect(command('mic', { on: true })).toEqual({ status: 200, body: { on: true } });
     expect(command('mic', { on: true }, theirs.key)).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
     expect(command('mic')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } });
@@ -997,7 +1033,12 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     // The web page's composer keeps dictation listening while it has the focus; anything but a boolean is refused.
     expect(command('composer', { focused: true, draft: 'fix', listen: true })).toEqual({ status: 200, body: { done: true } });
     expect(calls.at(-1)).toBe('composer true fix listen');
-    expect(command('composer', { focused: true, draft: 'fix', listen: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } });
+    // A page's update while its message is on its way carries no draft, and each is numbered; a bad draft or number is refused.
+    expect(command('composer', { focused: false, listen: true, seq: 4 })).toEqual({ status: 200, body: { done: true } });
+    expect(calls.at(-1)).toBe('composer false null listen seq 4');
+    for (const bad of [{ listen: 'yes' }, { draft: 3 }, { draft: 'x'.repeat(10_001) }, { seq: -1 }, { seq: 1.5 }, { seq: '2' }]) {
+      expect(command('composer', { focused: true, draft: 'fix', ...bad })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft?, listen?, seq?, heard?}.' } });
+    }
     expect(command('replay', { replyId: 'r-x' })).toEqual({ status: 403, body: { error: 'That reply is not in the session this page shows, so it was not read again.' } });
     expect(command('replay')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } });
     expect(service.voiceCommand('talk-here', { window: mine.key, scopeGen: 1 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } });
@@ -1042,7 +1083,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const other = open(3).key;
     const refused = (patch: Record<string, unknown>, window = key) => service.send(body(window, patch));
 
-    expect(service.send({ window: key, scopeGen: 1, sessionId: 's2', text: 'x' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text | answers: [{card, slug, letters, other}], command?}.' } });
+    expect(service.send({ window: key, scopeGen: 1, sessionId: 's2', text: 'x' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text | answers: [{card, slug, letters, other}], command?, heard?, composerSeq?}.' } });
     expect(refused({}, 'forged')).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
     expect(refused({ sessionId: 's3', launch: 'launch-3' })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
     expect(refused({}, other)).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
@@ -1069,7 +1110,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     expect(service.send(body(key, { opId: 'op-c0', text: '/compact\nnow', command: true }))).toEqual({ status: 400, body: { error: 'A slash command is one line that starts with /name.' } });
     expect(service.send(body(key, { opId: 'op-c1', text: 'compact now', command: true }))).toEqual({ status: 400, body: { error: 'A slash command is one line that starts with /name.' } });
-    expect(service.send(body(key, { opId: 'op-c2', text: '/compact', command: 'yes' }))).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text | answers: [{card, slug, letters, other}], command?}.' } });
+    expect(service.send(body(key, { opId: 'op-c2', text: '/compact', command: 'yes' }))).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text | answers: [{card, slug, letters, other}], command?, heard?, composerSeq?}.' } });
     expect(held.writes).toEqual([]);
 
     expect(service.send(body(key, { opId: 'op-c3', text: '/compact keep the plan', command: true }))).toMatchObject({ status: 200, body: { message: { id: 'm-1', text: '/compact keep the plan' } } });

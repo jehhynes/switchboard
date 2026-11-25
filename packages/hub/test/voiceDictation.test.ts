@@ -150,9 +150,9 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
   return { control, connection, windows, notified, dictated, busy, advance, settle, piece, end, fragments, logs, cardHeard, setCard: (run: typeof card) => (card = run), refuse: (why: string | null) => (refuse = why), focus: (key: string | null) => (focused = key), setLastReply: (text: string) => (lastReply = text) };
 }
 
-// A draft's `added` piece is left out here; the tests of a focused page's composer read it.
+// A draft's `added` piece and its number are left out here; the tests of a focused page's composer read them.
 const events = (notified: Array<{ key: string; type: string; payload: Record<string, unknown> }>, type: string) =>
-  notified.filter((one) => one.type === type).map((one) => [one.key, Object.fromEntries(Object.entries(one.payload).filter(([name]) => name !== 'added'))]);
+  notified.filter((one) => one.type === type).map((one) => [one.key, Object.fromEntries(Object.entries(one.payload).filter(([name]) => name !== 'added' && name !== 'piece'))]);
 
 describe('VoiceControl dictation', () => {
   it('applies a whole utterance that is a card command to the open card instead of sending it, and says the reply (PRD R103)', async () => {
@@ -274,7 +274,7 @@ describe('VoiceControl dictation', () => {
     expect(dictated).toEqual([{ key: 'k1', sessionId: 's1', text: 'Also, fix the login flow', partial: false, pieces: [expect.objectContaining({ text: 'fix the' }), expect.objectContaining({ text: 'login flow' })] }]);
     expect(events(notified, 'draft').at(-1)).toEqual(['k1', { text: '', sessionId: 's1' }]);
     expect(fragments().map((one) => `${String(one.event)} ${String(one.text)} ${String(one.messageId)}`)).toEqual(['heard fix the null', 'heard login flow null', 'submitted fix the m1', 'submitted login flow m1']);
-    expect(control.dictated('k1', 's1')).toBeNull();
+    expect(control.take('k1', 's1')?.pieces ?? null).toBeNull();
   });
 
   it('keeps the voice\'s steps of a message turn detection ended for its timing line, once, and none for one ended without them', async () => {
@@ -320,11 +320,11 @@ describe('VoiceControl dictation', () => {
     piece('late', 'u3', 0);
     expect(dictated).toEqual([]);
     expect(events(notified, 'draft').at(-1)).toEqual(['k1', { text: 'rename it and more', sessionId: 's1' }]);
-    expect(control.dictated('k1', 's1')).toMatchObject([{ text: 'rename it' }, { text: 'and more' }]);
-    expect(control.dictated('k1', 's1')).toBeNull();
+    expect(control.take('k1', 's1')?.pieces ?? null).toMatchObject([{ text: 'rename it' }, { text: 'and more' }]);
+    expect(control.take('k1', 's1')?.pieces ?? null).toBeNull();
     control.composer('k1', false, 'x');
     control.composer('k1', false, ' ');
-    expect(control.dictated('k1', 's1')).toBeNull();
+    expect(control.take('k1', 's1')?.pieces ?? null).toBeNull();
     connection.receive({ type: 'words', gen: 0, utteranceId: 'u9', sessionId: 's1', text: 'old' });
     expect(events(notified, 'words')).toEqual([]);
   });
@@ -343,10 +343,10 @@ describe('VoiceControl dictation', () => {
     end();
     expect(dictated).toEqual([]);
     expect(notified.filter((one) => one.type === 'draft').map((one) => one.payload)).toEqual([
-      { text: 'Also, rename it', sessionId: 's1', added: 'rename it' },
-      { text: 'Also, rename it and the tests', sessionId: 's1', added: 'and the tests' },
+      { text: 'Also, rename it', sessionId: 's1', added: 'rename it', piece: expect.any(Number) },
+      { text: 'Also, rename it and the tests', sessionId: 's1', added: 'and the tests', piece: expect.any(Number) },
     ]);
-    expect(control.dictated('k1', 's1')).toMatchObject([{ text: 'rename it' }, { text: 'and the tests' }]);
+    expect(control.take('k1', 's1')?.pieces ?? null).toMatchObject([{ text: 'rename it' }, { text: 'and the tests' }]);
 
     // A composer that does not ask to listen stops the voice process listening while it has the focus, as the Conversation view's does.
     control.composer('k1', true, '');
@@ -394,11 +394,11 @@ describe('VoiceControl dictation', () => {
     connection.receive({ type: 'audio', mic: 'paused-other-app', engine: 'decibri', device: null, recognizer: null, error: null });
     advance(FRAGMENT_FLUSH_MS + 2_000);
     expect(dictated).toEqual([]);
-    expect(control.dictated('k1', 's2')).toBeNull();
+    expect(control.take('k1', 's2')?.pieces ?? null).toBeNull();
     windows.set('k1', scope('k1', 3, 's3'));
     control.composer('k1', false, '');
-    expect(control.dictated('k1', 's3')).toBeNull();
-    expect(control.dictated('k1', 's1')).toMatchObject([{ text: 'one' }, { text: 'two' }]);
+    expect(control.take('k1', 's3')?.pieces ?? null).toBeNull();
+    expect(control.take('k1', 's1')?.pieces ?? null).toMatchObject([{ text: 'one' }, { text: 'two' }]);
   });
 
   it('keeps a refused turn\'s draft and logs it refused', async () => {
@@ -453,24 +453,159 @@ describe('VoiceControl dictation', () => {
     piece('hold on');
     end(true, 'u1', 1, interrupted);
     expect(dictated).toEqual([{ key: 'k1', sessionId: 's1', text: 'hold on', partial: false, pieces: [expect.objectContaining({ text: 'hold on' })], interrupted }]);
-    expect(control.interruption('k1', 's1')).toBeNull();
+    expect(control.take('k1', 's1')).toBeNull();
 
     // Cut short by the composer taking the focus: Enter sends it, naming the reply once.
     piece('wait', 'u2');
     control.composer('k1', true, 'wait');
     end(false, 'u2', 1, interrupted);
     expect(dictated).toHaveLength(1);
-    expect(control.dictated('k1', 's1')).toMatchObject([{ text: 'wait' }]);
-    expect(control.interruption('k1', 's1')).toEqual(interrupted);
-    expect(control.interruption('k1', 's1')).toBeNull();
+    expect(control.take('k1', 's1')).toEqual({ pieces: [expect.objectContaining({ text: 'wait' })], interrupted });
+    expect(control.take('k1', 's1')).toBeNull();
 
     // An emptied draft no longer names it; an utterance that kept nothing names nothing.
     piece('again', 'u3');
     end(false, 'u3', 1, interrupted);
     control.composer('k1', false, '');
-    expect(control.interruption('k1', 's1')).toBeNull();
     end(false, 'u4', 1, interrupted);
-    expect(control.interruption('k1', 's1')).toBeNull();
+    piece('later', 'u5');
+    expect(control.take('k1', 's1')).toEqual({ pieces: [expect.objectContaining({ text: 'later' })], interrupted: null });
+  });
+});
+
+describe('VoiceControl dictation sent from the composer (architecture.md § Dictation)', () => {
+  /** The last piece number a page saw, from the hub's last `draft` that joined one. */
+  const lastPiece = (notified: Array<{ type: string; payload: Record<string, unknown> }>): number => notified.filter((one) => one.type === 'draft' && typeof one.payload.piece === 'number').at(-1)!.payload.piece as number;
+  const lastDraft = (notified: Array<{ type: string; payload: Record<string, unknown> }>): string => notified.filter((one) => one.type === 'draft').at(-1)!.payload.text as string;
+
+  it('numbers each piece in its draft event, rising across page keys and from the hub clock, so an earlier number is never above a later piece', async () => {
+    const { control, windows, notified, piece, focus } = await setup();
+
+    piece('one');
+    const first = lastPiece(notified);
+
+    expect(first).toBeGreaterThanOrEqual(Date.UTC(2026, 10, 20, 12));
+    piece('two');
+    expect(lastPiece(notified)).toBe(first + 1);
+    // Another page key for the same session numbers on from the same count.
+    windows.set('k3', scope('k3', 1, 's1'));
+    focus('k3');
+    piece('three', 'u2');
+    expect(notified.at(-1)).toMatchObject({ key: 'k3', payload: { piece: first + 2 } });
+  });
+
+  it('tags a send with its dictation whether the focus update posted during it comes before or after it, and an update posted before it that comes after it is ignored', async () => {
+    const { control, connection, notified, dictated, piece, end } = await setup();
+    const typing = () => connection.sent.filter((one) => one.type === 'typing').at(-1);
+
+    // Before: the page's box has the focus and holds a typed word and a piece; Send (seq 3) is overtaken by a blur posted after it (seq 4).
+    control.composer('k1', true, 'Also,', true, 2);
+    piece('rename it');
+    const seen = lastPiece(notified);
+
+    control.composer('k1', false, null, true, 4);
+    expect(typing()).toEqual({ type: 'typing', on: false });
+    expect(control.take('k1', 's1', seen, 3)).toEqual({ pieces: [expect.objectContaining({ text: 'rename it' })], interrupted: null });
+    // The page's update with its draft before Send (seq 2) comes last: it is ignored, so the sent text does not come back as the draft.
+    control.composer('k1', true, 'Also, rename it', true, 2);
+    expect(typing()).toEqual({ type: 'typing', on: false });
+    piece('next', 'u2');
+    expect(lastDraft(notified)).toBe('next');
+    end(true, 'u2');
+    expect(dictated.at(-1)).toMatchObject({ text: 'next' });
+
+    // After: Send (seq 6) reaches the hub first, then the focus update posted after it (seq 7): the message is tagged the same, and the
+    // update leaves the emptied draft alone.
+    control.composer('k1', true, 'Fix', true, 5);
+    piece('the build', 'u3');
+    expect(control.take('k1', 's1', lastPiece(notified), 6)).toEqual({ pieces: [expect.objectContaining({ text: 'the build' })], interrupted: null });
+    control.composer('k1', true, null, true, 7);
+    piece('more', 'u4');
+    expect(lastDraft(notified)).toBe('more');
+    expect(control.take('k1', 's1', lastPiece(notified), 8)?.pieces).toEqual([expect.objectContaining({ text: 'more' })]);
+  });
+
+  it("keeps as the next draft the pieces joined after the last one the page had when it sent, with the reply they spoke over", async () => {
+    const { control, notified, piece, end } = await setup();
+    const interrupted = { replyId: 'r1', said: 'The session token', rest: 'is refreshed.' };
+
+    control.composer('k1', true, '', true, 1);
+    piece('fix it');
+    const seen = lastPiece(notified);
+
+    // A piece the hub joined before it took the send, whose draft event the page had not seen: it is not in the sent text.
+    piece('and the tests', 'u2');
+    end(false, 'u2', 1, interrupted);
+    // The reply it spoke over goes with it, not with the message sent before it.
+    expect(control.take('k1', 's1', seen, 2)).toEqual({ pieces: [expect.objectContaining({ text: 'fix it' })], interrupted: null });
+    piece('too', 'u3');
+    expect(lastDraft(notified)).toBe('and the tests too');
+    expect(control.take('k1', 's1', lastPiece(notified), 3)).toEqual({ pieces: [expect.objectContaining({ text: 'and the tests' }), expect.objectContaining({ text: 'too' })], interrupted });
+    // A reply spoken over by a piece the page had goes with its message; a later piece kept names none.
+    piece('stop', 'u5');
+    end(false, 'u5', 1, interrupted);
+    const stop = lastPiece(notified);
+
+    piece('then retry', 'u6');
+    expect(control.take('k1', 's1', stop, 4)).toEqual({ pieces: [expect.objectContaining({ text: 'stop' })], interrupted });
+    expect(control.take('k1', 's1', lastPiece(notified), 5)).toEqual({ pieces: [expect.objectContaining({ text: 'then retry' })], interrupted: null });
+    // None of its pieces seen: the message holds no dictation, and they all stay.
+    piece('later', 'u4');
+    expect(control.take('k1', 's1', 0, 4)).toBeNull();
+    expect(control.take('k1', 's1')?.pieces).toEqual([expect.objectContaining({ text: 'later' })]);
+  });
+
+  it('keeps a piece when an empty draft posted before it arrives later', async () => {
+    const { control, notified, piece } = await setup();
+
+    control.composer('k1', true, '', true, 1, 0);
+    piece('keep this');
+    const seen = lastPiece(notified);
+    control.composer('k1', true, '', true, 2, 0);
+    expect(control.take('k1', 's1', seen, 3)?.pieces).toEqual([expect.objectContaining({ text: 'keep this' })]);
+  });
+
+  it('keeps a send tagged with its dictation whether an empty draft reaches the hub before or after it, and keeps later speech for the next draft', async () => {
+    const { control, notified, piece } = await setup();
+
+    // Before: the box, emptied (seq 1), is told empty again (seq 2) before its piece reached the page; that update reaches the hub after the
+    // piece but before the send (seq 3), and keeps the piece it does not hold.
+    control.composer('k1', true, '', true, 1, 0);
+    piece('fix the build');
+    const first = lastPiece(notified);
+
+    control.composer('k1', true, '', true, 2, 0);
+    expect(control.take('k1', 's1', first, 3)).toEqual({ pieces: [expect.objectContaining({ text: 'fix the build' })], interrupted: null });
+
+    // After: the same empty update (seq 4) reaches the hub only after the send (seq 5) took the piece: it is ignored, and speech heard after
+    // the send stays as the next draft.
+    piece('and lint', 'u2');
+    const second = lastPiece(notified);
+
+    expect(control.take('k1', 's1', second, 5)).toEqual({ pieces: [expect.objectContaining({ text: 'and lint' })], interrupted: null });
+    piece('then deploy', 'u3');
+    control.composer('k1', true, '', true, 4, 0);
+
+    // The page's own empty draft once the hub took the message (seq 6) names the last piece it had, so a piece joined after it stays too.
+    piece('carefully', 'u4');
+    expect(lastDraft(notified)).toBe('then deploy carefully');
+    control.composer('k1', false, '', true, 6, second);
+    expect(control.take('k1', 's1', lastPiece(notified), 7)?.pieces).toEqual([expect.objectContaining({ text: 'then deploy' }), expect.objectContaining({ text: 'carefully' })]);
+  });
+
+  it('applies a draft older than a focus that came first, leaving the newer focus, and keeps the unnumbered contract', async () => {
+    const { control, connection, notified, piece } = await setup();
+    const typing = () => connection.sent.filter((one) => one.type === 'typing').at(-1);
+
+    control.composer('k1', false, null, true, 6);
+    control.composer('k1', true, 'typed', true, 5);
+    expect(typing()).toEqual({ type: 'typing', on: false });
+    piece('more');
+    expect(lastDraft(notified)).toBe('typed more');
+    // A composer without seq is applied whole, as before: an empty draft drops its dictation.
+    control.composer('k1', true, '', true);
+    expect(typing()).toEqual({ type: 'typing', on: true, listen: true });
+    expect(control.take('k1', 's1')).toBeNull();
   });
 });
 
@@ -603,7 +738,7 @@ describe('VoiceControl enrolment', () => {
     end(true, 'u2');
     expect(dictated).toEqual([]);
     expect(events(notified, 'held').at(-1)).toEqual(['k1', { sessionId: 's1', note: HELD_AFTER_NOTE }]);
-    expect(control.dictated('k1', 's1')).toHaveLength(3);
+    expect(control.take('k1', 's1')?.pieces ?? null).toHaveLength(3);
 
     // Sent by Enter, the draft is free again: the next turn sends on its own.
     piece('and lint', 'u3');

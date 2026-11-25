@@ -67,7 +67,16 @@ interface Composer {
   interrupted: Interruption | null;
   /** A room hold kept a spoken turn in the draft: no turn's end or `[partial]` sends it until the operator sends or empties it. */
   held: boolean;
+  /** The number of the last piece joined when `interrupted` was set, so a send that takes only earlier pieces leaves it with the later ones. */
+  interruptedPiece: number;
+  /** The highest `seq` of a `composer` that set the focus, so an older one, arriving later, leaves the focus alone. */
+  seq: number;
+  /** The highest `seq` of a `composer` that set the draft or of a `send` that took it, so an older draft, arriving later, is ignored. */
+  draftSeq: number;
 }
+
+/** Joins dictated text to a draft as a piece joins it: after a space unless the draft is empty or ends in one. */
+const joinText = (draft: string, text: string): string => (draft === '' || /\s$/.test(draft) ? `${draft}${text}` : `${draft} ${text}`);
 
 /**
  * Voiceprint enrolment as the Settings Voice page shows it (architecture.md § Voice check and barge-in): `idle` before any this run, `starting`
@@ -414,6 +423,12 @@ export class VoiceControl {
   /** Why the open capture listens while the voice plays though it cancels no echo, as the process last said; null otherwise. */
   #fullDuplex: string | null = null;
   readonly #composers = new Map<string, Composer>();
+  /**
+   * Each piece's number, which its `draft` event carries: one count for the hub, started at the hub's start time in milliseconds, so a page's
+   * numbers from another page key, or from an earlier hub unless the clock went back, are below every piece joined since (architecture.md § Dictation).
+   */
+  readonly #pieceNumbers = new WeakMap<Piece, number>();
+  #pieceNumber: number | null = null;
   readonly #heard = new Map<string, Heard>();
   /** A dictated message's steps before it was queued for typing, by message ID, until its timing line is written. */
   readonly #timings = new Map<string, UtteranceTiming & { receivedAt: number }>();
@@ -1170,53 +1185,62 @@ export class VoiceControl {
   /**
    * The composer's focus and draft (architecture.md § Dictation, the focus rule): the hub keeps each window's draft as the one text dictation
    * joins, and while the here window's composer has the focus no spoken turn sends it; the voice process stops listening too, unless the
-   * composer asks to keep `listen`ing, as the web page's does. A draft emptied by the operator no longer holds dictation.
+   * composer asks to keep `listen`ing, as the web page's does. A draft emptied by the operator no longer holds dictation. Without `draft` only
+   * the focus changes. With `seq`, a focus older than one already set is left alone, as is a draft older than one set or taken by a `send`.
    */
-  composer(key: string, focused: boolean, draft: string, listen = false): void {
+  composer(key: string, focused: boolean, draft: string | null, listen = false, seq?: number, heard?: number): void {
     const composer = this.#composer(key, this.deps.windows.scope(key)?.sessionId ?? '');
 
-    composer.focused = focused;
-    composer.listen = listen;
-    composer.draft = draft;
+    if (seq === undefined || seq >= composer.seq) {
+      composer.seq = seq ?? composer.seq;
+      composer.focused = focused;
+      composer.listen = listen;
+    }
 
-    if (draft.trim() === '') {
-      composer.pieces = [];
-      composer.interrupted = null;
-      composer.held = false;
+    if (draft !== null && (seq === undefined || seq >= composer.draftSeq)) {
+      composer.draftSeq = seq ?? composer.draftSeq;
+      const later = heard === undefined ? [] : this.#after(composer, heard);
+      composer.draft = later.reduce((text, piece) => joinText(text, piece.text), draft);
+
+      if (draft.trim() === '') {
+        composer.pieces = later;
+        if (later.length === 0 || heard === undefined || composer.interruptedPiece <= heard) composer.interrupted = null;
+        composer.held = false;
+      }
     }
 
     this.#syncTyping();
   }
 
   /**
-   * A message the window sends from its composer: the pieces of the dictation it holds, so it goes as a `[voice]` message, or null for one with
-   * none. The draft is then the composer's again, empty.
+   * A message the window sends from its composer takes the draft, as one step (architecture.md § Dictation): the pieces up to `heard`, the
+   * number of the last piece the window had when it sent, go with the message as its dictation, with the reply they spoke over; null when none
+   * do. Later pieces, which the sent text does not hold, stay as the draft, which becomes their text; without `heard` every piece goes.
    */
-  dictated(key: string, sessionId: string): Piece[] | null {
-    const composer = this.#composers.get(composerKey(key, sessionId));
+  take(key: string, sessionId: string, heard?: number, seq?: number): { pieces: Piece[]; interrupted: Interruption | null } | null {
+    const composer = this.#composer(key, sessionId);
 
-    if (composer === undefined || composer.pieces.length === 0) {
-      return null;
-    }
+    composer.draftSeq = Math.max(composer.draftSeq, seq ?? 0);
+    const kept = heard === undefined ? [] : this.#after(composer, heard);
+    const taken = composer.pieces.slice(0, composer.pieces.length - kept.length);
+    // The reply spoken over goes with the pieces whose utterance spoke over it: the later ones kept, when it came with one of them.
+    const keptInterruption = kept.length > 0 && heard !== undefined && composer.interruptedPiece > heard;
+    const interrupted = taken.length === 0 || keptInterruption ? null : composer.interrupted;
 
-    const pieces = composer.pieces;
-
-    composer.pieces = [];
-    composer.draft = '';
+    composer.draft = kept.reduce((text, piece) => joinText(text, piece.text), '');
+    composer.pieces = kept;
     composer.held = false;
-    return pieces;
-  }
 
-  /** The reply the dictation in a window's draft spoke over, taken as the window sends the draft; null with none. */
-  interruption(key: string, sessionId: string): Interruption | null {
-    const composer = this.#composers.get(composerKey(key, sessionId));
-    const interrupted = composer?.interrupted ?? null;
-
-    if (composer !== undefined) {
+    if (kept.length === 0 || (taken.length > 0 && !keptInterruption)) {
       composer.interrupted = null;
     }
 
-    return interrupted;
+    return taken.length === 0 ? null : { pieces: taken, interrupted };
+  }
+
+  /** The composer's pieces numbered after `heard`. */
+  #after(composer: Composer, heard: number): Piece[] {
+    return composer.pieces.filter((piece) => (this.#pieceNumbers.get(piece) ?? 0) > heard);
   }
 
   /**
@@ -1310,7 +1334,7 @@ export class VoiceControl {
     let composer = this.#composers.get(composerKey(key, sessionId));
 
     if (composer === undefined) {
-      composer = { focused: false, listen: false, draft: '', pieces: [], interrupted: null, held: false };
+      composer = { focused: false, listen: false, draft: '', pieces: [], interrupted: null, interruptedPiece: 0, held: false, seq: 0, draftSeq: 0 };
       this.#composers.set(composerKey(key, sessionId), composer);
     }
 
@@ -1390,10 +1414,13 @@ export class VoiceControl {
 
     const composer = this.#composer(heard.key, heard.sessionId);
 
-    composer.draft = composer.draft === '' || /\s$/.test(composer.draft) ? `${composer.draft}${message.text}` : `${composer.draft} ${message.text}`;
+    composer.draft = joinText(composer.draft, message.text);
     composer.pieces.push(piece);
-    // `added` names the piece, so a page whose box has the focus joins it to what the operator has typed since.
-    this.deps.notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId, added: message.text });
+    this.#pieceNumber = (this.#pieceNumber ?? Math.floor(this.deps.now())) + 1;
+    this.#pieceNumbers.set(piece, this.#pieceNumber);
+    // `added` names the piece, so a page whose box has the focus joins it to what the operator has typed since, and `piece` numbers it, so
+    // the page's `send` and `composer` say which pieces its text holds.
+    this.deps.notify(heard.key, 'draft', { text: composer.draft, sessionId: heard.sessionId, added: message.text, piece: this.#pieceNumber });
   }
 
   /**
@@ -1419,6 +1446,7 @@ export class VoiceControl {
     // The reply it spoke over goes with the message that sends this dictation, by voice or by Enter.
     if (message.interrupted !== null && composer.pieces.length > 0) {
       composer.interrupted = message.interrupted;
+      composer.interruptedPiece = this.#pieceNumbers.get(composer.pieces.at(-1)!) ?? 0;
     }
 
     if (!message.final) {

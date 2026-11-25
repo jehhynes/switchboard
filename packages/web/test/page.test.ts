@@ -8361,10 +8361,13 @@ describe('the page against late answers', () => {
     source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
     input.focus();
     typeIn('fix it');
+    const before = told().length;
+
     key('Enter');
     await flush();
     expect(document.activeElement).toBe(input);
-    expect(told().at(-1)).toMatchObject({ focused: true, draft: '' });
+    // The hub takes its draft with the message: no update empties it first, which could reach the hub before the send.
+    expect(told().slice(before)).toEqual([]);
 
     // A piece heard meanwhile waits for the answer; refused, it joins the text kept, and the hub's draft becomes the box's.
     source.emit('draft', { text: 'and more', sessionId: 's1', added: 'and more' });
@@ -8418,6 +8421,92 @@ describe('the page against late answers', () => {
     await flush();
     expect(menu.querySelector('[role="option"]')!.getAttribute('aria-disabled')).toBe('true');
     expect(input.hasAttribute('aria-activedescendant')).toBe(false);
+    page.close();
+  });
+  it("sends a message with the last dictated piece its box holds, after every composer update, and keeps only the pieces heard while it is on its way (architecture.md § Dictation)", async () => {
+    const { page, source } = start(/send/);
+    const input = root.querySelector('textarea')!;
+    const told = () => posts.filter((post) => post.url.endsWith('/composer')).map((post) => post.body);
+
+    helloFor(source, 1, 3);
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
+    input.focus();
+    typeIn('Also,');
+    source.emit('draft', { text: 'Also, fix it', sessionId: 's1', added: 'fix it', piece: 41 });
+    expect(input.value).toBe('Also, fix it');
+    key('Enter');
+    await flush();
+    const sent = sends().at(-1)!;
+    const seqs = told().map((body) => body['seq'] as number);
+
+    expect(sent).toMatchObject({ text: 'Also, fix it', heard: 41 });
+    expect(seqs.length).toBeGreaterThan(0);
+    expect(sent['composerSeq']).toBeGreaterThan(Math.max(...seqs));
+
+    // The hub's text still holds the message until it takes it: only the piece is kept. A blur meanwhile tells the focus alone, numbered
+    // after the send.
+    source.emit('draft', { text: 'Also, fix it and more', sessionId: 's1', added: 'and more', piece: 42 });
+    input.blur();
+    expect(told().at(-1)).toEqual({ scopeGen: 3, window: 'pk', opId: expect.any(String), focused: false, listen: true, seq: (sent['composerSeq'] as number) + 1, heard: 42 });
+    pending.shift()!.resolve({ status: 200, body: { message: { id: 'm5' } } });
+    await flush();
+    expect(input.value).toBe('and more');
+
+    // Refused, the box keeps its text and the piece heard meanwhile joins it once.
+    input.focus();
+    key('Enter');
+    await flush();
+    expect(sends().at(-1)).toMatchObject({ text: 'and more', heard: 42 });
+    source.emit('draft', { text: 'and more again', sessionId: 's1', added: 'again', piece: 43 });
+    pending.shift()!.resolve({ status: 409, body: { error: 'The session ended.' } });
+    await flush();
+    expect(input.value).toBe('and more again');
+    expect(told().at(-1)).toMatchObject({ focused: true, draft: 'and more again' });
+    page.close();
+  });
+  it('keeps a piece heard while a message is on its way over an older draft event, and as the draft of a work item no longer shown (architecture.md § Dictation)', async () => {
+    const { page, source } = start(/send/);
+    const input = root.querySelector('textarea')!;
+
+    helloFor(source, 1, 3);
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
+    input.focus();
+    typeIn('fix it');
+    key('Enter');
+    await flush();
+    // An older draft without a piece, then a piece: taken, the box holds the piece, which the older draft does not drop.
+    source.emit('draft', { text: '', sessionId: 's1' });
+    source.emit('draft', { text: 'fix it and more', sessionId: 's1', added: 'and more', piece: 42 });
+    pending.shift()!.resolve({ status: 200, body: { message: { id: 'm5' } } });
+    await flush();
+    expect(input.value).toBe('and more');
+
+    // Sent, then another work item shown before the answer: a piece heard meanwhile becomes the first work item's draft.
+    input.focus();
+    key('Enter');
+    await flush();
+    expect(sends().at(-1)).toMatchObject({ text: 'and more', heard: 42 });
+    helloFor(source, 2, 4);
+    source.emit('draft', { text: 'and more then lint', sessionId: 's1', added: 'then lint', piece: 43 });
+    pending.shift()!.resolve({ status: 200, body: { message: { id: 'm6' } } });
+    await flush();
+    expect(input.value).toBe('');
+    helloFor(source, 1, 5);
+    expect(input.value).toBe('then lint');
+
+    // A piece for the session shown meanwhile joins its box once the send answered, after the operator's edits, and its next send names it.
+    key('Enter');
+    await flush();
+    helloFor(source, 2, 6);
+    typeIn('Also,');
+    source.emit('draft', { text: 'check it', sessionId: 's2', added: 'check it', piece: 44 });
+    expect(input.value).toBe('Also,');
+    pending.shift()!.resolve({ status: 200, body: { message: { id: 'm7' } } });
+    await flush();
+    expect(input.value).toBe('Also, check it');
+    key('Enter');
+    await flush();
+    expect(sends().at(-1)).toMatchObject({ text: 'Also, check it', heard: 44 });
     page.close();
   });
 });

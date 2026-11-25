@@ -374,10 +374,12 @@ export interface ConversationVoice {
   selected(key: string): void;
   /** Whether `[expressive]` goes with `[spoken]` (`voice.expressive`). */
   expressive(): boolean;
-  /** The pieces of the dictation the window's draft holds, taken as it is sent, or null for a draft with none (architecture.md § Dictation). */
-  dictated?(key: string, sessionId: string): Piece[] | null;
-  /** The reply the window's dictation spoke over, taken as its draft is sent, or null (architecture.md § Voice check and barge-in). */
-  interruption?(key: string, sessionId: string): Interruption | null;
+  /**
+   * Takes the window's draft as it is sent: the pieces of the dictation its text holds, up to the piece numbered `heard`, with the reply they
+   * spoke over (architecture.md § Dictation, § Voice check and barge-in), or null for a text with none. `seq` orders it after the window's
+   * `composer` updates.
+   */
+  take?(key: string, sessionId: string, heard?: number, seq?: number): { pieces: Piece[]; interrupted: Interruption | null } | null;
   /** A reply's heard tags, for the glossary. */
   heard?(tags: HeardTag[]): void;
   /** A dictated message settled, for the fragments log. */
@@ -387,8 +389,8 @@ export interface ConversationVoice {
   /** The mic command: why it was refused, or null. */
   mic?(key: string, on: boolean): string | null;
   micTiming?(key: string, steps: Array<{ step: string; ms: number }>, outcome: string): void;
-  /** The composer command: the window's composer gained or lost the focus, or its draft changed. */
-  composer?(key: string, focused: boolean, draft: string, listen?: boolean): void;
+  /** The composer command: the window's composer gained or lost the focus, or its draft changed; a null `draft` leaves the draft. */
+  composer?(key: string, focused: boolean, draft: string | null, listen?: boolean, seq?: number, heard?: number): void;
 }
 
 /** The most IDs one `seen` command marks. */
@@ -2497,13 +2499,13 @@ export class ConversationService {
    * list without the escape that keeps every other message a message; it must be one line that starts with `/name`.
    */
   send(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, scopeGen, opId, sessionId, launch, command, answers } = body;
+    const { window, scopeGen, opId, sessionId, launch, command, answers, heard, composerSeq } = body;
     const given = answers === undefined ? null : parseAnswers(answers);
     // A card's Send posts its answers, whose text the hub writes (`answerMessage`).
     const text = given === null ? body['text'] : '';
 
-    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof sessionId !== 'string' || !(launch === null || typeof launch === 'string') || typeof text !== 'string' || !(command === undefined || typeof command === 'boolean') || (answers !== undefined && (given === null || command === true))) {
-      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text | answers: [{card, slug, letters, other}], command?}.' } };
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || opId === '' || opId.length > 200 || typeof sessionId !== 'string' || !(launch === null || typeof launch === 'string') || typeof text !== 'string' || !(command === undefined || typeof command === 'boolean') || (answers !== undefined && (given === null || command === true)) || !isCount(heard) || !isCount(composerSeq)) {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text | answers: [{card, slug, letters, other}], command?, heard?, composerSeq?}.' } };
     }
 
     const scope = this.deps.windows.scope(window);
@@ -2581,10 +2583,11 @@ export class ConversationService {
       return { status: 200, body: { message: itemView({ type: 'message', ...message }) } };
     }
 
-    // A draft that holds dictation goes as a [voice] message with its pieces, however it was sent (architecture.md § Dictation); a command never.
-    const pieces = command === true ? null : (this.deps.voice?.dictated?.(window, session.id) ?? null);
-    const interrupted = pieces === null ? null : (this.deps.voice?.interruption?.(window, session.id) ?? null);
-    const message = this.#type(session, window, launch, text, { opId, command: command === true, pieces, partial: false, interrupted });
+    // Sending takes the draft in the same step, so no composer update the page posted around it can drop its dictation (architecture.md §
+    // Dictation). A draft that holds dictation goes as a [voice] message with its pieces, however it was sent; a command never.
+    const taken = this.deps.voice?.take?.(window, session.id, heard as number | undefined, composerSeq as number | undefined) ?? null;
+    const pieces = command === true ? null : (taken?.pieces ?? null);
+    const message = this.#type(session, window, launch, text, { opId, command: command === true, pieces, partial: false, interrupted: pieces === null ? null : (taken?.interrupted ?? null) });
 
     return { status: 200, body: { message: itemView({ type: 'message', ...message }) } };
   }
@@ -2896,7 +2899,7 @@ export class ConversationService {
    * window's scope, 409 for a stale `scopeGen` and with the voice's refusal, and 404 while voice is not part of this hub.
    */
   voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic' | 'mic-timing' | 'composer', body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, scopeGen, opId, on, replyId, focused, draft, listen, steps, outcome } = body;
+    const { window, scopeGen, opId, on, replyId, focused, draft, listen, steps, outcome, seq, heard } = body;
 
     // A page's Mic on tap timed, for the hub log (architecture.md § Dictation): any window or page key the hub knows, at any scope.
     if (name === 'mic-timing') {
@@ -2923,9 +2926,9 @@ export class ConversationService {
       typeof opId !== 'string' ||
       ((name === 'speak-replies' || name === 'mic') && typeof on !== 'boolean') ||
       (name === 'replay' && typeof replyId !== 'string') ||
-      (name === 'composer' && (typeof focused !== 'boolean' || typeof draft !== 'string' || draft.length > MAX_MESSAGE_CHARS || (listen !== undefined && typeof listen !== 'boolean')))
+      (name === 'composer' && (typeof focused !== 'boolean' || !(draft === undefined || (typeof draft === 'string' && draft.length <= MAX_MESSAGE_CHARS)) || (listen !== undefined && typeof listen !== 'boolean') || !isCount(seq) || !isCount(heard)))
     ) {
-      const fields = name === 'speak-replies' || name === 'mic' ? ', on' : name === 'replay' ? ', replyId' : name === 'composer' ? ', focused, draft' : '';
+      const fields = name === 'speak-replies' || name === 'mic' ? ', on' : name === 'replay' ? ', replyId' : name === 'composer' ? ', focused, draft?, listen?, seq?, heard?' : '';
 
       return { status: 400, body: { error: `Expected {window, scopeGen, opId${fields}}.` } };
     }
@@ -2948,7 +2951,7 @@ export class ConversationService {
     }
 
     if (name === 'composer') {
-      voice.composer?.(window, focused as boolean, draft as string, listen === true);
+      voice.composer?.(window, focused as boolean, (draft as string | undefined) ?? null, listen === true, seq as number | undefined, heard as number | undefined);
       return { status: 200, body: { done: true } };
     }
 
@@ -3202,6 +3205,9 @@ export function typedText(message: ConversationMessage, expressive: boolean, cod
 // Kept as it is: an open page of an older build compares it to keep a send's opId for a retry; the page shows its own words for it
 // (packages/web/src/request.ts).
 export const CONVERSATION_CHANGED = "The window's conversation changed.";
+
+/** An optional count a page sends, such as `seq` or `heard`: absent, or a whole number from 0. */
+const isCount = (value: unknown): boolean => value === undefined || (Number.isSafeInteger(value) && (value as number) >= 0);
 
 /** How many not-sent `opId`s the service remembers, for a `send` repeated after its message left the conversation. */
 const UNSENT_KEPT = 100;
