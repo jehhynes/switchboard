@@ -818,8 +818,19 @@ export function dockRowOf(dock: Pick<DockView, 'groups'>, workItemId: number): D
   return dock.groups.flatMap((group) => group.rows).find((row) => row.key === `item:${workItemId}`) ?? null;
 }
 
-/** An artifact's file, or a file an artifact uses, as the page names it: `<owner>/<file>` or deeper, no segment starting with a dot. */
-const ARTIFACT_FILE = /^[\w-][\w.-]*(\/[\w-][\w.-]*)+$/;
+/**
+ * A segment of an artifact's file, or of a file an artifact uses, as the page names it. It does not start with a dot, end with a dot or a space,
+ * which Windows drops, hold a backslash, a colon (a drive or an NTFS stream) or a control character, or name a Windows device such as `nul.png`;
+ * spaces, `#` and other letters are allowed, as in a screenshot's name.
+ */
+const ARTIFACT_SEGMENT = /^(?!(?:con|prn|aux|nul|com\d|lpt\d|conin\$|conout\$)(?:\.|$))[^./\\:\x00-\x1f](?:[^/\\:\x00-\x1f]*[^/\\:\x00-\x1f. ])?$/i;
+
+/** An artifact's file, or a file an artifact uses: `<owner>/<file>` or deeper, each segment an `ARTIFACT_SEGMENT`. */
+const artifactFileName = (name: string): boolean => {
+  const parts = name.split('/');
+
+  return parts.length > 1 && parts.every((part) => ARTIFACT_SEGMENT.test(part));
+};
 
 const MIME: Record<string, string> = {
   md: 'text/markdown; charset=utf-8',
@@ -861,7 +872,7 @@ export const PAGE_CSP = "default-src 'self'; script-src 'self' " + PAGE_SCRIPT_H
 
 /** A file in an artifact folder: its real path, its media type, and whether it is served in the sandbox; null for a name or file outside it. */
 export function artifactFile(dir: string, name: string): { path: string; mime: string; sandboxed: boolean } | null {
-  if (!ARTIFACT_FILE.test(name)) {
+  if (!artifactFileName(name)) {
     return null;
   }
 

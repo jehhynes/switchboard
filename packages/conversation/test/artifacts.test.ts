@@ -252,6 +252,10 @@ describe('ExternalArtifacts', () => {
     expect(externalFile(entry, 'report/../secret.txt')).toBeNull();
     expect(externalFile(entry, 'report/.hidden')).toBeNull();
     expect(externalFile(entry, 'other/a.png')).toBeNull();
+    // An NTFS stream, a backslash or a control character is no file it uses.
+    expect(externalFile(entry, 'report/img/a.png:x')).toBeNull();
+    expect(externalFile(entry, 'report/img\\a.png')).toBeNull();
+    expect(externalFile(entry, 'report/img/\x01a.png')).toBeNull();
 
     // A stem folder that is a junction out of the file's own folder serves nothing of where it leads.
     const away = mkdtempSync(join(tmpdir(), 'artifacts-away-'));

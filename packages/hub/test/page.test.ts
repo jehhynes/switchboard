@@ -609,6 +609,20 @@ describe('artifactFile', () => {
     expect(artifactFile(folder, 'chat')).toBeNull();
     expect(artifactFile(folder, 'chat/missing.md')).toBeNull();
   });
+
+  it("serves a used file whose name has spaces, # or other letters, and refuses a stream, a backslash, a trailing dot or space, or a Windows device", () => {
+    const folder = join(dir, 'w2');
+
+    mkdirSync(join(folder, 'chat', 'report'), { recursive: true });
+    writeFileSync(join(folder, 'chat', 'report', 'my shot #1 (é).png'), 'png');
+    writeFileSync(join(folder, 'chat', 'report', 'a.png'), 'png');
+
+    expect(artifactFile(folder, 'chat/report/my shot #1 (é).png')).toMatchObject({ mime: 'image/png' });
+
+    for (const name of ['chat/report/a.png:x', 'chat/report\\a.png', 'chat\\..\\..\\w1/chat/notes.md', 'chat/report/a.png.', 'chat/report/a.png ', 'chat/report/NUL.png', 'chat/report/con', 'chat/report/COM1.txt', 'chat/./report/a.png', 'chat//report/a.png', 'chat/report/\x01a.png']) {
+      expect(artifactFile(folder, name), name).toBeNull();
+    }
+  });
 });
 
 describe('findFiles', () => {
@@ -768,8 +782,9 @@ describe('the web page routes', () => {
     let keys = 0;
     const folder = join(dir, 'w1');
 
-    mkdirSync(join(folder, 'chat'), { recursive: true });
+    mkdirSync(join(folder, 'chat', 'page'), { recursive: true });
     writeFileSync(join(folder, 'chat', 'page.html'), '<script>1</script>');
+    writeFileSync(join(folder, 'chat', 'page', 'my shot #1.png'), 'png');
 
     const browserPosts: unknown[] = [];
     const page: PageRoutes = {
@@ -1703,6 +1718,10 @@ describe('the web page routes', () => {
     expect(served.headers['referrer-policy']).toBe('no-referrer');
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-2/chat/page.html', {})).status).toBe(404);
     expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/..%2F..%2Fw1%2Fchat%2Fpage.html', {})).status).toBe(404);
+    // A used file's name keeps its spaces and #, encoded as the page writes them; an encoded backslash or stream is refused.
+    expect(await send(server.port, 'GET', '/v1/conversation/artifact/page-1/chat/page/my%20shot%20%231.png', {})).toMatchObject({ status: 200, body: 'png' });
+    expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/chat%5C..%5C..%5Cw1%5Cchat%5Cpage.html', {})).status).toBe(404);
+    expect((await send(server.port, 'GET', '/v1/conversation/artifact/page-1/chat/page.html%3Ax', {})).status).toBe(404);
     // An external artifact is read from the handle it came with, no further than its checked size.
     expect(await send(server.port, 'GET', '/v1/conversation/artifact/page-1/%401/report.md', {})).toMatchObject({ status: 200, body: '# Report' });
     expect(await send(server.port, 'GET', '/v1/conversation/artifact/page-1/%401/empty.md', {})).toMatchObject({ status: 200, body: '' });

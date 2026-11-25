@@ -419,13 +419,14 @@ export const inGit = (real: string): boolean => real.split(/[\\/]/).some((part) 
 
 /**
  * The real path of a file an external artifact uses: `rest` is the artifact's own file name, or a path under the folder beside it named
- * after its stem (`<stem>/...`), as in the artifact folder. Null for any other path, a dot segment, a link out of that folder, or a `.git` path.
+ * after its stem (`<stem>/...`), as in the artifact folder. Null for any other path, a dot segment, a backslash, colon (an NTFS stream) or control
+ * character, a link out of that folder, or a `.git` path.
  */
 export function externalFile(entry: ExternalEntry, rest: string): string | null {
   const parts = rest.split('/');
   const name = basename(entry.path);
 
-  if (parts.some((part) => part === '' || part.startsWith('.') || part.includes('\\'))) {
+  if (parts.some((part) => part === '' || part.startsWith('.') || /[\\:\x00-\x1f]/.test(part))) {
     return null;
   }
 
