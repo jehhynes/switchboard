@@ -6682,6 +6682,48 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     page.close();
   });
 
+  it('closes only the composer list, or stops only the speech, on an Escape in the composer, leaving the maximized column and keeping speech for a later Escape', async () => {
+    const width = window.innerWidth;
+
+    window.innerWidth = 1440;
+
+    const { page, source } = start();
+
+    hello(source);
+    click('#detail .panel-max');
+    expect(root.classList.contains('maximized')).toBe(true);
+
+    const input = root.querySelector('textarea')!;
+    const escape = (target: HTMLElement) => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    const stops = () => posts.filter((post) => post.url.endsWith('/stop-speaking')).length;
+
+    answers['/files'] = { status: 200, body: { files: [{ path: 'src/a.ts', dir: false }] } };
+    input.value = '@a';
+    input.setSelectionRange(2, 2);
+    input.dispatchEvent(new Event('input'));
+    await flush();
+    await flush();
+    expect(root.querySelector<HTMLElement>('.composer-menu')!.hidden).toBe(false);
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'off', speaking: 'r1', speakReplies: true, error: null } });
+    // The first Escape closes the list alone: the column stays maximized and the reply goes on.
+    escape(input);
+    await flush();
+    expect(root.querySelector<HTMLElement>('.composer-menu')!.hidden).toBe(true);
+    expect(root.classList.contains('maximized')).toBe(true);
+    expect(stops()).toBe(0);
+    // The next stops the speech alone.
+    escape(input);
+    await flush();
+    expect(stops()).toBe(1);
+    expect(root.classList.contains('maximized')).toBe(true);
+    // With nothing left in the composer, Escape restores the column.
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'off', speaking: null, speakReplies: true, error: null } });
+    escape(input);
+    expect(root.classList.contains('maximized')).toBe(false);
+    window.innerWidth = width;
+    page.close();
+  });
+
   it('puts back a message a stopped hub left unsent, only that, with why, and drives the voice from its buttons', async () => {
     const { page, source } = start();
 

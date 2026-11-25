@@ -1431,14 +1431,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    // An Escape the box uses is marked used, so the page's own Escape does not also close the drawer or the maximized column.
     if (event.key === 'Escape') {
       // Escape also drops a list asked for but not shown yet.
       box.cancel();
 
       if (menuOpen !== null) {
         closeMenu();
+        event.preventDefault();
       } else if (state.voice?.here === true && state.voice.speaking !== null) {
         void command('stop-speaking');
+        event.preventDefault();
       }
 
       return;
@@ -4939,6 +4942,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    // An Escape a part already used, as the composer closing its list, closes nothing more.
+    if (event.key === 'Escape' && event.defaultPrevented) {
+      return;
+    }
+
     let changesClosed: 'files' | 'scope' | null = null;
 
     if (event.key === 'Escape' && view.personas !== null) {
@@ -5009,7 +5017,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   }, { signal: listening.signal });
   root.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && (event.target as HTMLElement) !== input && state.voice?.here === true && state.voice.speaking !== null) {
+    if (event.key === 'Escape' && !event.defaultPrevented && (event.target as HTMLElement) !== input && state.voice?.here === true && state.voice.speaking !== null) {
       void command('stop-speaking');
     }
   }, { signal: listening.signal });
