@@ -196,6 +196,19 @@ it('focuses a row without selecting it and leaves its link pills focusable', () 
   expect(posts.filter((post) => post.url.endsWith('/select'))).toEqual([]);
 });
 
+it('opens a row menu whose first row is a write with nothing chosen, so Enter alone runs nothing', () => {
+  const done = { label: 'Mark done', action: 'done', icon: 'check', group: 'main', confirm: null, input: null } as unknown as PageRow['actions'][number];
+  start([group('progress', [row(1, { actions: [done] })])]);
+  key(el('.row'), 'ContextMenu');
+  expect(el('.row-menu .menu-row').dataset['label']).toBe('Mark done');
+  expect(document.activeElement).toBe(el('.row-menu'));
+  key(document.activeElement as HTMLElement, 'Enter');
+  expect(posts.filter((post) => !post.url.endsWith('/page-focus'))).toEqual([]);
+  expect(root.querySelector('.row-menu')).not.toBeNull();
+  key(document.activeElement as HTMLElement, 'ArrowUp');
+  expect(document.activeElement).toBe(el('.row-menu .menu-row'));
+});
+
 it.each(['ContextMenu', 'F10', 'right-click'])('opens a work-item menu with %s, walks it and returns focus with Escape', (method) => {
   start([group('progress', [row(1, { url: 'https://example.test/1' })])]);
   const target = el('.row');
@@ -203,9 +216,11 @@ it.each(['ContextMenu', 'F10', 'right-click'])('opens a work-item menu with %s, 
   if (method === 'right-click') target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   else key(target, method, { shiftKey: method === 'F10' });
   expect(el('.row-menu').textContent).toContain('Open ticket');
-  expect(document.activeElement).toBe(el('.row-menu .menu-row'));
+  expect(el('.row-menu').getAttribute('aria-label')).toBe('Actions for Item 1');
+  // The menu opens with no row chosen.
+  expect(document.activeElement).toBe(el('.row-menu'));
   key(document.activeElement as HTMLElement, 'ArrowDown');
-  expect(document.activeElement?.closest('.row-menu')).not.toBeNull();
+  expect(document.activeElement).toBe(el('.row-menu .menu-row'));
   key(document.activeElement as HTMLElement, 'Escape');
   expect(root.querySelector('.row-menu')).toBeNull();
   expect(document.activeElement).toBe(target);

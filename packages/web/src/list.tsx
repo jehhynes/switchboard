@@ -128,7 +128,7 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
       </div>
       {menu === null ? null : (
         <div class="row-menu-anchor" data-x={menuPoint === undefined ? undefined : String(menuPoint.x)} data-y={menuPoint === undefined ? undefined : String(menuPoint.y)}>
-          <ul class="glass menu row-menu" role="menu" aria-label={`Actions for ${row.ticket}`}>{menu}</ul>
+          <ul class="glass menu row-menu" role="menu" aria-label={`Actions for ${row.title}`} tabIndex={-1}>{menu}</ul>
         </div>
       )}
     </li>

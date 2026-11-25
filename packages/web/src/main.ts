@@ -4235,7 +4235,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.rowMenu = key;
     rowMenuPoint = point;
     draw();
-    list.querySelector<HTMLElement>('.row-menu .menu-row:not(:disabled)')?.focus();
+    // The menu itself takes the focus, with no row chosen, so Enter alone runs nothing; Down or Up chooses the first or last row.
+    list.querySelector<HTMLElement>('.row-menu')?.focus();
   };
   list.addEventListener('contextmenu', (event) => {
     const target = event.target as HTMLElement;

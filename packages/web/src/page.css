@@ -462,6 +462,8 @@ button.picker > .codicon-chevron-down { order: 2; }
 .row-menu-anchor { position: fixed; z-index: 3; top: 0; left: 0; }
 #list:has(.row-menu) { position: relative; z-index: var(--sb-z-bar-menu); }
 .row-menu-anchor > .row-menu { top: 0; left: 0; }
+/* A row's menu opens with the focus on the menu itself, no row chosen (main.ts), so it draws no focus ring of its own. */
+.row-menu:focus { outline: none; }
 .row-menu-anchor > .row-menu.flip-x { left: auto; right: 0; }
 .row-menu-anchor > .row-menu.flip-y { top: auto; bottom: 0; }
 .sheet-input { box-sizing: border-box; width: 100%; min-height: 90px; max-height: 300px; resize: vertical; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 2px; padding: 4px 6px; }
