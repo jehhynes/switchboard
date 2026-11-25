@@ -1,10 +1,10 @@
-import type { ConversationMessage, ConversationReply, ConversationStatus } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply } from '@switchboard/core';
 import { parseReply } from './tags.js';
-import type { ArtifactTag, HeardTag } from './tags.js';
+import type { ArtifactTag, HeardTag, ReplyState } from './tags.js';
 import type { ConversationDeps } from './conversation.js';
 import type { Via } from './screenHold.js';
 
-/** Shared conversation storage, reply tags, statuses and rewrites. Native IDs make history replay idempotent. */
+/** Shared conversation storage, reply tags, states and rewrites. Native IDs make history replay idempotent. */
 export class ConversationLog {
   protected lastMessage: string | null;
   protected answers: string | null = null;
@@ -42,7 +42,7 @@ export class ConversationLog {
   protected publish(text: string, at: number, _aside: boolean, via: Via, replaces: string | undefined, move = true): string {
     const parsed = parseReply(text);
 
-    // A reply that is only a status rewrites nothing: the view shows it on its Status tab, not in the timeline.
+    // A reply that is only a state rewrites nothing: the view shows it on the History tab, not in the timeline.
     parsed.rewrite &&= parsed.opening !== '';
     const existing = replaces === undefined ? null : this.deps.store.reply(replaces);
 
@@ -60,7 +60,7 @@ export class ConversationLog {
       };
 
       this.deps.store.updateReply(existing.id, patch);
-      this.status(existing.id, via, parsed.status, patch.at);
+      this.state(existing.id, via, parsed.state, patch.at);
       this.heard(existing.id, via, parsed.heard);
       this.artifacts(existing.id, via, parsed.artifacts);
 
@@ -103,7 +103,7 @@ export class ConversationLog {
     };
 
     this.deps.store.addReply(reply);
-    this.status(reply.id, via, parsed.status, at);
+    this.state(reply.id, via, parsed.state, at);
     this.heard(reply.id, via, parsed.heard);
     this.artifacts(reply.id, via, parsed.artifacts);
 
@@ -146,26 +146,26 @@ export class ConversationLog {
   }
 
   /**
-   * The status a reply's transcript copy carries, stored as the reply's own, so a later line of the same reply updates it in place. A screen copy's
-   * status is never published: it may be withdrawn, and is still being drawn.
+   * The state a reply's transcript copy carries, stored as the reply's own, so a later line of the same reply updates it in place. A screen copy's
+   * state is never published: it may be withdrawn, and is still being drawn.
    */
-  protected status(replyId: string, via: Via, markdown: string | null, at: number): void {
-    if (via !== 'transcript' || markdown === null) {
+  protected state(replyId: string, via: Via, state: ReplyState | null, at: number): void {
+    if (via !== 'transcript' || state === null) {
       return;
     }
 
     const id = `st-${replyId}`;
-    const stored = this.deps.store.status(id);
+    const stored = this.deps.store.state(id);
 
-    if (stored?.markdown === markdown) {
+    if (stored?.headline === state.headline && stored.body === state.body) {
       return;
     }
 
-    this.deps.store.setStatus({ id, sessionId: this.sessionId, workItemId: this.workItemId, replyId, at: stored?.at ?? at, markdown });
-    this.deps.onChange({ type: 'status', status: this.deps.store.status(id)! });
+    this.deps.store.setState({ id, sessionId: this.sessionId, workItemId: this.workItemId, replyId, at: stored?.at ?? at, headline: state.headline, body: state.body });
+    this.deps.onChange({ type: 'state', state: this.deps.store.state(id)! });
   }
 
-  /** A rewrite: it replaces the newest earlier reply that is not an aside, only a status, withdrawn, rewritten already or itself. */
+  /** A rewrite: it replaces the newest earlier reply that is not an aside, only a state, withdrawn, rewritten already or itself. */
   protected rewrite(id: string): void {
     const target = this.deps.store
       .latestReplies(this.sessionId, 200, id)

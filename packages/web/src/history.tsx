@@ -1,7 +1,8 @@
-// The web page's History tab (architecture.md § Web page): a ticket's activity (PRD R59), from the view the
+// The web page's History tab (architecture.md § Web page): the session's state and a ticket's activity (PRD R59), from the views the
 // hub builds, drawn by the page's own code.
 import type { VNode } from 'preact';
-import type { HistoryCategory, HistoryEntry, HistoryLink, HistorySection, HistoryView } from '@switchboard/protocol';
+import type { HistoryCategory, HistoryEntry, HistoryLink, HistorySection, HistoryView, StateView } from '@switchboard/protocol';
+import { renderState } from './side.js';
 
 /** What the operator set in a ticket's History while the page is open: hidden chips, the filter, opened or closed sections, expanded runs. */
 export interface HistoryUi {
@@ -258,17 +259,26 @@ function Section({ section, ui, open }: { section: HistorySection; ui: HistoryUi
 }
 
 /**
- * The page's History tab (PRD R59): the ticket's key, title, facts and links; the category chips, the filter,
- * Expand all and Collapse all; the note on reconstructed entries; and a section per work item, newest first, then the ticket's, the first open.
- * Loading… until the hub answers, and why when it cannot.
+ * The page's History tab (PRD R59, R98): the session's state at the top (`renderState`), then, for a row that offers its ticket's History
+ * (`open`), the ticket's key, title, facts and links; the category chips, the filter, Expand all and Collapse all; the note on reconstructed
+ * entries; and a section per work item, newest first, then the ticket's, the first open. Loading… until the hub answers, and why when it cannot.
  */
-export function renderHistory(open: HistoryOpen): VNode {
+export function renderHistory(open: HistoryOpen | null, state: StateView | null, now: number): VNode {
+  if (open === null) {
+    return (
+      <section class="history-view hist-body" aria-label="History">
+        {renderState(state, now)}
+      </section>
+    );
+  }
+
   const { view, ui } = open;
   // The first section opens by default: the newest work item, or with none the ticket's.
   const opened = (section: HistorySection, index: number): boolean => ui.sections[section.key] ?? index === 0;
 
   return (
     <section class="history-view hist-body" aria-label={`${open.key} History`}>
+      {renderState(state, now)}
       {open.error === null ? null : (
         <p class="hist-error" role="alert">
           <span class="codicon codicon-error" aria-hidden="true"></span>

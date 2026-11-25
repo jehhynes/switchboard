@@ -857,43 +857,43 @@ it('confirms messages typed as one by their shared line, each in order with its 
   it("takes a status from a reply's transcript copy, never its screen copy, and keeps one per reply, the reply's text before the tag", () => {
     const { store, conversation, path, append, items, advance, changes } = setup();
 
-    conversation.readScreen(screen('● Fixed.', '', '[status]', '', 'All green.'));
+    conversation.readScreen(screen('● Fixed.', '', '[state]', '', 'All green.'));
     advance(300);
     // The screen copy shows the reply's text alone.
     expect(items()).toMatchObject([{ opening: 'Fixed.', source: 'screen' }]);
-    expect(store.latestStatus('s1')).toBeNull();
+    expect(store.latestState('s1')).toBeNull();
 
-    append(user('u1', T0, 'Status?'), assistant('a1', T0 + 100, 'Fixed.\n\n[status]\n## Where it stands\n- All green.'));
+    append(user('u1', T0, 'Status?'), assistant('a1', T0 + 100, 'Fixed.\n\n[state]\n## Where it stands\n- All green.'));
     conversation.readTranscript(path);
 
     const [, reply] = items() as Array<{ id: string; opening: string }>;
 
     expect(reply).toMatchObject({ opening: 'Fixed.', source: 'transcript' });
-    expect(store.latestStatus('s1')).toEqual({ id: `st-${reply!.id}`, sessionId: 's1', workItemId: 7, replyId: reply!.id, at: T0 + 100, markdown: '## Where it stands\n- All green.', seenAt: null });
-    expect(changes.filter((change) => change.type === 'status')).toHaveLength(1);
+    expect(store.latestState('s1')).toMatchObject({ id: `st-${reply!.id}`, sessionId: 's1', workItemId: 7, replyId: reply!.id, at: T0 + 100, headline: 'Where it stands', body: '- All green.', seenAt: null });
+    expect(changes.filter((change) => change.type === 'state')).toHaveLength(1);
 
-    // A reply that is only a status has no text, and as a rewrite replaces nothing.
-    append(assistant('a2', T0 + 200, '[rewrite]\n[status]\nNext: ship it.'));
+    // A reply that is only a state has no text, and as a rewrite replaces nothing.
+    append(assistant('a2', T0 + 200, '[rewrite]\n[state]\nNext: ship it.'));
     conversation.readTranscript(path);
     expect(items().at(-1)).toMatchObject({ opening: '', replaces: null });
     expect(items()[1]).toMatchObject({ rewrittenBy: null });
-    expect(store.latestStatus('s1')?.markdown).toBe('Next: ship it.');
+    expect(store.latestState('s1')?.headline).toBe('Next: ship it.');
   });
 
   it('updates a status in place when a later line of its reply adds to it', () => {
     const { store, conversation, path, append, changes } = setup();
     const block = (uuid: string, text: string) => JSON.stringify({ type: 'assistant', uuid, timestamp: iso(T0), madeBy: 'model', requestRef: 'q', message: { id: 'msg_1', role: 'assistant', model: 'claude', content: [{ type: 'text', text }] } });
 
-    append(block('a1', 'Done.\n[status]\nFirst part.'));
+    append(block('a1', 'Done.\n[state]\nFirst part.'));
     conversation.readTranscript(path);
     append(block('a2', 'Second part.'));
     conversation.readTranscript(path);
 
-    const statuses = changes.filter((change) => change.type === 'status').map((change) => (change.type === 'status' ? change.status : null));
+    const states = changes.filter((change) => change.type === 'state').map((change) => (change.type === 'state' ? change.state : null));
 
-    expect(statuses.map((status) => status!.markdown)).toEqual(['First part.', 'First part.\n\nSecond part.']);
-    expect(new Set(statuses.map((status) => status!.id)).size).toBe(1);
-    expect(store.statuses('s1', null, 10).statuses).toHaveLength(1);
+    expect(states.map((state) => [state!.headline, state!.body])).toEqual([['First part.', null], ['First part.', 'Second part.']]);
+    expect(new Set(states.map((state) => state!.id)).size).toBe(1);
+    expect(store.states('s1', null, 10).states).toHaveLength(1);
   });
 
   it('resumes at its checkpoint after a hub restart and imports nothing twice', () => {

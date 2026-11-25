@@ -11,12 +11,12 @@ export const PHONE_SHORT_MAX = 500;
 export const CHAT_FIT = 640;
 /** The least width the conversation's sash sets: header, timeline and composer still work at about 360 px inside the padding. */
 export const CHAT_MIN = 400;
-/** The Status, Artifacts and Console column's least width, page.css's `min-width` for it. */
+/** The History, Artifacts and Console column's least width, page.css's `min-width` for it. */
 export const DETAIL_MIN = 360;
 /** How much wider than it needs the page must grow before a column that left comes back, so a width near a boundary does not flap. */
 export const LAYOUT_SLACK = 40;
 
-/** Which columns show beside an open conversation: the list as a column rather than a drawer, and Status and Artifacts as a column rather than tabs. */
+/** Which columns show beside an open conversation: the list as a column rather than a drawer, and History and Artifacts as a column rather than tabs. */
 export interface Layout {
   list: boolean;
   wide: boolean;
@@ -73,7 +73,7 @@ export function fitLayout(width: number, list: number, before: Layout | null, ch
 
 /**
  * The most the list's sash may set while the list is pinned at `width`: what leaves the conversation its least width beside it, and, while
- * the Status and Artifacts column shows (`wide`), the conversation at `chat` and the column at `DETAIL_MIN`, so a drag never folds the column.
+ * the History and Artifacts column shows (`wide`), the conversation at `chat` and the column at `DETAIL_MIN`, so a drag never folds the column.
  */
 export function sideLimit(width: number, wide: boolean, chat = CHAT_FIT): number {
   return width - (wide ? chat + DETAIL_MIN : CHAT_MIN);

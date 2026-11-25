@@ -3,9 +3,9 @@
 // comes back to it.
 
 /**
- * The open work item and its tab: `status`, `console`, `history`, `artifact:<path>`, `link` with the link tab's URL `u`, `changes` with the file
+ * The open work item and its tab: `history`, `console`, `artifact:<path>`, `link` with the link tab's URL `u`, `changes` with the file
  * `f` its diff was at, or `file` with the local file `p` at line `l`; null for its Conversation. An address from before link tabs had URLs names
- * `browser`, read as `link` with no URL. `h` is the ticket whose History an address from before History was a tab showed, with its key, which
+ * `browser`, read as `link` with no URL, and one from before History took the Status tab's place names `status`, read as `history`. `h` is the ticket whose History an address from before History was a tab showed, with its key, which
  * the page opens as the History tab. `list` is the phone's list (`#list`), which names no work item.
  */
 export interface Route {
@@ -46,7 +46,7 @@ export function parseRoute(hash: string): Route {
   const ticketId = whole(params.get('h'));
   const h = ticketId === null ? null : { ticketId, key: params.get('hk') ?? '' };
   const named = w === null ? null : params.get('t') || null;
-  const t = named === 'browser' ? 'link' : named;
+  const t = named === 'browser' ? 'link' : named === 'status' ? 'history' : named;
 
   return { w, t, f: t === 'changes' ? params.get('f') || null : null, p: t === 'file' ? params.get('p') || null : null, l: t === 'file' ? whole(params.get('l')) : null, u: t === 'link' ? params.get('u') || null : null, h };
 }
@@ -147,8 +147,6 @@ export interface TabSet {
   files: Array<{ target: string; line: number | null }>;
   /** The index in `files` of the file tab shown, or null. */
   file: number | null;
-  /** Whether the History tab is open; absent in a set kept before it could close. */
-  history?: boolean;
   /** The link tabs (`LinkSet` in iframeBrowser.ts); absent in a set kept before they were kept. */
   links?: { open: Array<{ url: string; name: string }>; closed: string[]; selected: string };
 }
@@ -202,9 +200,13 @@ export function parseTabSets(raw: string | null): Record<string, TabSet> {
           Array.isArray(set.files) &&
           set.files.every((one) => one !== null && typeof one === 'object' && text(one.target) && lineOrNull(one.line)) &&
           (set.file === null || (typeof set.file === 'number' && Number.isSafeInteger(set.file) && set.file >= 0 && set.file < set.files.length)) &&
-          (set.history === undefined || typeof set.history === 'boolean') &&
           (set.links === undefined || linkSet(set.links)),
-      ),
+      ).map(([key, set]) => {
+        // A set kept before History took the Status tab's place names `status`, and one kept while History could close says whether it was open.
+        const { history: _history, ...kept } = set as TabSet & { history?: unknown };
+
+        return [key, { ...kept, side: kept.side === 'status' ? 'history' : kept.side, tab: kept.tab === 'status' ? 'history' : kept.tab }];
+      }),
     ) as Record<string, TabSet>;
   } catch {
     return {};

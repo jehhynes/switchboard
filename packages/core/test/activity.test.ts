@@ -67,7 +67,8 @@ describe('activity log', () => {
       'workItem:status',
     ]);
     expect(events[2]!.changes.find((change) => change.entity === 'workItem' && 'taskPrompt' in change.fields)!.fields['taskPrompt']).toEqual([null, true]);
-    expect(events[4]!.changes).toEqual([{ entity: 'workItem', entityId: '1', op: 'update', workItemId: 1, sessionId: null, fields: { stage: [null, 'researching'] } }]);
+    // A stage sets a state, which the activity log leaves to the report itself.
+    expect(events[4]).toMatchObject({ detail: { kind: 'stage', stage: 'researching' }, changes: [] });
     expect(events[5]).toMatchObject({ detail: { kind: 'stage', stage: 'researching' }, changes: [] });
     expect(events[6]!.changes).toEqual([
       { entity: 'session', entityId: sessionId, op: 'update', workItemId: 1, sessionId, fields: { state: ['running', 'waiting'], stateDetail: [null, 'Which branch?'] } },

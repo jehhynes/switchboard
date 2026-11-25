@@ -3,7 +3,7 @@
  * the whole model message is saved, while the screen shows it as soon as the text block is drawn. Claude Code's classic renderer draws a reply as
  * "● text" with two-space continuation lines; a block counts as finished once something is drawn after it.
  */
-import { drawnKeyOf, endsInOpenTag, isArtifactLine, isDetailsLine, isRewriteLine, isStatusLine, startsArtifactLine, keyOf, parseReply, splitRewrite, stripAside } from './tags.js';
+import { drawnKeyOf, endsInOpenTag, isArtifactLine, isDetailsLine, isRewriteLine, isStateLine, startsArtifactLine, keyOf, parseReply, splitRewrite, stripAside } from './tags.js';
 
 /** The part of an xterm buffer cell the reader uses. */
 export interface Cell {
@@ -69,7 +69,7 @@ export function unwrap(lines: string[]): string {
     }
 
     const previous = out.at(-1);
-    const tag = isRewriteLine(line) || isStatusLine(line) || isDetailsLine(line);
+    const tag = isRewriteLine(line) || isStateLine(line) || isDetailsLine(line);
 
     // An artifact tag starts a line of its own, and the screen's wrapped rest of it joins it.
     if (previous !== undefined && previous !== '' && !alone && !tag && !startsArtifactLine(line) && !/^\s*([-*•]|\d+\.)\s/.test(line)) {

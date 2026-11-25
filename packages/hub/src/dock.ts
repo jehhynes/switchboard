@@ -2,7 +2,7 @@ import type { SourceIcon } from '@switchboard/core';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
-import { isFolderHost, switchboardHome } from '@switchboard/core';
+import { isFolderHost, stateStale, switchboardHome } from '@switchboard/core';
 import type { Provider, PullRequestStatus } from '@switchboard/core';
 import { activeSession, MARK_GLYPHS, MARK_TITLES, markOf, turnOf } from '@switchboard/core/group';
 import type { Mark } from '@switchboard/core/group';
@@ -56,7 +56,8 @@ import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 export interface DockText {
   text: string;
   title: string | null;
-  tone: 'warning' | 'error' | null;
+  /** `dim`: a state whose turn or session has ended (architecture.md § States). */
+  tone: 'warning' | 'error' | 'dim' | null;
 }
 
 /**
@@ -599,28 +600,34 @@ function oneLine(text: string): string {
   return text.replace(/\s*\r?\n\s*/g, ' ');
 }
 
-/** The approval summary, else the stage, each with its age, for line 3 (PRD R27, R58). */
+/**
+ * The approval summary, else the state's headline, each with its age, for line 3 (PRD R27, R58). A state whose turn ended is dimmed; one whose
+ * session ended is dimmed and named the last state (architecture.md § States).
+ */
 function progress(item: WorkItemView, now: number): DockText[] {
   const summary = item.status === 'awaiting-approval' ? item.approvalSummary : null;
+  const state = item.state;
 
   if (summary !== null) {
     const whole = summary.charAt(0).toUpperCase() + summary.slice(1);
     const { text, full } = clip(whole, CAPS.approval);
 
-    return [{ text: `${text} · ${age(item.statusAt, now)}`, title: item.stage === null ? full : `${whole}\nLast stage: ${item.stage}`, tone: null }];
+    return [{ text: `${text} · ${age(item.statusAt, now)}`, title: state === null ? full : `${whole}\nLast state: ${state.headline}`, tone: null }];
   }
 
   const stale = staleSince(item, now);
-  const staleTitle = stale === null ? null : `No stage report for ${age(stale, now)}`;
+  const staleTitle = stale === null ? null : `No state for ${age(stale, now)}`;
 
-  if (item.stage === null) {
-    return stale === null ? [] : [{ text: `No stage report · ${age(stale, now)}`, title: staleTitle, tone: 'warning' }];
+  if (state === null) {
+    return stale === null ? [] : [{ text: `No state · ${age(stale, now)}`, title: staleTitle, tone: 'warning' }];
   }
 
-  const { text, full } = clip(item.stage, CAPS.stage);
-  const since = item.stageAt === null ? '' : ` · ${age(item.stageAt, now)}`;
+  const old = stateStale(state, state.sessionId === null ? null : (item.sessions.find((session) => session.id === state.sessionId) ?? null));
+  const { text, full } = clip(state.headline, CAPS.state);
+  const shown = old === 'session' ? `Last state: ${text}` : text;
+  const title = staleTitle ?? (old === 'session' ? `Last state: ${state.headline}` : old === 'turn' ? `${state.headline}\nAs of the last turn` : full);
 
-  return [{ text: `${text}${since}`, title: staleTitle ?? full, tone: stale === null ? null : 'warning' }];
+  return [{ text: `${shown} · ${age(state.at, now)}`, title, tone: stale !== null ? 'warning' : old === null ? null : 'dim' }];
 }
 
 /**

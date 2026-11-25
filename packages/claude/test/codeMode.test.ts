@@ -112,8 +112,8 @@ describe('Code Mode command', () => {
     expect(primary).toContain("Don't restate or summarise the details; if nothing can be skipped, leave the `[details]` line out.");
     expect(primary).toContain('a reply with no `[details]` line shows whole.');
     expect(primary).not.toMatch(/no lists|file paths|URLs|at most about three|bubble|smaller/);
-    expect(tagged.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[details]', '[aside]', '[rewrite]', '[status]']);
-    expect(RULES).toContain('they do not change how you write, except where you put a `[details]` line and how you ask the operator a question, below');
+    expect(tagged.match(/\[[a-z]+\]/g)?.filter((tag, index, all) => all.indexOf(tag) === index)).toEqual(['[details]', '[aside]', '[rewrite]', '[state]']);
+    expect(RULES).toContain('they do not change how you write, except where you put a `[details]` line, when you write your state and how you ask the operator a question, below');
     expect(rest).not.toMatch(/\d+ words\b|\bsentences\b|short answer|\blines\b|one line|don't paste/i);
     // A turn may write several replies between tool calls; the rules give only the reason text before a tool call is lost (decision 24).
     expect(RULES).not.toMatch(/end of (your|the) turn/i);
@@ -138,7 +138,7 @@ describe('Code Mode command', () => {
     // Questions stay open; withdraw what no longer matters; answers come by slug.
     expect(RULES).toContain('withdraw it with a line `[withdraw: persona-registered]`');
     expect(RULES).toContain('Answers arrive as a message that starts with `[answers]`');
-    expect(RULES).toContain("Don't ask in a status");
+    expect(RULES).toContain("Don't ask in a state");
     expect(RULES).toContain("Don't ask the operator with AskUserQuestion in this session, even where the report contract or a skill says to: its menu holds the whole session until it is answered in the terminal");
     expect(RULES).toContain('Ask in a reply instead, as above.');
   });

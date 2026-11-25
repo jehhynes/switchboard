@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ConversationMessage, ConversationReply, ConversationStatus, TranscriptCheckpoint } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, ConversationState, TranscriptCheckpoint } from '@switchboard/core';
 import { ScreenHold } from './screenHold.js';
 import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
@@ -36,16 +36,16 @@ export interface ConversationStore {
   hasTranscriptEntry(sessionId: string, uuid: string): boolean;
   checkpoint(sessionId: string): TranscriptCheckpoint | null;
   setCheckpoint(checkpoint: TranscriptCheckpoint): void;
-  /** Adds a status, or updates the one with its ID in place. */
-  setStatus(status: Omit<ConversationStatus, 'seenAt'>): void;
-  status(id: string): ConversationStatus | null;
+  /** Adds a state, or updates the one with its ID in place. */
+  setState(state: Omit<ConversationState, 'seenAt' | 'turnEnded'>): void;
+  state(id: string): ConversationState | null;
 }
 
 /** What changed in a session's conversation, for the windows that show it. */
 export type ConversationChange =
   | { type: 'message'; message: ConversationMessage }
   | { type: 'reply'; reply: ConversationReply }
-  | { type: 'status'; status: ConversationStatus }
+  | { type: 'state'; state: ConversationState }
   /** A reply's transcript copy carries heard tags, for the voice's glossary (architecture.md § Dictation); sent once per reply. */
   | { type: 'heard'; replyId: string; heard: HeardTag[] }
   /** A reply's transcript copy names files outside the artifact folder as artifacts (architecture.md § Artifacts); each tag sent once per reply. */

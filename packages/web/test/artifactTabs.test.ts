@@ -66,19 +66,19 @@ describe('the artifact tabs', () => {
   it('puts only the chosen tab and its close mark in the tab order, a link tab, an artifact tab or History alike', () => {
     const links = [1, 2].map((n) => ({ url: `https://x/${n}`, label: `Link ${n}`, name: `Link ${n}`, icon: 'web' as const }));
     const stops = (markup: string) => [...parse(markup).querySelectorAll<HTMLElement>('button:not([tabindex="-1"])')].map((button) => button.getAttribute('aria-label') ?? button.dataset['url'] ?? button.textContent);
-    const strip = (side: 'browser' | 'artifacts' | 'history', link?: string, open: string | null = null) => html(renderSideSwitch(side, { ...state, artifacts: eight.slice(0, 2) }, true, { links, ...(link === undefined ? {} : { link }), open, menu: false, now: 2_000 }, false, true));
+    const strip = (side: 'browser' | 'artifacts' | 'history', link?: string, open: string | null = null) => html(renderSideSwitch(side, { ...state, artifacts: eight.slice(0, 2) }, true, { links, ...(link === undefined ? {} : { link }), open, menu: false, now: 2_000 }, false));
 
-    // The chosen link's tab and close mark, the other link's neither; the artifacts' and History's close marks are out of the order too.
+    // The chosen link's tab and close mark, the other link's neither; the artifacts' close marks are out of the order too, and History has none.
     expect(stops(strip('browser', 'https://x/2'))).toEqual(['https://x/2', 'Close Link 2']);
     expect(stops(strip('artifacts', undefined, 'chat/a1.md'))).toEqual(['Note 1', 'Close Note 1']);
-    expect(stops(strip('history'))).toEqual(['History', 'Close History']);
+    expect(stops(strip('history'))).toEqual(['History']);
   });
 
   it('follow Status and Browser in the column, the open one chosen with a close mark, and More with the rest, Console among them', () => {
-    // Room for four: the open one, Status, then Browser and the newest artifact in strip order.
+    // Room for four: the open one, History, then Browser and the newest artifact in strip order.
     const markup = html(renderSideSwitch('artifacts', state, true, { open: 'chat/a2.md', fit: room(4), menu: false, now: 2_000 }));
 
-    expect(paths(markup, 'data-side')).toEqual(['status', 'browser']);
+    expect(paths(markup, 'data-side')).toEqual(['history', 'browser']);
     expect(tabPaths(markup)).toEqual(['chat/a7.md', 'chat/a2.md']);
     expect(markup).toMatch(/class="tab artifact-tab selected"[^>]*data-path="chat\/a2.md"/);
     // Each artifact tab has its own close button beside the tab's, so each takes the keyboard; the open one's is in the tab order.
@@ -92,7 +92,7 @@ describe('the artifact tabs', () => {
   });
 
   it('list in the open More menu every tab the strip does not show, in strip order, Console too', () => {
-    const menu = parse(html(renderSideSwitch('status', state, false, { open: 'chat/a2.md', fit: room(3), menu: true, now: 2_000 }))).querySelector('.tab-menu')!;
+    const menu = parse(html(renderSideSwitch('history', state, false, { open: 'chat/a2.md', fit: room(3), menu: true, now: 2_000 }))).querySelector('.tab-menu')!;
 
     expect([...menu.querySelectorAll<HTMLElement>('.menu-row')].map((row) => row.dataset['path'] ?? row.dataset['side'])).toEqual(['chat/a5.md', 'chat/a4.md', 'chat/a3.md', 'chat/a2.md', 'chat/a1.md', 'chat/a0.md', 'console']);
     // Console's row is drawn as its tab, by its icon and label, and chooses it as the tab does.
@@ -103,7 +103,7 @@ describe('the artifact tabs', () => {
 
   it("show each artifact's title, kind and age in the menu, and its title and kind in its tab's tooltip", () => {
     const kinds = [{ ...artifact(1), kind: 'plan', title: 'Rollout plan' }, { ...artifact(2), kind: 'report', title: 'Load test' }, ...eight.slice(3)];
-    const markup = html(renderSideSwitch('status', { ...state, artifacts: kinds }, false, { open: null, fit: room(2), menu: true, now: 1_001 + 3 * 60_000 }));
+    const markup = html(renderSideSwitch('history', { ...state, artifacts: kinds }, false, { open: null, fit: room(2), menu: true, now: 1_001 + 3 * 60_000 }));
     const menu = parse(markup).querySelector('.tab-menu')!;
     const row = menu.querySelector('[data-path="chat/a1.md"]')!;
 
@@ -118,14 +118,14 @@ describe('the artifact tabs', () => {
 
   it("list an external artifact as any other, its menu row's tooltip its real path, and fetch it by its name", () => {
     const outside = { ...artifact(9), path: '@3/summary.md', owner: 'external', kind: 'research', title: 'Speech engines', file: 'D:/git/research/topic/summary.md' };
-    const markup = html(renderSideSwitch('status', { ...state, artifacts: [outside, ...eight] }, false, { open: null, fit: room(2), menu: true, now: 2_000 }));
+    const markup = html(renderSideSwitch('history', { ...state, artifacts: [outside, ...eight] }, false, { open: null, fit: room(2), menu: true, now: 2_000 }));
     const menu = parse(markup).querySelector('.tab-menu')!;
 
     expect(tabPaths(markup)).toEqual(['@3/summary.md']);
     expect(menu.querySelector('[data-path="chat/a7.md"]')!.getAttribute('title')).toBe('chat/a7.md');
     expect(artifactUrl('k', outside.path)).toBe('/v1/conversation/artifact/k/%403/summary.md');
     // In More, its row's tooltip is its real path.
-    const hidden = parse(html(renderSideSwitch('status', { ...state, artifacts: [...eight, { ...outside, updatedAt: 0 }] }, false, { open: null, fit: room(2), menu: true, now: 2_000 }))).querySelector('.tab-menu')!;
+    const hidden = parse(html(renderSideSwitch('history', { ...state, artifacts: [...eight, { ...outside, updatedAt: 0 }] }, false, { open: null, fit: room(2), menu: true, now: 2_000 }))).querySelector('.tab-menu')!;
 
     expect(hidden.querySelector('[data-path="@3/summary.md"]')!.getAttribute('title')).toBe('D:/git/research/topic/summary.md');
   });
@@ -140,7 +140,7 @@ describe('the artifact tabs', () => {
     expect([...menu.children].map((row) => (row as HTMLElement).dataset['path'] ?? (row as HTMLElement).dataset['side'] ?? row.className)).toEqual(['chat/a2.md', 'chat/a1.md', 'chat/a0.md', 'console', 'menu-separator', 'chat/a7.md', 'chat/a3.md']);
     expect(menu.querySelector('[data-path="chat/a7.md"] .menu-note')!.textContent).toBe('just now');
     // With every tab in the strip, More stays for the closed ones, with no separator.
-    const all = parse(html(renderSideSwitch('status', { ...state, artifacts: eight.slice(6) }, false, { open: null, menu: true, now: 2_000, closed })));
+    const all = parse(html(renderSideSwitch('history', { ...state, artifacts: eight.slice(6) }, false, { open: null, menu: true, now: 2_000, closed })));
 
     expect([...all.querySelectorAll<HTMLElement>('.tab-menu > *')].map((row) => row.dataset['path'])).toEqual(['chat/a7.md']);
     expect(all.querySelector('.tab-more-button .tab-badge')!.textContent).toBe('1');
@@ -148,7 +148,7 @@ describe('the artifact tabs', () => {
 
   it('mark unread rows with the dot after the title, named in the row, and More with the dot while any row is unread', () => {
     const unread = new Set(['chat/a7.md', 'chat/a0.md']);
-    const markup = html(renderSideSwitch('status', state, false, { open: null, fit: room(2), menu: true, now: 1_001 + 3 * 60_000, unread }));
+    const markup = html(renderSideSwitch('history', state, false, { open: null, fit: room(2), menu: true, now: 1_001 + 3 * 60_000, unread }));
     const menu = parse(markup).querySelector('.tab-menu')!;
     const row = menu.querySelector('[data-path="chat/a0.md"]')!;
 
@@ -165,25 +165,25 @@ describe('the artifact tabs', () => {
     expect(strip.querySelector('.tab-more-button')!.getAttribute('aria-haspopup')).toBe('menu');
     expect(css).toContain('.tab.tab-more-button .tab-badge > .unread-dot { position: absolute; top: -3px; right: -3px;');
     expect(strip.querySelector('.tab-more-button')!.getAttribute('aria-label')).toBe('More tabs, 8, 1 unread');
-    // A hidden unread Status marks More too; with nothing unread hidden, no dot.
-    const status = parse(html(renderSideSwitch('artifacts', { ...state, status: { id: 's', sessionId: 's', at: 1, markdown: 'x', fallback: false, unread: true } }, false, { open: 'chat/a3.md', fit: { ...room(1), width: 140 }, menu: true, now: 0 })));
+    // A hidden unread History marks More too; with nothing unread hidden, no dot.
+    const status = parse(html(renderSideSwitch('artifacts', { ...state, state: { id: 's', sessionId: 's', at: 1, headline: 'x', body: null, stale: null, unread: true } }, false, { open: 'chat/a3.md', fit: { ...room(1), width: 140 }, menu: true, now: 0 })));
 
-    expect(status.querySelector('.tab-menu [data-side="status"]')!.getAttribute('aria-label')).toBe('Status, unread');
+    expect(status.querySelector('.tab-menu [data-side="history"]')!.getAttribute('aria-label')).toBe('History, unread');
     expect(status.querySelector('.tab-more-button .unread-dot')).not.toBeNull();
-    expect(parse(html(renderSideSwitch('status', state, false, { open: null, fit: room(2), menu: false, now: 0, unread: new Set(['chat/a7.md']) }))).querySelector('.tab-more-button .unread-dot')).toBeNull();
+    expect(parse(html(renderSideSwitch('history', state, false, { open: null, fit: room(2), menu: false, now: 0, unread: new Set(['chat/a7.md']) }))).querySelector('.tab-more-button .unread-dot')).toBeNull();
   });
 
   it('show no More when every tab fits and none is closed, and no artifact tab without artifacts', () => {
-    expect(html(renderSideSwitch('status', { ...state, artifacts: eight.slice(0, 2) }, false, { open: null, fit: room(5), menu: false, now: 0 }))).not.toContain('tab-more');
+    expect(html(renderSideSwitch('history', { ...state, artifacts: eight.slice(0, 2) }, false, { open: null, fit: room(5), menu: false, now: 0 }))).not.toContain('tab-more');
     // Unmeasured, every tab shows.
-    expect(tabPaths(html(renderSideSwitch('status', state, false, { open: null, menu: false, now: 0 })))).toHaveLength(8);
-    expect(html(renderSideSwitch('status', EMPTY))).not.toContain('artifact-tab');
+    expect(tabPaths(html(renderSideSwitch('history', state, false, { open: null, menu: false, now: 0 })))).toHaveLength(8);
+    expect(html(renderSideSwitch('history', EMPTY))).not.toContain('artifact-tab');
   });
 
   it('end the conversation tab strip on a narrower screen the same way', () => {
     const markup = html(renderTabs({ ...newView(), tab: 'artifacts' }, state, false, { open: 'chat/a7.md', fit: room(3), menu: false, now: 0 }));
 
-    expect(paths(markup, 'data-tab')).toEqual(['conversation', 'status']);
+    expect(paths(markup, 'data-tab')).toEqual(['conversation', 'history']);
     expect(tabPaths(markup)).toEqual(['chat/a7.md']);
     expect(markup).toContain('<span class="tab-badge muted">8</span>');
   });

@@ -343,18 +343,18 @@ describe('ConversationService', () => {
     const theirs = open(3);
 
     expect(mine.frames[0]).toMatchObject({ type: 'hello', unread: 0 });
-    transcript('D:/w12', 'n2', [reply('a1', 'One.'), reply('a2', 'Two.\n[status]\nDone.')]);
+    transcript('D:/w12', 'n2', [reply('a1', 'One.'), reply('a2', 'Two.\n[state]\nDone\nAll green.')]);
     transcript('D:/w3', 'n3', [reply('b1', 'Theirs.')]);
     await service.poll();
 
     expect(mine.frames.filter((frame) => frame.type === 'reply')).toMatchObject([{ reply: { opening: 'One.', unread: true } }, { reply: { opening: 'Two.', unread: true } }]);
     expect(mine.frames.filter((frame) => frame.type === 'reply')[0]!['reply']).not.toHaveProperty('seenAt');
-    expect(mine.frames.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { markdown: 'Done.', unread: true } }]);
+    expect(mine.frames.filter((frame) => frame.type === 'state')).toMatchObject([{ state: { headline: 'Done', body: 'All green.', unread: true } }]);
     expect(mine.frames.filter((frame) => frame.type === 'unread').at(-1)).toMatchObject({ count: 3 });
     expect(theirs.frames.filter((frame) => frame.type === 'unread').at(-1)).toMatchObject({ count: 1 });
 
     const [one, two] = store.conversation('s2', null, 10).items.map((item) => item.id);
-    const statusId = store.latestStatus('s2')!.id;
+    const statusId = store.latestState('s2')!.id;
     const before = { mine: mine.frames.length, theirs: theirs.frames.length };
 
     // Another window's item, an unknown ID, another session, a stale scope and a malformed body mark nothing.
@@ -368,12 +368,12 @@ describe('ConversationService', () => {
     expect(store.unreadCount('s2')).toBe(3);
     expect(mine.frames.length).toBe(before.mine);
 
-    // The second reply and the status are seen; the first stays unread.
+    // The second reply and the state are seen; the first stays unread.
     expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o8', sessionId: 's2', ids: [two, statusId] })).toEqual({ status: 200, body: { unread: 1 } });
     const after = mine.frames.slice(before.mine);
 
     expect(after.filter((frame) => frame.type === 'reply')).toMatchObject([{ reply: { id: two, unread: false } }]);
-    expect(after.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { id: statusId, unread: false } }]);
+    expect(after.filter((frame) => frame.type === 'state')).toMatchObject([{ state: { id: statusId, unread: false } }]);
     expect(after.filter((frame) => frame.type === 'unread')).toMatchObject([{ count: 1 }]);
     expect(theirs.frames.length).toBe(before.theirs);
     expect(store.reply(one!)?.seenAt).toBeNull();
@@ -386,14 +386,14 @@ describe('ConversationService', () => {
 
     // Any change counts again, as a message that pushes an unread reply past the retention limit.
     store.markSeen('s2', [one!], NOW);
-    transcript('D:/w12', 'n2', [reply('a1', 'One.'), reply('a2', 'Two.\n[status]\nDone.'), JSON.stringify({ type: 'user', uuid: 'u3', timestamp: new Date(NOW).toISOString(), message: { role: 'user', content: 'Next?' } })]);
+    transcript('D:/w12', 'n2', [reply('a1', 'One.'), reply('a2', 'Two.\n[state]\nDone\nAll green.'), JSON.stringify({ type: 'user', uuid: 'u3', timestamp: new Date(NOW).toISOString(), message: { role: 'user', content: 'Next?' } })]);
     await service.poll();
     expect(mine.frames.filter((frame) => frame.type === 'unread').at(-1)).toMatchObject({ count: 0 });
     store.updateReply(one!, { seenAt: null });
 
     // A reconnect's hello carries the count and each item's state.
     mine.stream.close();
-    expect(open(2).frames[0]).toMatchObject({ type: 'hello', unread: 1, items: [{ id: one, unread: true }, { id: two, unread: false }, { type: 'message', text: 'Next?' }], status: { unread: false } });
+    expect(open(2).frames[0]).toMatchObject({ type: 'hello', unread: 1, items: [{ id: one, unread: true }, { id: two, unread: false }, { type: 'message', text: 'Next?' }], state: { unread: false } });
   });
 
   it('reads a live session\'s transcript at once when the hub asks before a turn end, and nothing for an unknown session (PRD R103)', () => {
@@ -454,65 +454,89 @@ describe('ConversationService', () => {
   it("says hello with the stage before the session's first status, then each window its own session's latest status, once", async () => {
     const { view, service, transcript, reply, open, store } = setup();
 
-    store.updateWorkItem(2, { stage: 'Reading the inbox code', stageAt: NOW - 60_000 });
+    store.setState({ id: 'stage-s2-1', sessionId: 's2', workItemId: 2, replyId: null, at: NOW - 60_000, headline: 'Reading the inbox code', body: null });
 
     const mine = open(2);
     const theirs = open(3);
 
-    expect(mine.frames[0]).toMatchObject({ type: 'hello', status: { id: 'stage-2', sessionId: 's2', at: NOW - 60_000, markdown: 'Reading the inbox code', fallback: true } });
-    // Item 3 has no stage, so its row is empty.
-    expect(theirs.frames[0]).toMatchObject({ type: 'hello', status: null });
+    expect(mine.frames[0]).toMatchObject({ type: 'hello', state: { id: 'stage-s2-1', sessionId: 's2', at: NOW - 60_000, headline: 'Reading the inbox code', body: null, unread: false } });
+    // Item 3 has no state.
+    expect(theirs.frames[0]).toMatchObject({ type: 'hello', state: null });
 
-    // A changed stage reaches the window with the next snapshot, once.
-    store.updateWorkItem(2, { stage: 'Writing the fix', stageAt: NOW });
+    // A new stage reaches the window with the next snapshot, once.
+    store.setState({ id: 'stage-s2-2', sessionId: 's2', workItemId: 2, replyId: null, at: NOW, headline: 'Writing the fix', body: null });
     service.sessionsChanged();
     service.sessionsChanged();
-    expect(mine.frames.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { markdown: 'Writing the fix', fallback: true } }]);
+    expect(mine.frames.filter((frame) => frame.type === 'state')).toMatchObject([{ state: { headline: 'Writing the fix' } }]);
 
-    transcript('D:/w12', 'n2', [reply('a1', 'Fixed.\n[status]\n## Done\n- the badge')]);
-    transcript('D:/w3', 'n3', [reply('b1', 'Theirs.\n[status]\nNot yours.')]);
+    transcript('D:/w12', 'n2', [reply('a1', 'Fixed.\n[state]\n## Done\n- the badge')]);
+    transcript('D:/w3', 'n3', [reply('b1', 'Theirs.\n[state]\nNot yours.')]);
     await service.poll();
     service.sessionsChanged();
 
-    expect(mine.frames.filter((frame) => frame.type === 'status').at(-1)).toMatchObject({ status: { sessionId: 's2', markdown: '## Done\n- the badge', fallback: false } });
-    expect(mine.frames.filter((frame) => frame.type === 'status')).toHaveLength(2);
+    expect(mine.frames.filter((frame) => frame.type === 'state').at(-1)).toMatchObject({ state: { sessionId: 's2', headline: 'Done', body: '- the badge', unread: true } });
+    expect(mine.frames.filter((frame) => frame.type === 'state')).toHaveLength(2);
     expect(mine.frames.find((frame) => frame.type === 'reply')).toMatchObject({ reply: { opening: 'Fixed.' } });
     expect(JSON.stringify(mine.frames)).not.toContain('Not yours.');
-    expect(theirs.frames.filter((frame) => frame.type === 'status')).toMatchObject([{ status: { sessionId: 's3', markdown: 'Not yours.' } }]);
-    // The store's work item and reply fields stay in the hub.
-    const shown = mine.frames.filter((frame) => frame.type === 'status').at(-1)!['status'];
+    expect(theirs.frames.filter((frame) => frame.type === 'state')).toMatchObject([{ state: { sessionId: 's3', headline: 'Not yours.' } }]);
+    // The store's work item, reply and turn fields stay in the hub.
+    const shown = mine.frames.filter((frame) => frame.type === 'state').at(-1)!['state'];
 
     expect(shown).not.toHaveProperty('workItemId');
     expect(shown).not.toHaveProperty('replyId');
+    expect(shown).not.toHaveProperty('turnEnded');
 
-    // A reconnect gets the latest status in its hello.
+    // A reconnect gets the latest state in its hello.
     mine.stream.close();
-    expect(open(2).frames[0]).toMatchObject({ status: { markdown: '## Done\n- the badge', fallback: false } });
+    expect(open(2).frames[0]).toMatchObject({ state: { headline: 'Done', body: '- the badge' } });
+
+    // A state of another session of the work item, or one the migration carried over, stands in for a session with none, never unread.
+    store.setState({ id: 'other', sessionId: 's9', workItemId: 3, replyId: 'r9', at: NOW, headline: 'Earlier session', body: 'Unread there.' });
+    expect(store.state('other')?.seenAt).toBeNull();
+    expect(service.state({ workItemId: 3, sessionId: 's-new' } as never)).toMatchObject({ id: 'other', headline: 'Earlier session', stale: 'session', unread: false });
+  });
+
+  it("sends a window its state again when its session's turn ends, dimmed", async () => {
+    const { service, transcript, reply, open, store } = setup();
+
+    store.updateSession('s2', { state: 'running' });
+    transcript('D:/w12', 'n2', [reply('a1', 'Working.\n[state]\nfixing tests')]);
+    await service.poll();
+
+    const mine = open(2);
+
+    expect(mine.frames[0]).toMatchObject({ state: { headline: 'fixing tests', stale: null } });
+    store.updateSession('s2', { state: 'idle' });
+    service.sessionsChanged();
+    expect(mine.frames.filter((frame) => frame.type === 'state').at(-1)).toMatchObject({ state: { headline: 'fixing tests', stale: 'turn' } });
+    store.updateSession('s2', { state: 'ended' });
+    service.sessionsChanged();
+    expect(mine.frames.filter((frame) => frame.type === 'state').at(-1)).toMatchObject({ state: { headline: 'fixing tests', stale: 'session' } });
   });
 
   it("serves a window's earlier statuses newest first, and refuses another window's session, a forged key or a stale scope generation", async () => {
     const { view, service, transcript, reply, open } = setup();
 
-    transcript('D:/w12', 'n2', [reply('a1', '[status]\nOne.'), reply('a2', '[status]\nTwo.'), reply('a3', '[status]\nThree.')]);
-    transcript('D:/w3', 'n3', [reply('b1', '[status]\nTheirs.')]);
+    transcript('D:/w12', 'n2', [reply('a1', '[state]\nOne.'), reply('a2', '[state]\nTwo.'), reply('a3', '[state]\nThree.')]);
+    transcript('D:/w3', 'n3', [reply('b1', '[state]\nTheirs.')]);
     await service.poll();
 
     const { key, frames } = open(2);
     const other = open(3).key;
-    const latest = (frames[0]!['status'] as { id: string; markdown: string });
+    const latest = (frames[0]!['state'] as { id: string; headline: string });
 
-    expect(latest.markdown).toBe('Three.');
-    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's2', before: latest.id, limit: 1 })).toMatchObject({ status: 200, body: { statuses: [{ markdown: 'Two.', fallback: false }], more: true } });
-    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o2', sessionId: 's2', before: null })).toMatchObject({ status: 200, body: { statuses: [{ markdown: 'Three.' }, { markdown: 'Two.' }, { markdown: 'One.' }], more: false } });
-    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o3', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
-    expect(service.statuses({ window: other, scopeGen: 1, opId: 'o4', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
-    expect(service.statuses({ window: 'forged', scopeGen: 1, opId: 'o5', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
-    expect(service.statuses({ window: key, scopeGen: 0, opId: 'o6', sessionId: 's2', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
-    expect(service.statuses({ window: key, scopeGen: 1, sessionId: 's2', before: 3 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } });
-    // Another session's status as the cursor has nothing before it.
-    const theirs = service.statuses({ window: other, scopeGen: 1, opId: 'o7', sessionId: 's3', before: null }) as { body: { statuses: Array<{ id: string }> } };
+    expect(latest.headline).toBe('Three.');
+    expect(service.states({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's2', before: latest.id, limit: 1 })).toMatchObject({ status: 200, body: { states: [{ headline: 'Two.' }], more: true } });
+    expect(service.states({ window: key, scopeGen: 1, opId: 'o2', sessionId: 's2', before: null })).toMatchObject({ status: 200, body: { states: [{ headline: 'Three.' }, { headline: 'Two.' }, { headline: 'One.' }], more: false } });
+    expect(service.states({ window: key, scopeGen: 1, opId: 'o3', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.states({ window: other, scopeGen: 1, opId: 'o4', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.states({ window: 'forged', scopeGen: 1, opId: 'o5', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
+    expect(service.states({ window: key, scopeGen: 0, opId: 'o6', sessionId: 's2', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+    expect(service.states({ window: key, scopeGen: 1, sessionId: 's2', before: 3 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } });
+    // Another session's state as the cursor has nothing before it.
+    const theirs = service.states({ window: other, scopeGen: 1, opId: 'o7', sessionId: 's3', before: null }) as { body: { states: Array<{ id: string }> } };
 
-    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o8', sessionId: 's2', before: theirs.body.statuses[0]!.id })).toEqual({ status: 200, body: { statuses: [], more: false } });
+    expect(service.states({ window: key, scopeGen: 1, opId: 'o8', sessionId: 's2', before: theirs.body.states[0]!.id })).toEqual({ status: 200, body: { states: [], more: false } });
   });
 
   it("lists its session's slash commands from the transcript for the window's composer, and refuses another window's session, a forged key or a stale scope generation", async () => {
@@ -2325,6 +2349,14 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.pageTabs({ window: page.key, workItemId, openOn: 'browser' }).status).toBe(200);
     expect(store.pagePref('openOn')).toBe('browser');
     expect(service.hello(phone.key)['openOn']).toBe('browser');
+    expect(service.pageTabs({ window: page.key, workItemId, openOn: 'history' }).status).toBe(200);
+    expect(store.pagePref('openOn')).toBe('history');
+    // Status, from before History took its place, is kept as History, and one kept before reads as History.
+    service.pageTabs({ window: page.key, workItemId, openOn: 'browser' });
+    expect(service.pageTabs({ window: page.key, workItemId, openOn: 'status' }).status).toBe(200);
+    expect(store.pagePref('openOn')).toBe('history');
+    store.setPagePref('openOn', 'status');
+    expect(service.hello(phone.key)['openOn']).toBe('history');
     expect(service.pageTabs({ window: page.key, workItemId, tab: 'status' }).status).toBe(400);
     expect(service.pageTabs({ window: page.key, workItemId, openOn: 'console' }).status).toBe(400);
     expect(service.pageTabs({ window: page.key, workItemId, tab: 'conversation' }).status).toBe(400);
@@ -2657,7 +2689,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(service.dictate(page.key, 's4', 'hi', [], false)).toEqual({ refused: 'This is an earlier session of the work item, shown read-only.' });
     // Reading it is allowed.
     expect(service.history({ window: page.key, scopeGen: gen, sessionId: 's4', before: null }).status).toBe(200);
-    expect(service.statuses({ window: page.key, scopeGen: gen, sessionId: 's4', before: null }).status).toBe(200);
+    expect(service.states({ window: page.key, scopeGen: gen, sessionId: 's4', before: null }).status).toBe(200);
 
     // A newer session keeps the page on the one it chose; the dropdown lists the session that was current.
     later('s6', 'task', NOW);

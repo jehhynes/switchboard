@@ -15,7 +15,7 @@ const REPORT_TIMEOUT_MS = 10_000;
 const REGISTER_TIMEOUT_MS = 30_000;
 
 const REPORT_USAGE = `Usage:
-  report stage <sessionId> <stage>
+  report stage <sessionId> <headline>
   report worktree <sessionId> <path>
   report done <sessionId>
   report approval <sessionId> --prompt <prompt> [--summary <text>] [--report <path>]

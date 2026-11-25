@@ -3,7 +3,7 @@ import type { SourceIcon } from '@switchboard/core';
  * The snapshot every window and the list view are built from (architecture.md § Hub lifecycle): a pure projection of the store and the runtime's
  * inputs, so the hub can build it in a worker thread with its own read-only connection and keep its main thread free.
  */
-import type { Comment, Link, Paste, Playbook, Provider, PullRequestStatus, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
+import type { Comment, ConversationState, Link, Paste, Playbook, Provider, PullRequestStatus, QueueWait, Session, Settings, Store, Ticket, Triage, WorkItem, Worktree } from '@switchboard/core';
 import { effectiveFocus, heldSlots, homeRepo, itemProvider, playbookChoices, PROVIDERS, queueWaits, reopenRefusal, repoRoots, resumesHeld, SCHEDULE_SOURCE, ADHOC_SOURCE } from '@switchboard/core';
 import type { HeldSession, HolderState } from './held.js';
 import { doneSince } from './rows.js';
@@ -38,6 +38,8 @@ export interface SnapshotInputs {
 
 export interface WorkItemView extends WorkItem {
   ticket: Ticket;
+  /** The work item's newest state (architecture.md § States), which line 3 of its row shows; null with none. */
+  state: ConversationState | null;
   /** The latest triage, which may still be running. */
   triage: Triage | null;
   /** The URL an item window opens: the latest successful triage's focus, else the ticket's URL (PRD R79). */
@@ -172,6 +174,7 @@ const leftoversOf = (latest: Session | undefined): { leftovers?: number[] } => {
         ...item,
         ticket,
         triage: triages.at(-1) ?? null,
+        state: store.workItemState(item.id),
         focus: effectiveFocus(triages, ticket.url),
         // An ended registered session resumes in the terminal holder, so its row opens it as an ended held session (PRD R81, R95).
         sessions: store.sessionsFor(item.id).map(({ lastTree: _lastTree, ...session }) => (resumesHeld(session) ? { ...session, codeMode: true } : session)),

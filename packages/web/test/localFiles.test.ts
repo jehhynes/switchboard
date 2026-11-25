@@ -618,7 +618,7 @@ describe('local file tabs', () => {
       start(true, 10);
       link('Review').click();
       await flush();
-      root.querySelector<HTMLElement>('[data-side="status"]')!.click();
+      root.querySelector<HTMLElement>('[data-side="history"]')!.click();
       await flush();
       const shownStatus = localGets().length;
 

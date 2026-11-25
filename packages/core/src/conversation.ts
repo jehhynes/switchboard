@@ -1,3 +1,5 @@
+import type { Session, SessionState } from './model.js';
+
 /**
  * What became of a message typed from the view (architecture.md § Typing a message): `open` while it waits or is being typed, `sent` once the
  * transcript has it or Claude Code's input box no longer holds it, and `not-sent` when nothing was typed or Claude Code did not take it. `refused`
@@ -140,19 +142,43 @@ export function inTranscript(item: ({ type: 'message'; provisional: boolean } | 
 }
 
 /**
- * A status a session posted (architecture.md § Statuses): the part of a reply after its `[status]` line, read from the transcript only. One per
- * reply, so a later line of the same reply updates it in place; the newest is the session's status.
+ * A state a session set (architecture.md § States): the part of a reply after its `[state]` line, read from the transcript only, one per reply, so
+ * a later line of the same reply updates it in place; or a `stage` report, which sets a headline alone. The newest is the session's state.
  */
-export interface ConversationStatus {
+export interface ConversationState {
   id: string;
-  sessionId: string;
+  /** Null only for a stage the migration carried over from a work item, whose session was not recorded. */
+  sessionId: string | null;
   workItemId: number | null;
-  /** The reply it was written in. */
-  replyId: string;
+  /** The reply it was written in; null for a `stage` report. */
+  replyId: string | null;
   at: number;
-  markdown: string;
-  /** When the operator saw it on the conversation's Status tab (architecture.md § Unread); null while unread. Only the latest status counts as unread. */
+  /** The first line, which the list row shows. */
+  headline: string;
+  /** The Markdown after the headline, or null. */
+  body: string | null;
+  /** The turn that wrote it has ended, or could not be established (architecture.md § States), so it no longer reads as current. */
+  turnEnded: boolean;
+  /** When the operator saw it on the History tab (architecture.md § Unread); null while unread. Only the latest state counts as unread. */
   seenAt: number | null;
+}
+
+/** The session states of a turn in progress; a session leaving them ends its states' turn. */
+export const TURN_STATES: readonly SessionState[] = ['starting', 'running', 'waiting'];
+
+/** How long before its session's current turn began a state may be written and still count as that turn's, for Codex history's whole-second times. */
+export const TURN_SLACK_MS = 5_000;
+
+/**
+ * Whether a state is old (architecture.md § States): `'session'` when it has no session or its session has ended or is gone, `'turn'` when the turn
+ * that wrote it has ended, else null, current.
+ */
+export function stateStale(state: Pick<ConversationState, 'sessionId' | 'turnEnded'>, session: Pick<Session, 'state'> | null): 'turn' | 'session' | null {
+  if (state.sessionId === null || session === null || session.state === 'ended') {
+    return 'session';
+  }
+
+  return state.turnEnded || !TURN_STATES.includes(session.state) ? 'turn' : null;
 }
 
 /** Where the transcript reader of a session stopped, so a hub restart resumes there. */
@@ -189,5 +215,5 @@ export function windowFileKey(file: string): string {
   return file.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
 }
 
-/** Messages and replies kept per session, and statuses, counted apart; older ones are deleted. */
+/** Messages and replies kept per session, and states, counted apart; older ones are deleted. */
 export const CONVERSATION_RETENTION = 500;

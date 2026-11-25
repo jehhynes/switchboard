@@ -5,7 +5,7 @@ import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 
 import { applyEvent, awaitingReply, EMPTY, inTurn, mentionOf, mentionQuery, commandQuery, timeline, withEarlier } from '../src/model.js';
 import { parseQuestions, resolveAnswers } from '@switchboard/conversation/questions';
 import { artifactUrl, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
-import { renderArtifactView, renderStatus } from '../src/side.js';
+import { renderArtifactView, renderState } from '../src/side.js';
 import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader, renderSideSwitch, renderTabs } from '../src/header.js';
 import { renderList, sourceIcons } from '../src/list.js';
@@ -36,7 +36,7 @@ const resizeTo = (width: number): void => {
 
 describe('the page model', () => {
   it('orders items by transcript place, drops not-sent messages, and starts from empty at hello', () => {
-    let state = applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items: [message('m2', 2), message('m1', 1)], more: true, status: null, artifacts: [], unread: 2 });
+    let state = applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items: [message('m2', 2), message('m1', 1)], more: true, state: null, artifacts: [], unread: 2 });
 
     expect(state).toMatchObject({ key: 'k', connected: true, unread: 2, more: true });
     state = applyEvent(state, { type: 'message', message: message('m3', 0, { provisional: true }) });
@@ -46,12 +46,14 @@ describe('the page model', () => {
     expect(state.items.map((item) => item.id)).not.toContain('m3');
     state = applyEvent(state, { type: 'unread', workItemId: 1, count: 5 });
     expect(state.unread).toBe(5);
-    state = applyEvent(state, { type: 'status', status: { id: 'st-x', sessionId: 'other', at: 1, markdown: 'x', fallback: false, unread: false } });
-    expect(state.status).toBeNull();
+    state = applyEvent(state, { type: 'state', state: { id: 'st-x', sessionId: 'other', at: 1, headline: 'x', body: null, stale: 'session', unread: false } });
+    expect(state.state).toMatchObject({ id: 'st-x', headline: 'x' });
+    state = applyEvent(state, { type: 'state', state: null });
+    expect(state.state).toBeNull();
     state = withEarlier(state, [message('m0', -1), message('m1', 1)], false);
     expect(state.items[0]!.id).toBe('m0');
     expect(state.more).toBe(false);
-    state = applyEvent(state, { type: 'hello', scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    state = applyEvent(state, { type: 'hello', scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     expect(state).toMatchObject({ key: 'k', scope: null, items: [] });
   });
 
@@ -93,7 +95,7 @@ describe('question cards', () => {
 
 describe('question cards in replies', () => {
   const ending = 'Before I go on:\n\n1. Port?\n   - A) 1\n   - B) 2';
-  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [], settings: { briefReplies: true } });
+  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, state: null, artifacts: [], settings: { briefReplies: true } });
 
   it('leaves questions that end a reply out of its text, folds ones written mid-message, and keeps a card open under a message that answers nothing', () => {
     const host = document.createElement('div');
@@ -128,27 +130,30 @@ describe('question cards in replies', () => {
 
   it("shows a status's questions on the Status tab as plain Markdown, with no card or fold", () => {
     const host = document.createElement('div');
-    const state = { ...pageState([reply('r1', 1, { opening: '' })]), status: { id: 'st-r1', sessionId: 's', at: 1, markdown: `Blocked on a choice.\n\n${ending}`, fallback: false, unread: false } };
+    const state = { id: 'st-r1', sessionId: 's', at: 1, headline: 'Blocked on a choice', body: ending, stale: null, unread: false } as const;
 
-    host.innerHTML = html(renderStatus(state, 2));
-    expect(host.querySelector('.status-body')?.textContent).toContain('Blocked on a choice.');
-    expect(host.querySelectorAll('.status-body ol > li')).toHaveLength(1);
-    // The status is a Markdown document, typeset as an artifact's (`md-doc`).
-    expect(host.querySelector('.status-body')!.className).toBe('status-body md-doc body');
+    host.innerHTML = html(renderState(state, 2));
+    expect(host.querySelector('.state-headline')?.textContent).toBe('Blocked on a choice');
+    expect(host.querySelectorAll('.state-body ol > li')).toHaveLength(1);
+    // The body is a Markdown document, typeset as an artifact's (`md-doc`).
+    expect(host.querySelector('.state-body')!.className).toBe('state-body md-doc body');
     expect(host.querySelector('.question-card')).toBeNull();
     expect(host.querySelector('.questions-fold')).toBeNull();
+    // A headline alone draws no body.
+    host.innerHTML = html(renderState({ ...state, body: null }, 2));
+    expect(host.querySelector('.state-body')).toBeNull();
   });
 
   it('marks an unread status with the unread dot, not a New label, on the Status tab in the strip and the column and in its head', () => {
     const host = document.createElement('div');
-    const unread = { ...pageState([]), status: { id: 'st-1', sessionId: 's', at: 1, markdown: 'Built.', fallback: false, unread: true } };
-    const seen = { ...unread, status: { ...unread.status, unread: false } };
+    const unread = { ...pageState([]), state: { id: 'st-1', sessionId: 's', at: 1, headline: 'Built', body: 'All green.', stale: null, unread: true } };
+    const seen = { ...unread, state: { ...unread.state, unread: false } };
     const dot = (markup: string, selector: string) => {
       host.innerHTML = markup;
       return host.querySelector(selector);
     };
 
-    for (const [markup, tab] of [[html(renderTabs(newView(), unread)), '[data-tab="status"]'], [html(renderSideSwitch('console', unread)), '[data-side="status"]']] as const) {
+    for (const [markup, tab] of [[html(renderTabs(newView(), unread)), '[data-tab="history"]'], [html(renderSideSwitch('console', unread)), '[data-side="history"]']] as const) {
       const shown = dot(markup, `${tab} .unread-dot`);
 
       expect(shown?.getAttribute('role')).toBe('img');
@@ -156,16 +161,31 @@ describe('question cards in replies', () => {
       expect(shown?.previousElementSibling?.className).toBe('tab-label');
       expect(shown?.getAttribute('aria-label')).toBe('Unread');
       expect(shown?.getAttribute('title')).toBe('Unread');
-      expect(host.querySelector(tab)?.textContent).toBe('Status');
+      expect(host.querySelector(tab)?.textContent).toBe('History');
       expect(host.querySelector('.tab-badge')).toBeNull();
     }
-    expect(dot(html(renderStatus(unread, 2)), '.status-head .unread-dot')?.getAttribute('aria-label')).toBe('Unread');
-    expect(host.querySelector('.status-head')?.textContent).not.toContain('New');
+    expect(dot(html(renderState(unread.state, 2)), '.state-head .unread-dot')?.getAttribute('aria-label')).toBe('Unread');
+    expect(host.querySelector('.state-head')?.textContent).not.toContain('New');
 
-    // A seen status has none.
+    // A seen state has none.
     expect(dot(html(renderTabs(newView(), seen)), '.unread-dot')).toBeNull();
     expect(dot(html(renderSideSwitch('console', seen)), '.unread-dot')).toBeNull();
-    expect(dot(html(renderStatus(seen, 2)), '.unread-dot')).toBeNull();
+    expect(dot(html(renderState(seen.state, 2)), '.unread-dot')).toBeNull();
+  });
+
+  it('labels a current state State, dims one whose turn ended as of the last turn, one whose session ended as the last state, and says when there is none', () => {
+    const host = document.createElement('div');
+    const state = { id: 'st-1', sessionId: 's', at: 1, headline: 'fixing tests', body: null, unread: false } as const;
+    const drawn = (stale: 'turn' | 'session' | null) => {
+      host.innerHTML = html(renderState({ ...state, stale }, 2));
+      return { label: host.querySelector('.state-label')?.textContent, dim: host.querySelector('.state-view')!.classList.contains('stale') };
+    };
+
+    expect(drawn(null)).toEqual({ label: 'State', dim: false });
+    expect(drawn('turn')).toEqual({ label: 'As of the last turn', dim: true });
+    expect(drawn('session')).toEqual({ label: 'Last state', dim: true });
+    host.innerHTML = html(renderState(null, 2));
+    expect(host.textContent).toBe('No state yet. It appears here when the session sets one.');
   });
 
   it("draws a tab's unread dot at its label's top-right, over the gap after it, and the dropdown's dot alike, so the dot leaves the tab's width as it was", () => {
@@ -205,7 +225,7 @@ describe('question cards in replies', () => {
 
 describe('drawing', () => {
   // The page's state with these items, as a hello brings them.
-  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, status: null, artifacts: [], settings: { briefReplies: true } });
+  const pageState = (items: Array<MessageView | ReplyView>) => applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session()], items, more: false, state: null, artifacts: [], settings: { briefReplies: true } });
 
   it('puts a Today, Yesterday or dated divider before the first item and each turn on another day', () => {
     const at = (day: number, hour: number): number => new Date(2026, 10, day, hour).getTime();
@@ -438,7 +458,7 @@ describe('drawing', () => {
     const answered = [message('m1', 1), reply('r1', 2, { answers: 'm1' })];
     const draw = (patch: Partial<SessionView>): HTMLElement => {
       const host = document.createElement('div');
-      const state = applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session(patch)], items: answered, more: false, status: null, artifacts: [] });
+      const state = applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session(patch)], items: answered, more: false, state: null, artifacts: [] });
 
       host.innerHTML = html(renderTimeline(state, newView()));
       return host;
@@ -464,7 +484,7 @@ describe('drawing', () => {
   it('shows Thinking for a message sent while only background tasks run, until a reply answers it', () => {
     const draw = (items: Array<MessageView | ReplyView>): HTMLElement => {
       const host = document.createElement('div');
-      const state = applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session({ state: 'running', background: { agents: 1, shells: 0, other: 0 } })], items, more: false, status: null, artifacts: [] });
+      const state = applyEvent(EMPTY, { type: 'hello', key: 'k', groups: [], scope, sessions: [session({ state: 'running', background: { agents: 1, shells: 0, other: 0 } })], items, more: false, state: null, artifacts: [] });
 
       host.innerHTML = html(renderTimeline(state, newView()));
       return host;
@@ -605,7 +625,7 @@ describe('drawing', () => {
 
     header.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [scope.conversations[0]!, other] }, session: session() }, { ...newView(), picker: true }));
     expect([...header.querySelectorAll('.conversation-row')].map((row) => row.querySelector('.unread-dot') !== null)).toEqual([false, true]);
-    expect(header.querySelector('button.picker .unread-dot')?.getAttribute('title')).toBe('Unread replies or status');
+    expect(header.querySelector('button.picker .unread-dot')?.getAttribute('title')).toBe('Unread replies or state');
   });
 
   it("draws a row's three lines from the hub's dock row: priority, title and time; comment, playbook, ticket, links and Returned; mark and details", () => {
@@ -849,7 +869,7 @@ describe('the page', () => {
     };
     const groups = [listGroup('progress', [listRow(1, { title: 'Fix it' })])];
 
-    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
 
     const row = root.querySelector<HTMLElement>('.row')!;
 
@@ -875,7 +895,7 @@ describe('the page', () => {
     const source = FakeSource.last!;
     const replies = () => root.querySelectorAll('#panel .reply').length;
 
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
 
     // A long history read arrives as one event per reply; none draws until the frame, which draws them all once.
     for (let index = 1; index <= 200; index++) {
@@ -911,7 +931,7 @@ describe('the page', () => {
       Object.defineProperty(panel, 'clientHeight', { value: 100, configurable: true });
     };
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
     sized(500);
     panel.scrollTop = 50;
     panel.dispatchEvent(new Event('scroll'));
@@ -946,8 +966,8 @@ describe('the page', () => {
     const { page, source } = start();
     const composer = root.querySelector<HTMLElement>('#composer')!;
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
-    root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
+    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
     expect(composer.hidden).toBe(false);
 
     const input = composer.querySelector('textarea')!;
@@ -958,7 +978,7 @@ describe('the page', () => {
     await flush();
     await flush();
     expect(posts.some((post) => post.url.endsWith('/send') && post.body['text'] === 'From the status')).toBe(true);
-    expect(root.querySelector('.tab.selected')?.getAttribute('data-tab')).toBe('status');
+    expect(root.querySelector('.tab.selected')?.getAttribute('data-tab')).toBe('history');
     // The folded tabs hide the composer off the Conversation tab, so the toast says it went, not the composer's own line.
     expect(root.classList.contains('off-conversation')).toBe(true);
     expect(composer.querySelector<HTMLElement>('.composer-sent')!.hidden).toBe(true);
@@ -1001,13 +1021,13 @@ describe('the page', () => {
     const composer = root.querySelector<HTMLElement>('#composer')!;
     const input = composer.querySelector('textarea')!;
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
     expect(root.classList.contains('wide')).toBe(false);
     expect(root.classList.contains('off-conversation')).toBe(false);
     input.value = 'Half a thought';
     input.dispatchEvent(new Event('input'));
     input.focus();
-    root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
     expect(root.classList.contains('off-conversation')).toBe(true);
     // Hidden by the stylesheet only, so the box and its text stay; the hidden box gives up the focus.
     expect(composer.hidden).toBe(false);
@@ -1018,7 +1038,7 @@ describe('the page', () => {
     expect(input.value).toBe('Half a thought');
 
     // In the wide layout the conversation's pane always shows the conversation, whatever the column shows.
-    root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
     expect(root.classList.contains('off-conversation')).toBe(true);
     resizeTo(1920);
     expect(root.classList.contains('wide')).toBe(true);
@@ -1041,7 +1061,7 @@ describe('the page', () => {
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: false } })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: false } })], items: [], more: false, state: null, artifacts: [] });
     // The header has no persona button of its own any more.
     expect(root.querySelector('button.persona, .persona-anchor')).toBeNull();
     root.querySelector<HTMLElement>('button.view-options')!.click();
@@ -1106,7 +1126,7 @@ describe('the page', () => {
       await flush();
     };
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: true } })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: true } })], items: [], more: false, state: null, artifacts: [] });
     await open();
     expect(root.querySelector('.persona-body .persona-note')?.textContent).toBe("The session takes Nova's tone when it next resumes.");
     root.querySelector<HTMLElement>('.persona-body')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1137,22 +1157,22 @@ describe('the page', () => {
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: false })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: false })], items: [], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('button.view-options')!.click();
     expect(root.querySelector('.view-options-menu')).not.toBeNull();
     expect(root.querySelector('.view-options-menu [data-action="persona"]')).toBeNull();
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, state: null, artifacts: [] });
 
     const row = root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!;
 
     expect(row.querySelector('.title')?.textContent).toBe('Persona: None');
     expect(row.querySelector('.menu-note')).toBeNull();
     // A persona resolved at the start, from the playbook or the pool, is named with no pin.
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'iris', name: 'Iris', pinned: false, tonePending: false }, canPin: true })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'iris', name: 'Iris', pinned: false, tonePending: false }, canPin: true })], items: [], more: false, state: null, artifacts: [] });
     expect(root.querySelector('.view-options-menu [data-action="persona"] .title')?.textContent).toBe('Persona: Iris');
     expect(root.querySelector('.view-options-menu [data-action="persona"] .menu-note')).toBeNull();
     expect(root.querySelector('.view-options-menu [data-action="persona"] .codicon-person')).not.toBeNull();
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, state: null, artifacts: [] });
     expect(row.title).toBe('No persona. Choose one for this session.');
     expect(row.querySelector('.codicon-person')).not.toBeNull();
     row.click();
@@ -1181,7 +1201,7 @@ describe('the page', () => {
       root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!.click();
     };
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, state: null, artifacts: [] });
     open();
     root.querySelector<HTMLElement>('.persona-close')!.click();
     open();
@@ -1206,7 +1226,7 @@ describe('the page', () => {
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('button.view-options')!.click();
     root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!.click();
     await flush();
@@ -1219,14 +1239,14 @@ describe('the page', () => {
   it('brings the conversation back where the operator left it after the Status tab', () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
 
     const panel = root.querySelector<HTMLElement>('#panel')!;
 
     Object.defineProperties(panel, { scrollHeight: { value: 500, configurable: true }, clientHeight: { value: 100, configurable: true } });
     panel.scrollTop = 50;
     panel.dispatchEvent(new Event('scroll'));
-    root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
     root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     expect(panel.scrollTop).toBe(50);
     // And after an artifact opened from its row.
@@ -1243,7 +1263,7 @@ describe('the page', () => {
     const { page, source } = start();
     const voice = { enabled: true, here: true, mic: 'off', speaking: 'r1', speakReplies: true, error: null, recognizer: null };
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [], voice });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [], voice });
 
     const speaker = root.querySelector<HTMLElement>('[data-voice="speak-replies"]')!;
 
@@ -1257,7 +1277,7 @@ describe('the page', () => {
   it('keeps the focus on a voice control over an unrelated stream event, and opens one header menu at a time', () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'p', name: 'P', pinned: false, tonePending: false } })], items: [], more: false, status: null, artifacts: [], voice: { enabled: true, here: true, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null } });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'p', name: 'P', pinned: false, tonePending: false } })], items: [], more: false, state: null, artifacts: [], voice: { enabled: true, here: true, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null } });
 
     const control = root.querySelector<HTMLElement>('.voice-controls button')!;
 
@@ -1274,7 +1294,7 @@ describe('the page', () => {
   it('closes the conversation dropdown on a press outside the header and on Escape', () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('button.picker')!.click();
     expect(root.querySelector('.conversation-menu')).not.toBeNull();
     root.querySelector('.conversation-menu')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
@@ -1291,7 +1311,7 @@ describe('the page', () => {
     const { page, source } = start();
 
     expect(source.url).toBe('/v1/conversation/events?page=1');
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     await flush();
     expect(posts.map((post) => [post.url, post.body['window']])).toEqual(expect.arrayContaining([['/v1/conversation/page-focus', 'pk'], ['/v1/conversation/select', 'pk']]));
     expect(posts.find((post) => post.url.endsWith('/select'))?.body['workItemId']).toBe(1);
@@ -1305,7 +1325,7 @@ describe('the page', () => {
 
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     expect(root.classList.contains('listing')).toBe(true);
     // With no work item open, the pane says so in words that hold on a phone, where the list is its own view.
     expect(root.querySelector('#panel .empty')?.textContent).toBe('No work item open. Choose one in the list to see its conversation.');
@@ -1313,7 +1333,7 @@ describe('the page', () => {
     await flush();
     expect(root.classList.contains('listing')).toBe(false);
     expect(location.hash).toBe('#w=1');
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     expect(root.classList.contains('listing')).toBe(false);
 
     // Back is the header's first button, which CSS hides outside the phone's layout; the Work items button after it shows only where the list is a drawer.
@@ -1343,11 +1363,11 @@ describe('the page', () => {
     const open = async (): Promise<void> => {
       root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
       await flush();
-      source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+      source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     };
 
     window.innerWidth = 375;
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     await open();
     source.emit('voice', voice('listening'));
     root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
@@ -1392,10 +1412,10 @@ describe('the page', () => {
     const phone = FakeSource.last!;
 
     history.replaceState(null, '', '#');
-    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
-    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     phone.emit('voice', voice('listening'));
     root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
     await flush();
@@ -1434,7 +1454,7 @@ describe('the page', () => {
     posts.length = 0;
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
-    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     phone.emit('voice', voice('off'));
     root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
     // Starting from the tap, while the voice socket and the microphone open.
@@ -1456,7 +1476,7 @@ describe('the page', () => {
     posts.length = 0;
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
-    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     phone.emit('voice', voice('off'));
     // The voice is already on this phone, its socket welcomed.
     root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
@@ -1482,7 +1502,7 @@ describe('the page', () => {
     holdMic = new Promise((resolve) => (answerFirst = resolve));
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
-    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     phone.emit('voice', voice('off'));
     root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
     await flush();
@@ -1491,7 +1511,7 @@ describe('the page', () => {
     await flush();
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
-    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     phone.emit('voice', voice('off'));
     holdMic = null;
     root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
@@ -1522,7 +1542,7 @@ describe('the page', () => {
     expect(root.querySelector('.composer-mic .mic.unavailable')?.getAttribute('title')).toBe('The mic did not start: Microphone access was not allowed on this device. Click to try again.');
     expect(root.querySelector('.composer-mic [data-voice="mic"]')?.getAttribute('data-on')).toBe('true');
     // The failure belongs to its conversation: another one's mic shows the hub's state.
-    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: { ...scope, workItemId: 2 }, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    phone.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: { ...scope, workItemId: 2 }, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     phone.emit('voice', voice('off'));
     expect(root.querySelector('.composer-mic .mic.unavailable')).toBeNull();
     window.innerWidth = width;
@@ -1586,7 +1606,7 @@ describe('the page', () => {
 
     const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, build: 'b1', reload });
     const phone = FakeSource.last!;
-    const hello = (key: string) => FakeSource.last!.emit('hello', { key, groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    const hello = (key: string) => FakeSource.last!.emit('hello', { key, groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
 
     hello('pk');
     phone.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
@@ -1666,11 +1686,11 @@ describe('the page', () => {
 
     const phone = start();
 
-    phone.source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    phone.source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     expect(document.documentElement.classList.contains('phone')).toBe(true);
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
-    phone.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    phone.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
     // Separate views, no drawer, and the conversation a history entry of its own, as in portrait.
     expect(root.classList.contains('listing')).toBe(false);
     expect(root.classList.contains('drawers')).toBe(false);
@@ -1698,11 +1718,11 @@ describe('the page', () => {
 
     const tablet = start();
 
-    tablet.source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    tablet.source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     expect(document.documentElement.classList.contains('phone')).toBe(false);
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
-    tablet.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    tablet.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
     expect(root.classList.contains('drawers')).toBe(false);
     expect(root.querySelector('.list-pin')).not.toBeNull();
     expect(history.state).not.toEqual({ switchboardConversation: true });
@@ -1740,9 +1760,9 @@ describe('the page', () => {
     };
 
     vi.spyOn(performance, 'now').mockImplementation(() => t);
-    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
-    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
     expect(root.classList.contains('listing')).toBe(false);
 
     // With the header's dropdown open the swipe is the menu's, and the conversation stays.
@@ -1785,9 +1805,9 @@ describe('the page', () => {
     const { page, source } = start();
     const groups = [listGroup('progress', [listRow(1)])];
 
-    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
-    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
     expect(history.state).toEqual({ switchboardConversation: true });
 
     const target = root.querySelector<HTMLElement>('#panel .timeline')!;
@@ -1829,9 +1849,9 @@ it("makes a phone's conversation a history entry, which the browser's back leave
     const popped = () => new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
     const entries = history.length;
 
-    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
-    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     expect(history.length).toBe(entries + 1);
     expect(location.hash).toBe('#w=1');
 
@@ -1860,7 +1880,7 @@ it("makes a phone's conversation a history entry, which the browser's back leave
 
     // Another conversation chosen from the header's dropdown replaces the entry rather than adding one.
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
-    source.emit('hello', { key: 'pk', groups, scope: { ...scope, workItemId: 2, conversations: [...scope.conversations, { ...scope.conversations[0]!, workItemId: 2, title: 'Item 2', primary: false }] }, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope: { ...scope, workItemId: 2, conversations: [...scope.conversations, { ...scope.conversations[0]!, workItemId: 2, title: 'Item 2', primary: false }] }, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     const after = history.length;
 
     root.querySelector<HTMLElement>('.header .picker')!.click();
@@ -1895,7 +1915,7 @@ it('steps back through history once for Back, select and Back in quick successio
     // A reload keeps the conversation's entry over the list's, adding none, so Back steps back to the list's.
     expect(history.state).toEqual({ switchboardConversation: true });
     expect(history.length).toBe(entries);
-    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
 
     const back = vi.spyOn(history, 'back');
     const popped = () => new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
@@ -1920,7 +1940,7 @@ it('steps back through history once for Back, select and Back in quick successio
     expect(history.state).toBeNull();
 
     // A refused first open from the list shows why in its place; Back to the list takes its entry back with it.
-    source.emit('hello', { key: 'pk2', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk2', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     refuse = true;
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
     expect(history.state).toEqual({ switchboardConversation: true });
@@ -1948,7 +1968,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     const open = async (): Promise<void> => {
       root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
       await flush();
-      source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, status: null, artifacts: [] });
+      source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });
       source.emit('voice', voice('listening'));
     };
     const swipe = async (): Promise<void> => {
@@ -1963,7 +1983,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
       await flush();
     };
 
-    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     await open();
     await swipe();
     expect(root.classList.contains('listing')).toBe(true);
@@ -1991,7 +2011,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     const { page, source } = start();
     const entries = history.length;
 
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     expect(history.length).toBe(entries);
     expect(location.hash).toBe('#w=1');
@@ -2004,7 +2024,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     const fetch = vi.fn(async (url: string) => ({ status: url.endsWith('/select') ? 404 : 200, ok: !url.endsWith('/select'), json: async () => (url.endsWith('/select') ? { error: 'That work item is gone.' } : {}), text: async () => '' }) as unknown as Response);
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
 
-    FakeSource.last!.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    FakeSource.last!.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     expect(root.classList.contains('listing')).toBe(false);
     // At once: its title and a placeholder.
@@ -2053,7 +2073,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     const labels = (selector: string) => [...root.querySelectorAll(selector)].map((one) => one.textContent);
     const scope2 = { ...scope, workItemId: 2, scopeGen: 4, title: 'Item 2', conversations: [{ ...scope.conversations[0]!, workItemId: 2, title: 'Item 2' }] };
 
-    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     expect(root.classList.contains('wide')).toBe(true);
     expect(composer.hidden).toBe(false);
     root.querySelector<HTMLElement>('#detail .panel-max')!.click();
@@ -2061,41 +2081,41 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
     // The maximized column restores, so the placeholder shows.
     expect(root.classList.contains('maximized')).toBe(false);
-    // At once: the column stays, its strip Status and Console dimmed over a loading note, and the composer keeps its place, hidden by page.css.
+    // At once: the column stays, its strip History and Console dimmed over a loading note, and the composer keeps its place, hidden by page.css.
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.classList.contains('item-opening')).toBe(true);
-    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['Status', 'Console']);
+    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['History', 'Console']);
     expect(root.querySelector('#detail .detail-head .opening-tabs')?.getAttribute('aria-hidden')).toBe('true');
     expect(root.querySelector('#detail .detail-body .opening-side')?.textContent).toContain('Loading…');
     expect(root.querySelector('#head .opening-tabs')).toBeNull();
     expect(root.querySelector('#panel .opening-note')).not.toBeNull();
     expect(composer.hidden).toBe(false);
     // Its hello: the work item's own strip and status in the same column.
-    source.emit('hello', { key: 'pk', groups, scope: scope2, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups, scope: scope2, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.classList.contains('item-opening')).toBe(false);
     expect(root.querySelector('#detail .opening-tabs')).toBeNull();
-    expect(root.querySelector('#detail .detail-head [data-side="status"]')).not.toBeNull();
+    expect(root.querySelector('#detail .detail-head [data-side="history"]')).not.toBeNull();
     expect(root.querySelector('#detail .detail-body .opening-side')).toBeNull();
 
     // Where the tabs fold into the conversation's, the placeholder strip is under its head; a refused open keeps it, and the column comes back
     // with no loading note when the page widens.
     resizeTo(1000);
     refuse = true;
-    root.querySelector<HTMLElement>('#head [data-tab="status"]')!.click();
+    root.querySelector<HTMLElement>('#head [data-tab="history"]')!.click();
     expect(root.classList.contains('off-conversation')).toBe(true);
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     // It opens on the Conversation tab, so the composer keeps its place meanwhile.
     expect(root.classList.contains('off-conversation')).toBe(false);
-    expect(labels('#head .opening-tabs .tab')).toEqual(['Conversation', 'Status', 'Console']);
+    expect(labels('#head .opening-tabs .tab')).toEqual(['Conversation', 'History', 'Console']);
     await flush();
     await flush();
     expect(root.querySelector('#panel .opening-failed')).not.toBeNull();
     expect(root.classList.contains('wide')).toBe(false);
-    expect(labels('#head .opening-tabs .tab')).toEqual(['Conversation', 'Status', 'Console']);
+    expect(labels('#head .opening-tabs .tab')).toEqual(['Conversation', 'History', 'Console']);
     resizeTo(1440);
     expect(root.classList.contains('wide')).toBe(true);
-    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['Status', 'Console']);
+    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['History', 'Console']);
     expect(root.querySelector('#detail .detail-body')?.textContent).toBe('');
     expect(root.querySelector('#head .opening-tabs')).toBeNull();
     page.close();
@@ -2104,7 +2124,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
   it('opens and collapses a group from its header, keeping the focus on the header', () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)]), listGroup('done', [listRow(5)])], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)]), listGroup('done', [listRow(5)])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
 
     const done = root.querySelector<HTMLElement>('[data-group="done"] .group-head')!;
 
@@ -2126,7 +2146,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     const groups = [listGroup('progress', [listRow(1)]), listGroup('snoozed', [listRow(4)]), listGroup('done', [listRow(5, { band: 'Today' }), listRow(6, { band: 'Two weeks ago' })])];
     const first = start();
 
-    first.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    first.source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     root.querySelector<HTMLElement>('[data-group="done"] .group-head')!.click();
     root.querySelector<HTMLElement>('[data-group="progress"] .group-head')!.click();
     root.querySelector<HTMLElement>('.band-head[data-band="done:Two weeks ago"]')!.click();
@@ -2136,7 +2156,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
 
     const second = start();
 
-    second.source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    second.source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     const open = () => [...root.querySelectorAll('.group-head')].map((head) => [head.getAttribute('data-group'), head.getAttribute('aria-expanded')]);
 
     expect(open()).toEqual([['progress', 'false'], ['snoozed', 'false'], ['done', 'true']]);
@@ -2153,7 +2173,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
   it('sends the composer\'s text to the session it shows, with its scope generation and launch, and keeps a draft per work item', async () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
 
     const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
@@ -2178,7 +2198,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
   it("shows dictation's live words dimmed after the box's text and the hub's draft in it, never over text typed after it (architecture.md § Dictation)", () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
 
     const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
     const live = root.querySelector<HTMLElement>('.live-words')!;
@@ -2213,7 +2233,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
   it('keeps dictation listening while the box has the focus: says so, joins each piece to the end of what was typed, keeps the caret, and tells the hub (architecture.md § Dictation)', async () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
 
     const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
@@ -2291,7 +2311,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
   it("fills the box with a draft that came while a message was being sent once the send answered, keeps each conversation's draft baseline, and clears live words on a switch", async () => {
     const { page, source } = start();
     const helloOn = (workItemId: number, sessionId: string) =>
-      source.emit('hello', { key: 'pk', groups: [], scope: { ...scope, workItemId, sessionId }, sessions: [session({ id: sessionId })], items: [], more: false, status: null, artifacts: [] });
+      source.emit('hello', { key: 'pk', groups: [], scope: { ...scope, workItemId, sessionId }, sessions: [session({ id: sessionId })], items: [], more: false, state: null, artifacts: [] });
 
     helloOn(1, 's');
 
@@ -2325,7 +2345,7 @@ it('shows the context meter as one ring in the composer, its numbers in the tool
     const { page, source } = start();
     const context = { used: 150_000, window: 200_000, compactAt: 167_000, model: 'claude-sonnet-4-6' };
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ context })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ context })], items: [], more: false, state: null, artifacts: [] });
 
     const slot = root.querySelector<HTMLElement>('.composer-controls .context-meter')!;
     const ring = () => slot.querySelector<HTMLButtonElement>('button.context-ring')!;
@@ -2367,7 +2387,7 @@ it('shows the context meter as one ring in the composer, its numbers in the tool
   it('shows an unknown context as the empty ring, and offers no Compact for a session the composer cannot talk to', () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ conversation: 'read-only', reason: 'Ended.' })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ conversation: 'read-only', reason: 'Ended.' })], items: [], more: false, state: null, artifacts: [] });
 
     const slot = root.querySelector<HTMLElement>('.context-meter')!;
 
@@ -2381,7 +2401,7 @@ it('shows the context meter as one ring in the composer, its numbers in the tool
   it('disables the composer with the reason for a session it cannot talk to', () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ conversation: 'read-only', state: 'idle', reason: 'The session is unobserved: sessions.installHooks is off.' })], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ conversation: 'read-only', state: 'idle', reason: 'The session is unobserved: sessions.installHooks is off.' })], items: [], more: false, state: null, artifacts: [] });
 
     const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
@@ -2427,7 +2447,7 @@ describe('attaching files from the composer', () => {
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
     const source = FakeSource.last!;
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     return { page, source };
   };
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -2541,7 +2561,7 @@ describe('attaching files from the composer', () => {
     const second = start();
 
     expect(chipNames().map(([name]) => name)).toEqual(Array.from({ length: 10 }, (_, index) => `c${index}.txt`));
-    second.source.emit('hello', { key: 'pk', groups: [], scope: { ...scope, workItemId: 2, scopeGen: 4 }, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
+    second.source.emit('hello', { key: 'pk', groups: [], scope: { ...scope, workItemId: 2, scopeGen: 4 }, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
     expect(chipNames()).toEqual([]);
     second.page.close();
   });
@@ -2644,7 +2664,7 @@ describe('the page in use', () => {
     return panel.textContent;
   };
   const hello = (source: FakeSource, patch: Record<string, unknown> = {}) =>
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side', host: 'w' })])], scope: { ...scope, conversations: [...scope.conversations, { ...scope.conversations[0]!, workItemId: 2, title: 'Side', primary: false }] }, sessions: [session()], items: [message('m1', 1), reply('r1', 2, { unread: true, opening: '1. Port?\n   - A) 1\n   - B) 2', answers: 'm1' })], more: true, status: { id: 'st-r1', sessionId: 's', at: 5_000, markdown: '**Working** on it\n\n```mermaid\ngraph TD; A-->B;\n```', fallback: false, unread: true }, artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html')], unread: 1, voice: { enabled: true, here: false, speaking: null, speakReplies: true, error: null }, ...patch });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side', host: 'w' })])], scope: { ...scope, conversations: [...scope.conversations, { ...scope.conversations[0]!, workItemId: 2, title: 'Side', primary: false }] }, sessions: [session()], items: [message('m1', 1), reply('r1', 2, { unread: true, opening: '1. Port?\n   - A) 1\n   - B) 2', answers: 'm1' })], more: true, state: { id: 'st-r1', sessionId: 's', at: 5_000, headline: 'Working on it', body: '```mermaid\ngraph TD; A-->B;\n```', stale: null, unread: true }, artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html')], unread: 1, voice: { enabled: true, here: false, speaking: null, speakReplies: true, error: null }, ...patch });
 
   it("draws Mermaid diagrams in the system scheme's theme, and draws the ones shown again from their sources when the scheme changes", async () => {
     const changes: Array<() => void> = [];
@@ -2684,7 +2704,7 @@ describe('the page in use', () => {
     const { page, source } = start(async () => true);
 
     hello(source);
-    click('[data-tab="status"]');
+    click('[data-tab="history"]');
     await flush();
     expect(drawn).toEqual(['graph TD; A-->B;\n']);
     expect(root.querySelector('pre.mermaid')!.textContent).toBe('svg');
@@ -2718,18 +2738,18 @@ describe('the page in use', () => {
     vi.stubGlobal('mermaid', mermaid);
 
     const { page, source } = start(async () => true);
-    const status = (markdown: string) => ({ id: 'st-r1', sessionId: 's', at: 5_000, markdown, fallback: false, unread: false });
+    const workState = (body: string) => ({ id: 'st-r1', sessionId: 's', at: 5_000, headline: 'Working on it', body, stale: null, unread: false });
 
     hello(source);
-    click('[data-tab="status"]');
+    click('[data-tab="history"]');
     await flush();
     expect(drawn).toEqual(['graph TD; A-->B;\n']);
-    source.emit('status', { status: status('**Working** on it\n\n```mermaid\ngraph TD; A-->C;\n```') });
+    source.emit('state', { state: workState('```mermaid\ngraph TD; A-->C;\n```') });
     await flush();
     expect(drawn).toEqual(['graph TD; A-->B;\n', 'graph TD; A-->C;\n']);
     expect([...root.querySelectorAll('pre.mermaid')].map((node) => node.textContent)).toEqual(['svg of graph TD; A-->C;\n']);
     // The same source again keeps its drawing.
-    source.emit('status', { status: { ...status('**Working** on it\n\n```mermaid\ngraph TD; A-->C;\n```'), at: 6_000 } });
+    source.emit('state', { state: { ...workState('```mermaid\ngraph TD; A-->C;\n```'), at: 6_000 } });
     await flush();
     expect(drawn).toHaveLength(2);
     expect(root.querySelector('pre.mermaid')!.textContent).toBe('svg of graph TD; A-->C;\n');
@@ -2790,7 +2810,7 @@ describe('the page in use', () => {
     // A changed artifact is unread again, with the dot on its own tab where the strip has room for it, until its tab shows it.
     vi.restoreAllMocks();
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
-    click('#detail [data-side="status"]');
+    click('#detail [data-side="history"]');
     source.emit('artifact', { artifact: { path: 'chat/a4.md', owner: 'chat', kind: 'note', title: 'Note 4', ext: 'md', type: 'markdown', updatedAt: 20_000 } });
     const tabDot = (path: string) => root.querySelector(`#detail .artifact-tab[data-path="${path}"] .tab-open > .tab-label + .unread-dot`);
 
@@ -2872,17 +2892,18 @@ describe('the page in use', () => {
     const { page, source } = start();
     const tabs = () => [...root.querySelectorAll('#detail .side-switch > .tab:not(.artifact-tab):not(.panel-max)')].map((one) => one.textContent);
 
+    // History is in the strip whether or not the row offers the ticket's History.
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
-    expect(tabs()).not.toContain('History');
+    expect(tabs()).toEqual(['History', 'Changes', 'Console']);
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
     source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
-    // Hidden until chosen from the menu; Console follows Changes, before the maximize button.
-    expect(tabs()).toEqual(['Status', 'Changes', 'Console']);
+    // Console follows Changes, before the maximize button.
+    expect(tabs()).toEqual(['History', 'Changes', 'Console']);
     expect(root.querySelector('#detail .side-switch > :last-child')?.classList.contains('panel-max')).toBe(true);
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/new.md"]')).not.toBeNull();
     click('[data-action="actions"]');
     click('.actions-menu [data-action="row-history"]');
-    expect(tabs()).toEqual(['Status', 'History', 'Changes', 'Console']);
+    expect(tabs()).toEqual(['History', 'Changes', 'Console']);
     expect(root.querySelector('.actions-menu')).toBeNull();
     expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(root.querySelector('#detail [data-side="history"]'));
@@ -2896,11 +2917,13 @@ describe('the page in use', () => {
     expect(root.querySelector('.history-view')).toBeNull();
     expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': { 'chat/new.md': 1 } });
 
-    // A row that stops offering History takes the tab with it, and the column shows Status in its place.
+    // A row that stops offering History keeps the tab, which then shows the state alone.
     click('#detail [data-side="history"]');
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
-    expect(tabs()).not.toContain('History');
-    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(tabs()).toContain('History');
+    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail .history-view .hist-hero')).toBeNull();
+    expect(root.querySelector('#detail .history-view .state-view')).not.toBeNull();
     page.close();
   });
 
@@ -2932,7 +2955,7 @@ describe('the page in use', () => {
 
     click('#detail [data-side="console"]');
     expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md']);
-    expect(root.querySelector('#detail .side-switch > [data-side="status"]')).not.toBeNull();
+    expect(root.querySelector('#detail .side-switch > [data-side="history"]')).not.toBeNull();
     expect(root.querySelector('#detail .tab-more-button .tab-badge')!.textContent).toBe('6');
 
     // More lists the rest in strip order: the older artifacts, then Changes; picking one chooses it, closes the menu, and gives it a tab in place
@@ -2985,7 +3008,7 @@ describe('the page in use', () => {
     click('#detail .artifact-tab[data-path="chat/a1.md"] .tab-open');
     expect(paths()).toEqual(['chat/a1.md']);
     expect(selected()!.dataset['path']).toBe('chat/a1.md');
-    expect([...root.querySelectorAll<HTMLElement>('#detail .side-switch > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(['status', 'artifact:chat/a1.md']);
+    expect([...root.querySelectorAll<HTMLElement>('#detail .side-switch > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(['history', 'artifact:chat/a1.md']);
     narrow.mockReturnValue({ width: 400 } as DOMRect);
     click('#detail .artifact-tab[data-path="chat/a1.md"] .tab-open');
 
@@ -3035,10 +3058,10 @@ describe('the page in use', () => {
     // Another device closing the open artifact shows Status here, and keeps nothing.
     source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [{ path: 'chat/a1.md', updatedAt: 10_001 }] } });
     expect(kept()).toHaveLength(echoed);
-    expect(selected()!.getAttribute('data-side')).toBe('status');
+    expect(selected()!.getAttribute('data-side')).toBe('history');
     expect(paths()).not.toContain('chat/a1.md');
     narrow.mockRestore();
-    click('#detail [data-side="status"]');
+    click('#detail [data-side="history"]');
     // Another device closing a tab closes it here too, and a newer version opens it again.
     source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [{ path: 'chat/a7.md', updatedAt: 10_007 }] } });
     expect(paths()).not.toContain('chat/a7.md');
@@ -3049,7 +3072,7 @@ describe('the page in use', () => {
     click('#detail .artifact-tab[data-path="chat/a7.md"]');
     hello(source, { artifacts: [] });
     expect(root.querySelector('#detail .artifact-tab')).toBeNull();
-    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');
+    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('history');
     vi.unstubAllGlobals();
     page.close();
   });
@@ -3091,25 +3114,25 @@ describe('the page in use', () => {
     });
 
     const shown = () => [...root.querySelectorAll<HTMLElement>('#detail .tabs > [data-id]')].map((tab) => tab.dataset['id']);
-    const redraw = () => click('#detail [data-side="status"]');
+    const redraw = () => click('#detail [data-side="history"]');
 
     // 600 px at 14 px padding: Status (95 px) and three artifacts (113 px each) beside More (71 px); the rest, hidden, were measured at 113 px.
     redraw();
-    expect(shown()).toEqual(['status', 'artifact:chat/a7.md', 'artifact:chat/a6.md', 'artifact:chat/a5.md']);
+    expect(shown()).toEqual(['history', 'artifact:chat/a7.md', 'artifact:chat/a6.md', 'artifact:chat/a5.md']);
     // 472 px takes 9 px padding: Status 85 px, More 61 px and 108 px an artifact leave 326 px, three artifacts' room. With a7 closed, a4 fits at
     // 108 px, which a measure kept from 14 px padding would hide.
     strip = 472;
     pad = 9;
     redraw();
-    expect(shown()).toEqual(['status', 'artifact:chat/a7.md', 'artifact:chat/a6.md', 'artifact:chat/a5.md']);
+    expect(shown()).toEqual(['history', 'artifact:chat/a7.md', 'artifact:chat/a6.md', 'artifact:chat/a5.md']);
     root.querySelector<HTMLElement>('#detail .artifact-tab[data-path="chat/a7.md"] .tab-close')!.click();
-    expect(shown()).toEqual(['status', 'artifact:chat/a6.md', 'artifact:chat/a5.md', 'artifact:chat/a4.md']);
+    expect(shown()).toEqual(['history', 'artifact:chat/a6.md', 'artifact:chat/a5.md', 'artifact:chat/a4.md']);
     // Back to 14 px padding at 615 px: 449 px less Status leaves room for three artifacts at 113 px, not a fourth that a measure kept from 9 px
     // padding (108 px) would let in.
     strip = 615;
     pad = 14;
     redraw();
-    expect(shown()).toEqual(['status', 'artifact:chat/a6.md', 'artifact:chat/a5.md', 'artifact:chat/a4.md']);
+    expect(shown()).toEqual(['history', 'artifact:chat/a6.md', 'artifact:chat/a5.md', 'artifact:chat/a4.md']);
     page.close();
   });
 
@@ -3118,8 +3141,8 @@ describe('the page in use', () => {
 
     answers['/artifact/'] = { status: 200, body: {}, text: '---\ntitle: Plan\n---\n# Plan\n\n![pic](plan/pic.png) ![up](../x.png)' };
     hello(source);
-    click('[data-tab="status"]');
-    expect(root.querySelector('#panel')!.innerHTML).toContain('status-tab');
+    click('[data-tab="history"]');
+    expect(root.querySelector('#panel')!.innerHTML).toContain('state-view');
     expect(mermaid).toHaveBeenCalled();
     // Each artifact has its own tab, newest first, and no Artifacts tab lists them.
     expect(root.querySelector('[data-tab="artifacts"]')).toBeNull();
@@ -3954,7 +3977,7 @@ describe('the page in use', () => {
     await flush();
     expect(files()).toEqual([]);
     expect(shownArtifact()).toBe('chat/plan.md');
-    click('#detail [data-side="status"]');
+    click('#detail [data-side="history"]');
     const read1 = reads();
 
     click('#panel a.path-link[data-target=".wip/artifacts/w1/chat/plan.md"]');
@@ -3997,7 +4020,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click(link);
     await settle();
     expect(shown()).toBe('artifact:chat/plan.md');
-    click('#detail [data-side="status"]');
+    click('#detail [data-side="history"]');
 
     // The link now resolves to a file outside the artifact folder: it opens that file, not the artifact it named before.
     answers['local-file'] = read('D:/elsewhere/plan.md');
@@ -4005,7 +4028,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await settle();
     expect(shown()).toBe('file:D:/elsewhere/plan.md');
     click('#detail .local-tab.selected [data-action="local-close"]');
-    click('#detail [data-side="status"]');
+    click('#detail [data-side="history"]');
 
     // A read the hub refuses now, as on a paired device, says why and opens no artifact.
     answers['local-file'] = { status: 403, body: { error: 'This device can only open files in the work item’s folders.' } };
@@ -4031,14 +4054,14 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     hello(source, { items: [reply('r1', 2, { opening: `See [plan](${plan}).` })] });
     click(`#panel a.path-link[data-target="${plan}"]`);
     await flush();
-    click('#detail [data-side="status"]');
+    click('#detail [data-side="history"]');
 
     const before = kept();
 
     release();
     await flush();
     await flush();
-    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(root.querySelector('#detail .local-tab')).toBeNull();
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).not.toBeNull();
     expect(kept()).toBe(before);
@@ -4080,7 +4103,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(reads()).toBe(1);
 
     answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Fresh', tooLarge: false, size: 7, entries: null, more: false } };
-    source.emit('hello', { key: 'pk9', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk9', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     hello(source, { key: 'pk9', scope: { ...scope, scopeGen: 6 }, items });
     await flush();
     await flush();
@@ -4102,7 +4125,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     expect(reads()).toBe(3);
     answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Current', tooLarge: false, size: 9, entries: null, more: false } };
-    source.emit('hello', { key: 'pk10', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk10', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     hello(source, { key: 'pk10', scope: { ...scope, scopeGen: 7 }, items });
     await flush();
     expect(reads()).toBe(3);
@@ -4133,7 +4156,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click('#panel a.path-link[data-target="src/b.ts"]');
     await flush();
     click('#detail .local-tab [data-action="local-tab"]');
-    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['status', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'changes', 'console']);
+    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['history', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'changes', 'console']);
     expect(shown()).toBe('file:src/a.ts');
 
     // Closing a tab not shown changes nothing else, a file's or an artifact's.
@@ -4150,7 +4173,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(shown()).toBe('artifact:chat/p.html');
     expect(kept().slice(before)).toHaveLength(1);
     click('#detail .artifact-tab.selected .tab-close');
-    expect(shown()).toBe('status');
+    expect(shown()).toBe('history');
     expect(kept().slice(before)).toEqual([expect.objectContaining({ close: { path: 'chat/plan.md', updatedAt: 1_500 } }), expect.objectContaining({ close: { path: 'chat/p.html', updatedAt: 1_500 } })]);
     page.close();
   });
@@ -4172,7 +4195,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.classList.contains('off-conversation')).toBe(false);
     // On a wider page the column shows Status, as it would have.
     resizeTo(1920);
-    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(kept()).toBe(before);
     page.close();
   });
@@ -4216,7 +4239,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     // Chosen again, it reads again; a failed read keeps what it shows.
     answers['local-file'] = { status: 500, body: { error: 'The disk is busy.' } };
-    click('#detail [data-side="status"]');
+    click('#detail [data-side="history"]');
     click('#detail [data-action="local-tab"]');
     await settle();
     expect(reads()).toBe(3);
@@ -4224,7 +4247,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     // A reconnect tries it again once the new stream shows the work item.
     answers['local-file'] = read('# Three');
-    source.emit('hello', { key: 'pk9', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk9', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     expect(reads()).toBe(3);
     hello(source, { key: 'pk9', scope: { ...scope, scopeGen: 6 }, items });
     await settle();
@@ -4273,7 +4296,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     await flush();
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).toBeNull();
-    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(kept()).toEqual([]);
 
     // A read that answers after the page has left its work item is dropped, there and on the work item's return.
@@ -4805,9 +4828,9 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(shown()).toBe('conversation');
 
     // A tab chosen there stays while the work item is open.
-    click('#head [data-tab="status"]');
+    click('#head [data-tab="history"]');
     source.emit('pane', { pane: { ...paired, shown: true } });
-    expect(shown()).toBe('status');
+    expect(shown()).toBe('history');
 
     // Back to the list and the same work item again: the conversation, with no new hello.
     click('.header > button.back-toggle');
@@ -4817,7 +4840,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(shown()).toBe('conversation');
 
     // Another work item, as from the header's list: the conversation.
-    click('#head [data-tab="status"]');
+    click('#head [data-tab="history"]');
     click('.header > button.back-toggle');
     click('[data-work-item="2"]');
     await flush();
@@ -4825,13 +4848,13 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(shown()).toBe('conversation');
 
     // A conversation of its dropdown the hub refuses to open leaves the open one's tab as it was.
-    click('#head [data-tab="status"]');
+    click('#head [data-tab="history"]');
     click('.header > button.back-toggle');
     refuse = true;
     click('[data-work-item="1"]');
     await flush();
     refuse = false;
-    expect(shown()).toBe('status');
+    expect(shown()).toBe('history');
 
     // A reload: the conversation.
     page.close();
@@ -5473,7 +5496,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.querySelector('#head .tabs')).toBeNull();
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.querySelector('#panel .timeline')).not.toBeNull();
-    expect(root.querySelector('#detail .status-tab')).not.toBeNull();
+    expect(root.querySelector('#detail .history-view')).not.toBeNull();
     expect(root.querySelectorAll('#detail .artifact-tab')).toHaveLength(2);
     // An artifact row in the conversation opens in the column, and the conversation stays.
     click('#panel [data-action="artifact"][data-path="chat/p.html"]');
@@ -5887,7 +5910,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       expect(chip()!.hidden).toBe(false);
       // On another tab, where the card is not shown, too; a click goes back to it.
       cardTop = 100;
-      root.querySelector<HTMLElement>('[data-tab="status"]')!.click();
+      root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
       expect(chip()!.hidden).toBe(false);
       click('#composer .question-waiting');
       expect(root.classList.contains('off-conversation')).toBe(false);
@@ -7022,6 +7045,36 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     page.close();
   });
 
+  it('marks a state seen on History, and again when its body changes under the same ID', async () => {
+    vi.useFakeTimers();
+
+    let now = 10_000;
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
+      return { status: 200, ok: true, json: async () => ({}), text: async () => '' } as unknown as Response;
+    });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => now });
+    const seenState = () => posts.filter((post) => post.url.endsWith('/seen') && (post.body['ids'] as string[]).includes('st-r1')).length;
+
+    hello(FakeSource.last!);
+    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
+    now += 1_100;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(seenState()).toBe(1);
+    // Seen, it is not reported again while it stays as it was.
+    FakeSource.last!.emit('state', { state: { id: 'st-r1', sessionId: 's', at: 5_000, headline: 'Working on it', body: 'Same.', stale: null, unread: false } });
+    now += 1_100;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(seenState()).toBe(1);
+    // A changed body marks it unread again, and it is reported once more.
+    FakeSource.last!.emit('state', { state: { id: 'st-r1', sessionId: 's', at: 5_000, headline: 'Working on it', body: 'More.', stale: null, unread: true } });
+    await vi.advanceTimersByTimeAsync(300);
+    now += 1_100;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(seenState()).toBe(2);
+    page.close();
+  });
+
   it('starts on the work item and tab this device kept when the address has none, as an installed app started again, and keeps each tab change', async () => {
     window.innerWidth = 375;
     localStorage.setItem('switchboard.route', '#w=1&t=status');
@@ -7029,10 +7082,10 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const { page, source } = start();
 
     // At once: the work item, before its hello.
-    expect(location.hash).toBe('#w=1&t=status');
+    expect(location.hash).toBe('#w=1&t=history');
     // The stream's first hello, before the page selected the work item on it.
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
-    expect(location.hash).toBe('#w=1&t=status');
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
+    expect(location.hash).toBe('#w=1&t=history');
     hello(source);
     expect(root.classList.contains('listing')).toBe(false);
     // Where the column folds into the conversation's strip, the opening shows the Conversation tab (PRD R109), and the address follows it.
@@ -7151,7 +7204,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     const entries = history.length;
     const groups = [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])];
-    const listHello = (source: FakeSource) => source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    const listHello = (source: FakeSource) => source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     const popped = () => new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
     const first = start();
 
@@ -7238,7 +7291,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     await flush();
     expect(root.classList.contains('listing')).toBe(true);
     expect(posts.some((post) => post.url.endsWith('/select'))).toBe(false);
@@ -7253,7 +7306,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(location.hash).toBe('#w=2');
     // The route's tab is the column's choice: a wider page shows it.
     resizeTo(1440);
-    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     page.close();
     window.innerWidth = 1024;
   });
@@ -7270,9 +7323,9 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     // Closed on every device: the route does not open it again.
     hello(source, { tabs: { tab: null, closed: [{ path: 'chat/plan.md', updatedAt: 1_500 }] } });
     await flush();
-    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(selected()).toBeNull();
-    expect(location.hash).toBe('#w=1&t=status');
+    expect(location.hash).toBe('#w=1&t=history');
     expect(kept()).toEqual([]);
     // A wide page adds no history entry.
     expect(history.length).toBe(entries);
@@ -7458,14 +7511,14 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(reads()).toBe(before + 1);
 
     // A tab's scroll place stays too.
-    click('#head [data-tab="status"]');
+    click('#head [data-tab="history"]');
     const panel = root.querySelector<HTMLElement>('#panel')!;
 
     panel.scrollTop = 237;
     source.emit('scope', { scope: { ...scope, scopeGen: 5, sessionId: 's4' } });
     hello(source, { scope: { ...scope, scopeGen: 5, sessionId: 's4' }, sessions: [session({ id: 's4' })], items: [] });
     await flush();
-    expect(root.querySelector('#head [data-tab="status"]')!.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#head [data-tab="history"]')!.getAttribute('aria-selected')).toBe('true');
     expect(panel.scrollTop).toBe(237);
 
     // Another work item starts from its own tabs.
@@ -7602,7 +7655,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     expect(before).toBeGreaterThan(0);
 
-    source.emit('hello', { key: 'pk9', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk9', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     expect(reads()).toBe(before);
     hello(source, { key: 'pk9', scope: { ...scope, scopeGen: 6 } });
     expect(reads()).toBe(before + 1);
@@ -7637,12 +7690,13 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const panel = root.querySelector<HTMLElement>('#panel')!;
 
     hello(source);
-    click('#head [data-tab="status"]');
-    panel.scrollTop = 120;
+    click('#head [data-tab="history"]');
+    // History scrolls its own body.
+    panel.querySelector<HTMLElement>('.hist-body')!.scrollTop = 120;
     click('#head [data-tab="conversation"]');
-    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 status']).toMatchObject({ top: 120 });
-    click('#head [data-tab="status"]');
-    expect(panel.scrollTop).toBe(120);
+    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 history']).toMatchObject({ top: 120 });
+    click('#head [data-tab="history"]');
+    expect(panel.querySelector<HTMLElement>('.hist-body')!.scrollTop).toBe(120);
     page.close();
     window.innerWidth = 1024;
   });
@@ -7690,7 +7744,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     const groups = [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Other' })])];
     const scopeOf = (workItemId: number) => ({ ...scope, workItemId, scopeGen: 3 + workItemId, title: `Item ${workItemId}`, conversations: [{ ...scope.conversations[0]!, workItemId, title: `Item ${workItemId}` }] });
-    const helloFor = (source: FakeSource, workItemId: number) => source.emit('hello', { key: 'pk', groups, scope: scopeOf(workItemId), sessions: [session()], items: [reply('r1', 2, { opening: 'See [a](src/a.ts#L3) and [b](src/b.ts).' })], more: false, status: null, artifacts: [artifact('chat/plan.md', 'markdown', 'md')] });
+    const helloFor = (source: FakeSource, workItemId: number) => source.emit('hello', { key: 'pk', groups, scope: scopeOf(workItemId), sessions: [session()], items: [reply('r1', 2, { opening: 'See [a](src/a.ts#L3) and [b](src/b.ts).' })], more: false, state: null, artifacts: [artifact('chat/plan.md', 'markdown', 'md')] });
     const fileTabs = () => [...root.querySelectorAll<HTMLElement>('#detail .detail-head [data-action="local-tab"]')].map((one) => `${one.title}${one.getAttribute('aria-selected') === 'true' ? ' *' : ''}`);
     const shown = () => root.querySelector<HTMLElement>('#detail .detail-head [aria-selected="true"]');
     // Read or not, a file tab is named by its link's target.
@@ -7712,7 +7766,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     helloFor(source, 2);
     await flush();
     expect(fileTabs()).toEqual([]);
-    expect(shown()?.dataset['side']).toBe('status');
+    expect(shown()?.dataset['side']).toBe('history');
     click('#detail [data-side="console"]');
     expect(shown()?.dataset['side']).toBe('console');
 
@@ -7758,7 +7812,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     const groups = [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Other' })])];
     const both = [1, 2].map((id) => ({ ...scope.conversations[0]!, workItemId: id, title: `Item ${id}`, primary: id === 1 }));
-    const helloFor = (source: FakeSource, workItemId: number) => source.emit('hello', { key: 'pk', groups, scope: { ...scope, workItemId, scopeGen: 3 + workItemId, conversations: both }, sessions: [session()], items: [reply('r1', 2, { opening: 'See [notes](notes.md).' })], more: false, status: null, artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html')] });
+    const helloFor = (source: FakeSource, workItemId: number) => source.emit('hello', { key: 'pk', groups, scope: { ...scope, workItemId, scopeGen: 3 + workItemId, conversations: both }, sessions: [session()], items: [reply('r1', 2, { opening: 'See [notes](notes.md).' })], more: false, state: null, artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html')] });
     const doc = () => root.querySelector<HTMLElement>('#detail .detail-body .local-view > .artifact-doc')!;
 
     answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Notes', tooLarge: false, size: 7, entries: null, more: false } };
@@ -7771,7 +7825,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     doc().scrollTop = 380;
     doc().dispatchEvent(new Event('scroll'));
-    click('#detail [data-side="status"]');
+    click('#detail [data-side="history"]');
     expect(root.querySelector('#detail .local-view')).toBeNull();
     // Back on the file tab, and after another work item and back, it is where it was left.
     click('#detail [data-action="local-tab"]');
@@ -7817,8 +7871,8 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const other = JSON.parse(localStorage.getItem('switchboard.tabs')!) as Record<string, unknown>;
 
     localStorage.setItem('switchboard.tabs', JSON.stringify({ ...other, w2: { side: 'console', tab: 'conversation', artifact: null, changes: false, changesFile: null, files: [], file: null } }));
-    click('#detail [data-side="status"]');
-    expect(JSON.parse(localStorage.getItem('switchboard.tabs')!)).toMatchObject({ w2: { side: 'console' }, w1: { side: 'status' } });
+    click('#detail [data-side="history"]');
+    expect(JSON.parse(localStorage.getItem('switchboard.tabs')!)).toMatchObject({ w2: { side: 'console' }, w1: { side: 'history' } });
     page.close();
   });
 
@@ -7864,7 +7918,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(3, { title: 'Other work' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(3, { title: 'Other work' })])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     await flush();
     await flush();
     expect(root.querySelector('#head .opening-title')?.textContent).toBe('Other work');
@@ -7999,7 +8053,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const next = FakeSource.last!;
 
     // The new stream's key is not bound yet: its hello has no work item, and the page selects it again.
-    next.emit('hello', { key: 'pk2', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    next.emit('hello', { key: 'pk2', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
     expect(root.querySelectorAll('#panel .timeline > li').length).toBeGreaterThan(0);
     expect(root.querySelector<HTMLElement>('#composer')!.hidden).toBe(false);
     await vi.advanceTimersByTimeAsync(0);
@@ -8092,7 +8146,7 @@ describe('the page against late answers', () => {
     }
   };
   const scopeOf = (workItemId: number, scopeGen: number, sessionId: string) => ({ ...scope, workItemId, scopeGen, sessionId, conversations: [1, 2].map((id) => ({ ...scope.conversations[0]!, workItemId: id, title: `W${id}`, sessionId: `s${id}` })) });
-  const helloFor = (source: FakeSource, workItemId: number, scopeGen: number, items: unknown[] = []) => source.emit('hello', { key: 'pk', groups: [], scope: scopeOf(workItemId, scopeGen, `s${workItemId}`), sessions: [session({ id: `s${workItemId}` })], items, more: true, status: null, artifacts: [] });
+  const helloFor = (source: FakeSource, workItemId: number, scopeGen: number, items: unknown[] = []) => source.emit('hello', { key: 'pk', groups: [], scope: scopeOf(workItemId, scopeGen, `s${workItemId}`), sessions: [session({ id: `s${workItemId}` })], items, more: true, state: null, artifacts: [] });
   const type = (text: string) => {
     const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
@@ -8179,7 +8233,7 @@ describe('the page against late answers', () => {
       { id: 'u1', title: 'Something else', kind: 'unsupported', questions: [], decisions: [] },
     ];
 
-    source.emit('hello', { key: 'pk', groups: [], scope: scopeOf(1, 3, 's1'), sessions: [session({ id: 's1', provider: 'codex', state: 'waiting', waitingFor: 'question', requests } as never)], items: [], more: false, status: null, artifacts: [] });
+    source.emit('hello', { key: 'pk', groups: [], scope: scopeOf(1, 3, 's1'), sessions: [session({ id: 's1', provider: 'codex', state: 'waiting', waitingFor: 'question', requests } as never)], items: [], more: false, state: null, artifacts: [] });
     expect(root.querySelector('#panel')!.textContent).toContain('Answer it in the terminal.');
     expect(root.querySelector<HTMLInputElement>('.request-field[data-field="q1:key"]')!.type).toBe('password');
     root.querySelector<HTMLElement>('[data-action="request-decision"][data-decision="accept"]')!.click();
@@ -8759,7 +8813,7 @@ describe("the list's CSS", () => {
     expect(detail.join(' ')).toContain(`flex: 1 1 ${DETAIL_MIN}px`);
     expect(detail.join(' ')).toContain(`min-width: ${DETAIL_MIN}px`);
     expect(detail.join(' ')).not.toMatch(/(?<![-\w])width:|clamp\(|max-width: (?!none)/);
-    expect(declarationsOf((selector) => ['.detail .status-tab', '.detail .artifact-list', '.detail .artifact-doc'].includes(unprefixed(selector)))).toEqual(['max-width: none;']);
+    expect(declarationsOf((selector) => ['.detail .state-view', '.detail .artifact-list', '.detail .artifact-doc'].includes(unprefixed(selector)))).toEqual(['max-width: none;']);
   });
 });
 

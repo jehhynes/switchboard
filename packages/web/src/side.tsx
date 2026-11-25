@@ -1,4 +1,4 @@
-// The Status and Artifacts tabs (architecture.md § Web page), in the tab strip or the column right of the conversation.
+// The state History shows and the Artifacts tab (architecture.md § Web page), in the tab strip or the column right of the conversation.
 import type { VNode } from 'preact';
 import { stampTime } from '@switchboard/conversation/messageMeta';
 import { artifactIcon } from './model.js';
@@ -8,30 +8,32 @@ import { stripQuestionMarkup } from '@switchboard/conversation/questions';
 import { UnreadDot } from './header.js';
 import { ago, artifactShow, artifactUrl } from './render.js';
 import { trusted } from './trusted.js';
-import type { ArtifactView, StatusView } from '@switchboard/protocol';
+import type { ArtifactView, StateView } from '@switchboard/protocol';
 
 /**
- * The Status tab: the latest status as Markdown with its time and age and the unread dot while unread, or the stage dimmed. Questions in a status are
+ * The state at the top of History (architecture.md § States): its headline, its time and age, the unread dot while unread, and its body as
+ * Markdown. A state whose turn ended is dimmed and says so; one whose session ended is dimmed and named the last state. Questions in a state are
  * plain Markdown; question cards show only in the conversation.
  */
-export function renderStatus(state: PageState, now: number): VNode {
-  const status: StatusView | null = state.status;
-
-  if (status === null) {
-    return <p class="empty">No status yet. It appears here when the session reports one.</p>;
+export function renderState(state: StateView | null, now: number): VNode {
+  if (state === null) {
+    return <p class="empty state-empty">No state yet. It appears here when the session sets one.</p>;
   }
 
+  const label = state.stale === 'session' ? 'Last state' : state.stale === 'turn' ? 'As of the last turn' : 'State';
+
   return (
-    <div class={`status-tab${status.fallback ? ' fallback' : ''}${status.unread ? ' unread' : ''}`} data-unread={status.unread ? status.id : undefined}>
-      <div class="status-head">
+    <div class={`state-view${state.stale === null ? '' : ' stale'}${state.unread ? ' unread' : ''}`} data-unread={state.unread ? state.id : undefined}>
+      <div class="state-head">
         <span class="codicon codicon-pulse" aria-hidden="true"></span>
-        <span class="status-label">{status.fallback ? 'Stage' : 'Status'}</span>
-        <span class="status-age">
-          {trusted(stampTime(status.at))} · {ago(status.at, now)}
+        <span class="state-label">{label}</span>
+        <span class="state-age">
+          {trusted(stampTime(state.at))} · {ago(state.at, now)}
         </span>
-        {status.unread ? <UnreadDot /> : null}
+        {state.unread ? <UnreadDot /> : null}
       </div>
-      <div class="status-body md-doc body">{trusted(renderMarkdown(stripQuestionMarkup(status.markdown)))}</div>
+      <p class="state-headline">{state.headline}</p>
+      {state.body === null ? null : <div class="state-body md-doc body">{trusted(renderMarkdown(stripQuestionMarkup(state.body)))}</div>}
     </div>
   );
 }

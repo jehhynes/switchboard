@@ -1,5 +1,5 @@
-import { countsUnread, inTranscript, summarizeMessage } from '@switchboard/core';
-import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
+import { countsUnread, inTranscript, stateStale, summarizeMessage } from '@switchboard/core';
+import type { ConversationMessage, ConversationReply, ConversationState, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
 import { ArtifactFolder, realInside, EXTERNAL_NAME, ExternalArtifacts, externalFile, externalName, inGit, joinMessages, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setComment, SLUG } from '@switchboard/conversation';
@@ -48,8 +48,8 @@ export const CONVERSATION_POLL_MS = 300;
 
 /** Items a window's `hello` and each `history` page carry. */
 export const PAGE_ITEMS = 100;
-/** Statuses each `statuses` page carries. */
-export const PAGE_STATUSES = 50;
+/** States each `states` page carries. */
+export const PAGE_STATES = 50;
 
 /** How a session shows in a window's Conversation view. */
 export interface SessionView {
@@ -112,24 +112,30 @@ export interface SpokenView {
 export type ItemView = MessageView | ReplyView;
 
 /**
- * The Status tab's status (architecture.md § Statuses): the session's latest `[status]`, or, before its first, the work item's stage as a
- * `fallback`, whose ID names the work item and whose `at` is when the stage was reported.
+ * The state History shows at its top (architecture.md § States): the scoped session's latest, else its work item's latest from another session or
+ * the migration. `stale` is `'turn'` once the turn that wrote it ended and `'session'` once its session ended (`stateStale`).
  */
-export interface StatusView {
+export interface StateView {
   id: string;
   sessionId: string | null;
   at: number;
-  markdown: string;
-  fallback: boolean;
-  /** A status the operator has not seen (architecture.md § Unread); never the stage. */
+  headline: string;
+  body: string | null;
+  stale: 'turn' | 'session' | null;
+  /** A state of the scoped session the operator has not seen (architecture.md § Unread); never another session's. */
   unread: boolean;
 }
 
 /** An artifact of the window's work item (architecture.md § Artifacts); `path` is `<owner>/<file>` in the window's `artifactsDir`. */
 export type ArtifactView = Artifact;
 
-export function statusView(status: ConversationStatus): StatusView {
-  return { id: status.id, sessionId: status.sessionId, at: status.at, markdown: status.markdown, fallback: false, unread: status.seenAt === null };
+/** The kept tab every work item opens on, with `status`, kept before History took the Status tab's place, read as `history`. */
+export function openOnPref(kept: string | null): string | null {
+  return kept === 'status' ? 'history' : kept;
+}
+
+export function stateView(state: ConversationState, session: Session | null, own = true): StateView {
+  return { id: state.id, sessionId: state.sessionId, at: state.at, headline: state.headline, body: state.body, stale: stateStale(state, session), unread: own && state.seenAt === null };
 }
 
 export function sessionView(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {
@@ -285,6 +291,8 @@ export interface ConversationServiceDeps {
    * § Web page): the session, or why it was refused.
    */
   newItemSession?(workItemId: number, prompt: string, provider?: Provider): { sessionId: string } | { refused: string };
+  /** A state was stored from a reply, which the list row shows. */
+  stateAdded?(): void;
   /** A message was added to a work item's conversation, whose first titles a hosted conversation. */
   messageAdded?(workItemId: number, text: string): void;
   providerTitle?(workItemId: number, title: string, origin: 'provider-manual' | 'provider-auto'): void;
@@ -617,9 +625,11 @@ export class ConversationService {
   /** Sends a change to the windows showing its session, and to `also`, a window that must hear it wherever its scope moved, with `extra` fields. */
   #changed(sessionId: string, change: ConversationChange, also?: string, extra: Record<string, unknown> = {}): void {
     if (this.#closed) return;
-    if (change.type === 'status') {
-      this.#statusChanged(this.deps.windows.showing(sessionId));
+    if (change.type === 'state') {
+      this.#stateChanged(this.deps.windows.showing(sessionId));
       this.#unreadChanged(sessionId);
+      // The list row shows the work item's state.
+      this.deps.stateAdded?.();
       return;
     }
 
@@ -1192,7 +1202,7 @@ export class ConversationService {
 
   /**
    * `page-tabs {window, workItemId, tab?, close?, reopen?, openOn?}` (architecture.md § Web page): keeps the right column's chosen tab, `console` or
-   * `artifact:<path>`, the tab every work item opens on, `status` or `browser`, for every work item, and closes an artifact's tab at its version, `{path, updatedAt}`, or opens one again by its path, for the page's
+   * `artifact:<path>`, the tab every work item opens on, `history` or `browser` (`status`, from before History took the Status tab's place, is kept as `history`), for every work item, and closes an artifact's tab at its version, `{path, updatedAt}`, or opens one again by its path, for the page's
    * work item, one artifact at a time so devices do not overwrite each other, and sends the result to every page showing it as `tabs`, the
    * sender's with its `opId`. 403 for
    * a key that is not a page's or another work item.
@@ -1200,7 +1210,7 @@ export class ConversationService {
   pageTabs(body: Record<string, unknown>): { status: number; body: unknown } {
     const { window, workItemId, tab, close, reopen, openOn, opId } = body;
     const tabOk = tab === undefined || tab === null || (typeof tab === 'string' && /^(console|artifact:.{1,500})$/s.test(tab));
-    const openOnOk = openOn === undefined || openOn === 'status' || openOn === 'browser';
+    const openOnOk = openOn === undefined || openOn === 'history' || openOn === 'status' || openOn === 'browser';
     const closeOk =
       close === undefined ||
       (typeof close === 'object' && close !== null && typeof (close as { path?: unknown }).path === 'string' && (close as { path: string }).path.length > 0 && (close as { path: string }).path.length <= 500 && Number.isFinite((close as { updatedAt?: unknown }).updatedAt));
@@ -1225,7 +1235,7 @@ export class ConversationService {
     this.deps.store.setPageTabs(id, tabs);
 
     if (openOn !== undefined) {
-      this.deps.store.setPagePref('openOn', openOn as string);
+      this.deps.store.setPagePref('openOn', openOn === 'status' ? 'history' : (openOn as string));
     }
 
     for (const key of this.pages()) {
@@ -1966,7 +1976,7 @@ export class ConversationService {
 
         if (streams.size === 0) {
           this.#streams.delete(key);
-          this.#statusShown.delete(key);
+          this.#stateShown.delete(key);
           this.#conversationsShown.delete(key);
           this.#listShown.delete(key);
 
@@ -1987,9 +1997,9 @@ export class ConversationService {
     const pageHello = this.deps.windows.isPage(key) ? this.#pageHello(key) : {};
 
     if (scope === null) {
-      this.#statusShown.delete(key);
+      this.#stateShown.delete(key);
       this.#conversationsShown.delete(key);
-      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, status: null, unread: 0, artifactsDir: null, artifacts: [], ...this.#voiceHello(key), ...pageHello };
+      return { protocol: CONVERSATION_PROTOCOL, scope: null, sessions: [], items: [], more: false, state: null, unread: 0, artifactsDir: null, artifacts: [], ...this.#voiceHello(key), ...pageHello };
     }
 
     const current = scope.sessionId === null ? null : this.deps.store.session(scope.sessionId);
@@ -1997,9 +2007,9 @@ export class ConversationService {
     if (current !== null) this.#adapter(current)?.readEnded(current);
 
     const page = scope.sessionId === null ? { items: [], more: false } : this.deps.store.conversation(scope.sessionId, null, PAGE_ITEMS, false);
-    const status = this.status(scope);
+    const state = this.state(scope);
 
-    this.#statusShown.set(key, JSON.stringify(status));
+    this.#stateShown.set(key, JSON.stringify(state));
 
     const unread = scope.sessionId === null ? 0 : this.deps.store.unreadCount(scope.sessionId);
     const view = this.scopeView(scope)!;
@@ -2021,7 +2031,7 @@ export class ConversationService {
       sessions: session === null ? [] : [session],
       items: page.items.filter((item) => !item.withdrawn).map(itemView),
       more: page.more,
-      status,
+      state,
       unread,
       artifactsDir: folder?.dir ?? null,
       // The artifact folder's files, then the work item's external artifacts.
@@ -2030,7 +2040,7 @@ export class ConversationService {
       ...this.#voiceHello(key),
       ...pageHello,
       // A page's tabs for its work item, kept for every device (architecture.md § Web page).
-      ...(this.deps.windows.isPage(key) && scope.workItemId !== null ? { tabs: this.deps.store.pageTabs(scope.workItemId), openOn: this.deps.store.pagePref('openOn') } : {}),
+      ...(this.deps.windows.isPage(key) && scope.workItemId !== null ? { tabs: this.deps.store.pageTabs(scope.workItemId), openOn: openOnPref(this.deps.store.pagePref('openOn')) } : {}),
     };
   }
 
@@ -2378,30 +2388,21 @@ export class ConversationService {
   }
 
   /**
-   * The status of a window's scope: its current session's latest status, else its work item's stage as a fallback, else null. Only a work
-   * item has a stage.
+   * The state of a window's scope (architecture.md § States): its current session's latest, else its work item's latest from another session or
+   * the migration, never unread; else null.
    */
-  status(scope: WindowScope): StatusView | null {
-    const latest = scope.sessionId === null ? null : this.deps.store.latestStatus(scope.sessionId);
+  state(scope: WindowScope): StateView | null {
+    const own = scope.sessionId === null ? null : this.deps.store.latestState(scope.sessionId);
+    const latest = own ?? (scope.workItemId === null ? null : this.deps.store.workItemState(scope.workItemId));
 
-    if (latest !== null) {
-      return statusView(latest);
-    }
-
-    const item = scope.workItemId === null ? null : this.deps.store.workItem(scope.workItemId);
-
-    if (item?.stage == null || item.stage.trim() === '') {
-      return null;
-    }
-
-    return { id: `stage-${scope.workItemId}`, sessionId: scope.sessionId, at: item.stageAt ?? item.statusAt ?? this.deps.now(), markdown: item.stage, fallback: true, unread: false };
+    return latest === null ? null : stateView(latest, latest.sessionId === null ? null : this.deps.store.session(latest.sessionId), own !== null);
   }
 
-  /** The status each window was last sent, so a `status` event goes only when its row changes. */
-  readonly #statusShown = new Map<string, string>();
+  /** The state each window was last sent, so a `state` event goes only when it changes. */
+  readonly #stateShown = new Map<string, string>();
 
-  /** Sends each of the windows its status again when it changed: a new or updated status, or the stage that stands in before the first. */
-  #statusChanged(keys: Iterable<string>): void {
+  /** Sends each of the windows its state again when it changed: a new or updated state, a mark seen, or its session's turn or end. */
+  #stateChanged(keys: Iterable<string>): void {
     for (const key of keys) {
       const scope = this.deps.windows.scope(key);
 
@@ -2409,12 +2410,12 @@ export class ConversationService {
         continue;
       }
 
-      const status = this.status(scope);
-      const text = JSON.stringify(status);
+      const state = this.state(scope);
+      const text = JSON.stringify(state);
 
-      if (this.#statusShown.get(key) !== text) {
-        this.#statusShown.set(key, text);
-        this.#send(key, 'status', { status });
+      if (this.#stateShown.get(key) !== text) {
+        this.#stateShown.set(key, text);
+        this.#send(key, 'state', { state });
       }
     }
   }
@@ -2452,8 +2453,8 @@ export class ConversationService {
   sessionsChanged(): void {
     this.#sendSessions();
 
-    // A stage reported before the session's first status.
-    this.#statusChanged(this.#streams.keys());
+    // A state reported with `report stage`, or a turn or session that ended, which makes the state shown old.
+    this.#stateChanged(this.#streams.keys());
     this.conversationsChanged();
     this.deps.voice?.update();
   }
@@ -2848,9 +2849,9 @@ export class ConversationService {
   }
 
   /**
-   * `seen` (architecture.md § Unread): replies and statuses of the window's current session that its view showed in a focused window for a
+   * `seen` (architecture.md § Unread): replies and states of the window's current session that its view showed in a focused window for a
    * second, each marked seen on its own. Refused with 403 outside the window's scope, for a forged session or for an ID that is not a reply or
-   * status of that session, marking none, and 409 for a stale `scopeGen`. The windows showing the session get each marked reply and status again
+   * state of that session, marking none, and 409 for a stale `scopeGen`. The windows showing the session get each marked reply and state again
    * and the new unread count. Marking again changes nothing, so a repeated `opId` is safe.
    */
   seen(body: Record<string, unknown>): { status: number; body: unknown } {
@@ -2884,8 +2885,8 @@ export class ConversationService {
       this.#changed(sessionId, { type: 'reply', reply: this.deps.store.reply(id)! });
     }
 
-    if (marked.statuses.length > 0) {
-      this.#statusChanged(this.deps.windows.showing(sessionId));
+    if (marked.states.length > 0) {
+      this.#stateChanged(this.deps.windows.showing(sessionId));
     }
 
     this.#unreadChanged(sessionId);
@@ -3131,10 +3132,10 @@ export class ConversationService {
   }
 
   /**
-   * `statuses` (architecture.md § Statuses): the statuses of the window's current session, newest first, before the status `before` names, or
-   * from the latest with null, for the Markdown preview. Refused as `history` is: 403 outside the scope, 409 for a stale `scopeGen`.
+   * `states` (architecture.md § States): the states of the window's current session, newest first, before the state `before` names, or
+   * from the latest with null. Refused as `history` is: 403 outside the scope, 409 for a stale `scopeGen`.
    */
-  statuses(body: Record<string, unknown>): { status: number; body: unknown } {
+  states(body: Record<string, unknown>): { status: number; body: unknown } {
     const { window, scopeGen, sessionId, before, limit } = body;
 
     if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof sessionId !== 'string' || !(before === null || typeof before === 'string') || !(limit === undefined || (Number.isInteger(limit) && (limit as number) > 0))) {
@@ -3147,9 +3148,10 @@ export class ConversationService {
       return refused;
     }
 
-    const page = this.deps.store.statuses(sessionId, before, Math.min((limit as number | undefined) ?? PAGE_STATUSES, PAGE_STATUSES));
+    const page = this.deps.store.states(sessionId, before, Math.min((limit as number | undefined) ?? PAGE_STATES, PAGE_STATES));
+    const session = this.deps.store.session(sessionId);
 
-    return { status: 200, body: { statuses: page.statuses.map(statusView), more: page.more } };
+    return { status: 200, body: { states: page.states.map((state) => stateView(state, session)), more: page.more } };
   }
 
   /**

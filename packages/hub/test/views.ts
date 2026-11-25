@@ -6,6 +6,7 @@ export const NOW = Date.UTC(2026, 9, 3, 12);
 
 export type Session = WorkItemView['sessions'][number];
 export type Triage = NonNullable<WorkItemView['triage']>;
+type ConversationState = NonNullable<WorkItemView['state']>;
 
 export function session(patch: Partial<Session> = {}): Session {
   return {
@@ -35,8 +36,6 @@ export function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemVie
     ticketId: id,
     playbook: 'dev:develop',
     status: 'running',
-    stage: null,
-    stageAt: null,
     taskPrompt: null,
     guidance: null,
     reportedPrompt: null,
@@ -59,6 +58,7 @@ export function item(id: number, patch: Partial<WorkItemView> = {}): WorkItemVie
     parentId: null,
     ticket: { id, source: 'github', sourceKey: String(100 + id), ref: `#${100 + id}`, repo: '', sourceId: null, title: `Issue <${id}>`, url: `https://github.com/o/r/issues/${100 + id}`, assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: NOW, repoRoot: '', adhocKey: null, blockers: [] },
     triage: null,
+    state: null,
     focus: `https://github.com/o/r/issues/${100 + id}`,
     sessions: [],
     worktree: null,
@@ -93,6 +93,11 @@ export function snapshot(items: WorkItemView[], patch: Partial<Snapshot> = {}): 
     errors: { settings: null, playbooks: [], hooks: null, sources: {} },
     ...patch,
   };
+}
+
+/** A state of session `s1`, current unless `patch` says otherwise. */
+export function workState(headline: string, at: number, patch: Partial<ConversationState> = {}): ConversationState {
+  return { id: `st-${at}`, sessionId: 's1', workItemId: 1, replyId: null, at, headline, body: null, turnEnded: false, seenAt: at, ...patch };
 }
 
 export function triage(patch: Partial<Triage> = {}): Triage {

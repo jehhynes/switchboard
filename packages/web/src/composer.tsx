@@ -28,7 +28,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
         <div id="composer" hidden></div>
       </main>
       <div class="sash chat-sash" role="separator" aria-orientation="vertical" aria-label="Conversation width" aria-controls="panel" tabindex={0} aria-valuemin={chat.min} aria-valuemax={chat.max} title="Drag to resize; double-click to reset"></div>
-      <aside id="detail" class="detail" aria-label="Status and artifacts">
+      <aside id="detail" class="detail" aria-label="History and artifacts">
         <div class="detail-head"></div>
         <div class="detail-body scroll"></div>
       </aside>

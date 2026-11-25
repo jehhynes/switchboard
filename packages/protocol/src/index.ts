@@ -154,12 +154,14 @@ export interface ReplyView {
 
 export type ItemView = MessageView | ReplyView;
 
-export interface StatusView {
+/** The state History shows at its top (`StateView` in the hub's `conversation.ts`). */
+export interface StateView {
   id: string;
   sessionId: string | null;
   at: number;
-  markdown: string;
-  fallback: boolean;
+  headline: string;
+  body: string | null;
+  stale: 'turn' | 'session' | null;
   unread: boolean;
 }
 
@@ -212,7 +214,7 @@ export interface PageRow {
   comment: { glyph: string; title: string } | null;
   /** Line 3: the mark, then the details, each coloured by its tone. */
   mark: { kind: Mark; glyph: string; title: string } | null;
-  details: Array<{ text: string; title: string | null; tone: 'warning' | 'error' | null }>;
+  details: Array<{ text: string; title: string | null; tone: 'warning' | 'error' | 'dim' | null }>;
   stripe: 'error' | 'warning' | 'turn' | null;
   dim: boolean;
   /** A hosted conversation's host's name; null for other work items. */

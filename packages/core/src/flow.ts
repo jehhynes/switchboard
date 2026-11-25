@@ -921,8 +921,6 @@ class Flow {
       ticketId,
       playbook: null,
       status: 'triaging',
-      stage: null,
-      stageAt: null,
       taskPrompt: null,
       guidance: null,
       reportedPrompt: null,
@@ -1132,6 +1130,7 @@ class Flow {
       cwd: event.cwd,
       state: 'running',
       stateAt: this.now,
+      turnAt: this.now,
       stateDetail: null,
       outcome: null,
       outcomeDetail: null,
@@ -1268,8 +1267,6 @@ class Flow {
       playbook: null,
       ...(provider === undefined ? {} : { provider }),
       status,
-      stage: null,
-      stageAt: null,
       taskPrompt: prompt,
       guidance: null,
       reportedPrompt: parentId === null ? null : prompt,
@@ -1382,8 +1379,6 @@ class Flow {
       ticketId: ticket.id,
       playbook: schedule.playbook,
       status,
-      stage: null,
-      stageAt: null,
       taskPrompt: null,
       guidance: null,
       reportedPrompt: null,
@@ -1758,12 +1753,13 @@ class Flow {
     const reading = TURN_ENDED.includes(state) ? (limit ?? (state === 'failed' && detail === 'rate_limit' ? UNREAD_LIMIT : null)) : undefined;
     const limited = reading === undefined ? {} : { rateLimit: reading === null ? null : limitFor(reading, session.rateLimit, session.launchId ?? null, this.now) };
 
-    this.store.updateSession(session.id, { state, stateAt: this.now, stateDetail: detail, endedAt: null, ...reopened, ...limited });
+    // A new turn after the last one ended, as one the operator typed in the session's terminal.
+    const resumed = (state === 'running' || state === 'waiting') && (session.state === 'ended' || TURN_ENDED.includes(session.state));
+
+    this.store.updateSession(session.id, { state, stateAt: this.now, stateDetail: detail, endedAt: null, ...(resumed ? { turnAt: this.now } : {}), ...reopened, ...limited });
 
     const current = { ...session, state, stateDetail: detail, ...reopened, ...limited };
     const atLimit = waitsOnLimit(current);
-    // A new turn after the last one ended, as one the operator typed in the session's terminal.
-    const resumed = (state === 'running' || state === 'waiting') && (session.state === 'ended' || TURN_ENDED.includes(session.state));
 
     // A registered session in the operator's window is theirs, so only a held session or an app-server thread ends here (PRD R39, R95).
     if (TURN_ENDED.includes(state)) {
@@ -2205,8 +2201,9 @@ class Flow {
 
     switch (report.kind) {
       case 'stage':
-        if (item !== null) {
-          this.store.updateWorkItem(item.id, { stage: report.stage, stageAt: this.now });
+        // The alias of a `[state]` headline (architecture.md § States), stored seen, with no body.
+        if (item !== null && report.stage.trim() !== '') {
+          this.store.setState({ id: `stage-${session.id}-${this.now}`, sessionId: session.id, workItemId: item.id, replyId: null, at: this.now, headline: report.stage.trim(), body: null });
         }
         return;
       case 'worktree': {
@@ -2610,8 +2607,6 @@ class Flow {
       ticketId: ticket.id,
       playbook: this.chosenPlaybook(triaged.playbook, ticket, playbook),
       status: 'queued',
-      stage: null,
-      stageAt: null,
       taskPrompt: null,
       guidance,
       reportedPrompt: null,
@@ -3005,6 +3000,7 @@ class Flow {
       cwd,
       state: 'starting',
       stateAt: this.now,
+      turnAt: this.now,
       stateDetail: null,
       outcome: null,
       outcomeDetail: null,

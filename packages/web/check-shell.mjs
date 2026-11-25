@@ -64,6 +64,8 @@ localStorage.removeItem('switchboard.tabs');
 sessionStorage.removeItem('switchboard.scroll');
 const now = Date.now();
 const row = (id, title, patch = {}) => ({ workItemId: id, ticketId: id, title, priority: null, time: null, ticket: 'gh ' + id, ticketNumber: String(id), sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null, ...patch });
+// Line 3 with a state's headline (architecture.md § States): one dimmed as of the last turn, one current, so the lists are as tall as a running list.
+const state = (text, tone) => ({ text, title: null, tone });
 const remove = { label: 'Delete', action: 'delete', icon: 'trash', group: 'state', confirm: { question: 'Delete Fix it?', detail: 'It goes for good.', action: 'delete' }, input: null };
 // The open work item's main control, which the header draws beside Actions: its icon alone on a phone.
 const approve = { label: 'Approve', action: 'approve', icon: 'check', group: 'main', confirm: null, input: null };
@@ -83,13 +85,13 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 // The header's sources: GitHub's and Zoho's logos are the page's own; the DPAF plugin gives its own, a made-up mark here.
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 const header = { notes: [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [approve, remove] }), row(2, 'Another thing', crowded), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' } }), row(4, 'Short playbook', short), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [approve, remove], details: [state('2/5 fixing tests · 4m', 'dim')] }), row(2, 'Another thing', crowded), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', short), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
-// their texts.
+// their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
 const listing = view === 'list' || narrow !== null;
 const open = !listing && !view?.startsWith('settings');
-if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list { width: ' + narrow + 'px !important; min-width: 0 !important; max-width: none !important; flex: none !important; }</style>');
+if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list { width: ' + narrow + 'px !important; min-width: 0 !important; max-width: none !important; }</style>');
 // A title longer than any header here fits, so the header shows how much of it is left beside the main control.
 const longTitle = 'Call Center dialer stops receiving incoming calls when its registration lapses';
 const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: longTitle, scopeGen: 3, conversations: [{ workItemId: 1, title: longTitle, primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0, sessionTitle: 'switchboard · dev:build · github 1' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
@@ -106,7 +108,7 @@ const artifacts = view === 'tabs' ? Array.from({ length: 10 }, (_, i) => ({ path
 class FakeSource {
   constructor() {
     this.listeners = {};
-    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open ? [session] : [], items, more: false, status: view === 'tabs' ? { id: 'st', sessionId: 's', at: now, markdown: 'Built.', fallback: false, unread: true } : null, artifacts, unread: 0 }), 20);
+    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open ? [session] : [], items, more: false, state: view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0 }), 20);
     // The tabs view's artifacts change after the page first shows them, so each is unread until its tab shows it.
     if (view === 'tabs') setTimeout(() => artifacts.forEach((artifact) => this.emit('artifact', { artifact: { ...artifact, updatedAt: artifact.updatedAt + 60000 } })), 120);
     // check-resize pauses the stream (window.__paused), so a resize is shown without a redraw.
@@ -462,7 +464,7 @@ function failures(view, size, m) {
     if (one.close !== null && one.dot.right > one.close.left - 0.5 && one.dot.left < one.close.right + 0.5 && one.dot.bottom > one.close.top - 0.5 && one.dot.top < one.close.bottom + 0.5) out.push(where + ' covers its close mark');
     if (Math.abs(one.widthChange) > 0.5) out.push(where + ' changes its tab\'s or label\'s width by ' + one.widthChange + ' px');
   }
-  // The tabs view's Status and artifacts are unread: Status's dot, a tab without a close mark, shows at every size, and an artifact's, with a
+  // The tabs view's state and artifacts are unread: History's dot, a tab without a close mark, shows at every size, and an artifact's, with a
   // close mark, cut or not, wherever the strip has room for an artifact tab besides the one shown.
   if (view === 'tabs') {
     if (!dots.some((one) => !one.closable)) out.push('no unread dot on a tab without a close mark');

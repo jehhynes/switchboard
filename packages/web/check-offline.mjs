@@ -43,7 +43,7 @@ const sends = [];
 let keys = 0;
 let streamsOpened = 0;
 const write = (res, type, data) => res.write('event: ' + type + '\ndata: ' + JSON.stringify({ type, ...data }) + '\n\n');
-const hello = (res, id) => write(res, 'hello', { key: res.key, groups, scope: id === null ? null : scopeOf(id), sessions: id === null ? [] : [session(id)], items: id === null ? [] : items(id), more: false, status: null, artifacts: [], unread: 0 });
+const hello = (res, id) => write(res, 'hello', { key: res.key, groups, scope: id === null ? null : scopeOf(id), sessions: id === null ? [] : [session(id)], items: id === null ? [] : items(id), more: false, state: null, artifacts: [], unread: 0 });
 const assetOf = (name) => PAGE_ASSETS[name] ?? Object.values(PAGE_ASSETS).find((one) => one.hashed === name);
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
@@ -486,12 +486,12 @@ try {
       const found = [];
 
       await open(2);
-      await evaluate('document.querySelector("#head [data-tab=\\"status\\"]")?.click()');
+      await evaluate('document.querySelector("#head [data-tab=\\"history\\"]")?.click()');
       await evaluate('(() => { const box = document.querySelector("#composer textarea"); box.value = "Half a thought"; box.dispatchEvent(new Event("input", { bubbles: true })); })()');
       await wait(300);
       const hash = await evaluate('location.hash');
 
-      if (hash !== '#w=2&t=status') found.push('the address names ' + hash);
+      if (hash !== '#w=2&t=history') found.push('the address names ' + hash);
       // Where the column folds into the conversation's strip, every opening shows the Conversation tab (PRD R109), a reload's too, and the
       // address follows it.
       await send('Page.reload');

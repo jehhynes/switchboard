@@ -39,7 +39,7 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
  * - bar-menu: a bar or tab strip while one of its menus is open, so the menu lies over the sashes.
  * - sliver, drawer-backdrop, drawer: the unpinned list's sliver, the backdrop under the drawer opened by its button, and the drawer, over every
  *   bar, sash and menu of the page; its own sash and menus stack inside it.
- * - maximized: the Status and Artifacts column maximized over the whole page, its menus inside it.
+ * - maximized: the History and Artifacts column maximized over the whole page, its menus inside it.
  * - sheet, persona, settings, settings-sheet: the dialogs over the dimmed page, each over the ones it can open from.
  * - update, toast: Update ready and the toast, over every sheet and dialog, so their buttons still take a press while one is open.
  * - top-line, top-band: the installed app's title bar line and the status bar's band, over everything.
@@ -61,12 +61,12 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
 .main:has(#composer:not([hidden])) { --sb-end: 0px; }
 .codicon { font: normal normal normal 14px/1 codicon; display: inline-block; text-decoration: none; text-rendering: auto; -webkit-font-smoothing: antialiased; user-select: none; }
 /* The texts of a row of an icon and its label (menu rows, the conversation picker, tabs, group heads, pills, Changes' file rows and Files
-   button, the list's title, the New session form's provider switch, the Opening… note, the Status pane's head, History's filter chips): each text's box runs from its cap height to its baseline (text-box), so a row that centres its items centres
+   button, the list's title, the New session form's provider switch, the Opening… note, the state's head, History's filter chips): each text's box runs from its cap height to its baseline (text-box), so a row that centres its items centres
    the capitals on the icon, as on every text beside it. A line box centres the font's ascent and descent instead, which in Segoe UI sit
    0.06 em above its capitals, so text drew about 1 px low beside every icon. Padding above and below makes the box its line's height again,
    so descenders and accents stay inside a text that clips its overflow and the row lays out as before, at the same pixel positions, which
    keeps Chrome's text snapping at 125% scale from undoing the shift. A browser without text-box draws the texts as before. */
-@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, button.picker > .picker-text, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .tab-menu .title, .provider-option, .opening-note, .status-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .picker-text, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
+@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, button.picker > .picker-text, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .tab-menu .title, .provider-option, .opening-note, .state-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .picker-text, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
 /* A spinner (a codicon-modifier-spin codicon or the mic's starting ring): its box stands still and clips its paint, and only its ::before turns,
    smoothly, on its own compositor layer. Chrome takes a turning layer to overlap everything painted after it up to its nearest clip, and moves
    that content onto layers of its own, where text loses its subpixel antialiasing and may shift as the layers change (mechanics.md M141);
@@ -301,6 +301,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row-details .row-detail:last-child { margin-right: 6px; }
 .row-details .row-detail-separator { flex: none; color: var(--sb-row-muted); }
 .row-details .row-detail.warning { color: var(--vscode-editorWarning-foreground); }
+.row-details .row-detail.dim { opacity: 0.6; }
 /*
  * Phone first: in the phone's layout (html.phone, set by main.ts from `isPhone` in layout.ts: under 768 px wide, or a phone's screen in
  * either orientation) the list and the conversation are each a full-width view, the list until a work item is opened, the conversation with a
@@ -318,7 +319,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .swipe-shade { position: fixed; inset: 0; z-index: 2; background: #000; opacity: 0; pointer-events: none; }
 /* A sash resizes the pane before it (resizer in main.ts, which keeps the width in --side-width or --chat-width), drawn as VS Code's:
    invisible until hovered, dragged or focused, then a 4 px line in the sash colour over the edge, taking no width of its own, the page's
-   whole height and over the top bars. The work items' sash shows where the list is a column, the conversation's only beside the Status and
+   whole height and over the top bars. The work items' sash shows where the list is a column, the conversation's only beside the History and
    Artifacts column. */
 .sash { display: none; flex: none; position: relative; z-index: var(--sb-z-sash); width: 4px; margin: 0 -2px; cursor: col-resize; touch-action: none; transition: background-color 0.1s 0.3s; }
 .sash:hover, .sash.dragging, .sash:focus-visible { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); outline: none; }
@@ -635,13 +636,17 @@ button.picker > .codicon-chevron-down { order: 2; }
 .code-block > .copy { position: absolute; top: 4px; right: 4px; background: var(--vscode-editor-background); }
 .code-block:hover > .copy, .reply:hover .meta .copy, .copy:focus-visible { opacity: 1; }
 
-/* The Status and Artifacts tabs. */
-.status-tab, .artifact-list { max-width: 900px; margin: 0 auto; }
-.status-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-.status-label { font-weight: 500; }
-.status-age { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
-.status-tab.unread .codicon-pulse { color: var(--vscode-activityBarBadge-background); }
-.status-tab.fallback .status-body { color: var(--vscode-descriptionForeground); }
+/* The artifact list. */
+.artifact-list { max-width: 900px; margin: 0 auto; }
+/* The state at the top of History (architecture.md § States); an old one is dimmed. */
+.state-view { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent)); }
+.state-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.state-label { font-weight: 500; }
+.state-age { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
+.state-headline { margin: 0 0 6px; font-size: 1.08em; font-weight: 600; }
+.state-view.unread .codicon-pulse { color: var(--vscode-activityBarBadge-background); }
+.state-view.stale .state-headline, .state-view.stale .state-body { color: var(--vscode-descriptionForeground); }
+.state-empty { margin-bottom: 16px; }
 .artifact-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .timeline > li.artifact { padding-left: 30px; list-style: none; }
 .artifact-open { display: flex; align-items: center; gap: 6px; width: 100%; border: 1px solid var(--vscode-widget-border); border-radius: 6px; padding: 4px 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
@@ -660,7 +665,7 @@ button.picker > .codicon-chevron-down { order: 2; }
 }
 .artifact-frame { flex: 1; width: 100%; border: 0; background: #fff; }
 .artifact-doc { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 20px calc(60px + var(--sb-end)); max-width: 900px; width: 100%; box-sizing: border-box; margin: 0 auto; }
-/* The head shows the kind as a badge before the title. A Markdown document, the Status tab's and an artifact's or a file's alike (`md-doc`), is
+/* The head shows the kind as a badge before the title. A Markdown document, a state's and an artifact's or a file's alike (`md-doc`), is
    typeset as claude-collab's artifact viewer does, in the theme's colours: 15 px text, headings, code, tables and quotes as there. */
 .artifact-badge { flex: none; font-size: 12px; font-weight: 600; line-height: 16px; padding: 1px 6px; border: 1px solid currentColor; border-radius: 4px; color: var(--vscode-editorWarning-foreground); }
 .artifact-head .artifact-title { font-weight: 600; }
@@ -1001,8 +1006,8 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 @media (prefers-reduced-motion: reduce) { .composer .mic .codicon { animation: none; } }
 @media (hover: none), (pointer: coarse) { .composer .mic { min-width: 44px; min-height: 44px; } }
 
-/* Where the conversation and the column both fit (#root.wide, set by fitLayout in layout.ts), Status and Artifacts leave the tabs for a column
-   beside the conversation, with its own Status and Artifacts switch; narrower screens keep the tabs. The composer stays with the conversation.
+/* Where the conversation and the column both fit (#root.wide, set by fitLayout in layout.ts), History and Artifacts leave the tabs for a column
+   beside the conversation, with its own History and Artifacts switch; narrower screens keep the tabs. The composer stays with the conversation.
    The conversation's pane keeps the width set on its sash, 940 px by default, its timeline and composer as wide as with the column hidden, and
    the column, at least 360 px (DETAIL_MIN), takes the rest of the width, so a wide screen gives the status and artifacts the room. */
 .detail { display: none; }
@@ -1028,7 +1033,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 :where(html:not(.phone)) .detail-head { flex: none; display: flex; align-items: flex-start; padding-top: 1px; border-bottom: 1px solid var(--vscode-panel-border); }
 :where(html:not(.phone)) .detail-head { background: var(--sb-tab-strip); }
 :where(html:not(.phone)) .detail-head .tabs { flex: 1; min-width: 0; border-bottom: none; }
-:where(html:not(.phone)) .detail .status-tab, :where(html:not(.phone)) .detail .artifact-list, :where(html:not(.phone)) .detail .artifact-doc { max-width: none; }
+:where(html:not(.phone)) .detail .state-view, :where(html:not(.phone)) .detail .artifact-list, :where(html:not(.phone)) .detail .artifact-doc { max-width: none; }
 
 /* Session state icons (architecture.md § Conversation view): one size and weight, a 13 px glyph in a fixed 16 px column centred on the text,
    muted unless the state needs the operator, a limit holds it, or it failed (IconTone in packages/core/src/group.ts). */

@@ -338,7 +338,7 @@ function snoozeControls(ticket: { id: number; snoozed: boolean }): Control[] {
 }
 
 /** Character caps for the texts sessions report; the contract asks for less, and a longer text is cut here with its whole in the tooltip. */
-export const CAPS = { stage: 24, approval: 60, note: 80 } as const;
+export const CAPS = { state: 40, approval: 60, note: 80 } as const;
 
 /** The text cut at `max` characters on a word boundary with an ellipsis, and the whole text for the tooltip when it was cut. */
 export function clip(text: string, max: number): { text: string; full: string | null } {
@@ -726,12 +726,12 @@ export function stripeOf(item: WorkItemView): 'error' | 'warning' | 'turn' | nul
   return 'turn';
 }
 
-/** How long a running session goes without a stage report before the list colours the stage age (PRD R58). */
-export const STALE_STAGE_MS = 30 * 60_000;
+/** How long a running session goes without a state before the list colours the state's age (PRD R58). */
+export const STALE_STATE_MS = 30 * 60_000;
 
 /**
- * When a running work item's session last reported a stage, or began running if it has reported none since: null unless the row is
- * stale (PRD R58). A stage from before a new session or a wait does not count against the current run.
+ * When a running work item's session last set a state, or began running if it has set none since: null unless the row is stale (PRD R58). A
+ * state from before a new session or a wait does not count against the current run.
  */
 export function staleSince(item: WorkItemView, now: number): number | null {
   const session = activeSession(item);
@@ -740,9 +740,9 @@ export function staleSince(item: WorkItemView, now: number): number | null {
     return null;
   }
 
-  const since = Math.max(item.stageAt ?? -Infinity, item.runStartedAt ?? -Infinity, session.stateAt);
+  const since = Math.max(item.state?.at ?? -Infinity, item.runStartedAt ?? -Infinity, session.stateAt);
 
-  return now - since >= STALE_STAGE_MS ? since : null;
+  return now - since >= STALE_STATE_MS ? since : null;
 }
 
 /**

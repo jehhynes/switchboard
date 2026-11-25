@@ -12,16 +12,14 @@ export type StripLayout = 'wide' | 'narrow';
 export interface StripState {
   /** The tab the pane under the strip shows. */
   shown: Tab;
-  /** Whether the work item's status is unread. */
-  statusUnread: boolean;
+  /** Whether the state History shows is unread. */
+  stateUnread: boolean;
   /** Whether the Browser tab shows, which it does only while the strip has no link tabs (`links`). */
   browser: boolean;
   /** The embedded link tabs, while the page has them (architecture.md § Embedded link tabs). */
   links?: ReadonlyArray<FrameLink> | undefined;
   /** The link the Browser pane shows. */
   link?: string | null | undefined;
-  /** Whether History is open. */
-  history: boolean;
   artifacts: readonly ArtifactView[];
   /** The artifact the Artifacts pane shows. */
   open: string | null;
@@ -33,15 +31,14 @@ export interface StripState {
 }
 
 interface TabBase {
-  /** `status`, `history`, `changes`, `console`, `conversation` and `browser` for the fixed tabs, `link:<url>`, `artifact:<path>` or `file:<path>`. */
+  /** `history`, `changes`, `console`, `conversation` and `browser` for the fixed tabs, `link:<url>`, `artifact:<path>` or `file:<path>`. */
   id: string;
   selected: boolean;
 }
 
-/** A strip's tab: a fixed tab, History, a link, an artifact, a file or Changes. */
+/** A strip's tab: a fixed tab, a link, an artifact, a file or Changes. */
 export type DocTab =
-  | (TabBase & { kind: 'fixed'; tab: 'conversation' | 'status' | 'browser' | 'console'; unread: boolean })
-  | (TabBase & { kind: 'history' })
+  | (TabBase & { kind: 'fixed'; tab: 'conversation' | 'history' | 'browser' | 'console'; unread: boolean })
   | (TabBase & { kind: 'link'; link: FrameLink })
   | (TabBase & { kind: 'artifact'; artifact: ArtifactView })
   | (TabBase & { kind: 'file'; file: LocalTab })
@@ -51,20 +48,19 @@ export type DocTab =
 export const filePath = (tab: LocalTab): string => (tab.entry.state === 'ok' ? tab.entry.data.path : tab.target);
 
 /**
- * The strip's tabs in order, each only while it applies: Conversation (narrow strip only), Status, History while open, the links (or Browser),
+ * The strip's tabs in order, each only while it applies: Conversation (narrow strip only), History, the links (or Browser),
  * the artifacts newest first but those closed, unless shown, the file tabs in the order they were opened, Changes, then Console.
  */
 export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
   const { shown } = state;
-  const fixed = (tab: 'conversation' | 'status' | 'browser' | 'console'): DocTab => ({ id: tab, kind: 'fixed', tab, selected: shown === tab, unread: tab === 'status' && state.statusUnread });
+  const fixed = (tab: 'conversation' | 'history' | 'browser' | 'console'): DocTab => ({ id: tab, kind: 'fixed', tab, selected: shown === tab, unread: tab === 'history' && state.stateUnread });
   const artifacts = [...state.artifacts]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .filter((artifact) => !state.closed.has(artifact.path) || (shown === 'artifacts' && artifact.path === state.open));
 
   return [
     ...(layout === 'narrow' ? [fixed('conversation')] : []),
-    fixed('status'),
-    ...(state.history ? [{ id: 'history', kind: 'history' as const, selected: shown === 'history' }] : []),
+    fixed('history'),
     ...(state.links === undefined ? (state.browser ? [fixed('browser')] : []) : state.links.map((link): DocTab => ({ id: `link:${link.url}`, kind: 'link', link, selected: shown === 'browser' && state.link === link.url }))),
     ...artifacts.map((artifact): DocTab => ({ id: `artifact:${artifact.path}`, kind: 'artifact', artifact, selected: shown === 'artifacts' && artifact.path === state.open })),
     ...state.files.tabs.map((file): DocTab => ({ id: `file:${filePath(file)}`, kind: 'file', file, selected: shown === 'file' && file.id === state.files.open })),
@@ -89,13 +85,13 @@ export interface TabFit {
 /** A strip not measured yet, which shows every tab. */
 export const UNMEASURED: TabFit = { width: 0, more: 0, plain: 0, closable: 0, measured: {} };
 
-/** Whether a tab has a close mark: History, a link, an artifact or a file. */
-export const closable = (tab: DocTab): boolean => tab.kind === 'history' || tab.kind === 'link' || tab.kind === 'artifact' || tab.kind === 'file';
+/** Whether a tab has a close mark: a link, an artifact or a file. */
+export const closable = (tab: DocTab): boolean => tab.kind === 'link' || tab.kind === 'artifact' || tab.kind === 'file';
 
 /**
  * Which of a strip's tabs show and which go in More, each list in strip order. Every tab shows while all fit at their least widths, with More
  * beside them when `menu` (closed artifacts for it to list). Else More takes its room and the tabs are kept in this order while they fit: the
- * selected tab, Conversation, Status, then the rest in strip order, stopping at the first that does not fit; so a very narrow strip drops Status
+ * selected tab, Conversation, History, then the rest in strip order, stopping at the first that does not fit; so a very narrow strip drops History
  * first, then Conversation, and keeps the selected tab whatever its width, every tab reachable through More. An unmeasured strip shows them all.
  */
 export function fitTabs(tabs: readonly DocTab[], fit: TabFit, menu = false): { shown: DocTab[]; hidden: DocTab[] } {
@@ -106,7 +102,7 @@ export function fitTabs(tabs: readonly DocTab[], fit: TabFit, menu = false): { s
     return { shown: [...tabs], hidden: [] };
   }
 
-  const order = [...tabs.filter((tab) => tab.selected), ...['conversation', 'status'].flatMap((id) => tabs.filter((tab) => tab.id === id && !tab.selected)), ...tabs.filter((tab) => !tab.selected && tab.id !== 'conversation' && tab.id !== 'status')];
+  const order = [...tabs.filter((tab) => tab.selected), ...['conversation', 'history'].flatMap((id) => tabs.filter((tab) => tab.id === id && !tab.selected)), ...tabs.filter((tab) => !tab.selected && tab.id !== 'conversation' && tab.id !== 'history')];
   const kept = new Set<DocTab>();
   let room = fit.width - fit.more;
 

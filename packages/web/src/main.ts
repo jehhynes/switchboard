@@ -21,7 +21,7 @@ import { fitFade } from './replyFade.js';
 import { cardSteps, currentStep, draftAnswers, moveStep, pickLetter, picked, sendLabel, setComment } from '@switchboard/conversation/questions';
 import type { CardDraft as SharedDraft, LedgerCard } from '@switchboard/conversation/questions';
 import { cardKeyAction, isAnswerMessage, questionsWaiting } from '@switchboard/conversation/questionCard';
-import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
+import { renderArtifacts, renderArtifactView, renderEmpty } from './side.js';
 import { renderPersonaDialog } from './personas.js';
 import { renderSheet } from './sheet.js';
 import { toast } from './toast.js';
@@ -68,12 +68,12 @@ const OPEN_IN_VSCODE = 'Open in VS Code';
 /** How long typing in a card's Comment field pauses before the hub hears it. */
 export const COMMENT_SETTLE_MS = 400;
 
-export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'questions', 'needs', 'config', 'viewed'];
-/** How long an unread reply or status must be visible on a focused page before it counts as seen (architecture.md § Unread). */
+export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'state', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'questions', 'needs', 'config', 'viewed'];
+/** How long an unread reply or state must be visible on a focused page before it counts as seen (architecture.md § Unread). */
 export const SEEN_MS = 1_000;
 const SEEN_CHECK_MS = 250;
 const COMPOSER_MAX_PX = 200;
-/** How long the composer says a message sent from the Status or Artifacts tab went. */
+/** How long the composer says a message sent from the History or Artifacts tab went. */
 export const SENT_NOTE_MS = 4_000;
 /** How often the page reads the prompt a session waits on in its terminal while it waits. */
 export const PROMPT_POLL_MS = 1_000;
@@ -179,7 +179,7 @@ export interface ConsoleModule {
 }
 
 /**
- * The web page (architecture.md § Web page): the list of work items on the left; the selected one's conversation, status and artifacts tabs and
+ * The web page (architecture.md § Web page): the list of work items on the left; the selected one's conversation, History and artifacts tabs and
  * the composer on the right. Everything it shows comes from its own conversation stream, bound to the work item it selected.
  */
 export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageState; close(): void } {
@@ -214,7 +214,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const detailHead = root.querySelector<HTMLElement>('#detail .detail-head')!;
   const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
   // The open work item takes the room first (layout.ts): the list is a column while the operator keeps it pinned, and a drawer otherwise;
-  // Status and Artifacts are a column only while they and the conversation fit, and tabs otherwise. A layout choice an earlier page kept is
+  // History and Artifacts are a column only while they and the conversation fit, and tabs otherwise. A layout choice an earlier page kept is
   // dropped.
   localStorage.removeItem('switchboard.layout');
   let layout: Layout | null = null;
@@ -223,7 +223,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const standalone = (): boolean => deps.standalone?.() ?? (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
 
   // The work items' and the conversation's widths (architecture.md § Web page), each set on a sash: the work items' on their edge, or on the
-  // open drawer's, the conversation's between it and the Status and Artifacts column, which takes the rest of the width. A drag only sets a
+  // open drawer's, the conversation's between it and the History and Artifacts column, which takes the rest of the width. A drag only sets a
   // width: the list's sash stops where the conversation, and the column while it shows, keep what they need, and only the list's pin button
   // makes it a drawer.
   let listPinned = ((): boolean => {
@@ -257,7 +257,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   /**
-   * Whether the Status and Artifacts column covers the whole page, list and conversation too, for a wide artifact or diff; until restored,
+   * Whether the History and Artifacts column covers the whole page, list and conversation too, for a wide artifact or diff; until restored,
    * the column folds into tabs or the page reloads. Kept nowhere.
    */
   let panelMaximized = false;
@@ -309,7 +309,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Outside the phone's layout, an unpinned list is a drawer (page.css), shown only with a work item open.
     root.classList.toggle('drawers', !phone && !next.list);
 
-    // The Status and Artifacts column is maximized only while it is a column.
+    // The History and Artifacts column is maximized only while it is a column.
     panelMaximized &&= next.wide;
     root.classList.toggle('maximized', panelMaximized);
 
@@ -374,20 +374,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   let linkItem: number | null = null;
   const itemLinks = (): boolean => frameLinks(selectedRow(state)).length > 0 || (linkItem !== null && linkItem === state.scope?.workItemId);
-  /** Whether the Browser tab shows: embedded tabs enabled for this page, and links of the open work item to show; the operator's Status or Browser choice stays. */
+  /** Whether the Browser tab shows: embedded tabs enabled for this page, and links of the open work item to show; the operator's History or Browser choice stays. */
   const showBrowser = (): boolean => browserTab() && itemLinks();
   /** Whether the Console tab shows: an active session, not ended, that the terminal holder may hold; otherwise its console would be blank, so there is no tab. */
   const showConsole = (): boolean => hasConsole(state.session);
-  /** Whether the open work item's row offers History. */
+  /** Whether the open work item's row offers its ticket's History, which the History tab reads under the state. */
   const offersHistory = (): boolean => (selectedRow(state)?.history ?? null) !== null;
-  /** The work item whose History tab the operator opened from an actions menu, or null; its close mark hides it again. Kept in its `TabSet`. */
-  let historyOpen: number | null = null;
   /** The work item whose History a row's menu chose before its `hello` came, to open once its kept tabs are back. */
   let historyOnHello: number | null = null;
-  /** Whether the History tab shows: opened for the open work item, while its row offers History. */
-  const showHistory = (): boolean => historyOpen !== null && historyOpen === state.scope?.workItemId && offersHistory();
-  /** The tab the conversation's pane shows: always the conversation while Status and Artifacts have their own column, and never a Browser tab that is gone. */
-  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'history' && !showHistory()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) || (view.tab === 'file' && localFiles.shown() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'status' : view.tab);
+  /** The tab the conversation's pane shows: always the conversation while the column has its own place, and never a Browser tab that is gone. */
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) || (view.tab === 'file' && localFiles.shown() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? 'history' : view.tab);
   /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
   let openedItem: number | null = null;
   let tabChosen = false;
@@ -435,41 +431,41 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     return browserTab() && (iframe.ready) && row !== null && itemLinks();
   };
   const browserFirst = (): boolean => browserUseful() && state.session === null;
-  /** The tab every work item opens on, Status or Browser, as the operator last chose it on any device; null before any choice. */
-  let openOn: 'status' | 'browser' | null = null;
+  /** The tab every work item opens on, History or Browser, as the operator last chose it on any device; null before any choice. */
+  let openOn: 'history' | 'browser' | null = null;
   /**
    * The tabs a work item opens on: Console or an artifact kept for it while it still applies; otherwise Browser when embedded tabs has links of
-   * the work item to show and the operator last chose Browser, or the work item has no status report yet, or before any choice when it also has no
-   * session yet; otherwise Status. That is the column's tab; where the column folds into the conversation's tabs, the work item opens on the
+   * the work item to show and the operator last chose Browser, or the work item has no state yet, or before any choice when it also has no
+   * session yet; otherwise History. That is the column's tab; where the column folds into the conversation's tabs, the work item opens on the
    * Conversation tab.
    */
   const openTabs = (): void => {
     const saved = savedTabs?.workItemId === state.scope?.workItemId ? savedTabs?.tab : null;
     const path = saved?.startsWith('artifact:') === true ? saved.slice('artifact:'.length) : null;
     const kept: Tab | null = saved === 'console' && showConsole() ? 'console' : path !== null && state.artifacts.some((one) => one.path === path) && !closedNow().has(path) ? 'artifacts' : null;
-    // A work item with no status report yet, its stage at most on Status, opens on Browser whatever was chosen before.
-    const reported = state.status !== null && !state.status.fallback;
+    // A work item with no state yet opens on Browser whatever was chosen before.
+    const reported = state.state !== null;
     const browser = openOn === 'browser' || !reported ? browserUseful() : openOn === null && browserFirst();
-    const chosen: Tab = kept ?? (browser ? 'browser' : 'status');
+    const chosen: Tab = kept ?? (browser ? 'browser' : 'history');
 
     view.side = chosen as SideTab;
-    view.tab = !wide() || chosen === 'status' ? 'conversation' : chosen;
+    view.tab = !wide() || chosen === 'history' ? 'conversation' : chosen;
     view.artifact = chosen === 'artifacts' ? path : null;
   };
   /**
-   * Keeps the operator's choice in the hub, for every device: Status or Browser as the tab every work item opens on, and Console or an artifact for
+   * Keeps the operator's choice in the hub, for every device: History or Browser as the tab every work item opens on, and Console or an artifact for
    * the open work item.
    */
   const saveTab = (): void => {
     const workItemId = state.scope?.workItemId ?? null;
     const shown = wide() ? sideTab() : mainTab();
 
-    // The Changes tab, a file tab or History lasts as long as the page shows the work item, so it is not kept.
-    if (workItemId === null || shown === 'conversation' || shown === 'diff' || shown === 'file' || shown === 'history') {
+    // The Changes tab or a file tab lasts as long as the page shows the work item, so it is not kept.
+    if (workItemId === null || shown === 'conversation' || shown === 'diff' || shown === 'file') {
       return;
     }
 
-    if (shown === 'status' || shown === 'browser') {
+    if (shown === 'history' || shown === 'browser') {
       openOn = shown;
       savedTabs = { workItemId, tab: null, closed: savedTabs?.workItemId === workItemId ? savedTabs.closed : [] };
       void post('page-tabs', { workItemId, tab: null, openOn: shown });
@@ -526,8 +522,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     return next;
   };
-  /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
-  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'history' && !showHistory()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) || (view.side === 'file' && localFiles.shown() === null) ? 'status' : view.side);
+  /** What the column right of the conversation shows: History in place of a Browser tab that is gone. */
+  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) || (view.side === 'file' && localFiles.shown() === null) ? 'history' : view.side);
   /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
   function openArtifact(): string | null {
     return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;
@@ -551,7 +547,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     } else {
       view.tab = tab;
       // A tab of the column chosen here is the column's choice too; Conversation leaves the column's choice, but Browser.
-      view.side = tab !== 'conversation' ? tab : view.side === 'browser' ? 'status' : view.side;
+      view.side = tab !== 'conversation' ? tab : view.side === 'browser' ? 'history' : view.side;
     }
   };
   /**
@@ -1896,7 +1892,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const live = state.connected && state.session?.conversation === 'full' && !drafting;
     const full = live || (state.connected && drafting);
 
-    // On every tab, so the operator can type and dictate from the status or the artifacts too, but on a short screen (page.css).
+    // On every tab, so the operator can type and dictate from History or the artifacts too, but on a short screen (page.css).
     composerHost.hidden = state.scope === null;
     input.disabled = !full;
     attachButton.disabled = !live;
@@ -2580,7 +2576,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // the page resumes it in the terminal holder, or a Codex thread in its daemon, without a terminal.
     mount(note, draftShown() ? renderDraftNote(view.newDraft!) : renderEndedNote(state.session, resuming, state.scope?.earlier === true ? (state.scope.workItemId ?? null) : null));
 
-    // From the wide layout Status, Artifacts, Console and Browser are a column of their own; embedded tabs covers the Browser tab's area.
+    // From the wide layout History, Artifacts, Console and Browser are a column of their own; embedded tabs covers the Browser tab's area.
     // While another work item opens, the columns keep their widths and the conversation's composer its place (page.css), so nothing moves when it comes.
     const pending = openingShown();
     const side = wide() && (state.scope !== null || pending !== null);
@@ -2651,11 +2647,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     // The History tab reads the hub only while it shows.
     followHistory((side ? sideTab() : mainTab()) === 'history' && !(isPhone() && root.classList.contains('listing')));
-    mount(head, [renderHeader(state, view, deps.now()), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, showConsole(), showHistory())]);
+    mount(head, [renderHeader(state, view, deps.now()), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, showConsole())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
-    /** Draws the Status or Artifacts tab, or an open artifact, into a pane; an open artifact stays as it is, so a frame or a video is not reloaded. */
+    /** Draws History or the Artifacts tab, or an open artifact, into a pane; an open artifact stays as it is, so a frame or a video is not reloaded. */
     const drawTab = (pane: HTMLElement, tab: Tab): void => {
       pane.classList.toggle('console-pane', tab === 'console');
       pane.classList.toggle('browser-pane', tab === 'browser');
@@ -2676,7 +2672,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       } else if (tab === 'console') {
         drawConsole(pane);
       } else if (tab === 'history') {
-        drawPane(pane, shownHistory === null ? null : renderHistory(shownHistory));
+        // The ticket's History only for a row that offers it (`followHistory`); the state always.
+        drawPane(pane, renderHistory(offersHistory() ? shownHistory : null, state.state, now));
+        drawDiagrams(pane);
         placeHistory(pane);
       } else if (tab === 'diff') {
         changes.drawDiff(pane);
@@ -2710,7 +2708,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         drawDiagrams(pane);
       } else {
-        drawPane(pane, tab === 'status' ? renderStatus(state, now) : tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
+        drawPane(pane, tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
         drawDiagrams(pane);
       }
 
@@ -2733,7 +2731,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
       }
 
-      mount(detailHead, renderSideSwitch(sideTab(), state, showBrowser(), strip, showConsole(), showHistory(), renderMaximize(panelMaximized)));
+      mount(detailHead, renderSideSwitch(sideTab(), state, showBrowser(), strip, showConsole(), renderMaximize(panelMaximized)));
       drawTab(detailBody, sideTab());
     }
     // The composer first, so the conversation is scrolled against its final height.
@@ -3007,7 +3005,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const routeOf = (): Route => {
     const tab = wide() ? sideTab() : mainTab();
     const shownFile = tab === 'file' ? localFiles.shown() : null;
-    const t = tab === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : tab === 'status' || tab === 'console' || tab === 'history' ? tab : tab === 'browser' ? 'link' : tab === 'diff' ? 'changes' : shownFile !== null ? 'file' : null;
+    const t = tab === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : tab === 'console' || tab === 'history' ? tab : tab === 'browser' ? 'link' : tab === 'diff' ? 'changes' : shownFile !== null ? 'file' : null;
 
     return { w: wanted, t, f: tab === 'diff' ? changes.focusPath : null, p: shownFile?.target ?? null, l: shownFile?.line ?? null, u: tab === 'browser' ? iframe.selected || null : null, h: null };
   };
@@ -3068,8 +3066,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const body = pane.querySelector<HTMLElement>('.hist-body');
     const w = state.scope?.workItemId;
 
-    // Not while it loads: a body too short for the place would lose it.
-    if (body === null || w == null || shownHistory?.view == null || historyPlaced.get(pane) === body) {
+    // Not while the ticket's History loads: a body too short for the place would lose it. The state alone draws at once.
+    if (body === null || w == null || (offersHistory() && shownHistory?.view == null) || historyPlaced.get(pane) === body) {
       return;
     }
 
@@ -3214,7 +3212,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const files = localFiles.view.tabs;
     const shownFile = files.findIndex((one) => one.id === localFiles.view.open);
     const links = iframe.kept(w);
-    const set: TabSet = { side: view.side, tab: view.tab, artifact: view.artifact, changes: changes.view.tab, changesFile: changes.view.tab ? changes.focusPath : null, files: files.map((one) => ({ target: one.target, line: one.line })), file: shownFile === -1 ? null : shownFile, history: historyOpen === w, ...(links === null ? {} : { links }) };
+    const set: TabSet = { side: view.side, tab: view.tab, artifact: view.artifact, changes: changes.view.tab, changesFile: changes.view.tab ? changes.focusPath : null, files: files.map((one) => ({ target: one.target, line: one.line })), file: shownFile === -1 ? null : shownFile, ...(links === null ? {} : { links }) };
     const key = tabSetKey(w);
 
     if (Object.keys(tabSets).at(-1) === key && JSON.stringify(tabSets[key]) === JSON.stringify(set)) {
@@ -3256,7 +3254,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     localFiles.view.open = (set.file === null ? undefined : localFiles.view.tabs[set.file])?.id ?? localFiles.view.tabs.at(-1)?.id ?? null;
-    historyOpen = set.history === true ? (state.scope?.workItemId ?? null) : null;
 
     if ([...SIDE_TABS, 'diff', 'file'].includes(set.side)) {
       view.side = set.side as SideTab;
@@ -3265,7 +3262,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Where the column folds into the conversation's strip, every opening shows the Conversation tab (PRD R109); the column's tab waits in `side`.
     view.tab = wide() && TABS.some((one) => one.tab === set.tab) ? (set.tab as Tab) : 'conversation';
 
-    // An artifact gone or closed since leaves its tab to Status (`sideTab`, `mainTab`).
+    // An artifact gone or closed since leaves its tab to History (`sideTab`, `mainTab`).
     view.artifact = set.artifact !== null && state.artifacts.some((one) => one.path === set.artifact) && !closedNow().has(set.artifact) ? set.artifact : null;
     tabChosen = true;
   };
@@ -3393,7 +3390,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    // The conversation's pane, and on a wide screen the Status and Artifacts column beside it.
+    // The conversation's pane, and on a wide screen the History and Artifacts column beside it.
     const visible = [panel, ...(wide() ? [detailBody] : [])]
       .flatMap((pane) => {
         const box = pane.getBoundingClientRect();
@@ -3891,7 +3888,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   /**
    * Shows the tab the route names for the work item shown, as no choice of the operator's (`openDoc` without `chosen`): an artifact gone or
-   * closed on every device gives way to Status. Where the column folds into the conversation's strip, the route's tab waits in the column's
+   * closed on every device gives way to History. Where the column folds into the conversation's strip, the route's tab waits in the column's
    * choice and the page shows the Conversation tab, as every opening does there (PRD R109).
    */
   const routeTab = (): void => {
@@ -3918,7 +3915,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           openDoc(`artifact:${path}`, { chosen: false });
         } else {
           view.artifact = null;
-          chooseTab('status');
+          chooseTab('history');
         }
       } else if (tab === 'link') {
         if (route.u != null) {
@@ -3926,9 +3923,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         } else if (showBrowser()) {
           chooseTab('browser');
         }
-      } else if (tab === 'history') {
-        openDoc('history', { chosen: false });
-      } else if (tab === 'status' || (tab === 'console' && showConsole())) {
+      } else if (tab === 'history' || (tab === 'console' && showConsole())) {
         chooseTab(tab);
       } else if (tab === 'changes') {
         changes.openChanges(route.f ?? null);
@@ -4152,26 +4147,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     pendingRowControl = { key, run };
     void select(row.workItemId);
   };
-  /** Opens the open work item's History tab, selects it and gives it the focus, while its row offers History. */
+  /** Selects the open work item's History tab and gives it the focus. */
   const openHistory = (): void => {
-    if (offersHistory()) {
-      historyOpen = state.scope?.workItemId ?? null;
-      leaving('history');
-      chooseTab('history');
-      view.artifact = null;
-      draw();
-      (wide() ? detailHead : head).querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')?.focus();
-    } else {
-      draw();
-    }
+    leaving('history');
+    chooseTab('history');
+    view.artifact = null;
+    draw();
+    (wide() ? detailHead : head).querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')?.focus();
   };
   /** The strip's tabs as drawn (tabs.ts), in its order at the page's width. */
   const docTabs = (): DocTab[] =>
-    stripTabs({ shown: wide() ? sideTab() : mainTab(), statusUnread: false, browser: showBrowser(), ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), history: showHistory(), artifacts: state.artifacts, open: openArtifact(), closed: closedNow(), files: localFiles.view, changes: true, console: showConsole() }, wide() ? 'wide' : 'narrow');
+    stripTabs({ shown: wide() ? sideTab() : mainTab(), stateUnread: false, browser: showBrowser(), ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), artifacts: state.artifacts, open: openArtifact(), closed: closedNow(), files: localFiles.view, changes: true, console: showConsole() }, wide() ? 'wide' : 'narrow');
   /**
    * Opens a document's tab, or selects the tab it has (architecture.md § Web page), whatever opened it: a conversation or History link, Open
-   * report, an artifact card, the More menu or a route. `id` is `artifact:<path>`, `file:<path>` at `line`, `link:<url>` named `name`, or
-   * `history`. A file the hub reads as an artifact gives way to that artifact's tab (localFiles.tsx). Without `chosen`, as for a restore, it is no
+   * report, an artifact card, the More menu or a route. `id` is `artifact:<path>`, `file:<path>` at `line` or `link:<url>` named `name`. A file the hub reads as an artifact gives way to that artifact's tab (localFiles.tsx). Without `chosen`, as for a restore, it is no
    * choice of the operator's: it keeps nothing in the hub (`page-tabs`) and opens no closed artifact again.
    */
   const openDoc = (id: string, { line = null, name = '', chosen = true }: { line?: number | null; name?: string; chosen?: boolean } = {}): void => {
@@ -4224,16 +4213,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       } else {
         openWebLink(url, name);
       }
-    } else if (id === 'history') {
-      if (chosen) {
-        openHistory();
-      } else if (offersHistory()) {
-        historyOpen = state.scope?.workItemId ?? null;
-        chooseTab('history');
-      }
     }
   };
-  /** Shows a tab of the strip, Status on a wide page or the conversation on a narrow one for none, without keeping it as a choice (`closeDoc`). */
+  /** Shows a tab of the strip, History on a wide page or the conversation on a narrow one for none, without keeping it as a choice (`closeDoc`). */
   const showDoc = (tab: DocTab | undefined): void => {
     if (tab?.kind === 'artifact') {
       view.artifact = tab.artifact.path;
@@ -4248,11 +4230,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       chooseTab('browser');
     } else {
-      chooseTab(tab?.kind === 'history' ? 'history' : wide() ? 'status' : 'conversation');
+      chooseTab(wide() ? 'history' : 'conversation');
     }
   };
   /**
-   * Closes a document's tab: History, a link, an artifact or a file (architecture.md § Web page). Closing the tab shown shows its neighbour in
+   * Closes a document's tab: a link, an artifact or a file (architecture.md § Web page). Closing the tab shown shows its neighbour in
    * the strip, the one before it, else the one after it; closing another changes nothing else. What shows next is no choice of the operator's,
    * so it posts no `page-tabs`; only an artifact's close is kept, for every device. The focus goes to the tab shown when the closed tab showed or
    * had the focus (`focused`).
@@ -4275,12 +4257,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       iframe.close(id.slice('link:'.length));
     } else if (id.startsWith('file:')) {
       localFiles.remove(id.slice('file:'.length));
-    } else if (id === 'history') {
-      historyOpen = null;
-
-      if (view.side === 'history') {
-        view.side = 'status';
-      }
     }
 
     view.tabMenu = false;
@@ -4555,17 +4531,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           closeMenus();
 
           // A row's menu runs this once its work item's scope comes; its `hello` then puts its kept tabs back, so History opens after that.
-          if (offersHistory() && state.scope?.workItemId != null && state.scope.workItemId !== openedItem) {
+          if (state.scope?.workItemId != null && state.scope.workItemId !== openedItem) {
             historyOnHello = state.scope.workItemId;
             draw();
           } else {
             openHistory();
           }
         });
-        break;
-      case 'close-history':
-        // Hides the History tab until History is chosen again; the focus on the tab or its close mark goes to the tab shown, rather than to the page.
-        closeDoc('history', button!.closest('.history-tab')?.contains(document.activeElement) === true);
         break;
       case 'history-chip':
         if (shownHistory !== null) {
@@ -5913,6 +5885,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const before = state;
 
       state = applyEvent(state, data);
+      // A state whose body changed is unread again under the same ID, so it is reported seen again once it shows.
+      if (type === 'state' && state.state?.unread === true) reported.delete(state.state.id);
       // A pending choice ends with a scope that comes while no select is outstanding, its own or one the hub showed itself; a late scope of an
       // earlier choice, a reconnect's hello with none, or any other event leaves it.
       if (hostPending !== null && state.scope != null && state.scope !== before.scope && !selectInFlight && acked === wanted && ackedSession === wantedSession) hostPending = null;
@@ -5932,7 +5906,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       if (keep) {
-        state = { ...state, scope: before.scope, session: before.session, items: before.items, more: before.more, status: before.status, artifacts: before.artifacts, unread: before.unread, questions: before.questions };
+        state = { ...state, scope: before.scope, session: before.session, items: before.items, more: before.more, state: before.state, artifacts: before.artifacts, unread: before.unread, questions: before.questions };
       }
 
       // The Changes tab kept through a reconnect reads its list again once the new stream shows the work item, as a new stream reads anew.
@@ -6071,18 +6045,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         unechoed.clear();
         savedTabs = tabs == null ? null : { workItemId: state.scope.workItemId, tab: tabs.tab, closed: tabs.closed };
-        openOn = data['openOn'] === 'status' || data['openOn'] === 'browser' ? data['openOn'] : null;
+        // `status`, kept before History took the Status tab's place, is History.
+        openOn = data['openOn'] === 'history' || data['openOn'] === 'status' ? 'history' : data['openOn'] === 'browser' ? 'browser' : null;
       } else if (type === 'tabs' && data['workItemId'] === state.scope?.workItemId) {
         const tabs = data['tabs'] as { tab: string | null; closed: Array<{ path: string; updatedAt: number }> };
 
         savedTabs = { workItemId: data['workItemId'] as number, tab: tabs.tab, closed: withUnechoed(tabs.closed, data['opId']) };
       }
 
-      // The artifact shown here closed on another device, as a `tabs` event or a new `hello` tells: Status shows in its place, or the conversation
+      // The artifact shown here closed on another device, as a `tabs` event or a new `hello` tells: History shows in its place, or the conversation
       // where the column folds into the conversation's strip. A `tabs` event only reconciles, so it moves nothing else and keeps no choice.
       if ((type === 'tabs' || type === 'hello') && view.artifact !== null && closedNow().has(view.artifact)) {
         view.artifact = null;
-        view.side = view.side === 'artifacts' ? 'status' : view.side;
+        view.side = view.side === 'artifacts' ? 'history' : view.side;
         view.tab = view.tab === 'artifacts' ? 'conversation' : view.tab;
       }
 
@@ -6281,7 +6256,7 @@ export function loadDiff(): Promise<DiffModule | null> {
   );
 }
 
-/** Loads Mermaid from the hub once, for diagrams in replies, statuses and artifacts; false when the hub has none. */
+/** Loads Mermaid from the hub once, for diagrams in replies, states and artifacts; false when the hub has none. */
 export function loadMermaid(): Promise<boolean> {
   return new Promise((resolve) => {
     const script = document.createElement('script');

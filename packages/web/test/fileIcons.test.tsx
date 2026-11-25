@@ -203,12 +203,12 @@ describe('the page', () => {
     const strip = root.querySelector('.artifact-tab')!.closest<HTMLElement>('.tabs')!;
 
     const narrow = vi.spyOn(strip, 'getBoundingClientRect').mockReturnValue({ width: 1 } as DOMRect);
-    strip.querySelector<HTMLElement>('[data-side="status"], [data-tab="status"]')!.click();
+    strip.querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')!.click();
     root.querySelector<HTMLElement>('.tab-more-button')!.click();
     expect([...root.querySelectorAll('.tab-menu [data-action="artifact"] .menu-gutter > span')].map((icon) => icon.className)).toEqual([...artifacts].reverse().map((one) => seti(one.path)));
     // Measured unmeasured again, the strip shows every tab, Changes among them.
     narrow.mockRestore();
-    strip.querySelector<HTMLElement>('[data-side="status"], [data-tab="status"]')!.click();
+    strip.querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')!.click();
 
     root.querySelector<HTMLElement>('.changes-tab')!.click();
     await flush();

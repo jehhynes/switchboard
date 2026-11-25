@@ -16,11 +16,11 @@ describe('ConversationLog native entries', () => {
     expect(store.message('client-1')).toMatchObject({delivery:'sent',error:null,transcriptUuid:'native-1',provisional:false,at:2});
     const reopened = new ConversationLog('s1',1,deps);
     reopened.message('native-1','hello',2,'client-1');
-    reopened.reply('reply-1','[speak]Hello.[/speak]\n[status]\nReady.',4);
-    reopened.reply('reply-1','[speak]Hello.[/speak]\n[status]\nReady.',4);
+    reopened.reply('reply-1','[speak]Hello.[/speak]\n[state]\nReady.',4);
+    reopened.reply('reply-1','[speak]Hello.[/speak]\n[state]\nReady.',4);
     expect(store.conversation('s1',null,100).items).toHaveLength(3);
     expect(store.latestReplies('s1',10)[0]).toMatchObject({opening:'Hello.',speak:'Hello.',source:'transcript',transcriptUuid:'reply-1'});
-    expect(store.statuses('s1',null,100).statuses.map(s=>s.markdown)).toEqual(['Ready.']);
+    expect(store.states('s1',null,100).states.map(s=>s.headline)).toEqual(['Ready.']);
     store.close();
   });
 
@@ -29,12 +29,12 @@ describe('ConversationLog native entries', () => {
     const log = new ConversationLog('s1',1,{store,now:()=>1000,newId:()=>String(++id),log:()=>{},onChange:()=>{}});
     store.addMessage({id:'foreign',sessionId:'s2',workItemId:2,at:1,origin:'typed',text:'secret',transcriptUuid:null,provisional:true,withdrawn:false,delivery:'open',error:null,opId:null,pastedAt:null});
     log.message('native-1','hello',2,'foreign');
-    log.reply('reply-1','First.\n[status]\nWorking.',3);
-    log.reply('reply-1','Revised.\n[status]\nDone.',3);
+    log.reply('reply-1','First.\n[state]\nWorking.',3);
+    log.reply('reply-1','Revised.\n[state]\nDone.',3);
     expect(store.message('foreign')).toMatchObject({sessionId:'s2',delivery:'open'});
     expect(store.latestReplies('s1',10)).toHaveLength(1);
     expect(store.latestReplies('s1',10)[0]?.opening).toBe('Revised.');
-    expect(store.statuses('s1',null,100).statuses.map(s=>s.markdown)).toEqual(['Done.']);
+    expect(store.states('s1',null,100).states.map(s=>s.headline)).toEqual(['Done.']);
     store.close();
   });
 

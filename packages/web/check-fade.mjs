@@ -66,7 +66,7 @@ const items = replies.flatMap((reply, i) => [
 ]);
 history.replaceState(null, '', location.search + '#w=1');
 class FakeSource {
-  constructor() { this.listeners = {}; window.fakeSource = this; setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: [session], items, more: false, status: null, artifacts: [], unread: 0, settings: { briefReplies: true } }), 20); }
+  constructor() { this.listeners = {}; window.fakeSource = this; setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: [session], items, more: false, state: null, artifacts: [], unread: 0, settings: { briefReplies: true } }), 20); }
   addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); }
   removeEventListener() {}
   close() {}

@@ -1,6 +1,6 @@
 import { SESSION_ICONS, SESSION_TONES, sessionIcon } from '@switchboard/core/group';
 import type { IconTone, SessionIcon } from '@switchboard/core/group';
-import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageHeader, PageRow, QuestionsView, ReplyView, ScopeView, SessionView, StatusView, VoiceView } from '@switchboard/protocol';
+import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageHeader, PageRow, QuestionsView, ReplyView, ScopeView, SessionView, StateView, VoiceView } from '@switchboard/protocol';
 
 /** What the page shows, kept from its conversation stream (architecture.md § Web page). */
 export interface PageState {
@@ -15,7 +15,8 @@ export interface PageState {
   session: SessionView | null;
   items: ItemView[];
   more: boolean;
-  status: StatusView | null;
+  /** The state History shows at its top (architecture.md § States). */
+  state: StateView | null;
   artifacts: ArtifactView[];
   unread: number;
   voice: VoiceView | null;
@@ -28,7 +29,7 @@ export interface PageState {
   diffWrap: 'auto' | 'on' | 'off';
 }
 
-export const EMPTY: PageState = { key: null, connected: false, groups: [], header: null, scope: null, session: null, items: [], more: false, status: null, artifacts: [], unread: 0, voice: null, questions: null, briefReplies: false, diffLayout: 'auto', diffWrap: 'auto' };
+export const EMPTY: PageState = { key: null, connected: false, groups: [], header: null, scope: null, session: null, items: [], more: false, state: null, artifacts: [], unread: 0, voice: null, questions: null, briefReplies: false, diffLayout: 'auto', diffWrap: 'auto' };
 
 /** The diff viewer's settings an event carries, each kept as it was when the event lacks it or names a value the page does not know. */
 function diffSettings(settings: Record<string, unknown> | undefined, state: PageState): Pick<PageState, 'diffLayout' | 'diffWrap'> {
@@ -79,7 +80,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
         session: (event['sessions'] as SessionView[] | undefined)?.find((one) => one.current) ?? null,
         items: ((event['items'] as ItemView[] | undefined) ?? []).filter((item) => !notSent(item)),
         more: event['more'] === true,
-        status: event['status'] ?? null,
+        state: event['state'] ?? null,
         artifacts: newestFirst(event['artifacts'] ?? []),
         unread: event['unread'] ?? 0,
         voice: event['voice'] ?? null,
@@ -100,11 +101,9 @@ export function applyEvent(state: PageState, event: Event): PageState {
       return { ...state, items: notSent(event['message']) ? state.items.filter((item) => item.id !== event['message'].id) : upsert(state.items, event['message']) };
     case 'reply':
       return { ...state, items: upsert(state.items, event['reply']) };
-    case 'status': {
-      const status = event['status'] as StatusView | null;
-
-      return status === null || status.sessionId === state.scope?.sessionId || (status.fallback && status.id === `stage-${state.scope?.workItemId}`) ? { ...state, status } : state;
-    }
+    case 'state':
+      // The hub sends each window the state of its own scope, and a new scope with a new `hello`.
+      return { ...state, state: event['state'] as StateView | null };
     case 'artifact': {
       const rest = state.artifacts.filter((one) => one.path !== event['artifact'].path);
 
@@ -198,7 +197,7 @@ export function sessionEnd(state: PageState): number {
 export type Entry = { type: 'message'; item: Extract<ItemView, { type: 'message' }> } | { type: 'reply'; item: ReplyView; earlier: ReplyView | null } | { type: 'artifact'; artifact: ArtifactView };
 
 /**
- * The timeline: withdrawn items and replies that are only a status left out, a rewrite in the place of the reply it rewrote, and each artifact
+ * The timeline: withdrawn items and replies that are only a state left out, a rewrite in the place of the reply it rewrote, and each artifact
  * written since the oldest item shown, and before `until`, after the last item from no later than its write. An earlier session's timeline ends
  * where the next session starts (`sessionEnd`), so an artifact last written in a later session shows only there.
  */

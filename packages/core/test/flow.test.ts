@@ -9,7 +9,7 @@ import { heldSlots } from '../src/queue.js';
 /** The report contract offering `reports`, written out so a change to the contract shows here. */
 const CONTRACT = (id: string, reports: string[] = ['stage', 'worktree', 'done', 'approval', 'link', 'task']) => {
   const lines: Record<string, string[]> = {
-    stage: [`- ${REPORT} stage ${id} <stage>, when you start a new phase of the work.`, `  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`],
+    stage: [`- ${REPORT} stage ${id} <headline>, when you start a new phase of the work between tool calls: it sets the headline of your state, which the list of work items shows.`, `  - The headline states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`],
     worktree: [`- ${REPORT} worktree ${id} <path>, when you create a worktree.`],
     done: [`- ${REPORT} done ${id}, when the entire work item is done: every part of the task is complete, and this session has nothing left to do and can be retired.`],
     approval: [
@@ -659,8 +659,13 @@ describe('sessions', () => {
     const { item, session } = running(h, '1', 'dev:finish');
 
     h.now += 10;
-    h.report(session, { kind: 'stage', stage: 'Planning' });
-    expect(h.item(item)).toMatchObject({ stage: 'Planning', stageAt: T0 + 10 });
+    h.report(session, { kind: 'stage', stage: ' Planning ' });
+    // A stage report is a headline-only state of the session, seen, and current while its turn runs.
+    expect(h.store.workItemState(item)).toMatchObject({ sessionId: session, workItemId: item, replyId: null, headline: 'Planning', body: null, at: T0 + 10, seenAt: T0 + 10, turnEnded: false });
+    expect(h.store.session(session)?.turnAt).toBe(h.store.session(session)?.startedAt);
+    // An empty one sets nothing.
+    h.report(session, { kind: 'stage', stage: '  ' });
+    expect(h.store.workItemState(item)?.headline).toBe('Planning');
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     h.act({ type: 'roster', sessions: [] });
@@ -673,10 +678,28 @@ describe('sessions', () => {
     expect(h.store.session(session)?.outcome).toBe('done');
 
     h.report(session, { kind: 'stage', stage: 'Old session' });
-    expect(h.item(item).stage).toBe('Planning');
+    expect(h.store.workItemState(item)?.headline).toBe('Planning');
+    // Its turn ended when the session went idle.
+    expect(h.store.workItemState(item)?.turnEnded).toBe(true);
 
     h.report(retry, { kind: 'done' });
     expect(h.item(item).status).toBe('done');
+  });
+
+  it("starts a session's turn when it runs again after a turn ended, not when it waits mid-turn", () => {
+    const h = new Harness({ playbooks: playbooks(undefined, FINISH) });
+    const { session } = running(h, '1', 'dev:finish');
+    const started = h.store.session(session)!.turnAt;
+
+    h.now += 10;
+    h.act({ type: 'marker', sessionId: session, state: 'waiting', detail: null });
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.store.session(session)?.turnAt).toBe(started);
+
+    h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
+    h.now += 10;
+    h.act({ type: 'marker', sessionId: session, state: 'running', detail: null });
+    expect(h.store.session(session)?.turnAt).toBe(h.now);
   });
 
   it('hands a work item to another task playbook in its namespace, and refuses any other', () => {
@@ -783,7 +806,7 @@ describe('sessions', () => {
     expect(h.store.session(session)).toMatchObject({ outcome: null, outcomeDetail: null });
 
     h.report(session, { kind: 'stage', stage: 'fixing the rest' });
-    expect(h.item(item).stage).toBe('fixing the rest');
+    expect(h.store.workItemState(item)?.headline).toBe('fixing the rest');
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
     expect(h.item(item)).toMatchObject({ status: 'blocked', error: MESSAGES.turnEnded });

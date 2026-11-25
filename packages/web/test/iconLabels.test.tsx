@@ -17,7 +17,7 @@ const room = (n: number): TabFit => ({ width: n * 100 + 50, more: 50, plain: 100
 const artifact = (n: number): ArtifactView => ({ path: `chat/a${n}.${n % 2 === 0 ? 'md' : 'png'}`, owner: 'o', kind: 'notes', title: `A ${n}`, ext: n % 2 === 0 ? 'md' : 'png', type: n % 2 === 0 ? 'markdown' : 'image', updatedAt: n });
 const session: SessionView = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
-const state: PageState = { ...EMPTY, connected: true, scope, session, artifacts: [1, 2, 3, 4].map(artifact), status: { id: 'st', sessionId: 's', at: 1, markdown: 'Done.', fallback: false, unread: true } };
+const state: PageState = { ...EMPTY, connected: true, scope, session, artifacts: [1, 2, 3, 4].map(artifact), state: { id: 'st', sessionId: 's', at: 1, headline: 'Done', body: null, stale: null, unread: true } };
 const changes = { ...newChanges(), list: { total: 2, rows: [] } as never };
 
 function draw(tree: ComponentChild): HTMLElement {
@@ -37,8 +37,8 @@ function labelSelector(): string {
 
 describe('the tab strips', () => {
   const strips = [
-    draw(renderTabs(newView(), state, true, { open: null, menu: false, now: 0, changes }, true, true)),
-    draw(renderSideSwitch('status', state, true, { open: 'chat/a2.md', fit: room(8), menu: false, now: 0, changes }, true, true)),
+    draw(renderTabs(newView(), state, true, { open: null, menu: false, now: 0, changes }, true)),
+    draw(renderSideSwitch('history', state, true, { open: 'chat/a2.md', fit: room(7), menu: false, now: 0, changes }, true)),
   ];
 
   it('TabStrips_EveryTab_ShowsAnIcon', () => {
@@ -60,16 +60,15 @@ describe('the tab strips', () => {
     // In the strip's order (tabs.ts): History before the links, Console last, after Changes.
     expect(tabs.map((tab) => [tab.dataset['tab'], tab.querySelector('.codicon')!.className, tab.querySelector('.tab-label')!.textContent, tab.title])).toEqual([
       ['conversation', 'codicon codicon-comment-discussion', 'Conversation', 'Conversation'],
-      ['status', 'codicon codicon-pulse', 'Status', 'Status'],
       ['history', 'codicon codicon-history', 'History', 'History'],
       ['browser', 'codicon codicon-globe', 'Browser', 'Browser'],
       ['console', 'codicon codicon-terminal', 'Console', 'Console'],
     ]);
-    // Status's unread dot stays in its name once the label is hidden.
-    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Conversation', 'Status, unread', 'History', 'Browser', 'Console']);
+    // History's unread dot stays in its name once the label is hidden.
+    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Conversation', 'History, unread', 'Browser', 'Console']);
     expect(strips[0]!.querySelector('.changes-tab ~ [data-tab="console"]')).not.toBeNull();
-    // History has a close mark, as a file tab has.
-    expect(strips.map((strip) => strip.querySelector('.history-tab [data-action="close-history"]')?.getAttribute('aria-label'))).toEqual(['Close History', 'Close History']);
+    // History has no close mark.
+    expect(strips.map((strip) => strip.querySelector('[data-action="close-history"]'))).toEqual([null, null]);
     expect(TABS.every((one) => one.icon !== '')).toBe(true);
   });
 
@@ -83,8 +82,8 @@ describe('the tab strips', () => {
     ];
 
     for (const strip of [
-      draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { links, link: links[0]!.url, open: null, menu: false, now: 0, changes }, true, true)),
-      draw(renderSideSwitch('browser', state, true, { links, link: links[0]!.url, open: null, menu: false, now: 0, changes }, true, true)),
+      draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { links, link: links[0]!.url, open: null, menu: false, now: 0, changes }, true)),
+      draw(renderSideSwitch('browser', state, true, { links, link: links[0]!.url, open: null, menu: false, now: 0, changes }, true)),
     ]) {
       const tabs = [...strip.querySelectorAll<HTMLElement>('.link-tab .tab-open')];
 

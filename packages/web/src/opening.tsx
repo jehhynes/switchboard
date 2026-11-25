@@ -62,11 +62,11 @@ export function renderOpening(opening: Opening): VNode {
 }
 
 /**
- * The tab strip in the place of the work item's own while it opens: Conversation where the tabs hold it, then Status and Console, dimmed and
+ * The tab strip in the place of the work item's own while it opens: Conversation where the tabs hold it, then History and Console, dimmed and
  * inert, so the strip keeps its height and the work item's own replaces it in place. `column` for the strip atop the column right of the conversation.
  */
 export function renderOpeningTabs(column: boolean): VNode {
-  const labels = column ? ['Status', 'Console'] : ['Conversation', 'Status', 'Console'];
+  const labels = column ? ['History', 'Console'] : ['Conversation', 'History', 'Console'];
 
   return (
     <nav class={`tabs opening-tabs${column ? ' side-switch' : ''}`} aria-hidden="true">

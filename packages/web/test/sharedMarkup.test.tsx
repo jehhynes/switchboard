@@ -5,12 +5,12 @@ import { mount } from '../src/island.js';
 import { EMPTY } from '../src/model.js';
 import type { PageState } from '../src/model.js';
 import { newView, renderMicButton, renderVoice } from '../src/render.js';
-import { renderArtifactView, renderStatus } from '../src/side.js';
+import { renderArtifactView, renderState } from '../src/side.js';
 import { renderTimeline } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
 import { renderShared } from '../src/composer.js';
 import { renderMarkdown } from '../src/markdown.js';
-import type { MessageView, ReplyView, SessionView, StatusView } from '@switchboard/protocol';
+import type { MessageView, ReplyView, SessionView, StateView } from '@switchboard/protocol';
 
 // The shared renderers (messageMeta, replyBody, voiceControls, providerIcons) and the page's Markdown return HTML, which a part must draw
 // through `trusted`; given to JSX as a child, it shows as text such as "<time class=…".
@@ -38,7 +38,7 @@ const message = (id: string, patch: Partial<MessageView> = {}): MessageView => (
 const reply = (id: string, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's', at: AT, ord: 2, provisional: false, kind: 'reply', answers: null, opening: `reply ${id}`, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
 const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, ...patch });
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0, provider: 'codex' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
-const status = (patch: Partial<StatusView> = {}): StatusView => ({ id: 'st-1', sessionId: 's', at: AT, markdown: 'Done.\n\n\`\`\`\ncode\n\`\`\`\n\nPick:\n- A) x\n- B) y', fallback: false, unread: true, ...patch });
+const workState = (patch: Partial<StateView> = {}): StateView => ({ id: 'st-1', sessionId: 's', at: AT, headline: 'Done', body: '\`\`\`\ncode\n\`\`\`\n\nPick:\n- A) x\n- B) y', stale: null, unread: true, ...patch });
 const state = (patch: Partial<PageState> = {}): PageState => ({ ...EMPTY, connected: true, scope, session: session({ provider: 'codex' } as Partial<SessionView>), ...patch });
 
 describe('HTML from the shared renderers', () => {
@@ -48,14 +48,13 @@ describe('HTML from the shared renderers', () => {
   });
 
   it('is drawn as nodes on the Status tab, with its time as a time element', () => {
-    for (const one of [status(), status({ fallback: true, markdown: 'Build' })]) {
-      const view = { ...newView(), details: true };
+    for (const one of [workState(), workState({ stale: 'turn', body: null, headline: 'Build' })]) {
       const host = document.createElement('div');
 
-      expect(markupText(renderStatus(state({ status: one }), AT + 23 * 3_600_000))).toEqual([]);
-      mount(host, renderStatus(state({ status: one }), AT + 23 * 3_600_000));
-      expect(host.querySelector('.status-age time.stamp')?.getAttribute('datetime')).toBe('2026-11-20T19:03:41.000Z');
-      expect(host.querySelector('.status-age')!.textContent).toMatch(/^\d{1,2}:03 [AP]M · 23 h ago$/);
+      expect(markupText(renderState(one, AT + 23 * 3_600_000))).toEqual([]);
+      mount(host, renderState(one, AT + 23 * 3_600_000));
+      expect(host.querySelector('.state-age time.stamp')?.getAttribute('datetime')).toBe('2026-11-20T19:03:41.000Z');
+      expect(host.querySelector('.state-age')!.textContent).toMatch(/^\d{1,2}:03 [AP]M · 23 h ago$/);
     }
   });
 

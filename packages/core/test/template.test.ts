@@ -21,8 +21,8 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
     expect(sessionContract('s-1', 'node "C:/h/hub.js" report', ['link', 'approval', 'done', 'worktree', 'stage'], 'claude')).toBe(
       [
         `Report to Switchboard with these commands:`,
-        `- node "C:/h/hub.js" report stage s-1 <stage>, when you start a new phase of the work.`,
-        `  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`,
+        `- node "C:/h/hub.js" report stage s-1 <headline>, when you start a new phase of the work between tool calls: it sets the headline of your state, which the list of work items shows.`,
+        `  - The headline states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.`,
         `- node "C:/h/hub.js" report worktree s-1 <path>, when you create a worktree.`,
         `- node "C:/h/hub.js" report done s-1, when the entire work item is done: every part of the task is complete, and this session has nothing left to do and can be retired.`,
         `- node "C:/h/hub.js" report approval s-1 --prompt <prompt> --summary <text> --report <absolute path>, when the work is ready but posting or publishing it needs the operator's approval, then end your turn.`,
@@ -41,8 +41,8 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
     expect(sessionContract('s-2', 'R', ['stage', 'link'], 'claude')).toBe(
       [
         'Report to Switchboard with these commands:',
-        '- R stage s-2 <stage>, when you start a new phase of the work.',
-        '  - The stage states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.',
+        '- R stage s-2 <headline>, when you start a new phase of the work between tool calls: it sets the headline of your state, which the list of work items shows.',
+        '  - The headline states the work now running and what it acts on as an -ing phrase of at most four words with no ending punctuation, optionally after a step count, such as 2/5 fixing tests.',
         '- R link s-2 --label <text> --target <url>, for each GitHub issue or pull request that tracks or delivers this work, such as one you create, but not a related, base or parent one.',
         "- R handled s-2 <ticket url> [--release <assignment key>], only when a skill directs it: register another ticket's current assignment as already handled before publishing it to the work queue; save the returned assignment key for an explicit release.",
         '',

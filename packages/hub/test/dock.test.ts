@@ -9,7 +9,7 @@ import type { DockRow } from '../src/dock.js';
 import { CONTROL_GLYPHS } from '../src/rows.js';
 import type { HeldSession } from '../src/held.js';
 import type { Snapshot, WorkItemView } from '../src/runtime.js';
-import { item, NOW, pool, session, snapshot, triage } from './views.js';
+import { item, NOW, pool, session, snapshot, triage, workState } from './views.js';
 
 /** Where the tests' item windows keep their workspace files. */
 const W = 'C:\\Users\\op\\.switchboard\\windows';
@@ -120,8 +120,7 @@ describe('dockView', () => {
         triage: triage({ immediacy: 'URGENT', severity: 'HIGH' }),
         warning: 'Ticket left the assigned state',
         sessions: [session({ state: 'waiting', stateAt: NOW - 25 * 60_000 })],
-        stage: 'checking refunds',
-        stageAt: NOW - 30 * 60_000,
+        state: workState('checking refunds', NOW - 30 * 60_000),
         parent: { ...item(3).ticket },
         parentId: 3,
       }),
@@ -143,12 +142,12 @@ describe('dockView', () => {
         { text: 'From gh 103', title: 'Issue <3>', tone: null },
       ],
     });
-    // The question is answered in Claude, so line 3 names the mark in place of the stage.
-    expect(row(item(7, { sessions: [session({ state: 'waiting' })], stage: 'checking refunds', stageAt: NOW - 60_000 })).details).toEqual([{ text: 'Answer a question', title: null, tone: null }]);
+    // The question is answered in Claude, so line 3 names the mark in place of the state.
+    expect(row(item(7, { sessions: [session({ state: 'waiting' })], state: workState('checking refunds', NOW - 60_000) })).details).toEqual([{ text: 'Answer a question', title: null, tone: null }]);
   });
 
-  it('marks a permission prompt, says what answers it on line 3 without the stage, and opens a terminal from its main control (PRD R70)', () => {
-    const permission = row(item(7, { status: 'running', sessions: [session({ codeMode: true, withoutCodeMode: true, state: 'waiting', stateDetail: PERMISSION_PROMPT })], stage: 'checking refunds', stageAt: NOW - 60_000 }));
+  it('marks a permission prompt, says what answers it on line 3 without the state, and opens a terminal from its main control (PRD R70)', () => {
+    const permission = row(item(7, { status: 'running', sessions: [session({ codeMode: true, withoutCodeMode: true, state: 'waiting', stateDetail: PERMISSION_PROMPT })], state: workState('checking refunds', NOW - 60_000) }));
 
     expect(permission).toMatchObject({
       mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' },
@@ -159,8 +158,8 @@ describe('dockView', () => {
     expect(permission.open).toEqual({ type: 'session', sessionId: 's1', cwd: 'D:/git/widgets', provider: 'claude' });
   });
 
-  it('marks a held turn that ended on an unanswered question card Answer a question in Blocked on you, without the stage or a main control (PRD R103)', () => {
-    const card = row(item(7, { status: 'running', sessions: [session({ state: 'idle', stateDetail: QUESTION_CARD, codeMode: true })], stage: 'checking refunds', stageAt: NOW - 60_000 }));
+  it('marks a held turn that ended on an unanswered question card Answer a question in Blocked on you, without the state or a main control (PRD R103)', () => {
+    const card = row(item(7, { status: 'running', sessions: [session({ state: 'idle', stateDetail: QUESTION_CARD, codeMode: true })], state: workState('checking refunds', NOW - 60_000) }));
 
     expect(card).toMatchObject({ mark: { kind: 'question', title: 'Answer a question' }, stripe: 'warning', details: [{ text: 'Answer a question', title: null, tone: null }] });
     expect(card.main).toBeNull();
@@ -179,7 +178,7 @@ describe('dockView', () => {
     expect(row(item(1, { status: 'unstarted', ticket: blocked(one) })).details).toEqual([
       { text: 'Blocker: #12', title: 'Open issues that block this one:\n#12 Migrate the schema\nA start waits until it closes.', tone: 'warning' },
     ]);
-    expect(row(item(1, { ticket: blocked(three), sessions: [session()], stage: 'planning', stageAt: NOW - 60_000 })).details).toEqual([
+    expect(row(item(1, { ticket: blocked(three), sessions: [session()], state: workState('planning', NOW - 60_000) })).details).toEqual([
       { text: 'Blockers: #12, #15 and o/docs#7', title: 'Open issues that block this one:\n#12 Migrate the schema\n#15 Add the API\no/docs#7 Docs\nA start waits until they close.', tone: 'warning' },
       { text: 'planning · 1m', title: null, tone: null },
     ]);
@@ -197,24 +196,40 @@ describe('dockView', () => {
   });
 
   it('shows the approval summary with its age, or the stage, coloured when stale', () => {
-    expect(row(item(1, { status: 'awaiting-approval', statusAt: NOW - 2 * 3_600_000, approvalSummary: 'post the reply', stage: 'drafting' })).details).toEqual([
-      { text: 'Post the reply · 2h', title: 'Post the reply\nLast stage: drafting', tone: null },
+    expect(row(item(1, { status: 'awaiting-approval', statusAt: NOW - 2 * 3_600_000, approvalSummary: 'post the reply', state: workState('drafting', NOW) })).details).toEqual([
+      { text: 'Post the reply · 2h', title: 'Post the reply\nLast state: drafting', tone: null },
     ]);
-    expect(row(item(1, { stage: 'fixing tests', stageAt: NOW - 5 * 60_000, sessions: [session()] })).details).toEqual([{ text: 'fixing tests · 5m', title: null, tone: null }]);
-    expect(row(item(1, { stage: 'fixing tests', stageAt: NOW - 29 * 60_000, runStartedAt: NOW - 40 * 60_000, sessions: [session({ stateAt: NOW - 40 * 60_000 })] })).details).toEqual([{ text: 'fixing tests · 29m', title: null, tone: null }]);
-    expect(row(item(1, { stage: 'fixing tests', stageAt: NOW - 30 * 60_000, runStartedAt: NOW - 40 * 60_000, sessions: [session({ stateAt: NOW - 40 * 60_000 })] })).details).toEqual([
-      { text: 'fixing tests · 30m', title: 'No stage report for 30m', tone: 'warning' },
+    expect(row(item(1, { state: workState('fixing tests', NOW - 5 * 60_000), sessions: [session()] })).details).toEqual([{ text: 'fixing tests · 5m', title: null, tone: null }]);
+    expect(row(item(1, { state: workState('fixing tests', NOW - 29 * 60_000), runStartedAt: NOW - 40 * 60_000, sessions: [session({ stateAt: NOW - 40 * 60_000 })] })).details).toEqual([{ text: 'fixing tests · 29m', title: null, tone: null }]);
+    expect(row(item(1, { state: workState('fixing tests', NOW - 30 * 60_000), runStartedAt: NOW - 40 * 60_000, sessions: [session({ stateAt: NOW - 40 * 60_000 })] })).details).toEqual([
+      { text: 'fixing tests · 30m', title: 'No state for 30m', tone: 'warning' },
     ]);
     expect(row(item(1, { runStartedAt: NOW - 40 * 60_000, sessions: [session({ stateAt: NOW - 40 * 60_000 })] })).details).toEqual([
-      { text: 'No stage report · 40m', title: 'No stage report for 40m', tone: 'warning' },
+      { text: 'No state · 40m', title: 'No state for 40m', tone: 'warning' },
     ]);
     expect(row(item(1, { status: 'queued', waits: [{ kind: 'snoozed' }] })).details).toEqual([{ text: 'Starts after the snooze ends', title: 'The ticket is snoozed.', tone: null }]);
+  });
+
+  it("dims a state whose turn ended and names one whose session ended the last state, so neither reads as current", () => {
+    const long = 'a headline that runs past the forty characters of the row';
+
+    expect(row(item(1, { state: workState('fixing tests', NOW - 60_000, { turnEnded: true }), sessions: [session()] })).details).toEqual([
+      { text: 'fixing tests · 1m', title: 'fixing tests\nAs of the last turn', tone: 'dim' },
+    ]);
+    // A session between turns makes its state old even before the turn end reaches the state.
+    expect(row(item(1, { status: 'finished', state: workState('ready for review', NOW - 60_000), sessions: [session({ state: 'idle' })] })).details).toContainEqual({ text: 'ready for review · 1m', title: 'ready for review\nAs of the last turn', tone: 'dim' });
+    expect(row(item(1, { status: 'finished', state: workState('done', NOW - 60_000), sessions: [session({ state: 'ended' })] })).details).toContainEqual({ text: 'Last state: done · 1m', title: 'Last state: done', tone: 'dim' });
+    // A stage carried over from before states has no session; a state of a session that is gone is old too.
+    expect(row(item(1, { status: 'finished', state: workState('done', NOW - 60_000, { sessionId: null }), sessions: [session()] })).details).toContainEqual({ text: 'Last state: done · 1m', title: 'Last state: done', tone: 'dim' });
+    expect(row(item(1, { status: 'finished', state: workState('done', NOW - 60_000, { sessionId: 'gone' }), sessions: [session()] })).details).toContainEqual({ text: 'Last state: done · 1m', title: 'Last state: done', tone: 'dim' });
+    // A long headline is cut to 40 characters, with the whole in its title.
+    expect(row(item(1, { state: workState(long, NOW - 60_000), sessions: [session()] })).details).toEqual([{ text: 'a headline that runs past the forty… · 1m', title: long, tone: null }]);
   });
 
   it('names the mark in words on line 3 when nothing else is there', () => {
     expect(row(item(1, { status: 'setup' })).details).toEqual([{ text: 'Setting up', title: null, tone: null }]);
     expect(row(item(1, { status: 'finished' })).details).toEqual([{ text: 'Review the finished turn', title: null, tone: null }]);
-    expect(row(item(1, { status: 'setup', stage: 'creating the worktree', stageAt: NOW - 60_000, sessions: [session()] })).details).toEqual([
+    expect(row(item(1, { status: 'setup', state: workState('creating the worktree', NOW - 60_000), sessions: [session()] })).details).toEqual([
       { text: 'creating the worktree · 1m', title: null, tone: null },
     ]);
     // An Unstarted row has no mark, so line 3 stays empty.
@@ -482,7 +497,7 @@ describe('dockView', () => {
             pastes: [{ id: 1, workItemId: 10, label: 'Customer reply', file: 'D:/drafts/reply.md', reportedAt: NOW }],
             sessions: [session({ state: 'ended', cwd: 'D:/git/support' })],
           }),
-          item(13, { status: 'running', readyAt: NOW - 5 * 3_600_000, orderAt: NOW - 6 * 3_600_000, stage: 'posting', stageAt: NOW - 60_000, sessions: [session({ cwd: 'D:/git/widgets', codeMode: true })] }),
+          item(13, { status: 'running', readyAt: NOW - 5 * 3_600_000, orderAt: NOW - 6 * 3_600_000, state: workState('posting', NOW - 60_000), sessions: [session({ cwd: 'D:/git/widgets', codeMode: true })] }),
           item(14, { status: 'failed', error: 'Setup ended without a worktree.', statusAt: NOW - 600_000 }),
           item(15, { sessions: [session({ id: 'cm15', workItemId: 15, codeMode: true, state: 'waiting', nativeSessionId: 'eeee5555-native', shortId: 'eeee5555', cwd: 'D:/git/widgets' })] }),
           // Done rows carry their date band; 12:00 UTC less a minute is the same local day in any zone within ±11 hours.
@@ -873,7 +888,7 @@ describe('workspace files', () => {
 describe('a row waiting on a usage limit (architecture.md § Rate limits)', () => {
   it('stays In progress on the agent\'s turn, with the Rate limited mark and when it resumes on line 3', () => {
     const resetsAt = NOW + 3_600_000;
-    const limited = row(item(1, { status: 'running', stage: '2/5 finding defects', stageAt: NOW, sessions: [session({ codeMode: true, state: 'failed', stateDetail: 'rate_limit', rateLimit: { kind: 'usage', window: 'five_hour', resetsAt, exact: true, cli: true, message: 'limit', since: NOW, at: NOW, launchId: 'l', attempts: 0, nextAt: resetsAt + 180_000 } })] }));
+    const limited = row(item(1, { status: 'running', state: workState('2/5 finding defects', NOW), sessions: [session({ codeMode: true, state: 'failed', stateDetail: 'rate_limit', rateLimit: { kind: 'usage', window: 'five_hour', resetsAt, exact: true, cli: true, message: 'limit', since: NOW, at: NOW, launchId: 'l', attempts: 0, nextAt: resetsAt + 180_000 } })] }));
 
     expect(limited).toMatchObject({ mark: { kind: 'limited', glyph: '\u{eb7c}', title: 'Rate limited' }, stripe: null, turn: 'agent' });
     expect(limited.details[0]?.text).toMatch(/^Rate limited · resumes \d{1,2}:\d{2} [AP]M$/);

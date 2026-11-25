@@ -287,7 +287,7 @@ class Builder {
           break;
         case 'workItem.stage':
           if (after !== null) {
-            lines.push(`Stage: ${str(after)}`);
+            lines.push(`State: ${str(after)}`);
           }
           break;
         case 'workItem.approvalSummary':
@@ -683,7 +683,7 @@ class Builder {
     switch (detail['kind']) {
       case 'stage':
         skip.add('stage');
-        return { ...base, icon: 'milestone', text: `Stage: ${str(detail['stage'])}` };
+        return { ...base, icon: 'milestone', text: `State: ${str(detail['stage'])}` };
       case 'worktree':
         skip.add('*');
         return {
@@ -760,7 +760,7 @@ class Builder {
           tone: detail['outcome'] === 'failed' ? 'error' : null,
         };
       case 'stage':
-        return { ...base, category: 'report', icon: 'milestone', text: `Stage: ${str(detail['stage'])}` };
+        return { ...base, category: 'report', icon: 'milestone', text: `State: ${str(detail['stage'])}` };
       case 'status':
         return detail['status'] === 'awaiting-approval'
           ? {

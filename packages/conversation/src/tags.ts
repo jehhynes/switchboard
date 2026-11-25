@@ -28,18 +28,42 @@ export function splitRewrite(text: string): { rewrite: boolean; text: string } {
   return match === null ? { rewrite: false, text } : { rewrite: true, text: text.slice(match[0].length).trim() };
 }
 
-/** The `[status]` line: up to three spaces in, since four or more make an indented code block. */
-const STATUS_LINE = /^ {0,3}\[status\][ \t]*$/i;
+/** The `[state]` line, or `[status]`, which earlier sessions write: up to three spaces in, since four or more make an indented code block. */
+const STATE_LINE = /^ {0,3}\[(?:state|status)\][ \t]*$/i;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
-/** A line that is only the status tag, kept apart when the screen's wrapped lines are joined. */
-export const isStatusLine = (line: string): boolean => STATUS_LINE.test(line);
+/** A line that is only the state tag, kept apart when the screen's wrapped lines are joined. */
+export const isStateLine = (line: string): boolean => STATE_LINE.test(line);
+
+/** A state a reply carries (architecture.md § States): its headline, for the list row, and its Markdown body, or null. */
+export interface ReplyState {
+  headline: string;
+  body: string | null;
+}
+
+/** Markdown marks at the start of a headline line, which the row would show as text: a heading, a bullet or a quote. */
+const HEADLINE_MARKS = /^(?:#{1,6}\s+|[-*+]\s+|>\s*)+/;
+
+/** A state's text split into its first non-empty line, without leading Markdown marks or bold, and the rest, trimmed; null for empty text. */
+export function stateParts(text: string): ReplyState | null {
+  const trimmed = text.trim();
+
+  if (trimmed === '') {
+    return null;
+  }
+
+  const [first, ...rest] = trimmed.split('\n');
+  // Bold is unwrapped too, so the row shows the words alone.
+  const headline = first!.trim().replace(HEADLINE_MARKS, '').replace(/(\*\*|__)(.+?)\1/g, '$2').trim();
+
+  return { headline: headline === '' ? first!.trim() : headline, body: rest.join('\n').trim() || null };
+}
 
 /**
- * Splits a reply's text at its first `[status]` line outside fenced code, from claude-collab's `status.js`: the text before it is the reply, the
- * text after it, to the end, the status, or null when it is empty. A tag quoted inline or in a code block is text.
+ * Splits a reply's text at its first `[state]` or `[status]` line outside fenced code, from claude-collab's `status.js`: the text before it is
+ * the reply, the text after it, to the end, the state, or null when it is empty. A tag quoted inline or in a code block is text.
  */
-export function splitStatus(text: string): { reply: string; status: string | null } {
+export function splitState(text: string): { reply: string; state: ReplyState | null } {
   const lines = text.split('\n');
   let fence: string | null = null;
 
@@ -57,12 +81,12 @@ export function splitStatus(text: string): { reply: string; status: string | nul
       continue;
     }
 
-    if (fence === null && STATUS_LINE.test(line)) {
-      return { reply: lines.slice(0, index).join('\n').trim(), status: lines.slice(index + 1).join('\n').trim() || null };
+    if (fence === null && STATE_LINE.test(line)) {
+      return { reply: lines.slice(0, index).join('\n').trim(), state: stateParts(lines.slice(index + 1).join('\n')) };
     }
   }
 
-  return { reply: text, status: null };
+  return { reply: text, state: null };
 }
 
 /** A tone line: `[tone: …]` alone on the reply's first line, how the whole reply sounds when spoken (claude-collab `tts.js` `splitTone`). */
@@ -236,13 +260,13 @@ export function spokenText(passage: string): string {
     .trim();
 }
 
-/** A reply's parts: an aside or a reply, whether it rewrites the previous reply, its text without the tags, and the status it carries. */
+/** A reply's parts: an aside or a reply, whether it rewrites the previous reply, its text without the tags, and the state it carries. */
 export interface ParsedReply {
   kind: 'reply' | 'aside';
   rewrite: boolean;
-  /** Empty for a reply that is only a status. */
+  /** Empty for a reply that is only a state. */
   opening: string;
-  status: string | null;
+  state: ReplyState | null;
   /**
    * The primary response (`splitPrimary`), shown first and read aloud up to its first Markdown structure (`speechPart`) while Speak replies is
    * on, which `opening` holds too, without the `[details]` line; an older reply's `[speak]` passage, whose markers `opening` leaves out. Null
@@ -253,7 +277,7 @@ export interface ParsedReply {
   tone: string | null;
   /** The heard tags, which `opening` leaves out, in order (architecture.md § Dictation). */
   heard: HeardTag[];
-  /** The artifact tags, which `opening` and `status` leave out, in order (architecture.md § Artifacts). */
+  /** The artifact tags, which `opening` and `state` leave out, in order (architecture.md § Artifacts). */
   artifacts: ArtifactTag[];
 }
 
@@ -419,7 +443,7 @@ export function splitHeard(text: string): { heard: HeardTag[]; text: string } {
 /** Splits a reply's text into its parts. Every session is read as if it carries the current conversation rules. */
 export function parseReply(text: string): ParsedReply {
   const { artifacts, text: untagged } = splitArtifacts(text);
-  const { reply, status } = splitStatus(untagged);
+  const { reply, state } = splitState(untagged);
   const { aside, text: unaside } = stripAside(reply);
   // The tone line is the reply's first line, before or after a rewrite tag.
   const before = splitTone(unaside);
@@ -430,7 +454,7 @@ export function parseReply(text: string): ParsedReply {
   // An older reply's [speak] passage stands; any other reply's primary response is what comes before its [details] line.
   const { primary, text: body } = marked.speak !== null ? { primary: marked.speak, text: marked.text } : splitPrimary(marked.text);
 
-  return { kind: aside ? 'aside' : 'reply', rewrite: rewrite && !aside, opening: body.trim(), status, speak: aside ? null : primary, tone: before.tone ?? after.tone, heard, artifacts };
+  return { kind: aside ? 'aside' : 'reply', rewrite: rewrite && !aside, opening: body.trim(), state, speak: aside ? null : primary, tone: before.tone ?? after.tone, heard, artifacts };
 }
 
 /**
@@ -546,7 +570,7 @@ export function drawnKeyOf(text: string): string | null {
   return key === keyOf(text) ? null : key;
 }
 
-const TAG_WORDS = ['aside', 'rewrite', 'status', 'details', 'speak', '/speak', 'tone', 'artifact'];
+const TAG_WORDS = ['aside', 'rewrite', 'state', 'status', 'details', 'speak', '/speak', 'tone', 'artifact'];
 
 /**
  * Whether the text's last line ends in a tag or an HTML comment still being drawn, such as "Done. <!--as" or "[asi": read now, it would be

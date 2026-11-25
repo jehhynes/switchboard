@@ -5,21 +5,20 @@ import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
 import { questionSegments, stripQuestionMarkup } from '@switchboard/conversation/questions';
 import type { CardDraft as SharedDraft } from '@switchboard/conversation/questions';
-import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StatusView, VoiceView } from '@switchboard/protocol';
+import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StateView, VoiceView } from '@switchboard/protocol';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
 import type { DotView } from './connectionView.js';
 import { UNMEASURED } from './tabs.js';
 import type { TabFit } from './tabs.js';
 
 /** `diff` shows the open file's diff tab (`changes.tsx`), which has no fixed tab of its own. */
-export type Tab = 'conversation' | 'status' | 'artifacts' | 'console' | 'browser' | 'history' | 'diff' | 'file';
+export type Tab = 'conversation' | 'history' | 'artifacts' | 'console' | 'browser' | 'diff' | 'file';
 export const TABS: Array<{ tab: Tab; label: string; icon: string }> = [
   { tab: 'conversation', label: 'Conversation', icon: 'comment-discussion' },
-  { tab: 'status', label: 'Status', icon: 'pulse' },
+  { tab: 'history', label: 'History', icon: 'history' },
   { tab: 'artifacts', label: 'Artifacts', icon: 'files' },
   { tab: 'console', label: 'Console', icon: 'terminal' },
   { tab: 'browser', label: 'Browser', icon: 'globe' },
-  { tab: 'history', label: 'History', icon: 'history' },
 ];
 
 /** A fixed tab's codicon, by its tab. */
@@ -28,8 +27,8 @@ export function tabIcon(tab: Tab | SideTab): string {
 }
 
 /** What the column right of the conversation shows on a wide screen. */
-export type SideTab = 'status' | 'artifacts' | 'console' | 'browser' | 'history' | 'diff' | 'file';
-export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console', 'browser', 'history'];
+export type SideTab = 'history' | 'artifacts' | 'console' | 'browser' | 'diff' | 'file';
+export const SIDE_TABS: readonly SideTab[] = ['history', 'artifacts', 'console', 'browser'];
 
 /**
  * The artifacts whose tabs are closed (architecture.md § Web page): each closed at its version, until a newer version opens its tab again.
@@ -172,7 +171,7 @@ export interface View {
   sheet: Sheet | null;
   /** A row action is running, so its controls wait. */
   acting: boolean;
-  /** What the Status and Artifacts column shows on a wide screen. */
+  /** What the column right of the conversation shows on a wide screen. */
   side: SideTab;
   /** Whether the view options menu is open. */
   viewMenu: boolean;
@@ -216,7 +215,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, newDraft: null, side: 'status', viewMenu: false, details: false, briefReplies: null, tabFit: UNMEASURED, tabMenu: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, newDraft: null, side: 'history', viewMenu: false, details: false, briefReplies: null, tabFit: UNMEASURED, tabMenu: false });
 
 /** The longest menu label for a link, carried over from the retired dock; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;
@@ -316,7 +315,7 @@ export function bandOpen(key: string, bands: ReadonlyMap<string, boolean>): bool
 }
 
 /**
- * A reply's or a status's Markdown when its card draws its questions: questions that end it are left out; questions with text after them stay
+ * A reply's or a state's Markdown when its card draws its questions: questions that end it are left out; questions with text after them stay
  * in place, folded into one line, "2 questions — answer below", that opens them. `ends` is false for text a spoken passage follows, whose questions
  * all fold.
  */

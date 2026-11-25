@@ -320,7 +320,7 @@ describe('hub entry point', () => {
     const usage = await start('report', 'stage', 's1').exited;
 
     expect(usage.code).toBe(1);
-    expect(usage.stderr).toContain('report stage <sessionId> <stage>');
+    expect(usage.stderr).toContain('report stage <sessionId> <headline>');
 
     const noHub = await start('report', 'stage', 's1', 'Planning').exited;
 

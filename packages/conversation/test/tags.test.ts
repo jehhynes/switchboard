@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { drawnKeyOf, drawnLinks, endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, speechPart, splitArtifacts, splitHeard, splitPrimary, splitRewrite, splitSpeak, splitStatus, splitTone, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
+import { drawnKeyOf, drawnLinks, endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, speechPart, splitArtifacts, splitHeard, splitPrimary, splitRewrite, splitSpeak, splitState, splitTone, stateParts, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
 import { typedText } from '../src/transcript.js';
 
 describe('reply tags', () => {
@@ -13,11 +13,11 @@ describe('reply tags', () => {
   });
 
   it('parses a reply into its kind, rewrite, text and status, keeps any other bracketed word as text', () => {
-    expect(parseReply('[rewrite] Both done.\n\n- a\n- b')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\n\n- a\n- b', status: null, speak: 'Both done.\n\n- a\n- b', tone: null, heard: [], artifacts: [] });
-    expect(parseReply('Done.\n[details]\nx')).toEqual({ kind: 'reply', rewrite: false, opening: 'Done.\n\nx', status: null, speak: 'Done.', tone: null, heard: [], artifacts: [] });
-    expect(parseReply('[aside] Reading files.')).toEqual({ kind: 'aside', rewrite: false, opening: 'Reading files.', status: null, speak: null, tone: null, heard: [], artifacts: [] });
-    expect(parseReply('[rewrite] Fixed.\n\n[status]\n## Done\n- the badge')).toEqual({ kind: 'reply', rewrite: true, opening: 'Fixed.', status: '## Done\n- the badge', speak: 'Fixed.', tone: null, heard: [], artifacts: [] });
-    expect(parseReply('[status]\nAll green.')).toEqual({ kind: 'reply', rewrite: false, opening: '', status: 'All green.', speak: null, tone: null, heard: [], artifacts: [] });
+    expect(parseReply('[rewrite] Both done.\n\n- a\n- b')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\n\n- a\n- b', state: null, speak: 'Both done.\n\n- a\n- b', tone: null, heard: [], artifacts: [] });
+    expect(parseReply('Done.\n[details]\nx')).toEqual({ kind: 'reply', rewrite: false, opening: 'Done.\n\nx', state: null, speak: 'Done.', tone: null, heard: [], artifacts: [] });
+    expect(parseReply('[aside] Reading files.')).toEqual({ kind: 'aside', rewrite: false, opening: 'Reading files.', state: null, speak: null, tone: null, heard: [], artifacts: [] });
+    expect(parseReply('[rewrite] Fixed.\n\n[status]\n## Done\n- the badge')).toEqual({ kind: 'reply', rewrite: true, opening: 'Fixed.', state: { headline: 'Done', body: '- the badge' }, speak: 'Fixed.', tone: null, heard: [], artifacts: [] });
+    expect(parseReply('[state]\nAll green.')).toEqual({ kind: 'reply', rewrite: false, opening: '', state: { headline: 'All green.', body: null }, speak: null, tone: null, heard: [], artifacts: [] });
   });
 
   it('takes the primary response before a [details] line, spoken or not, and with none the whole reply', () => {
@@ -60,10 +60,10 @@ describe('reply tags', () => {
   });
 
   it('reads the [speak] passage and the tone line, and leaves their markers out of the text the view shows', () => {
-    expect(parseReply('[speak]Fixed the badge.[/speak]\n\n- one\n- two')).toEqual({ kind: 'reply', rewrite: false, opening: 'Fixed the badge.\n\n- one\n- two', status: null, speak: 'Fixed the badge.', tone: null, heard: [], artifacts: [] });
-    expect(parseReply('[tone: calm, slightly amused]\n[rewrite]\n[speak]\nBoth done.\n[/speak]\nDetails.')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\nDetails.', status: null, speak: 'Both done.', tone: 'calm, slightly amused', heard: [], artifacts: [] });
+    expect(parseReply('[speak]Fixed the badge.[/speak]\n\n- one\n- two')).toEqual({ kind: 'reply', rewrite: false, opening: 'Fixed the badge.\n\n- one\n- two', state: null, speak: 'Fixed the badge.', tone: null, heard: [], artifacts: [] });
+    expect(parseReply('[tone: calm, slightly amused]\n[rewrite]\n[speak]\nBoth done.\n[/speak]\nDetails.')).toEqual({ kind: 'reply', rewrite: true, opening: 'Both done.\nDetails.', state: null, speak: 'Both done.', tone: 'calm, slightly amused', heard: [], artifacts: [] });
     expect(parseReply('[rewrite]\n[tone: dry]\nNo.')).toMatchObject({ rewrite: true, opening: 'No.', tone: 'dry' });
-    expect(parseReply('[speak]Done.[/speak]\n[status]\nGreen.')).toMatchObject({ opening: 'Done.', status: 'Green.', speak: 'Done.' });
+    expect(parseReply('[speak]Done.[/speak]\n[status]\nGreen.')).toMatchObject({ opening: 'Done.', state: { headline: 'Green.', body: null }, speak: 'Done.' });
     // Quoted in inline code, a marker is text; one never closed marks nothing.
     expect(splitSpeak('The `[speak]` rule.')).toEqual({ speak: null, text: 'The `[speak]` rule.' });
     expect(splitSpeak('[speak]Half a passage')).toEqual({ speak: null, text: 'Half a passage' });
@@ -144,14 +144,26 @@ describe('reply tags', () => {
   });
 
   it('splits a status at its own [status] line outside fenced code, never at a quoted or indented tag', () => {
-    expect(splitStatus('Done.\n[status]\n# Where it stands\n\n- one')).toEqual({ reply: 'Done.', status: '# Where it stands\n\n- one' });
-    expect(splitStatus('Done.\n  [STATUS]  \nx')).toEqual({ reply: 'Done.', status: 'x' });
-    expect(splitStatus('Done.\n[status]\n')).toEqual({ reply: 'Done.', status: null });
-    expect(splitStatus('Write `[status]` on its own line.')).toEqual({ reply: 'Write `[status]` on its own line.', status: null });
-    expect(splitStatus('See:\n```md\n[status]\nx\n```\nend')).toEqual({ reply: 'See:\n```md\n[status]\nx\n```\nend', status: null });
-    expect(splitStatus('Code:\n    [status]\nx').status).toBeNull();
-    expect(splitStatus('[status] Done').status).toBeNull();
-    expect(splitStatus('~~~\n```\n[status]\n~~~\n[status]\nafter')).toEqual({ reply: '~~~\n```\n[status]\n~~~', status: 'after' });
+    expect(splitState('Done.\n[state]\n2/5 fixing tests\n\n- one')).toEqual({ reply: 'Done.', state: { headline: '2/5 fixing tests', body: '- one' } });
+    // [status], which earlier sessions write, is the same tag.
+    expect(splitState('Done.\n[status]\n# Where it stands\n\n- one')).toEqual({ reply: 'Done.', state: { headline: 'Where it stands', body: '- one' } });
+    expect(splitState('Done.\n  [STATE]  \nx')).toEqual({ reply: 'Done.', state: { headline: 'x', body: null } });
+    expect(splitState('Done.\n[state]\n')).toEqual({ reply: 'Done.', state: null });
+    expect(splitState('Write `[state]` on its own line.')).toEqual({ reply: 'Write `[state]` on its own line.', state: null });
+    expect(splitState('See:\n```md\n[state]\nx\n```\nend')).toEqual({ reply: 'See:\n```md\n[state]\nx\n```\nend', state: null });
+    expect(splitState('Code:\n    [state]\nx').state).toBeNull();
+    expect(splitState('[state] Done').state).toBeNull();
+    expect(splitState('[states]\nDone').state).toBeNull();
+    expect(splitState('~~~\n```\n[state]\n~~~\n[status]\nafter')).toEqual({ reply: '~~~\n```\n[state]\n~~~', state: { headline: 'after', body: null } });
+  });
+
+  it("takes a state's first non-empty line, without leading Markdown marks, as its headline and the rest as its body", () => {
+    expect(stateParts('\n\n## **Reviewing** the plan\n\nBody.')).toEqual({ headline: 'Reviewing the plan', body: 'Body.' });
+    expect(stateParts('- **3/4 verifying**\n  - sub')).toEqual({ headline: '3/4 verifying', body: '- sub' });
+    expect(stateParts('> quoted')).toEqual({ headline: 'quoted', body: null });
+    // A line of marks alone stays as written rather than empty.
+    expect(stateParts('***\nrest')).toEqual({ headline: '***', body: 'rest' });
+    expect(stateParts('  \n ')).toBeNull();
   });
 
   it('keys copies by letters and digits, without the rewrite tag, and a reply with none by its other characters', () => {
@@ -208,7 +220,7 @@ describe('artifact tags', () => {
       { path: 'plans/a plan.md', title: 'The plan', kind: 'plan' },
       { path: 'C:/x y/z.html', title: null, kind: 'page' },
     ]);
-    expect(parseReply(text)).toMatchObject({ opening: 'Report written.\nNext.', status: 'Working.', artifacts: [{ path: 'D:/git/research/topic/2026-11-23/report/summary.md' }, { path: 'plans/a plan.md' }, { path: 'C:/x y/z.html' }] });
+    expect(parseReply(text)).toMatchObject({ opening: 'Report written.\nNext.', state: { headline: 'Working.', body: null }, artifacts: [{ path: 'D:/git/research/topic/2026-11-23/report/summary.md' }, { path: 'plans/a plan.md' }, { path: 'C:/x y/z.html' }] });
   });
 
   it('leaves a tag in a fenced or indented code block, in inline code or inside a sentence as text, and one with no path', () => {

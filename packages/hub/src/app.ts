@@ -60,6 +60,9 @@ export const PHONE_LOST_NOTE = 'Voice stopped unexpectedly on the paired device.
 /** Operator events a page's row controls may post (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
 
+/** What a spoken alert reads of a state when the reply has no text: its body, else its headline. */
+const stateText = (state: { headline: string; body: string | null } | null): string | null => (state === null ? null : (state.body ?? state.headline));
+
 const REPORT_KINDS = new Set(['stage', 'worktree', 'done', 'approval', 'link', 'playbook', 'paste', 'task', 'question']);
 
 /** A link target: an http(s) URL (PRD R52). */
@@ -517,7 +520,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const current = card === null ? null : currentStep(card, conversation.drafts(sessionId).get(card.key));
       const questions = current === null ? null : { count: ledger.open.length, first: questionSpeech(current.question, 1, 1) };
 
-      return { title: store.ticket(item.ticketId)?.title ?? '', detail: alertDetail(cause, session.state === 'waiting', reply, store.latestStatus(sessionId)?.markdown ?? null, questions) };
+      return { title: store.ticket(item.ticketId)?.title ?? '', detail: alertDetail(cause, session.state === 'waiting', reply, stateText(store.latestState(sessionId)), questions) };
     },
     replyChanged: (replyId) => conversation.replyUpdated(replyId),
     notify: (key, type, payload) => conversation.notify(key, type, payload),
@@ -813,6 +816,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       voice.update();
     },
+    stateAdded: () => builder.schedule(),
     // Give an unnamed interactive conversation a short label until its provider names it.
     messageAdded: (workItemId, text) => {
       const item = store.workItem(workItemId);
@@ -1162,7 +1166,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/v1/conversation/select': async (body) => (isRecord(body) ? conversation.select(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId}.' } }),
       '/v1/conversation/page-new-session': async (body) => (isRecord(body) ? conversation.newSession(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider, model?, prompt?, run?}.' } }),
       '/v1/conversation/page-folders': async (body) => (isRecord(body) ? conversation.pageFolders(body) : { status: 400, body: { error: 'Expected {window, path?}.' } }),
-      '/v1/conversation/statuses': async (body) => (isRecord(body) ? conversation.statuses(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
+      '/v1/conversation/states': async (body) => (isRecord(body) ? conversation.states(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/commands': async (body) => (isRecord(body) ? conversation.commands(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/talk-here': async (body) => (isRecord(body) ? conversation.voiceCommand('talk-here', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/stop-speaking': async (body) => (isRecord(body) ? conversation.voiceCommand('stop-speaking', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),

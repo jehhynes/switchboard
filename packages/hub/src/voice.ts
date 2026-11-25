@@ -176,16 +176,16 @@ export function alertKind(session: Pick<Session, 'state' | 'stateDetail'>): Aler
 
 /**
  * What an answered alert reads: a permission prompt or a question menu waits in the session's terminal, which the hub cannot read; otherwise the
- * latest reply's primary response, else its text, else the latest status, as speech without Markdown, cut at a sentence to `ALERT_DETAIL_MAX`.
+ * latest reply's primary response, else its text, else the latest state, as speech without Markdown, cut at a sentence to `ALERT_DETAIL_MAX`.
  */
-export function alertDetail(cause: AlertCause, inTerminal: boolean, reply: { speak: string | null; opening: string } | null, status: string | null, questions: { count: number; first: string } | null = null): string {
-  const base = alertText(cause, inTerminal, reply, status);
+export function alertDetail(cause: AlertCause, inTerminal: boolean, reply: { speak: string | null; opening: string } | null, state: string | null, questions: { count: number; first: string } | null = null): string {
+  const base = alertText(cause, inTerminal, reply, state);
 
   // A session idle on open questions reads its passage, then how many questions it has and the current one only (design § 7).
   return questions === null || questions.count === 0 || cause === 'permission' || inTerminal ? base : `${base} It has ${questions.count === 1 ? 'one question' : `${questions.count} questions`}; ${questions.count === 1 ? 'it is' : 'the first'}: ${questions.first}`;
 }
 
-function alertText(cause: AlertCause, inTerminal: boolean, reply: { speak: string | null; opening: string } | null, status: string | null): string {
+function alertText(cause: AlertCause, inTerminal: boolean, reply: { speak: string | null; opening: string } | null, state: string | null): string {
   if (cause === 'permission') {
     return 'It is waiting for your permission in its terminal.';
   }
@@ -194,10 +194,10 @@ function alertText(cause: AlertCause, inTerminal: boolean, reply: { speak: strin
     return 'It is waiting for your answer in its terminal.';
   }
 
-  // The part of the primary response the voice would read, else the reply's text, else the status.
+  // The part of the primary response the voice would read, else the reply's text, else the state.
   const primary = reply?.speak == null ? '' : speechOf(reply.speak);
   const opening = reply === null ? '' : stripQuestionMarkup(reply.opening).trim();
-  const text = spokenText(primary !== '' ? primary : opening !== '' ? opening : (status ?? ''))
+  const text = spokenText(primary !== '' ? primary : opening !== '' ? opening : (state ?? ''))
     .replace(/\s+/g, ' ')
     .trim();
 

@@ -43,13 +43,15 @@ describe('the route', () => {
     expect(parseRoute(link)).toMatchObject({ w: 3, t: 'link', u: 'https://github.com/o/r/pull/5?x=1#y' });
     expect(parseRoute('#w=3&t=browser')).toMatchObject({ w: 3, t: 'link', u: null });
     // The URL belongs to the link tab only.
-    expect(routeHash({ w: 3, t: 'status', u: 'https://example.com/' })).toBe('#w=3&t=status');
-    expect(parseRoute('#w=3&t=status&u=https%3A%2F%2Fexample.com%2F').u).toBeNull();
+    expect(routeHash({ w: 3, t: 'history', u: 'https://example.com/' })).toBe('#w=3&t=history');
+    expect(parseRoute('#w=3&t=history&u=https%3A%2F%2Fexample.com%2F').u).toBeNull();
+    // An address from before History took the Status tab's place opens History.
+    expect(parseRoute('#w=3&t=status')).toMatchObject({ w: 3, t: 'history' });
   });
 
   it("starts on the address's route, or with none in it on the one this device kept, as an installed app started again at its start URL", () => {
     expect(startRoute('#w=3', '#w=9&t=status')).toMatchObject({ w: 3, t: null });
-    expect(startRoute('', '#w=9&t=status')).toMatchObject({ w: 9, t: 'status' });
+    expect(startRoute('', '#w=9&t=status')).toMatchObject({ w: 9, t: 'history' });
     expect(startRoute('#h=4&hk=k', '#w=9')).toMatchObject({ w: null, h: { ticketId: 4, key: 'k' } });
     expect(startRoute('', null)).toMatchObject({ w: null, t: null });
     expect(startRoute('', '#')).toMatchObject({ w: null, t: null });
@@ -91,8 +93,13 @@ describe('the route', () => {
     expect(Object.keys(sets)[0]).toBe('w6');
     expect(parseTabSets(JSON.stringify(sets))).toEqual(sets);
     expect(parseTabSets(JSON.stringify({ w1: set, w2: { ...set, file: 2 }, w3: { ...set, files: [{ target: 1, line: null }] }, w4: { ...set, changes: 'yes' }, '5': set, w6: null }))).toEqual({ w1: set });
-    // Whether History is open: a boolean, or absent in a set kept before it could close.
-    expect(parseTabSets(JSON.stringify({ w1: { ...set, history: true }, w2: { ...set, history: false }, w3: set, w4: { ...set, history: 'yes' } }))).toEqual({ w1: { ...set, history: true }, w2: { ...set, history: false }, w3: set });
+    // A set kept while History could close drops whether it was open, and one that named Status names History, which a set naming History keeps.
+    expect(parseTabSets(JSON.stringify({ w1: { ...set, history: true }, w2: { ...set, history: 'yes' }, w3: { ...set, side: 'status', tab: 'status' }, w4: { ...set, side: 'history', tab: 'history' } }))).toEqual({
+      w1: set,
+      w2: set,
+      w3: { ...set, side: 'history', tab: 'history' },
+      w4: { ...set, side: 'history', tab: 'history' },
+    });
     // The link tabs: those open with their names, the closed ones and the one selected.
     const links = { open: [{ url: 'https://github.com/o/r/pull/7', name: 'PR #7' }], closed: ['https://github.com/o/r/issues/1'], selected: 'https://github.com/o/r/pull/7' };
 

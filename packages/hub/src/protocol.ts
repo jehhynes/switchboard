@@ -6,7 +6,7 @@
 import type { ScreenPrompt } from '@switchboard/conversation';
 import type * as Page from '@switchboard/protocol';
 import type { NativeRequest } from './conversationAdapter.js';
-import type { ArtifactView, ConversationEntry, MessageView, ReplyView, ScopeView, SessionView, StatusView } from './conversation.js';
+import type { ArtifactView, ConversationEntry, MessageView, ReplyView, ScopeView, SessionView, StateView } from './conversation.js';
 import type { DockSourceGroup } from './dock.js';
 import type { CATEGORIES, Entry, HistoryView, Section } from './history.js';
 import type { PageAction, PageHeader, PageListGroup, PageRow } from './page.js';
@@ -23,7 +23,7 @@ export type PageProtocolChecks = [
   Carries<ScopeView, Page.ScopeView>,
   Carries<MessageView, Page.MessageView>,
   Carries<ReplyView, Page.ReplyView>,
-  Carries<StatusView, Page.StatusView>,
+  Carries<StateView, Page.StateView>,
   Carries<ArtifactView, Page.ArtifactView>,
   Carries<VoiceView, Page.VoiceView>,
   Carries<PageRow, Page.PageRow>,

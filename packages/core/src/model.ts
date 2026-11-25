@@ -96,8 +96,6 @@ export interface WorkItem {
   /** Null for an ad-hoc work item and before triage chooses one. */
   playbook: string | null;
   status: WorkItemStatus;
-  stage: string | null;
-  stageAt: number | null;
   /** The prompt the latest task session ran, or the typed prompt of an ad-hoc work item. */
   taskPrompt: string | null;
   /** The operator's guidance from Start, added to the next task session's prompt and cleared when that session starts (PRD R77). */
@@ -205,6 +203,8 @@ export interface Session {
   cwd: string;
   state: SessionState;
   stateAt: number;
+  /** When the current or last turn began: set when the session is inserted, resumed or starts a turn after one ended; null before this was kept. */
+  turnAt?: number | null;
   /** Error kind of a `failed` turn, or `START_PROMPT` or `PERMISSION_PROMPT` for a `waiting` one. */
   stateDetail: string | null;
   outcome: SessionOutcome | null;

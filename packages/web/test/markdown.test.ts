@@ -45,7 +45,7 @@ describe('GitHub-flavoured Markdown', () => {
   it('typesets the Status tab, an artifact and a file as one Markdown document, with no Status rules of its own but the stage dimmed', () => {
     expect(rule('.body.md-doc')).toBe('.body.md-doc { font-size: 15px; line-height: 1.55; }');
     expect(css).not.toMatch(/\.body\.artifact-doc (?!pre\.artifact-text)/);
-    expect(css.match(/^[^\n{]*\.status-body[^\n{]*\{[^}]*\}/gm)).toEqual(['.status-tab.fallback .status-body { color: var(--vscode-descriptionForeground); }']);
+    expect(css.match(/^[^\n{]*\.state-body[^\n{]*\{[^}]*\}/gm)).toEqual(['.state-view.stale .state-headline, .state-view.stale .state-body { color: var(--vscode-descriptionForeground); }']);
   });
 
   it('draws <details> with its <summary> as a disclosure, its body as Markdown, nested and open', () => {

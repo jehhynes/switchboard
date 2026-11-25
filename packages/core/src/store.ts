@@ -1,8 +1,8 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 import { ownPrompt } from './group.js';
-import { CONVERSATION_RETENTION } from './conversation.js';
-import type { ConversationMessage, ConversationReply, ConversationStatus, MessageAnswer, Piece, TranscriptCheckpoint } from './conversation.js';
+import { CONVERSATION_RETENTION, TURN_SLACK_MS, TURN_STATES } from './conversation.js';
+import type { ConversationMessage, ConversationReply, ConversationState, MessageAnswer, Piece, TranscriptCheckpoint } from './conversation.js';
 
 export const MIGRATIONS = [
   `CREATE TABLE tickets (
@@ -403,7 +403,7 @@ export const MIGRATIONS = [
   ALTER TABLE messages ADD COLUMN opId TEXT;
   ALTER TABLE messages ADD COLUMN pastedAt INTEGER;
   CREATE INDEX messagesByOpId ON messages (opId);`,
-  // Statuses a Code Mode session posted (architecture.md § Statuses), in the order they were read.
+  // Statuses a Code Mode session posted, in the order they were read; states replaced them (architecture.md § States).
   `CREATE TABLE statuses (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
@@ -482,7 +482,7 @@ export const MIGRATIONS = [
     tab TEXT,
     closed TEXT NOT NULL DEFAULT '[]'
   );`,
-  // The web page's choices that hold for every work item, such as Status or Browser to open on (architecture.md § Web page).
+  // The web page's choices that hold for every work item, such as History or Browser to open on (architecture.md § Web page).
   `CREATE TABLE pagePrefs (name TEXT PRIMARY KEY, value TEXT NOT NULL);`,
   // The web page's viewed ticks (architecture.md § Web page): a changed file a work item's operator marked viewed, at the content it had then.
   `CREATE TABLE viewedFiles (
@@ -564,6 +564,38 @@ export const MIGRATIONS = [
   );`,
   // Window bindings served only VS Code windows. A hosted conversation keeps `tickets.hostWindow`, from which Open in VS Code finds its window.
   `DROP TABLE windowBindings;`,
+  // States (architecture.md § States) replace statuses and the work item's stage. A status's first line becomes its headline and the rest its body,
+  // in read order. A stage newer than its work item's newest status is kept with no session, since its writer was not recorded. Every copied
+  // state is turn-ended: the hub was down, so no turn can be established. `turnAt`: when a session's current turn began.
+  `CREATE TABLE states (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    sessionId TEXT,
+    workItemId INTEGER,
+    replyId TEXT,
+    at INTEGER NOT NULL,
+    headline TEXT NOT NULL,
+    body TEXT,
+    turnEnded INTEGER NOT NULL DEFAULT 0,
+    seenAt INTEGER
+  );
+  CREATE INDEX statesBySession ON states (sessionId, seq);
+  CREATE INDEX statesByWorkItem ON states (workItemId, seq);
+  WITH s AS (SELECT seq, id, sessionId, workItemId, replyId, at, seenAt, ltrim(markdown, char(9, 10, 13, 32)) AS md FROM statuses),
+    l AS (SELECT *, instr(md, char(10)) AS nl FROM s),
+    f AS (SELECT *, rtrim(CASE WHEN nl > 0 THEN substr(md, 1, nl - 1) ELSE md END, char(9, 13, 32)) AS line FROM l)
+  INSERT INTO states (id, sessionId, workItemId, replyId, at, headline, body, turnEnded, seenAt)
+    SELECT id, sessionId, workItemId, replyId, at, COALESCE(NULLIF(trim(rtrim(ltrim(line, '#*-+>_ '), '*_ ')), ''), line),
+      CASE WHEN nl > 0 THEN NULLIF(trim(substr(md, nl + 1), char(9, 10, 13, 32)), '') ELSE NULL END, 1, seenAt
+    FROM f ORDER BY seq;
+  INSERT INTO states (id, sessionId, workItemId, replyId, at, headline, body, turnEnded, seenAt)
+    SELECT 'stage-' || id, NULL, id, NULL, COALESCE(stageAt, statusAt), trim(stage), NULL, 1, COALESCE(stageAt, statusAt) FROM workItems
+    WHERE trim(COALESCE(stage, '')) <> '' AND COALESCE(stageAt, statusAt) > COALESCE((SELECT MAX(at) FROM statuses WHERE statuses.workItemId = workItems.id), -1)
+    ORDER BY COALESCE(stageAt, statusAt), id;
+  DROP TABLE statuses;
+  ALTER TABLE workItems DROP COLUMN stage;
+  ALTER TABLE workItems DROP COLUMN stageAt;
+  ALTER TABLE sessions ADD COLUMN turnAt INTEGER;`,
 ];
 
 /**
@@ -775,14 +807,14 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The snooze event's detail holds its comment (PRD R49).
   tickets: new Set(['lastPolledAt', 'sortAt', 'scopeAt', 'snoozeComment']),
   // The start or pick event's detail holds the guidance (PRD R77).
-  workItems: new Set(['statusAt', 'runStartedAt', 'stageAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt', 'guidance', 'reportedPrompt']),
+  workItems: new Set(['statusAt', 'runStartedAt', 'scopeAt', 'queuedAt', 'readyAt', 'orderAt', 'guidance', 'reportedPrompt']),
   // The question report's event names the question; its ID and its clearing are bookkeeping. A fork's nativeSessionId change names what it retired.
   // The register event names an external session, and its end already shows when it was cleared.
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
   // The session-started event names a Code Mode session; its launch and last process tree are bookkeeping (PRD R93, R95).
   // The register event names a registered session, and the resume that holds it says whether it runs without Code Mode (PRD R81).
   // The persona event names a pin; the version of the tone section a prompt got is bookkeeping (architecture.md § Personas).
-  sessions: new Set(['stateAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned', 'instructionsHash', 'instructionsCompactionId', 'rateLimit', 'registered', 'withoutCodeMode']),
+  sessions: new Set(['stateAt', 'turnAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned', 'instructionsHash', 'instructionsCompactionId', 'rateLimit', 'registered', 'withoutCodeMode']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),
@@ -1205,7 +1237,7 @@ export class Store {
     this.#db.prepare('DELETE FROM messages WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM replies WHERE workItemId = ?').run(id);
     this.#revisionEpoch++;
-    this.#db.prepare('DELETE FROM statuses WHERE workItemId = ?').run(id);
+    this.#db.prepare('DELETE FROM states WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM sessions WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM pastes WHERE workItemId = ?').run(id);
     this.#db.prepare('DELETE FROM comments WHERE workItemId = ?').run(id);
@@ -1411,8 +1443,13 @@ export class Store {
     this.#insert('sessions', session as unknown as Row);
   }
 
+  /** A session that leaves its turn, by a turn end or its end, ends its states' turn (architecture.md § States). */
   updateSession(id: string, patch: Partial<Omit<Session, 'id'>>): void {
     this.#update('sessions', id, patch);
+
+    if (patch.state !== undefined && !TURN_STATES.includes(patch.state)) {
+      this.#db.prepare('UPDATE states SET turnEnded = 1 WHERE sessionId = ? AND turnEnded = 0').run(id);
+    }
   }
 
   session(id: string): Session | null {
@@ -1742,51 +1779,79 @@ export class Store {
   }
 
   /**
-   * Adds a session's status, or updates the one with its ID in place, keeping its place; keeps the newest `CONVERSATION_RETENTION` statuses of
-   * the session.
+   * Adds a state, or updates the one with its ID in place, keeping its place; keeps the newest `CONVERSATION_RETENTION` states of the session.
+   * Only a body marks a state unread (architecture.md § Unread): a new state whose body is not null and differs from the session's latest body,
+   * or an update that changes its body to another one; any other new state is stored seen, and an update keeps its `seenAt`. A state stored
+   * while its session is not in a turn, or written more than `TURN_SLACK_MS` before the session's current turn began, is turn-ended: its turn
+   * cannot be established, so it never reads as current. An update keeps `turnEnded`.
    */
-  setStatus(status: Omit<ConversationStatus, 'seenAt'>): void {
+  setState(state: Omit<ConversationState, 'seenAt' | 'turnEnded'>): void {
+    const stored = this.state(state.id);
+
+    if (stored !== null) {
+      const unread = state.body !== null && state.body !== stored.body;
+
+      this.#db
+        .prepare('UPDATE states SET at = ?, headline = ?, body = ?, seenAt = ? WHERE id = ?')
+        .run(state.at, state.headline, state.body, unread ? null : stored.seenAt, state.id);
+      return;
+    }
+
+    const session = state.sessionId === null ? null : this.session(state.sessionId);
+    // The body the operator last had to read: a headline-only state between keeps it.
+    const previous = state.sessionId === null ? null : (this.#db.prepare('SELECT body FROM states WHERE sessionId = ? AND body IS NOT NULL ORDER BY seq DESC LIMIT 1').get(state.sessionId) as { body: string } | undefined);
+    const unread = state.body !== null && state.body !== (previous?.body ?? null);
+    const inTurn = session !== null && TURN_STATES.includes(session.state) && state.at >= (session.turnAt ?? -Infinity) - TURN_SLACK_MS;
+
     this.#db
-      .prepare('INSERT INTO statuses (id, sessionId, workItemId, replyId, at, markdown) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET at = excluded.at, markdown = excluded.markdown')
-      .run(status.id, status.sessionId, status.workItemId, status.replyId, status.at, status.markdown);
-    this.#db
-      .prepare('DELETE FROM statuses WHERE sessionId = :id AND seq < (SELECT MIN(seq) FROM (SELECT seq FROM statuses WHERE sessionId = :id ORDER BY seq DESC LIMIT :keep))')
-      .run({ id: status.sessionId, keep: CONVERSATION_RETENTION });
+      .prepare('INSERT INTO states (id, sessionId, workItemId, replyId, at, headline, body, turnEnded, seenAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(state.id, state.sessionId, state.workItemId, state.replyId, state.at, state.headline, state.body, inTurn ? 0 : 1, unread ? null : state.at);
+
+    if (state.sessionId !== null) {
+      this.#db
+        .prepare('DELETE FROM states WHERE sessionId = :id AND seq < (SELECT MIN(seq) FROM (SELECT seq FROM states WHERE sessionId = :id ORDER BY seq DESC LIMIT :keep))')
+        .run({ id: state.sessionId, keep: CONVERSATION_RETENTION });
+    }
   }
 
-  status(id: string): ConversationStatus | null {
-    return this.#statusRows('SELECT * FROM statuses WHERE id = ?', id)[0] ?? null;
+  state(id: string): ConversationState | null {
+    return this.#stateRows('SELECT * FROM states WHERE id = ?', id)[0] ?? null;
   }
 
-  /** A session's newest status; null before its first. */
-  latestStatus(sessionId: string): ConversationStatus | null {
-    return this.#statusRows('SELECT * FROM statuses WHERE sessionId = ? ORDER BY seq DESC LIMIT 1', sessionId)[0] ?? null;
+  /** A session's newest state; null before its first. */
+  latestState(sessionId: string): ConversationState | null {
+    return this.#stateRows('SELECT * FROM states WHERE sessionId = ? ORDER BY seq DESC LIMIT 1', sessionId)[0] ?? null;
+  }
+
+  /** A work item's newest state, from any of its sessions or the migration; null with none. */
+  workItemState(workItemId: number): ConversationState | null {
+    return this.#stateRows('SELECT * FROM states WHERE workItemId = ? ORDER BY seq DESC LIMIT 1', workItemId)[0] ?? null;
   }
 
   /**
-   * A session's statuses, newest first, at most `limit` of those before the status `before` (its ID, or null for the newest), and whether there are
-   * older ones; a status that is gone, or another session's, has none before it.
+   * A session's states, newest first, at most `limit` of those before the state `before` (its ID, or null for the newest), and whether there are
+   * older ones; a state that is gone, or another session's, has none before it.
    */
-  statuses(sessionId: string, before: string | null, limit: number): { statuses: ConversationStatus[]; more: boolean } {
-    const cursor = before === null ? Number.MAX_SAFE_INTEGER : (this.#db.prepare('SELECT seq FROM statuses WHERE id = ? AND sessionId = ?').get(before, sessionId) as { seq: number } | undefined)?.seq;
+  states(sessionId: string, before: string | null, limit: number): { states: ConversationState[]; more: boolean } {
+    const cursor = before === null ? Number.MAX_SAFE_INTEGER : (this.#db.prepare('SELECT seq FROM states WHERE id = ? AND sessionId = ?').get(before, sessionId) as { seq: number } | undefined)?.seq;
 
     if (cursor === undefined) {
-      return { statuses: [], more: false };
+      return { states: [], more: false };
     }
 
-    const rows = this.#statusRows('SELECT * FROM statuses WHERE sessionId = ? AND seq < ? ORDER BY seq DESC LIMIT ?', sessionId, cursor, limit + 1);
+    const rows = this.#stateRows('SELECT * FROM states WHERE sessionId = ? AND seq < ? ORDER BY seq DESC LIMIT ?', sessionId, cursor, limit + 1);
 
-    return { statuses: rows.slice(0, limit), more: rows.length > limit };
+    return { states: rows.slice(0, limit), more: rows.length > limit };
   }
 
   /**
    * How many items of a session are unread (architecture.md § Unread): its replies that `countsUnread` and that were not seen, and its latest
-   * status when it was not seen.
+   * state when it was not seen.
    */
   unreadCount(sessionId: string): number {
     const row = this.#db
       .prepare(
-        `SELECT (SELECT COUNT(*) FROM replies WHERE sessionId = :id AND ${UNREAD_REPLY}) + COALESCE((SELECT seenAt IS NULL FROM statuses WHERE sessionId = :id ORDER BY seq DESC LIMIT 1), 0) AS unread`,
+        `SELECT (SELECT COUNT(*) FROM replies WHERE sessionId = :id AND ${UNREAD_REPLY}) + COALESCE((SELECT seenAt IS NULL FROM states WHERE sessionId = :id ORDER BY seq DESC LIMIT 1), 0) AS unread`,
       )
       .get({ id: sessionId }) as { unread: number };
 
@@ -1794,23 +1859,23 @@ export class Store {
   }
 
   /**
-   * Marks a session's replies and statuses seen at `at`, each on its own; one already seen keeps its time. Returns the IDs it marked, or null, marking
-   * nothing, when an ID is not a reply or status of the session.
+   * Marks a session's replies and states seen at `at`, each on its own; one already seen keeps its time. Returns the IDs it marked, or null, marking
+   * nothing, when an ID is not a reply or state of the session.
    */
-  markSeen(sessionId: string, ids: readonly string[], at: number): { replies: string[]; statuses: string[] } | null {
+  markSeen(sessionId: string, ids: readonly string[], at: number): { replies: string[]; states: string[] } | null {
     const wanted = [...new Set(ids)];
-    const known = (table: 'replies' | 'statuses'): Array<{ id: string; seenAt: number | null }> =>
+    const known = (table: 'replies' | 'states'): Array<{ id: string; seenAt: number | null }> =>
       wanted.length === 0 ? [] : (this.#db.prepare(`SELECT id, seenAt FROM ${table} WHERE sessionId = ? AND id IN (${wanted.map(() => '?').join(', ')})`).all(sessionId, ...wanted) as Array<{ id: string; seenAt: number | null }>);
     const replies = known('replies');
-    const statuses = known('statuses');
+    const states = known('states');
 
-    if (replies.length + statuses.length !== wanted.length) {
+    if (replies.length + states.length !== wanted.length) {
       return null;
     }
 
-    const marked = { replies: replies.filter((one) => one.seenAt === null).map((one) => one.id), statuses: statuses.filter((one) => one.seenAt === null).map((one) => one.id) };
+    const marked = { replies: replies.filter((one) => one.seenAt === null).map((one) => one.id), states: states.filter((one) => one.seenAt === null).map((one) => one.id) };
 
-    for (const [table, list] of [['replies', marked.replies], ['statuses', marked.statuses]] as const) {
+    for (const [table, list] of [['replies', marked.replies], ['states', marked.states]] as const) {
       for (const id of list) {
         this.#db.prepare(`UPDATE ${table} SET seenAt = ? WHERE id = ? AND seenAt IS NULL`).run(at, id);
       }
@@ -1819,8 +1884,8 @@ export class Store {
     return marked;
   }
 
-  #statusRows(sql: string, ...params: SQLInputValue[]): ConversationStatus[] {
-    return (this.#db.prepare(sql).all(...params) as unknown as Array<ConversationStatus & { seq: number }>).map(({ seq: _seq, ...status }) => status);
+  #stateRows(sql: string, ...params: SQLInputValue[]): ConversationState[] {
+    return (this.#db.prepare(sql).all(...params) as unknown as Array<Omit<ConversationState, 'turnEnded'> & { seq: number; turnEnded: number }>).map(({ seq: _seq, turnEnded, ...state }) => ({ ...state, turnEnded: turnEnded === 1 }));
   }
 
   /** A remembered web page sign-in by its cookie's hash (architecture.md § Web page), or null. */

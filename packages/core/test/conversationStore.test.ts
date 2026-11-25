@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CONVERSATION_RETENTION, MIGRATIONS, Store } from '../src/index.js';
+import { CONVERSATION_RETENTION, MIGRATIONS, Store, TURN_SLACK_MS } from '../src/index.js';
 import type { ConversationReply } from '../src/index.js';
 
 const dirs: string[] = [];
@@ -149,32 +149,70 @@ describe('conversation store', () => {
 
   it("keeps a session's statuses in the order read, updates one in place, pages them newest first and keeps the newest CONVERSATION_RETENTION", () => {
     const store = Store.open(':memory:');
-    const status = (id: string, sessionId = 's1', markdown = id) => store.setStatus({ id, sessionId, workItemId: 1, replyId: `r-${id}`, at: 10, markdown });
+    const state = (id: string, sessionId = 's1', body: string | null = id) => store.setState({ id, sessionId, workItemId: 1, replyId: `r-${id}`, at: 10, headline: `h-${id}`, body });
 
-    expect(store.latestStatus('s1')).toBeNull();
-    status('a');
-    status('b');
-    status('other', 's2');
-    status('c');
-    // A later line of the same reply updates its status and keeps its place.
-    status('a', 's1', 'a, longer');
+    expect(store.latestState('s1')).toBeNull();
+    state('a');
+    state('b');
+    state('other', 's2');
+    state('c');
+    // A later line of the same reply updates its state and keeps its place.
+    state('a', 's1', 'a, longer');
 
-    expect(store.status('a')).toEqual({ id: 'a', sessionId: 's1', workItemId: 1, replyId: 'r-a', at: 10, markdown: 'a, longer', seenAt: null });
-    expect(store.latestStatus('s1')?.id).toBe('c');
-    expect(store.statuses('s1', null, 2)).toMatchObject({ statuses: [{ id: 'c' }, { id: 'b' }], more: true });
-    expect(store.statuses('s1', 'b', 5)).toMatchObject({ statuses: [{ id: 'a' }], more: false });
+    // No session row: its turn cannot be established, so the state is stored turn-ended.
+    expect(store.state('a')).toEqual({ id: 'a', sessionId: 's1', workItemId: 1, replyId: 'r-a', at: 10, headline: 'h-a', body: 'a, longer', turnEnded: true, seenAt: null });
+    expect(store.latestState('s1')?.id).toBe('c');
+    expect(store.workItemState(1)?.id).toBe('c');
+    expect(store.workItemState(2)).toBeNull();
+    expect(store.states('s1', null, 2)).toMatchObject({ states: [{ id: 'c' }, { id: 'b' }], more: true });
+    expect(store.states('s1', 'b', 5)).toMatchObject({ states: [{ id: 'a' }], more: false });
     // A cursor that is gone, or another session's, has nothing before it.
-    expect(store.statuses('s1', 'gone', 5)).toEqual({ statuses: [], more: false });
-    expect(store.statuses('s1', 'other', 5)).toEqual({ statuses: [], more: false });
+    expect(store.states('s1', 'gone', 5)).toEqual({ states: [], more: false });
+    expect(store.states('s1', 'other', 5)).toEqual({ states: [], more: false });
 
     for (let index = 0; index < CONVERSATION_RETENTION; index++) {
-      status(`n${index}`);
+      state(`n${index}`);
     }
 
-    expect(store.status('c')).toBeNull();
-    expect(store.status('n0')).not.toBeNull();
-    expect(store.status('other')).not.toBeNull();
-    expect(store.statuses('s1', null, CONVERSATION_RETENTION + 5).statuses).toHaveLength(CONVERSATION_RETENTION);
+    expect(store.state('c')).toBeNull();
+    expect(store.state('n0')).not.toBeNull();
+    expect(store.state('other')).not.toBeNull();
+    expect(store.states('s1', null, CONVERSATION_RETENTION + 5).states).toHaveLength(CONVERSATION_RETENTION);
+  });
+
+  it("stores a state current only during its session's turn, and ends it when the turn or the session ends", () => {
+    const store = Store.open(':memory:');
+    const ticket = store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 't', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' } as never);
+    const item = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: 0 } as never);
+    const session = (id: string, state: 'running' | 'idle' | 'waiting', turnAt: number | null) =>
+      store.insertSession({ id, workItemId: item.id, kind: 'task', provider: 'claude', nativeSessionId: null, shortId: null, cwd: 'D:/w', state, stateAt: 0, turnAt, stateDetail: null, outcome: null, outcomeDetail: null, startedAt: 0, endedAt: null, released: false, releasing: false, question: null, reports: [], retiredIds: [], pendingFork: null, external: false, move: null, movedAt: null });
+    const state = (id: string, sessionId: string, at: number) => store.setState({ id, sessionId, workItemId: item.id, replyId: null, at, headline: id, body: null });
+
+    session('run', 'running', 100_000);
+    session('idle', 'idle', 100_000);
+    session('wait', 'waiting', null);
+    state('now', 'run', 100_000);
+    // Codex history gives a turn's whole second, so a little before the turn began still counts as the turn's.
+    state('slack', 'run', 100_000 - TURN_SLACK_MS);
+    // Replayed from an earlier turn.
+    state('older', 'run', 100_000 - TURN_SLACK_MS - 1);
+    state('late', 'idle', 200_000);
+    state('waiting', 'wait', 1);
+
+    expect([store.state('now'), store.state('slack'), store.state('older'), store.state('late'), store.state('waiting')].map((one) => one?.turnEnded)).toEqual([false, false, true, true, false]);
+
+    // A move between running and waiting is the same turn; the turn's end ends every state of the session, and only that session's.
+    store.updateSession('run', { state: 'waiting' });
+    expect(store.state('now')?.turnEnded).toBe(false);
+    store.updateSession('run', { state: 'idle' });
+    expect(store.state('now')?.turnEnded).toBe(true);
+    expect(store.state('waiting')?.turnEnded).toBe(false);
+    store.updateSession('wait', { state: 'ended' });
+    expect(store.state('waiting')?.turnEnded).toBe(true);
+
+    // An update in place keeps its turn ended.
+    state('now', 'run', 100_000);
+    expect(store.state('now')?.turnEnded).toBe(true);
   });
 
   it('lists messages and replies in the order they were added, whatever their times, and pages older ones', () => {
@@ -294,14 +332,16 @@ describe('conversation store', () => {
     store.addReply(reply('r1', 1, { workItemId: item.id }));
     store.addMessage({ id: 'm1', sessionId: 's1', workItemId: item.id, at: 1, origin: 'terminal', text: 'x', transcriptUuid: null, provisional: false, withdrawn: false, delivery: null, error: null, opId: null, pastedAt: null });
     store.setCheckpoint({ sessionId: 's1', transcript: 'a', offset: 1, lastUuid: null, lastAt: null });
-    store.setStatus({ id: 'st1', sessionId: 's1', workItemId: item.id, replyId: 'r1', at: 1, markdown: 'x' });
-    store.setStatus({ id: 'st2', sessionId: 's9', workItemId: item.id + 1, replyId: 'r9', at: 1, markdown: 'y' });
+    store.setState({ id: 'st1', sessionId: 's1', workItemId: item.id, replyId: 'r1', at: 1, headline: 'x', body: null });
+    store.setState({ id: 'stage-1', sessionId: null, workItemId: item.id, replyId: null, at: 1, headline: 'x', body: null });
+    store.setState({ id: 'st2', sessionId: 's9', workItemId: item.id + 1, replyId: 'r9', at: 1, headline: 'y', body: null });
     store.deleteWorkItem(item.id);
 
     expect(store.conversation('s1', null, 10).items).toEqual([]);
     expect(store.checkpoint('s1')).toBeNull();
-    expect(store.latestStatus('s1')).toBeNull();
-    expect(store.latestStatus('s9')?.id).toBe('st2');
+    expect(store.latestState('s1')).toBeNull();
+    expect(store.state('stage-1')).toBeNull();
+    expect(store.latestState('s9')?.id).toBe('st2');
   });
 
   it('keeps a typed message with its delivery and opId, finds those still awaiting the transcript, and lists open ones after a restart', () => {
@@ -350,28 +390,43 @@ describe('conversation store', () => {
     expect(store.unreadCount('s1')).toBe(4);
     expect(store.reply('r1')?.seenAt).toBeNull();
 
-    // Only the latest status counts; one that a newer status replaced no longer shows.
-    store.setStatus({ id: 'st1', sessionId: 's1', workItemId: 1, replyId: 'r1', at: 1, markdown: 'one' });
-    store.setStatus({ id: 'st2', sessionId: 's1', workItemId: 1, replyId: 'r2', at: 2, markdown: 'two' });
+    // Only the latest state counts; one that a newer state replaced no longer shows.
+    store.setState({ id: 'st1', sessionId: 's1', workItemId: 1, replyId: 'r1', at: 1, headline: 'one', body: 'one' });
+    store.setState({ id: 'st2', sessionId: 's1', workItemId: 1, replyId: 'r2', at: 2, headline: 'two', body: 'two' });
     expect(store.unreadCount('s1')).toBe(5);
 
     // Marking one leaves the earlier ones unread, and a second mark keeps the first time.
-    expect(store.markSeen('s1', ['r2', 'st2', 'r2'], 50)).toEqual({ replies: ['r2'], statuses: ['st2'] });
+    expect(store.markSeen('s1', ['r2', 'st2', 'r2'], 50)).toEqual({ replies: ['r2'], states: ['st2'] });
     expect(store.reply('r2')?.seenAt).toBe(50);
     expect(store.reply('r1')?.seenAt).toBeNull();
-    expect(store.status('st2')?.seenAt).toBe(50);
+    expect(store.state('st2')?.seenAt).toBe(50);
     expect(store.unreadCount('s1')).toBe(3);
-    expect(store.markSeen('s1', ['r2'], 60)).toEqual({ replies: [], statuses: [] });
+    expect(store.markSeen('s1', ['r2'], 60)).toEqual({ replies: [], states: [] });
     expect(store.reply('r2')?.seenAt).toBe(50);
-    // A later line of the seen status keeps it seen.
-    store.setStatus({ id: 'st2', sessionId: 's1', workItemId: 1, replyId: 'r2', at: 2, markdown: 'two, longer' });
-    expect(store.status('st2')).toMatchObject({ markdown: 'two, longer', seenAt: 50 });
+    // A later line that changes only the headline keeps the state seen; one that changes the body marks it unread again.
+    store.setState({ id: 'st2', sessionId: 's1', workItemId: 1, replyId: 'r2', at: 2, headline: 'two, longer', body: 'two' });
+    expect(store.state('st2')).toMatchObject({ headline: 'two, longer', seenAt: 50 });
+    store.setState({ id: 'st2', sessionId: 's1', workItemId: 1, replyId: 'r2', at: 2, headline: 'two, longer', body: 'two, more' });
+    expect(store.state('st2')?.seenAt).toBeNull();
+    // Nor does a headline-only line clear a body still unread.
+    store.setState({ id: 'st2', sessionId: 's1', workItemId: 1, replyId: 'r2', at: 2, headline: 'two, again', body: 'two, more' });
+    expect(store.state('st2')?.seenAt).toBeNull();
+    expect(store.unreadCount('s1')).toBe(4);
+    store.markSeen('s1', ['st2'], 55);
+
+    // A new state is unread only with a body unlike the latest one's: a headline alone, as from a stage report, or the same body is stored seen.
+    store.setState({ id: 'st3', sessionId: 's1', workItemId: 1, replyId: null, at: 3, headline: 'three', body: null });
+    store.setState({ id: 'st4', sessionId: 's1', workItemId: 1, replyId: 'r4', at: 4, headline: 'four', body: null });
+    expect(store.state('st3')?.seenAt).toBe(3);
+    store.setState({ id: 'st5', sessionId: 's1', workItemId: 1, replyId: 'r5', at: 5, headline: 'five', body: 'two, more' });
+    expect(store.state('st5')?.seenAt).toBe(5);
+    expect(store.unreadCount('s1')).toBe(3);
 
     // Another session's item, or an unknown ID, marks nothing.
     expect(store.markSeen('s1', ['r1', 'theirs'], 70)).toBeNull();
     expect(store.markSeen('s1', ['r1', 'nope'], 70)).toBeNull();
     expect(store.reply('r1')?.seenAt).toBeNull();
-    expect(store.markSeen('s1', [], 70)).toEqual({ replies: [], statuses: [] });
+    expect(store.markSeen('s1', [], 70)).toEqual({ replies: [], states: [] });
     expect(store.unreadCount('nobody')).toBe(0);
   });
 
@@ -400,7 +455,56 @@ describe('conversation store', () => {
     const store = Store.open(path);
 
     expect(store.reply('r1')?.seenAt).toBe(10);
-    expect(store.status('st1')?.seenAt).toBe(10);
+    expect(store.state('st1')).toMatchObject({ headline: 'Old.', body: null, seenAt: 10 });
+    expect(store.unreadCount('s1')).toBe(0);
+    store.close();
+  });
+
+  it("turns statuses and work items' stages into states, keeping each session's order", () => {
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
+    const dir = mkdtempSync(join(tmpdir(), 'store-states-'));
+
+    dirs.push(dir);
+
+    const path = join(dir, 'switchboard.db');
+    const db = new DatabaseSync(path);
+    const before = MIGRATIONS.findIndex((migration) => migration.includes('CREATE TABLE states'));
+
+    db.exec('BEGIN');
+    for (const migration of MIGRATIONS.slice(0, before)) {
+      db.exec(migration);
+    }
+    db.exec(`PRAGMA user_version = ${before}`);
+    db.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, pool, snoozed, repoRoot) VALUES (1, 'adhoc', '1', 't', '', 1, 0, 0, '')");
+    const item = (id: number, stage: string | null, stageAt: number | null) =>
+      db.prepare("INSERT INTO workItems (id, ticketId, playbook, status, stage, stageAt, createdAt, statusAt) VALUES (?, 1, NULL, 'running', ?, ?, 0, 5)").run(id, stage, stageAt);
+    // 1: a stage newer than its status; 2: a stage older than its status; 3: a stage with no time and no status; 4: no stage.
+    item(1, '2/5 fixing tests', 300);
+    item(2, 'old stage', 50);
+    item(3, '  ', null);
+    item(4, null, null);
+    db.prepare('UPDATE workItems SET stage = ? WHERE id = 3').run('reviewing');
+    const status = (id: string, workItemId: number, at: number, markdown: string, seenAt: number | null) =>
+      db.prepare('INSERT INTO statuses (id, sessionId, workItemId, replyId, at, markdown, seenAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, `s${workItemId}`, workItemId, `r-${id}`, at, markdown, seenAt);
+    // Read out of time order: the one read last stays the latest.
+    status('st-a', 1, 200, '## **Where it stands**\n\n- one\n- two', null);
+    status('st-b', 1, 100, 'Single line', 100);
+    status('st-c', 2, 100, '\n\n- Bullet headline\r\nrest', null);
+    db.exec('COMMIT');
+    db.close();
+
+    const store = Store.open(path);
+
+    expect(store.state('st-a')).toEqual({ id: 'st-a', sessionId: 's1', workItemId: 1, replyId: 'r-st-a', at: 200, headline: 'Where it stands', body: '- one\n- two', turnEnded: true, seenAt: null });
+    expect(store.state('st-b')).toMatchObject({ headline: 'Single line', body: null, seenAt: 100 });
+    expect(store.state('st-c')).toMatchObject({ headline: 'Bullet headline', body: 'rest' });
+    expect(store.latestState('s1')?.id).toBe('st-b');
+    // A stage newer than the work item's newest status is kept with no session, seen and turn-ended; an older one is dropped.
+    expect(store.workItemState(1)).toEqual({ id: 'stage-1', sessionId: null, workItemId: 1, replyId: null, at: 300, headline: '2/5 fixing tests', body: null, turnEnded: true, seenAt: 300 });
+    expect(store.workItemState(2)?.id).toBe('st-c');
+    expect(store.workItemState(3)).toMatchObject({ id: 'stage-3', at: 5, headline: 'reviewing' });
+    expect(store.workItemState(4)).toBeNull();
+    expect(store.workItem(1)).not.toHaveProperty('stage');
     expect(store.unreadCount('s1')).toBe(0);
     store.close();
   });

@@ -225,7 +225,7 @@ describe('History model', () => {
       'Triage chose dev:question',
       'You started it',
       'Session abc12345 started',
-      'Stage: researching',
+      'State: researching',
       'Session abc12345 is waiting for you',
       'Session abc12345 is working',
       'Asked for approval: Post the answer',
@@ -280,7 +280,7 @@ describe('History model', () => {
     const session = history.workItems[0]!.sessions[0]!;
 
     expect(view.reconstructed).toBe(true);
-    expect(view.sections[0]!.entries[0]).toMatchObject({ text: 'Stage: old stage', reconstructed: true, category: 'report' });
+    expect(view.sections[0]!.entries[0]).toMatchObject({ text: 'State: old stage', reconstructed: true, category: 'report' });
     expect(sessionOpen({ ...session, state: 'running' })).toBeNull();
     expect(sessionOpen({ ...session, state: 'idle', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude', session: session.id, workItemId: session.workItemId });
     // An ended session that was never held resumes in the terminal holder, by its Switchboard session ID (PRD R93).
@@ -423,7 +423,7 @@ describe('History model', () => {
         { text: 'The session continues in fork 9e8d7c6b', lines: [], stateChange: false },
       ],
       [event('poll', 'source', { source: 'github' }, [change('workItem', 'update', { unassignedAt: [null, 5] })], null), { text: 'Left the assigned state while a session was active', category: 'ticket' }],
-      [event('poll', 'source', { source: 'github' }, [change('workItem', 'update', { unassignedAt: [5, null], warning: [null, 'Odd'], stage: ['a', 'b'], approvalSummary: [null, 'Ship'], custom: [1, 2] })], null), { text: 'Assigned to you again', lines: ['Warning: Odd', 'Stage: b', 'Approval: Ship', 'custom: 1 → 2'] }],
+      [event('poll', 'source', { source: 'github' }, [change('workItem', 'update', { unassignedAt: [5, null], warning: [null, 'Odd'], stage: ['a', 'b'], approvalSummary: [null, 'Ship'], custom: [1, 2] })], null), { text: 'Assigned to you again', lines: ['Warning: Odd', 'State: b', 'Approval: Ship', 'custom: 1 → 2'] }],
       [event('pick', 'operator', null, [change('triage', 'update', { workItemId: [null, 1] }), change('triage', 'delete', {}, { workItemId: null })], null), { text: 'You picked it from the pool', lines: ['Pool triage attached to the work item', 'Pool triage discarded'] }],
       [event('tick', 'hub', null, [change('triage', 'insert', { startedAt: [null, 1] })], null), { text: 'Triage started', category: 'triage' }],
       [

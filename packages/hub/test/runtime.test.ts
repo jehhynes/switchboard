@@ -924,7 +924,7 @@ describe('Runtime', () => {
     await runtime.settled();
 
     expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Planning' })).toEqual({ refused: null });
-    expect(store.workItem(1)?.stage).toBe('Planning');
+    expect(store.workItemState(1)?.headline).toBe('Planning');
 
     expect(await runtime.report({ sessionId: 's1', kind: 'worktree', path: 'D:\\git\\widgets-wt\\7-fix\\' })).toEqual({ refused: null });
     expect(store.worktreeFor(1)).toMatchObject({ path: 'D:/git/widgets-wt/7-fix', branch: '7-fix', linkedBy: 'report' });
@@ -1683,7 +1683,7 @@ describe('Runtime', () => {
 
     // Of four done work items, only the started one with the triaged playbook counts: one never ran a session, one's launch failed, one ran another playbook.
     const ticket = store.findTicket('github', '1')!;
-    const done = { ticketId: ticket.id, playbook: 'dev:develop', status: 'done', stage: null, stageAt: null, taskPrompt: null, guidance: null, reportedPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: T0, statusAt: T0, runStartedAt: null, readyAt: null, orderAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator', parentId: null } as const;
+    const done = { ticketId: ticket.id, playbook: 'dev:develop', status: 'done', taskPrompt: null, guidance: null, reportedPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: T0, statusAt: T0, runStartedAt: null, readyAt: null, orderAt: null, scopeAt: null, doneAt: T0, doneReason: 'operator', parentId: null } as const;
     const ran = store.insertWorkItem(done);
     store.insertWorkItem(done);
     const refused = store.insertWorkItem(done);
@@ -2185,7 +2185,7 @@ describe('forks (PRD R78)', () => {
 
     state.relation = 'older';
     expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Planning' }, 'old-copy')).toEqual({ refused: 'Session old-copy was replaced by fork abc12345, so the report was not recorded.' });
-    expect(store.workItem(1)?.stage).toBeNull();
+    expect(store.workItemState(1)).toBeNull();
 
     state.relation = 'newer';
     expect(await runtime.report({ sessionId: 's1', kind: 'stage', stage: 'Planning' }, 'new-copy')).toEqual({ refused: null });
@@ -3171,7 +3171,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
 
     expect(await runtime.report({ sessionId: 's2', kind: 'stage', stage: 'testing' } as never, 'other-native-uuid')).toEqual({ refused: 'Session other-na is not the session Switchboard started, so the report was not recorded.' });
     expect(await runtime.report({ sessionId: 's2', kind: 'stage', stage: 'testing' } as never, 's2-native')).toEqual({ refused: null });
-    expect(store.workItem(store.session('s2')!.workItemId)?.stage).toBe('testing');
+    expect(store.workItemState(store.session('s2')!.workItemId)?.headline).toBe('testing');
     runtime.stop();
   });
 

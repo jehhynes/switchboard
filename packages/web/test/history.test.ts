@@ -65,10 +65,26 @@ const view = (patch: Partial<HistoryView> = {}): HistoryView => ({
 const open = (patch: Partial<HistoryOpen> = {}): HistoryOpen => ({ ticketId: 77, key: 'gh 77', view: view(), categories: CATEGORIES, error: null, ui: { ...EMPTY_HISTORY_UI }, ...patch });
 
 describe("the page's History (architecture.md § Web page)", () => {
+  it('draws the state at the top of History, before the ticket, and the state alone for a row that offers no ticket History', () => {
+    const root = document.createElement('div');
+    const state = { id: 'st-1', sessionId: 's1', at: T0, headline: '2/5 fixing tests', body: 'Two left.', stale: null, unread: true } as const;
+
+    root.innerHTML = html(renderHistory(open(), state, T0 + 60_000));
+    expect(root.querySelector('.history-view')!.firstElementChild!.className).toBe('state-view unread');
+    expect(root.querySelector('.state-headline')?.textContent).toBe('2/5 fixing tests');
+    expect(root.querySelector('.state-view + .hist-hero')).not.toBeNull();
+    root.innerHTML = html(renderHistory(null, state, T0 + 60_000));
+    expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('History');
+    expect(root.querySelector('.state-body')?.textContent?.trim()).toBe('Two left.');
+    expect(root.querySelector('.hist-hero')).toBeNull();
+    root.innerHTML = html(renderHistory(null, null, T0));
+    expect(root.querySelector('.history-view')?.textContent).toBe('No state yet. It appears here when the session sets one.');
+  });
+
   it("draws the History tab's header, chips, sections with day headings, gaps and marks, the first section open", () => {
     const root = document.createElement('div');
 
-    root.innerHTML = html(renderHistory(open()));
+    root.innerHTML = html(renderHistory(open(), null, T0));
     expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('gh 77 History');
     expect(root.querySelector('.hist-headline h1')?.textContent).toBe('Inbox <badge>');
     expect(root.querySelector('.hist-key')?.textContent).toBe('gh 77');
@@ -95,10 +111,10 @@ describe("the page's History (architecture.md § Web page)", () => {
   it('filters by chip and text with the count of what shows, collapses a long run of state changes, and says when logging began', () => {
     const root = document.createElement('div');
 
-    root.innerHTML = html(renderHistory(open({ ui: { ...EMPTY_HISTORY_UI, hidden: ['session'] } })));
+    root.innerHTML = html(renderHistory(open({ ui: { ...EMPTY_HISTORY_UI, hidden: ['session'] } }), null, T0));
     expect(root.querySelector('[data-section="w1"] .hist-count')?.textContent).toBe('2 of 3');
     expect(root.querySelector('.hist-chip[data-category="session"]')?.getAttribute('aria-pressed')).toBe('false');
-    root.innerHTML = html(renderHistory(open({ ui: { ...EMPTY_HISTORY_UI, query: 'BRANCH', sections: { ticket: true } } })));
+    root.innerHTML = html(renderHistory(open({ ui: { ...EMPTY_HISTORY_UI, query: 'BRANCH', sections: { ticket: true } } }), null, T0));
     expect(root.querySelectorAll('[data-section="w1"] .hist-entry')).toHaveLength(1);
     expect(root.querySelector('[data-section="ticket"] .hist-empty')?.textContent).toBe('No entries match the filter. Clear it to see every entry.');
     expect(entryShown(entry('x', T0, { links: [{ label: 'PR #9', icon: 'git-pull-request', title: '', open: { type: 'openUrl', url: 'https://x' } }] }), { ...EMPTY_HISTORY_UI, query: 'pr #9' })).toBe(true);
@@ -106,20 +122,20 @@ describe("the page's History (architecture.md § Web page)", () => {
     const states = Array.from({ length: RUN_LIMIT + 1 }, (_, index) => entry(`s${index}`, T0 + index * 1000, { category: 'session', stateChange: true }));
     const long = view({ reconstructed: true, recordedSince: T0, sections: [{ ...view().sections[0]!, entries: states }] });
 
-    root.innerHTML = html(renderHistory(open({ view: long })));
+    root.innerHTML = html(renderHistory(open({ view: long }), null, T0));
     expect(root.querySelector('.hist-run summary')?.textContent).toBe(`${RUN_LIMIT + 1} session state changes, 09:00:00 to 09:00:05`);
     expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(false);
-    root.innerHTML = html(renderHistory(open({ view: long, ui: { ...EMPTY_HISTORY_UI, runs: ['s0'] } })));
+    root.innerHTML = html(renderHistory(open({ view: long, ui: { ...EMPTY_HISTORY_UI, runs: ['s0'] } }), null, T0));
     expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(true);
-    root.innerHTML = html(renderHistory(open({ view: { ...long, sections: [{ ...long.sections[0]!, entries: states.slice(0, RUN_LIMIT) }] } })));
+    root.innerHTML = html(renderHistory(open({ view: { ...long, sections: [{ ...long.sections[0]!, entries: states.slice(0, RUN_LIMIT) }] } }), null, T0));
     expect(root.querySelector('.hist-run')).toBeNull();
     expect(root.querySelector('.hist-banner')?.textContent).toContain('Switchboard began logging on 2026-10-07 09:00.');
     // Before the hub answers, and when it cannot.
-    root.innerHTML = html(renderHistory(open({ view: null })));
-    expect(root.querySelector('.hist-body .empty')?.textContent).toBe('Loading…');
-    root.innerHTML = html(renderHistory(open({ view: null, error: 'Unknown ticket 77.' })));
+    root.innerHTML = html(renderHistory(open({ view: null }), null, T0));
+    expect(root.querySelector('.hist-body .empty:not(.state-empty)')?.textContent).toBe('Loading…');
+    root.innerHTML = html(renderHistory(open({ view: null, error: 'Unknown ticket 77.' }), null, T0));
     expect(root.querySelector('.hist-error')?.textContent).toBe('Unknown ticket 77.');
-    expect(root.querySelector('.hist-body .empty')).toBeNull();
+    expect(root.querySelector('.hist-body .empty:not(.state-empty)')).toBeNull();
     expect(gapText(45_000)).toBe('45s');
     expect(gapText(3 * 86_400_000 + 4 * 3_600_000)).toBe('3d 4h');
     expect(historyUrl({ label: 'f', icon: 'file', title: '', open: { type: 'openUrl', url: 'D:/report.md' } })).toBeNull();
@@ -219,8 +235,8 @@ describe("the page's History tab in use", () => {
     const { page, source } = start();
 
     hello(source);
-    // The row offers History, but its tab is hidden, and reads nothing, until the actions menu opens it.
-    expect(historyTab()).toBeNull();
+    // History is always in the strip, but reads nothing while another tab shows.
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
     await flush();
     expect(histories()).toEqual([]);
     openFromMenu();
@@ -228,10 +244,12 @@ describe("the page's History tab in use", () => {
     expect(historyTab()?.textContent).toBe('History');
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(historyTab());
-    expect(root.querySelector('.history-pane .history-view .empty')?.textContent).toBe('Loading…');
-    // No bar of its own: the tab names it, and its close mark closes it.
+    // The state stands at its top while the ticket's History loads.
+    expect(root.querySelector('.history-pane .history-view .state-empty')).not.toBeNull();
+    expect(root.querySelector('.history-pane .history-view > .empty:not(.state-empty)')?.textContent).toBe('Loading…');
+    // No bar of its own and no close mark: the tab names it.
     expect(root.querySelector('.hist-bar, .hist-close')).toBeNull();
-    expect(root.querySelector('.history-tab [data-action="close-history"]')).not.toBeNull();
+    expect(root.querySelector('[data-action="close-history"]')).toBeNull();
     await flush();
     expect(histories()).toEqual([77]);
     expect(root.querySelector('.history-view h1')?.textContent).toBe('Inbox <badge>');
@@ -269,7 +287,7 @@ describe("the page's History tab in use", () => {
     expect(opened).toEqual(['https://github.com/o/r/issues/77']);
 
     // Another tab stops the reads, a list change included.
-    root.querySelector<HTMLElement>('[data-side="status"], [data-tab="conversation"]')!.click();
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     expect(root.querySelector('.history-view')).toBeNull();
     source.emit('list', { groups: groups(rows) });
     await vi.advanceTimersByTimeAsync(60_000);
@@ -283,17 +301,6 @@ describe("the page's History tab in use", () => {
     await flush();
     expect(histories()).toEqual([77, 77, 77, 77]);
     expect(root.querySelector('.history-view h1')?.textContent).toBe('Renamed');
-
-    // Its close mark hides it again, shows the tab before it with the focus, and stops the reads; the menu opens it again.
-    root.querySelector<HTMLElement>('.history-tab [data-action="close-history"]')!.click();
-    expect(historyTab()).toBeNull();
-    expect(root.querySelector('.history-view')).toBeNull();
-    expect(document.activeElement?.getAttribute('aria-selected')).toBe('true');
-    expect(document.activeElement?.matches('[data-side="status"], [data-tab="conversation"]')).toBe(true);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(histories()).toEqual([77, 77, 77, 77]);
-    openFromMenu();
-    expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     page.close();
   });
 
@@ -301,34 +308,22 @@ describe("the page's History tab in use", () => {
     vi.useFakeTimers();
     answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
     const { page, source } = start();
-    const kept = () => JSON.parse(localStorage.getItem('switchboard.tabs') ?? '{}') as Record<string, { history?: boolean }>;
+    const kept = () => JSON.parse(localStorage.getItem('switchboard.tabs') ?? '{}') as Record<string, { history?: boolean; tab?: string }>;
 
     hello(source);
     openFromMenu();
     await flush();
-    expect(kept()['w1']?.history).toBe(true);
+    // History cannot close, so a work item's kept tabs no longer say whether it is open.
+    expect(kept()['w1']).not.toHaveProperty('history');
+    expect(kept()['w1']?.tab).toBe('history');
 
-    // Another work item opens with History closed.
+    // Every work item has the tab; the strip opens on the conversation (PRD R109).
     openItem(source, 2);
-    expect(historyTab()).toBeNull();
-    expect(kept()['w2']?.history).toBe(false);
-
-    // Back on the first, its History tab is open as it was left; the strip opens on the conversation (PRD R109).
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
+    expect(kept()['w2']).not.toHaveProperty('history');
     openItem(source, 1);
     expect(historyTab()).not.toBeNull();
     expect(root.querySelector('[data-tab="conversation"]')?.getAttribute('aria-selected')).toBe('true');
-
-    // Opened on the first and the second, closed on the first: the second keeps its own.
-    openItem(source, 2);
-    openFromMenu();
-    openItem(source, 1);
-    root.querySelector<HTMLElement>('.history-tab [data-action="close-history"]')!.click();
-    expect(historyTab()).toBeNull();
-    expect(kept()['w1']?.history).toBe(false);
-    openItem(source, 2);
-    expect(historyTab()).not.toBeNull();
-    openItem(source, 1);
-    expect(historyTab()).toBeNull();
     page.close();
   });
 
@@ -369,21 +364,6 @@ describe("the page's History tab in use", () => {
     page.close();
   });
 
-  it('gives the focus to the tab shown when the History tab it was on closes, chosen or not', () => {
-    const { page, source } = start();
-
-    hello(source);
-    openFromMenu();
-    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
-    const close = root.querySelector<HTMLElement>('.history-tab [data-action="close-history"]')!;
-
-    close.focus();
-    close.click();
-    expect(historyTab()).toBeNull();
-    expect(document.activeElement).toBe(root.querySelector('[data-tab="conversation"]'));
-    page.close();
-  });
-
   it("follows the open work item's ticket, and offers no History where the row offers none or no work item is open", async () => {
     vi.useFakeTimers();
     answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
@@ -395,16 +375,16 @@ describe("the page's History tab in use", () => {
     root.querySelector<HTMLElement>('.hist-chip[data-category="you"]')!.click();
     expect(histories()).toEqual([77]);
 
-    // Another work item's conversation opens on its own tabs, History closed; opened there, it reads that work item's ticket, at Loading… first.
+    // Another work item's conversation opens on its own tabs; History chosen there reads that work item's ticket, at Loading… first.
     openItem(source, 2);
-    expect(historyTab()).toBeNull();
+    expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
     openFromMenu();
-    expect(root.querySelector('.history-view .empty')?.textContent).toBe('Loading…');
+    expect(root.querySelector('.history-view .empty:not(.state-empty)')?.textContent).toBe('Loading…');
     await flush();
     expect(histories()).toEqual([77, 78]);
     expect(root.querySelector('.hist-chip[data-category="you"]')?.getAttribute('aria-pressed')).toBe('true');
 
-    // Back on the first, its History tab is still open; the strip opens on the conversation (PRD R109). Chosen, its chips are as the operator set them.
+    // Back on the first, the strip opens on the conversation (PRD R109). History chosen, its chips are as the operator set them.
     openItem(source, 1);
     expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
     historyTab()!.click();
@@ -412,9 +392,11 @@ describe("the page's History tab in use", () => {
     expect(histories()).toEqual([77, 78, 77]);
     expect(root.querySelector('.hist-chip[data-category="you"]')?.getAttribute('aria-pressed')).toBe('false');
 
-    // A work item whose row offers no History has neither the tab nor the menu item.
+    // A work item whose row offers no ticket History has the tab, showing only the state, and no menu item, and reads nothing.
     openItem(source, 3);
-    expect(historyTab()).toBeNull();
+    historyTab()!.click();
+    expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('History');
+    expect(root.querySelector('.history-view .hist-hero, .history-view .empty:not(.state-empty)')).toBeNull();
     root.querySelector<HTMLElement>('.header [data-action="actions"]')?.click();
     expect(root.querySelector('[data-action="row-history"]')).toBeNull();
 
@@ -507,16 +489,12 @@ describe("the page's History tab in use", () => {
     expect(document.documentElement.classList.contains('phone')).toBe(true);
     const tabs = () => [...root.querySelectorAll('#head .tabs > .tab')].map((one) => one.textContent);
 
-    expect(tabs()).toEqual(['Conversation', 'Status', 'Changes']);
+    expect(tabs()).toEqual(['Conversation', 'History', 'Changes']);
     openFromMenu();
-    expect(tabs()).toEqual(['Conversation', 'Status', 'History', 'Changes']);
+    expect(tabs()).toEqual(['Conversation', 'History', 'Changes']);
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     await flush();
     expect(root.querySelector('#panel.history-pane .history-view h1')?.textContent).toBe('Inbox <badge>');
-    // Closed, the phone shows the conversation.
-    root.querySelector<HTMLElement>('.history-tab [data-action="close-history"]')!.click();
-    expect(tabs()).toEqual(['Conversation', 'Status', 'Changes']);
-    expect(root.querySelector('#head [data-tab="conversation"]')?.getAttribute('aria-selected')).toBe('true');
     page.close();
   });
 });
