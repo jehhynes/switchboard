@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { open, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import { changesPlan } from '@switchboard/core';
-import type { ChangedPath, DiffRow } from '@switchboard/core';
+import { changesPlan, MAX_ROWS } from '@switchboard/core';
+import type { ChangedPath, ChangeKind, DiffRow } from '@switchboard/core';
 import { outOfScope } from './windows.js';
 import type { WindowScope } from './windows.js';
 
@@ -88,6 +88,12 @@ export interface WorktreeChanges {
   view: ChangesView;
   /** Each shown row's two sides, by its `path`, and whether its file is untracked. */
   sides: Map<string, DiffRow & { untracked: boolean }>;
+  /** HEAD, the base refs and the index file as read (`readStamp`): while they are the same, so are the base, the commits since it, the range's commits and the staged changes. */
+  stamp: string;
+  /** The index file's path, whose size and time are part of `stamp`. */
+  index: string | null;
+  /** How the working tree changes each path against the index, untracked included, keyed by `pathKey`; `PageChanges` checks a kept read's rows against it. */
+  working: Map<string, ChangeKind | 'untracked'>;
 }
 
 export interface GitResult {
@@ -305,6 +311,38 @@ function pathKey(path: string): string {
   return path.toLowerCase();
 }
 
+/**
+ * The index file's identity, its file ID, size and change time to the nanosecond, or null when it cannot be read: git writes a new index and
+ * renames it into place at each staging, commit or checkout.
+ */
+async function indexStamp(path: string | null): Promise<string | null> {
+  try {
+    const info = path === null ? null : await stat(path, { bigint: true });
+
+    return info === null ? null : `${info.ino} ${info.size} ${info.mtimeNs}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * HEAD's commit, the commits of {@link BASE_REFS} and the index file (`indexStamp`), which decide the merge base, the commits since it, what a
+ * range names and the staged changes with their renames (`WorktreeChanges.stamp`): `head` HEAD's commit, null when it has none, `stamp` null
+ * when a read failed, `index` the index file's path.
+ */
+async function readStamp(folder: string, git: Git): Promise<{ head: string | null; stamp: string | null; index: string | null }> {
+  const [read, refs] = await Promise.all([
+    git(['rev-parse', '--path-format=absolute', '--git-path', 'index', '--verify', 'HEAD'], folder),
+    git(['for-each-ref', '--format=%(refname) %(objectname)', ...BASE_REFS.map((ref) => `refs/remotes/${ref}`)], folder),
+  ]);
+  const [index = '', head = ''] = read.stdout.toString('utf8').trim().split('\n').map((line) => line.trim());
+  const ok = read.code === 0 && SHA.test(head) && index !== '';
+
+  const indexed = ok ? await indexStamp(index) : null;
+
+  return { head: ok ? head : null, index: index || null, stamp: ok && refs.code === 0 && indexed !== null ? `${head}\n${refs.stdout.toString('utf8')}\n${indexed}` : null };
+}
+
 /** The first of {@link BASE_REFS} that shares history with HEAD, or null. */
 async function mergeBase(root: string, git: Git): Promise<string | null> {
   for (const ref of BASE_REFS) {
@@ -373,8 +411,16 @@ export const COMMIT_GONE = 'The chosen commit is no longer on this branch.';
  * `stale` when the range names a commit that is not one since the base, as after a rebase. A commit the range starts from may also be the first
  * parent of one since the base, so a commit's own changes can be asked for.
  */
-export async function readChanges(folder: string, git: Git = nodeGit, withCounts = true, range: ChangeRange = ALL_CHANGES): Promise<WorktreeChanges | { error: string; stale?: true }> {
-  const top = await git(['rev-parse', '--show-toplevel'], folder);
+export async function readChanges(
+  folder: string,
+  git: Git = nodeGit,
+  withCounts = true,
+  range: ChangeRange = ALL_CHANGES,
+  withHashes = true,
+): Promise<WorktreeChanges | { error: string; stale?: true }> {
+  // Read side by side in the folder, which must be its repository's top, and checked in this order once both are back. HEAD and the base refs
+  // are read before anything that depends on them, so a ref that moves later leaves a stamp that no longer matches, never one newer than the read.
+  const [top, { head: headRead, stamp, index }] = await Promise.all([git(['rev-parse', '--show-toplevel'], folder), readStamp(folder, git)]);
   const root = top.stdout.toString('utf8').trim();
 
   if (top.code !== 0 || root === '') {
@@ -389,50 +435,61 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
     return { error: `${folder} is not the top of its git repository, ${root}.` };
   }
 
-  const headRead = await git(['rev-parse', '--verify', 'HEAD'], root);
-  const head = headRead.stdout.toString('utf8').trim();
-
-  if (headRead.code !== 0) {
+  if (headRead === null) {
     return { error: 'The repository has no commit yet.' };
   }
 
-  const base = await mergeBase(root, git);
-  const log = base === null ? { commits: [], more: false } : await readCommits(root, base, git);
+  const head = headRead;
 
-  if (log === null) {
-    return { error: 'git could not read the commits since the base.' };
-  }
+  const base = await mergeBase(root, git);
 
   // A commit the range names must be one since the base, or a range's start the first parent of one, so only this branch's commits are read.
   // Every commit since the base counts, not only those the menu lists, so a commit chosen before more were made is still found.
-  const listed = base === null ? '' : await git(['rev-list', '--parents', `${base}..HEAD`, '--'], root);
-
-  if (typeof listed !== 'string' && listed.code !== 0) {
-    return { error: 'git could not read the commits since the base.' };
-  }
-
-  const lines = typeof listed === 'string' ? [] : listed.stdout.toString('utf8').split('\n').filter((line) => line !== '').map((line) => line.split(' '));
-  const commitIds = new Set(lines.map(([sha = '']) => sha));
-  const starts = new Set([...(base === null ? [] : [base]), ...commitIds, ...lines.map(([, parent = '']) => parent)]);
-
-  if ((SHA.test(range.from) && !starts.has(range.from)) || (SHA.test(range.to) && !commitIds.has(range.to))) {
-    return { error: COMMIT_GONE, stale: true };
-  }
-
+  const commitsRead = Promise.all([base === null ? { commits: [], more: false } : readCommits(root, base, git), base === null ? '' : git(['rev-list', '--parents', `${base}..HEAD`, '--'], root)]);
+  // A range that names a commit is checked before git reads anything at it; any other is read while the commits are.
+  const named = SHA.test(range.from) || SHA.test(range.to);
+  const checked = named ? await commitsRead : null;
   const ref = range.from === 'HEAD' ? head : range.from === 'base' ? (base ?? head) : range.from;
   const to = range.to === 'worktree' ? null : range.to === 'HEAD' ? head : range.to;
+  const stale = ([log, listed]: Awaited<typeof commitsRead>): { error: string; stale?: true } | null => {
+    if (log === null || (typeof listed !== 'string' && listed.code !== 0)) {
+      return { error: 'git could not read the commits since the base.' };
+    }
+
+    const lines = typeof listed === 'string' ? [] : listed.stdout.toString('utf8').split('\n').filter((line) => line !== '').map((line) => line.split(' '));
+    const commitIds = new Set(lines.map(([sha = '']) => sha));
+    const starts = new Set([...(base === null ? [] : [base]), ...commitIds, ...lines.map(([, parent = '']) => parent)]);
+
+    return (SHA.test(range.from) && !starts.has(range.from)) || (SHA.test(range.to) && !commitIds.has(range.to)) ? { error: COMMIT_GONE, stale: true } : null;
+  };
+  const refused = checked === null ? null : stale(checked);
+
+  if (refused !== null) {
+    return refused;
+  }
+
   const diff = ['diff', '-z', '--no-ext-diff', '--no-textconv', '--no-color'];
   // To disk: the commits from `ref` to HEAD, then the index, the working tree and the untracked files; to a commit, that commit's tree alone.
   const onDisk = to === null;
-  const [committed, staged, working, untracked, conflicts, numstat, raw] = await Promise.all([
-    to !== null ? git([...diff, '--name-status', '-M', ref, to], root) : ref === head ? null : git([...diff, '--name-status', '-M', ref, 'HEAD'], root),
-    onDisk ? git([...diff, '--cached', '--name-status', '-M'], root) : null,
-    onDisk ? git([...diff, '--name-status'], root) : null,
-    onDisk ? git(['ls-files', '-z', '--others', '--exclude-standard'], root) : null,
-    onDisk ? git([...diff, '--name-only', '--diff-filter=U'], root) : null,
-    git([...diff, '--numstat', '-M', ref, ...(to === null ? [] : [to])], root),
-    to === null ? null : git([...diff, '--raw', '--no-abbrev', '-M', ref, to], root),
+  const [[committed, staged, working, untracked, conflicts, numstat, raw], commits] = await Promise.all([
+    Promise.all([
+      to !== null ? git([...diff, '--name-status', '-M', ref, to], root) : ref === head ? null : git([...diff, '--name-status', '-M', ref, 'HEAD'], root),
+      onDisk ? git([...diff, '--cached', '--name-status', '-M'], root) : null,
+      onDisk ? git([...diff, '--name-status'], root) : null,
+      onDisk ? git(['ls-files', '-z', '--others', '--exclude-standard'], root) : null,
+      onDisk ? git([...diff, '--name-only', '--diff-filter=U'], root) : null,
+      git([...diff, '--numstat', '-M', ref, ...(to === null ? [] : [to])], root),
+      to === null ? null : git([...diff, '--raw', '--no-abbrev', '-M', ref, to], root),
+    ]),
+    checked ?? commitsRead,
   ]);
+  const unread = checked === null ? stale(commits) : null;
+
+  if (unread !== null) {
+    return unread;
+  }
+
+  const log = commits[0]!;
   const failed = [committed, staged, working, untracked, conflicts, numstat, raw].find((result) => result !== null && result.code !== 0);
 
   if (failed !== undefined) {
@@ -516,7 +573,7 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
   // in one git process; a file that went meanwhile fails that process, so each is then hashed on its own.
   const present: ChangeRow[] = [];
 
-  for (let start = 0; onDisk && start < rows.length; start += COUNT_AT_ONCE) {
+  for (let start = 0; onDisk && withHashes && start < rows.length; start += COUNT_AT_ONCE) {
     const batch = rows.slice(start, start + COUNT_AT_ONCE).filter((row) => row.status !== 'D');
     const inside = await Promise.all(batch.map((row) => fileInside(root, row.path)));
 
@@ -543,6 +600,10 @@ export async function readChanges(folder: string, git: Git = nodeGit, withCounts
     ref,
     to,
     tickScope: to === null ? '' : `${ref}..${to}`,
+    // No stamp read: one that never matches, so the read is never used again.
+    stamp: stamp ?? '',
+    index,
+    working: new Map([...stages.working.map((change) => [pathKey(change.path), change.kind] as const), ...stages.untracked.map((change) => [pathKey(change.path), 'untracked'] as const)]),
     view: { base, head, from: range.from, to: range.to, commits: log.commits, commitsMore: log.more, rows, stages: { committed: stages.committed.length, staged: stages.staged.length, working: stages.working.length, untracked: stages.untracked.length }, shown: planned.shown, total: planned.total },
     sides,
   };
@@ -743,6 +804,9 @@ function same(deps: PageChangesDeps, key: string, scope: WindowScope): boolean {
 export const CONVERSATION_MOVED = "The window's conversation changed.";
 export const VIEWED_REFUSED = 'Expected {window, scopeGen, opId, path, hash, viewed[, from, to]}.';
 
+/** How many pages' reads of their changes are kept (`PageChanges`). */
+const KEPT_READS = 16;
+
 /** How many `viewed` answers a page's retried `opId` can find. */
 const TICKED_KEPT = 100;
 
@@ -751,9 +815,118 @@ export function etagOf(body: unknown): string {
   return createHash('sha256').update(JSON.stringify(body)).digest('hex').slice(0, 32);
 }
 
+/**
+ * HEAD and how the working tree changes each path against the index, keyed by `pathKey`, from `git status --porcelain=v2 -z --branch`, as
+ * `readChanges` reads them with `git diff --name-status` and `ls-files --others`: added, modified or deleted, a conflict as modified, or untracked.
+ */
+export function parseStatusWorking(output: Buffer): { head: string | null; working: Map<string, ChangeKind | 'untracked'> } {
+  const working = new Map<string, ChangeKind | 'untracked'>();
+  let head: string | null = null;
+
+  for (const entry of fields(output)) {
+    const kind = entry[0];
+
+    if (entry.startsWith('# branch.oid ')) {
+      head = SHA.test(entry.slice('# branch.oid '.length)) ? entry.slice('# branch.oid '.length) : null;
+    } else if (kind === '?') {
+      working.set(pathKey(entry.slice(2)), 'untracked');
+    } else if (kind === '1' || kind === 'u') {
+      // The path follows 8 fields for a changed entry and 10 for an unmerged one, and may hold spaces.
+      const parts = entry.split(' ');
+      const path = parts.slice(kind === '1' ? 8 : 10).join(' ');
+      const y = (parts[1] ?? '..')[1];
+
+      if (kind === 'u' || (y !== undefined && y !== '.')) {
+        working.set(pathKey(path), kind === 'u' ? 'modified' : y === 'D' ? 'deleted' : y === 'A' ? 'added' : 'modified');
+      }
+    }
+  }
+
+  return { head, working };
+}
+
+/**
+ * Whether a kept read still answers for `paths`: HEAD, the base refs and the index file are as it read them (`stamp`), so the commits and the
+ * staged changes, renames included, are too; and, for a range to disk, each path changes in the working tree as it did then, read now by
+ * `git status` for those paths alone. A file ignored, deleted, put back or made again since fails it; an edit that leaves it modified does not,
+ * since the patch and the sides are read at each request.
+ */
+async function stillHolds(read: WorktreeChanges, paths: string[], git: Git): Promise<boolean> {
+  const onDisk = read.to === null && paths.length > 0;
+  const [head, refs, index] = await Promise.all([
+    onDisk ? git(['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--no-renames', '--', ...paths], read.root) : git(['rev-parse', '--verify', 'HEAD'], read.root),
+    git(['for-each-ref', '--format=%(refname) %(objectname)', ...BASE_REFS.map((ref) => `refs/remotes/${ref}`)], read.root),
+    indexStamp(read.index),
+  ]);
+
+  // A list at its row limit can lose a row to a new one that sorts before it, so it is read again.
+  if (head.code !== 0 || refs.code !== 0 || index === null || read.view.total >= MAX_ROWS) {
+    return false;
+  }
+
+  const status = onDisk ? parseStatusWorking(head.stdout) : null;
+  const now = status === null ? head.stdout.toString('utf8').trim() : status.head;
+
+  if (`${now}\n${refs.stdout.toString('utf8')}\n${index}` !== read.stamp) {
+    return false;
+  }
+
+  return status === null || paths.every((path) => read.working.get(pathKey(path)) === status.working.get(pathKey(path)));
+}
+
 /** The page's change routes, scoped by the window scope rule to the page's selected conversation's folder (architecture.md § Web page). */
 export class PageChanges {
   constructor(private readonly deps: PageChangesDeps) {}
+
+  /**
+   * Each page's last read of its changes, by page key, with the scope and range it was read for: the list the page shows, which its diff and
+   * file reads use rather than read every change again for each file (mechanics M158). A read on its way is shared.
+   */
+  readonly #reads = new Map<string, { scopeGen: number; cwd: string; workItemId: number | null; range: string; read: Promise<WorktreeChanges | { error: string; stale?: true }> }>();
+
+  #keep(key: string, scope: WindowScope, range: ChangeRange, read: Promise<WorktreeChanges | { error: string; stale?: true }>): void {
+    this.#reads.delete(key);
+    this.#reads.set(key, { scopeGen: scope.scopeGen, cwd: scope.cwd!, workItemId: scope.workItemId, range: `${range.from} ${range.to}`, read });
+
+    if (this.#reads.size > KEPT_READS) {
+      this.#reads.delete(this.#reads.keys().next().value!);
+    }
+  }
+
+  /**
+   * `use`'s answer from the page's kept read when it has one for this scope and range that still holds (`stillHolds`), else from a fresh read,
+   * kept unless a newer read was kept meanwhile; the fresh read leaves out the content hashes, which only the list and a tick need. `rows` names
+   * the paths whose stages the answer relies on. `use` answers null for a path the kept read does not answer, and the fresh read answers it.
+   */
+  async #fromRead<T>(
+    key: string,
+    scope: WindowScope,
+    range: ChangeRange,
+    use: (read: WorktreeChanges, kept: boolean) => Promise<T | null>,
+    rows: (read: WorktreeChanges) => string[] = () => [],
+  ): Promise<{ read: WorktreeChanges | { error: string; stale?: true }; value: T | null }> {
+    const kept = this.#reads.get(key);
+
+    if (kept !== undefined && kept.scopeGen === scope.scopeGen && kept.cwd === scope.cwd && kept.workItemId === scope.workItemId && kept.range === `${range.from} ${range.to}`) {
+      const read = await kept.read;
+      const value = !('error' in read) && (await stillHolds(read, rows(read), this.deps.git ?? nodeGit)) ? await use(read, true) : null;
+
+      if (value !== null) {
+        return { read: read as WorktreeChanges, value };
+      }
+    }
+
+    const fresh = readChanges(scope.cwd!, this.deps.git, false, range, false);
+
+    // A list read since this request started is the page's newer one; this read only answers this request.
+    if (this.#reads.get(key) === kept) {
+      this.#keep(key, scope, range, fresh);
+    }
+
+    const read = await fresh;
+
+    return { read, value: 'error' in read ? null : await use(read, false) };
+  }
 
   /**
    * `GET /v1/conversation/changes?window=<page key>[&from=<point>][&to=<point>]`: the selected conversation's worktree's `ChangesView` for the range
@@ -772,7 +945,11 @@ export class PageChanges {
       return scope;
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, true, range);
+    const reading = readChanges(scope.cwd!, this.deps.git, true, range);
+
+    this.#keep(key, scope, range, reading);
+
+    const read = await reading;
 
     if (!same(this.deps, key, scope)) {
       return { status: 409, body: { error: CONVERSATION_MOVED } };
@@ -810,8 +987,26 @@ export class PageChanges {
       return scope;
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, false, range);
-    const diff = 'error' in read ? null : await readDiff(read, path, this.deps.git, sides !== '0');
+    // A kept read's binary row, known binary only from the list, and a row whose patch is now empty are answered by a fresh read.
+    const { read, value: diff } = await this.#fromRead(
+      key,
+      scope,
+      range,
+      async (changes, kept) => {
+        if (kept && changes.view.rows.find((row) => row.path === path)?.binary === true) {
+          return null;
+        }
+
+        const view = await readDiff(changes, path, this.deps.git, sides !== '0');
+
+        return kept && view !== null && view.patch === null && !view.binary && view.tooLarge === null ? null : view;
+      },
+      (changes) => {
+        const row = changes.sides.get(path);
+
+        return row === undefined ? [] : [...new Set([row.original?.path, row.modified?.path].filter((one): one is string => one !== undefined))];
+      },
+    );
 
     if (!same(this.deps, key, scope)) {
       return { status: 409, body: { error: CONVERSATION_MOVED } };
@@ -846,8 +1041,18 @@ export class PageChanges {
       return scope;
     }
 
-    const read = await readChanges(scope.cwd!, this.deps.git, false, range);
-    const view = 'error' in read ? null : await readFileView(read, path, side, this.deps.git);
+    // The base side is a row's: its paths are checked as a diff's are. A disk file is checked by `readFileView` itself.
+    const { read, value: view } = await this.#fromRead(
+      key,
+      scope,
+      range,
+      (changes) => readFileView(changes, path, side, this.deps.git),
+      (changes) => {
+        const row = side === 'base' ? [...changes.sides.values()].find((one) => one.original?.path === path) : undefined;
+
+        return row === undefined ? [] : [...new Set([row.original?.path, row.modified?.path].filter((one): one is string => one !== undefined))];
+      },
+    );
 
     if (!same(this.deps, key, scope)) {
       return { status: 409, body: { error: CONVERSATION_MOVED } };
