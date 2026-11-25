@@ -50,7 +50,7 @@ function setup() {
     },
     session: (id) => sessions.get(id) ?? null,
     label: (session) => `switchboard · ad-hoc · adhoc 1 ${session.nativeSessionId}`,
-    codexPath: () => 'C:/Codex/bin/codex',
+    codexPath: () => '/Codex/bin/codex',
     codexHome: 'D:\\cxh',
     env: { EXTRA: '1' },
     hasTurns: async () => turns,
@@ -98,12 +98,12 @@ describe('Codex terminals in the holder', () => {
     expect(spawn).toMatchObject({
       session: 's1',
       label: 'switchboard · ad-hoc · adhoc 1 thread-1',
-      file: 'C:/Codex/bin/codex.exe',
+      file: '/Codex/bin/codex.exe',
       args: ['resume', '--no-alt-screen', '--remote', 'unix://D:/cxh/app-server-control/app-server-control.sock', 'thread-1'],
       cwd: 'D:/git/widgets',
     });
     expect(spawn!.env).toMatchObject({ CODEX_HOME: 'D:\\cxh', TERM: 'xterm-256color', EXTRA: '1', HOME: 'C:/Users/me' });
-    expect(spawn!.env['PATH']!.startsWith('C:/Codex/bin')).toBe(true);
+    expect(spawn!.env['PATH']!.startsWith('/Codex/bin')).toBe(true);
     expect(Object.keys(spawn!.env).filter((name) => /^(VSCODE_|ELECTRON_|NODE_OPTIONS)/.test(name))).toEqual([]);
     expect(controlSocket('C:\\Users\\me\\.codex')).toBe('unix://C:/Users/me/.codex/app-server-control/app-server-control.sock');
   });

@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BUILT_IN_PLUGINS, PluginRegistry, pluginError } from '../src/plugins.js';
 import { tempHome } from './helpers.js';
@@ -75,14 +76,16 @@ describe('PluginRegistry', () => {
       return { default: { kind: 'forum', label: 'Forum', optionsError: () => null, create: () => ({ error: 'x' }) } };
     });
 
+    // An absolute path on the platform the tests run on.
+    const forum = resolve('/plugins/forum.mjs');
     await registry.use([]);
-    const draft = await registry.resolve(['D:/plugins/forum.mjs']);
+    const draft = await registry.resolve([forum]);
 
     expect(draft.get('forum')?.label).toBe('Forum');
     expect(registry.current.get('forum')).toBeUndefined();
-    await registry.use(['D:/plugins/forum.mjs']);
+    await registry.use([forum]);
     expect(registry.current.get('forum')?.label).toBe('Forum');
-    expect(imported).toEqual(['file:///D:/plugins/forum.mjs']);
+    expect(imported).toEqual([pathToFileURL(forum).href]);
   });
 });
 
