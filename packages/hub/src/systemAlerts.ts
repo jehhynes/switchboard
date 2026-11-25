@@ -32,6 +32,31 @@ const runHelper: RunHelper = (file, args, env, input) =>
     child.once('close', (code) => resolve({ code, stdout, stderr }));
   });
 
+/** How the notifier starts a helper that outlives the hub; calls `failed` when it cannot start. */
+export type DetachHelper = (file: string, args: string[], env: NodeJS.ProcessEnv, failed: (error: Error) => void) => void;
+
+/** Starts `file` in its own process group, unreferenced, so it outlives the hub. */
+export const detachHelper: DetachHelper = (file, args, env, failed) => {
+  const child = spawn(file, args, { stdio: 'ignore', detached: true, env, shell: false });
+
+  child.once('error', failed);
+  child.unref();
+};
+
+/**
+ * The shell script a Linux notification runs, detached from the hub so that a click on a notification the message tray kept still opens its
+ * URL after the hub restarts. Its arguments: the program that opens the URL, the URL, then notify-send's arguments. A notify-send older than
+ * libnotify 0.7.9 has no --action and fails, so the notification is shown again without one.
+ */
+export const NOTIFY_SCRIPT = [
+  'open=$1; target=$2; shift 2',
+  'if choice=$(notify-send --action=default=Open --wait "$@"); then',
+  '  if [ "$choice" = default ]; then exec "$open" "$target"; fi',
+  '  exit 0',
+  'fi',
+  'exec notify-send "$@"',
+].join('\n');
+
 /** The app ID the Windows toasts show as, registered under HKCU so Windows shows them as Switchboard's without a Start menu shortcut. */
 export const TOAST_APP_ID = 'Switchboard';
 
@@ -75,10 +100,16 @@ export function toastInput(alerts: readonly SystemAlert[], sound: boolean): stri
 
 /**
  * The notifier that runs this computer's notification helper (architecture.md § Web page): Windows PowerShell's WinRT toast on Windows,
- * `notify-send` on Linux, whose Open action opens the URL, and `osascript` on macOS, whose notification opens nothing. A helper that fails is
+ * `notify-send` on Linux, run detached, whose Open action opens the URL, and `osascript` on macOS, whose notification opens nothing. A helper that fails is
  * logged; the alert is not retried.
  */
-export function systemNotifier(log: (line: string) => void, run: RunHelper = runHelper, platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): SystemNotifier {
+export function systemNotifier(
+  log: (line: string) => void,
+  run: RunHelper = runHelper,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  detach: DetachHelper = detachHelper,
+): SystemNotifier {
   const clean = launchEnvironment(env);
   /** Logs a helper's failing exit, or why it could not start. */
   const failed = (what: string) => (result: unknown) => {
@@ -104,21 +135,11 @@ export function systemNotifier(log: (line: string) => void, run: RunHelper = run
 
       if (platform === 'linux') {
         for (const alert of alerts) {
-          const base = ['--app-name=Switchboard', ...(sound ? [] : ['--hint=boolean:suppress-sound:true'])];
-          const text = ['--', alert.title, alert.reason];
-          const plain = (): void => void run('notify-send', [...base, ...text], clean).then((result) => result.code === 0 || failed('notify-send')(result), failed('notify-send'));
+          const { file, args } = browserCommand(alert.url, platform);
+          const notify = ['--app-name=Switchboard', ...(sound ? [] : ['--hint=boolean:suppress-sound:true']), '--', alert.title, alert.reason];
 
-          // --wait holds notify-send until the notification closes and prints the action chosen; a notify-send older than libnotify 0.7.9 has no
-          // --action and fails, so the notification is shown again without one.
-          void run('notify-send', [...base, '--action=default=Open', '--wait', ...text], clean).then((result) => {
-            if (result.code !== 0) {
-              plain();
-            } else if (result.stdout.trim() === 'default') {
-              const { file, args } = browserCommand(alert.url, platform);
-
-              void run(file, args, clean).then((opened) => opened.code === 0 || failed('xdg-open')(opened), failed('xdg-open'));
-            }
-          }, failed('notify-send'));
+          // Its exit is not seen, since the helper outlives the hub; only a shell that cannot start is logged.
+          detach('sh', ['-c', NOTIFY_SCRIPT, 'switchboard-notify', file, ...args, ...notify], clean, failed('notify-send'));
         }
 
         return;

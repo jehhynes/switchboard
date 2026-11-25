@@ -1,6 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { systemNotifier, TOAST_SCRIPT, toastInput, toastXml } from '../src/systemAlerts.js';
-import type { RunHelper, SystemAlert } from '../src/systemAlerts.js';
+import { detachHelper, NOTIFY_SCRIPT, systemNotifier, TOAST_SCRIPT, toastInput, toastXml } from '../src/systemAlerts.js';
+import type { DetachHelper, RunHelper, SystemAlert } from '../src/systemAlerts.js';
 
 const ALERT: SystemAlert = { workItemId: 7, title: 'Fix <b> & "quote" it\'s', reason: 'Review, then approve', url: 'http://127.0.0.1:47616/page/#w=7' };
 
@@ -20,6 +24,9 @@ function fakeRun(answer: (file: string, args: string[]) => { code: number | null
 
   return { calls, run };
 }
+
+/** This test process's process group. */
+const getpgid = (): number => Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim());
 
 const settle = () => new Promise((done) => setTimeout(done, 0));
 
@@ -98,33 +105,73 @@ describe('systemNotifier', () => {
     expect(logs).toEqual(['system notification not shown: none on freebsd']);
   });
 
-  it('shows each alert with notify-send on Linux and opens its URL when the operator chose Open, and nothing when it was dismissed', async () => {
+  it('shows each alert on Linux through a detached shell that outlives the hub, with the URL and notify-send arguments as its own arguments', () => {
     const logs: string[] = [];
-    const { calls, run } = fakeRun((file, args) => (file === 'notify-send' ? { code: 0, stdout: args.includes('Second') ? '\n' : 'default\n' } : { code: 0 }));
+    const { calls, run } = fakeRun();
+    const detached: Array<{ file: string; args: string[] }> = [];
+    const detach: DetachHelper = (file, args, _env, failed) => { detached.push({ file, args }); if (args.includes('Broken')) failed(new Error('spawn sh ENOENT')); };
 
-    systemNotifier((line) => logs.push(line), run, 'linux', {}).notify([ALERT, { ...ALERT, workItemId: 8, title: 'Second', url: 'http://x/page/#w=8' }], false);
-    await settle();
-    await settle();
-    expect(calls).toEqual([
-      { file: 'notify-send', args: ['--app-name=Switchboard', '--hint=boolean:suppress-sound:true', '--action=default=Open', '--wait', '--', ALERT.title, 'Review, then approve'] },
-      { file: 'notify-send', args: ['--app-name=Switchboard', '--hint=boolean:suppress-sound:true', '--action=default=Open', '--wait', '--', 'Second', 'Review, then approve'] },
-      { file: 'xdg-open', args: [ALERT.url] },
+    systemNotifier((line) => logs.push(line), run, 'linux', {}, detach).notify([ALERT, { ...ALERT, workItemId: 8, title: 'Broken', url: 'http://x/page/#w=8' }], false);
+    expect(calls).toEqual([]);
+    expect(detached).toEqual([
+      { file: 'sh', args: ['-c', NOTIFY_SCRIPT, 'switchboard-notify', 'xdg-open', ALERT.url, '--app-name=Switchboard', '--hint=boolean:suppress-sound:true', '--', ALERT.title, 'Review, then approve'] },
+      { file: 'sh', args: ['-c', NOTIFY_SCRIPT, 'switchboard-notify', 'xdg-open', 'http://x/page/#w=8', '--app-name=Switchboard', '--hint=boolean:suppress-sound:true', '--', 'Broken', 'Review, then approve'] },
     ]);
-    expect(logs).toEqual([]);
+    expect(logs).toEqual(['system notification not shown (notify-send): Error: spawn sh ENOENT']);
+    systemNotifier(() => {}, run, 'linux', {}, (file, args) => detached.push({ file, args })).notify([ALERT], true);
+    expect(detached[2]!.args.slice(5)).toEqual(['--app-name=Switchboard', '--', ALERT.title, 'Review, then approve']);
   });
 
-  it('shows the notification again without an action where notify-send has none, logging when that fails too', async () => {
-    const logs: string[] = [];
-    const { calls, run } = fakeRun((_file, args) => (args.includes('--wait') ? { code: 1, stderr: 'Unknown option --action' } : { code: 2, stderr: 'no bus' }));
+  describe.runIf(process.platform !== 'win32')('the Linux notification script', () => {
+    const TITLE = '-x "it\'s" * $(touch pwned) `id` $HOME';
+    const URL = 'http://127.0.0.1:47616/page/?a=1&b=$(id)#w=7';
 
-    systemNotifier((line) => logs.push(line), run, 'linux', {}).notify([ALERT], true);
-    await settle();
-    await settle();
-    expect(calls.map((call) => call.args)).toEqual([
-      ['--app-name=Switchboard', '--action=default=Open', '--wait', '--', ALERT.title, 'Review, then approve'],
-      ['--app-name=Switchboard', '--', ALERT.title, 'Review, then approve'],
-    ]);
-    expect(logs).toEqual(['system notification not shown (notify-send): exit 2: no bus']);
+    /** Runs NOTIFY_SCRIPT with a fake notify-send that answers `answer` to --wait; returns each program's arguments, one bracketed per argument. */
+    function runScript(answer: { code: number; stdout: string }): { calls: string[]; files: string[] } {
+      const dir = mkdtempSync(join(tmpdir(), 'hub-notify-'));
+      const record = join(dir, 'calls');
+      const each = `for a in "$@"; do printf '[%s]' "$a" >> '${record}'; done; echo >> '${record}'`;
+      writeFileSync(join(dir, 'notify-send'), `#!/bin/sh\nprintf 'notify-send ' >> '${record}'\n${each}\ncase " $* " in *" --wait "*) printf '%s' '${answer.stdout}'; exit ${answer.code};; esac\nexit 0\n`, { mode: 0o755 });
+      writeFileSync(join(dir, 'opener'), `#!/bin/sh\nprintf 'opener ' >> '${record}'\n${each}\n`, { mode: 0o755 });
+      try {
+        execFileSync('sh', ['-c', NOTIFY_SCRIPT, 'switchboard-notify', join(dir, 'opener'), URL, '--app-name=Switchboard', '--', TITLE, 'Why  two spaces'], { env: { PATH: `${dir}:/usr/bin:/bin` }, cwd: dir });
+        return { calls: readFileSync(record, 'utf8').trim().split('\n'), files: readdirSync(dir).sort() };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+    const shown = `[--app-name=Switchboard][--][${TITLE}][Why  two spaces]`;
+
+    it('opens the URL when the operator chose Open, passing each argument whole and running none of its text', () => {
+      expect(runScript({ code: 0, stdout: 'default\n' })).toEqual({
+        calls: [`notify-send [--action=default=Open][--wait]${shown}`, `opener [${URL}]`],
+        files: ['calls', 'notify-send', 'opener'],
+      });
+    });
+
+    it('opens nothing when the notification was dismissed', () => {
+      expect(runScript({ code: 0, stdout: '' }).calls).toEqual([`notify-send [--action=default=Open][--wait]${shown}`]);
+    });
+
+    it('shows the notification again without an action where notify-send has none', () => {
+      expect(runScript({ code: 1, stdout: '' }).calls).toEqual([`notify-send [--action=default=Open][--wait]${shown}`, `notify-send ${shown}`]);
+    });
+
+    it('starts the helper in its own process group, apart from the hub', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'hub-detach-'));
+      const out = join(dir, 'out');
+      try {
+        const errors: Error[] = [];
+        detachHelper('sh', ['-c', `echo "$$ $(ps -o pgid= -p $$)" > '${out}.tmp' && mv '${out}.tmp' '${out}'`], { PATH: '/usr/bin:/bin' }, (error) => errors.push(error));
+        await expect.poll(() => existsSync(out), { timeout: 5_000 }).toBe(true);
+        const [pid, group] = readFileSync(out, 'utf8').trim().split(/\s+/);
+        expect(group).toBe(pid);
+        expect(Number(group)).not.toBe(getpgid());
+        expect(errors).toEqual([]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it('passes the title and reason to osascript as arguments on macOS, with the sound only when it may', async () => {
