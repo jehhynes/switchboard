@@ -3664,6 +3664,9 @@ describe('the page in use', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: clipboard }, configurable: true });
     hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', actions, main: 'Approve', pastes: ['Reply'] })])] });
     expect(root.querySelector('.header .row-main')!.textContent).toBe('Approve');
+    // Its label is its tooltip too and a span of its own, which the phone's layout keeps for a screen reader and does not draw (page.css).
+    expect(root.querySelector('.header .row-main')!.getAttribute('title')).toBe('Approve');
+    expect(root.querySelector('.header .row-main > .row-main-label')!.textContent).toBe('Approve');
     click('.header .row-main');
     await flush();
     expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ window: 'pk', scopeGen: 3, workItemId: 1, label: 'Approve' });

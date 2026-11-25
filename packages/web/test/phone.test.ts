@@ -144,8 +144,11 @@ describe('the page on a phone', () => {
     expect(PAGE_ASSETS['index.html']!.body).toContain('html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%;');
   });
 
-  it("hides the header's main control in the phone's layout, and the Actions menu starts with it whatever it is", () => {
-    expect(css).toContain(':where(html.phone) .header > button.row-main { display: none; }');
+  it("shows the header's main control as its icon alone in the phone's layout, and the Actions menu starts with it whatever it is", () => {
+    // A 44 px target, its label kept for a screen reader but not drawn (the operator's decision, 2026-11-25).
+    expect(css).toContain(':where(html.phone) .header > button.row-main { position: relative; justify-content: center; min-width: 44px; min-height: 44px; padding: 0; }');
+    expect(css).toContain(':where(html.phone) .header > button.row-main > .row-main-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }');
+    expect(css).not.toMatch(/button\.row-main \{[^}]*display: none/);
 
     for (const label of ['Approve', 'Mark done', 'Resume', 'Open in Claude', 'Answer in terminal']) {
       const main = { label, icon: 'check', group: 'main' } as PageAction;

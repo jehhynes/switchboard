@@ -63,6 +63,8 @@ sessionStorage.removeItem('switchboard.scroll');
 const now = Date.now();
 const row = (id, title, patch = {}) => ({ workItemId: id, ticketId: id, title, priority: null, time: null, ticket: 'gh ' + id, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null, ...patch });
 const remove = { label: 'Delete', action: 'delete', icon: 'trash', group: 'state', confirm: { question: 'Delete Fix it?', detail: 'It goes for good.', action: 'delete' }, input: null };
+// The open work item's main control, which the header draws beside Actions: its icon alone on a phone.
+const approve = { label: 'Approve', action: 'approve', icon: 'check', group: 'main', confirm: null, input: null };
 // The second row's line 2 holds more pills than fit beside its long playbook, so some drop out.
 const pr = (n) => ({ label: 'PR #' + n, url: 'https://github.com/o/r/pull/' + n, kind: 'pr', badge: String(n), glyph: '\u{ea64}', mentioned: false });
 const crowded = { ticket: 'gh 21509', playbook: 'dev:address-pr-review', comment: { glyph: '\u{ea6b}', title: 'A comment' }, links: [pr(21512), pr(21513), pr(21514), pr(21515), { label: 'Design notes', url: 'https://example.com/notes', kind: 'url', badge: 'Design notes', glyph: '\u{eb15}', mentioned: false }], returned: 2 };
@@ -72,13 +74,15 @@ const short = { ticket: 'gh 7', playbook: 'dev:plan', links: [pr(21516), { label
 // does not, so the sixth shows its text and the seventh its icon alone.
 const link = (badge) => ({ label: badge, url: 'https://example.com/' + badge, kind: 'url', badge, glyph: '\u{eb15}', mentioned: false });
 const many = { ticket: 'gh 9', playbook: 'dev:x', links: ['1', '2', '3', '4', '5', '6', 'A long seventh label'].map(link) };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [remove] }), row(2, 'Another thing', crowded), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'gh 21510', comment: { glyph: '\u{ea6b}', title: 'A comment' } }), row(4, 'Short playbook', short), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)])] }];
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [approve, remove] }), row(2, 'Another thing', crowded), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'gh 21510', comment: { glyph: '\u{ea6b}', title: 'A comment' } }), row(4, 'Short playbook', short), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)])] }];
 // The list at its narrowest, 200 px, where line 2 wraps, and at 300 px, where line 2's pills shrink to their icons.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
 const listing = view === 'list' || narrow !== null;
 const open = !listing && view !== 'settings';
 if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list { width: ' + narrow + 'px !important; min-width: 0 !important; max-width: none !important; flex: none !important; }</style>');
-const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
+// A title longer than any header here fits, so the header shows how much of it is left beside the main control.
+const longTitle = 'Call Center dialer stops receiving incoming calls when its registration lapses';
+const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: longTitle, scopeGen: 3, conversations: [{ workItemId: 1, title: longTitle, primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0, sessionTitle: 'switchboard · dev:build · github 1' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
 const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: view === 'persona' ? { id: 'nova', name: 'Nova', pinned: true, tonePending: false } : null, canPin: true };
 const personas = [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm and brief, with a dry joke now and then.' }, { id: 'iris', name: 'Iris', voice: 'marin', style: 'none', personality: '' }];
 const items = [];
@@ -241,6 +245,20 @@ const measure = `(() => {
         }),
       };
     }),
+    // The conversation's header: whether its controls share one line, its main control's box and drawn label, and the room its title has.
+    header: (() => {
+      const header = [...document.querySelectorAll('.header')].find(shown);
+      if (!header) return null;
+      const boxes = [...header.children].filter(shown).map((one) => one.getBoundingClientRect()).filter((box) => box.width > 0 && box.height > 0);
+      const main = header.querySelector('button.row-main');
+      const box = main && shown(main) ? main.getBoundingClientRect() : null;
+      const title = header.querySelector('button.picker .title');
+      return {
+        overlap: Math.min(...boxes.map((one) => one.bottom)) - Math.max(...boxes.map((one) => one.top)),
+        main: box === null ? null : { width: box.width, height: box.height, label: main.querySelector('.row-main-label').getBoundingClientRect().width, title: main.title },
+        title: title ? title.getBoundingClientRect().width : null,
+      };
+    })(),
     tops: { header: top('.header'), listHeader: top('.list-header'), settingsHead: top('.settings-head'), personaHead: top('.persona-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
@@ -333,6 +351,19 @@ function failures(view, size, m) {
   }
   // The tabs view's strip has more tabs than fit, so More holds the rest.
   if (view === 'tabs' && !m.strips.some((strip) => strip.more)) out.push('no strip shows More for a work item with more tabs than fit');
+  // The header keeps one line with its main control: on a phone its icon alone, a 44 px target named by its label; elsewhere with its label.
+  if (m.header !== null) {
+    const h = m.header;
+
+    if (h.overlap <= 0) out.push('the header takes more than one line');
+    if (h.main === null) out.push('the header shows no main control');
+    else if (size.phone && (h.main.width < 43.5 || h.main.height < 43.5)) out.push('the main control is ' + h.main.width + 'x' + h.main.height + ' px, under 44 px');
+    else if (size.phone && h.main.label > 1) out.push('the main control draws its label on a phone (' + h.main.label + ' px)');
+    else if (!size.phone && h.main.label <= 1) out.push('the main control hides its label outside the phone\'s layout');
+    if (h.main !== null && ((h.main.name !== undefined && h.main.name !== 'Approve') || h.main.title !== 'Approve')) out.push('the main control is named ' + JSON.stringify(h.main.name) + ' with the tooltip ' + JSON.stringify(h.main.title));
+    if (h.title === null) out.push('the header shows no title');
+    else if (h.title < 80) out.push('the header leaves its title ' + h.title + ' px');
+  }
   for (const [bar, top] of Object.entries(m.tops)) {
     // The dialogs, Settings and the persona dialog, outside the phone's layout sit inside the dimmed page's margin.
     if ((['header', 'listHeader'].includes(bar) || (['settingsHead', 'personaHead'].includes(bar) && size.phone)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
@@ -438,6 +469,16 @@ try {
 
         await wait(200);
         const m = await evaluate(measure);
+
+        // The main control's accessible name as the browser computes it, which a hidden label or an aria-label would change; not while a modal
+        // dialog, such as the persona dialog, leaves the page behind it out of the accessibility tree.
+        if (m.header?.main && !(await evaluate('document.querySelector("[aria-modal=true]") !== null'))) {
+          const { root } = await send('DOM.getDocument', { depth: 0 });
+          const { nodeId } = await send('DOM.querySelector', { nodeId: root.nodeId, selector: '.header button.row-main' });
+          const { nodes } = await send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false });
+
+          m.header.main.name = nodes.find((node) => !node.ignored)?.name?.value ?? null;
+        }
         const found = missing.length > 0 ? ['could not open the view: no ' + missing.join(', ')] : failures(view, size, m);
 
         if (view === 'tabs' && missing.length === 0) {

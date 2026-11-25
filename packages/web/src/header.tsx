@@ -117,9 +117,9 @@ function Actions({ row, view }: { row: PageRow | null; view: View }) {
   return (
     <>
       {main === undefined ? null : (
-        <button type="button" class="row-main" data-action="row-action" data-row={rowKey(row)} data-label={main.label} disabled={waiting(view)} title={offlineTitle(view)}>
+        <button type="button" class="row-main" data-action="row-action" data-row={rowKey(row)} data-label={main.label} disabled={waiting(view)} title={offlineTitle(view) ?? main.label}>
           <span class={`codicon codicon-${main.icon}`} aria-hidden="true"></span>
-          <span>{main.label}</span>
+          <span class="row-main-label">{main.label}</span>
         </button>
       )}
       <div class="menu-anchor actions-anchor">
