@@ -231,16 +231,16 @@ function json(response: ServerResponse, status: number, body: unknown): void {
 
 /** A JSON answer gzipped when the client takes gzip and it is large enough to gain, with its `ETag`, and 304 for a matching `If-None-Match`. */
 function jsonCompressed(request: IncomingMessage, response: ServerResponse, reply: Reply & { etag?: string }): void {
-  const etag = reply.etag === undefined ? {} : { ETag: `"${reply.etag}"` };
+  const text = JSON.stringify(reply.body);
+  const gzip = text.length >= GZIP_MIN_BYTES && /\bgzip\b/.test(String(request.headers['accept-encoding'] ?? ''));
+  // A strong ETag names one set of bytes, so the gzipped answer has its own.
+  const etag = reply.etag === undefined ? {} : { ETag: `"${reply.etag}${gzip ? '-gzip' : ''}"` };
 
-  if (reply.etag !== undefined && reply.status === 200 && request.headers['if-none-match'] === `"${reply.etag}"`) {
-    response.writeHead(304, { ...etag, 'Cache-Control': 'no-cache' });
+  if (etag.ETag !== undefined && reply.status === 200 && request.headers['if-none-match'] === etag.ETag) {
+    response.writeHead(304, { ...etag, 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding' });
     response.end();
     return;
   }
-
-  const text = JSON.stringify(reply.body);
-  const gzip = text.length >= GZIP_MIN_BYTES && /\bgzip\b/.test(String(request.headers['accept-encoding'] ?? ''));
 
   response.writeHead(reply.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding', ...etag, ...(gzip ? { 'Content-Encoding': 'gzip' } : {}) });
   response.end(gzip ? gzipSync(text) : text);
@@ -868,7 +868,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
             if (raw) {
               json(response, 404, { error: 'Only a picture or a PDF is sent as a file.' });
             } else {
-              jsonCompressed(request, response, { status: 200, body: found.view });
+              // The page reads an open file tab again while it shows, sending this ETag, so an unchanged file answers 304.
+              jsonCompressed(request, response, { status: 200, body: found.view, etag: createHash('sha256').update(JSON.stringify(found.view)).digest('hex').slice(0, 32) });
             }
           } else {
             // A picture shows in an img and a PDF in a frame of the page; an SVG's scripts get an opaque origin, as an artifact's do. The bytes

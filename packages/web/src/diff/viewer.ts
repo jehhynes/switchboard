@@ -6,7 +6,7 @@ import type { CodeViewDiffItem, CodeViewItem, CodeViewOptions, FileDiffMetadata 
 import { getOrCreateWorkerPoolSingleton } from '@pierre/diffs/worker';
 import type { WorkerPoolManager } from '@pierre/diffs/worker';
 import { largeReason } from '../changesWindow.js';
-import type { ChangesMount, ChangesMountOptions, ChangesRowInput, DiffData, DiffMount, DiffMountOptions, FileData, FileMountOptions, RowContent } from './types.js';
+import type { ChangesMount, ChangesMountOptions, ChangesRowInput, DiffData, DiffMount, DiffMountOptions, FileData, FileMount, FileMountOptions, RowContent } from './types.js';
 
 registerCustomTheme('sb-dark-modern', () => import('./themes/sb-dark-modern.json').then((module) => module.default as never));
 registerCustomTheme('sb-light-modern', () => import('./themes/sb-light-modern.json').then((module) => module.default as never));
@@ -113,7 +113,7 @@ export function mountDiff(host: HTMLElement, data: DiffData, version: string, mo
 }
 
 /** Draws a whole file read-only into `host`, scrolled to `line` and with it selected (PRD R118's file view). */
-export function mountFile(host: HTMLElement, data: FileData, version: string, mount: FileMountOptions): DiffMount {
+export function mountFile(host: HTMLElement, data: FileData, version: string, mount: FileMountOptions): FileMount {
   const callbacks = { renderHeaderPrefix: () => mount.prefix ?? null, renderHeaderFilenameSuffix: () => mount.suffix ?? null, renderHeaderMetadata: () => mount.meta ?? null };
   const view = new CodeView<undefined, undefined>({ ...options('stacked', mount.wrap), ...callbacks }, workers());
   const item: CodeViewItem<undefined> = { id: data.path, type: 'file', file: { name: data.path, contents: data.contents ?? '', cacheKey: version } };
@@ -126,7 +126,11 @@ export function mountFile(host: HTMLElement, data: FileData, version: string, mo
     view.setSelectedLines({ id: data.path, range: { start: mount.line, end: mount.line } });
   }
 
-  return { set: (_layout, wrap) => view.setOptions({ ...options('stacked', wrap), ...callbacks }), dispose: () => view.cleanUp() };
+  return {
+    set: (_layout, wrap) => view.setOptions({ ...options('stacked', wrap), ...callbacks }),
+    update: (contents, nextVersion) => view.setItems([{ ...item, file: { ...item.file, contents, cacheKey: nextVersion } }]),
+    dispose: () => view.cleanUp(),
+  };
 }
 
 /** The most lines a placeholder is drawn with, so a huge file's placeholder does not stretch the scroll bar before its diff is read. */

@@ -12,6 +12,8 @@ export interface LocalFileData {
   size: number | null;
   entries: Array<{ name: string; dir: boolean }> | null;
   more: boolean;
+  /** A picture's or PDF's modification time, so a new version loads again; null or absent otherwise. */
+  modified?: number | null;
 }
 
 /**

@@ -1604,7 +1604,17 @@ describe('the web page routes', () => {
     expect(changes.status).toBe(200);
     expect(changes.headers['etag']).toBe('"e1"');
     expect(JSON.parse(changes.body)).toEqual({ rows: 'x'.repeat(2000), q: 'z' });
-    expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', { Cookie: cookie, 'Accept-Encoding': 'gzip' })).headers['content-encoding']).toBe('gzip');
+    const gzipped = await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', { Cookie: cookie, 'Accept-Encoding': 'gzip' });
+
+    expect(gzipped.headers['content-encoding']).toBe('gzip');
+    // The gzipped bytes have their own strong ETag, and neither validates the other.
+    expect(gzipped.headers['etag']).toBe('"e1-gzip"');
+    expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', { Cookie: cookie, 'If-None-Match': '"e1-gzip"' })).status).toBe(200);
+    expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', { Cookie: cookie, 'Accept-Encoding': 'gzip', 'If-None-Match': '"e1"' })).status).toBe(200);
+    const unchanged = await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', { Cookie: cookie, 'Accept-Encoding': 'gzip', 'If-None-Match': '"e1-gzip"' });
+
+    expect(unchanged.status).toBe(304);
+    expect(unchanged.headers['vary']).toBe('Accept-Encoding');
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', { Cookie: cookie, 'If-None-Match': '"e1"' })).status).toBe(304);
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-2', { Cookie: cookie })).status).toBe(403);
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', {})).status).toBe(401);
@@ -1724,6 +1734,19 @@ describe('the web page routes', () => {
     expect(JSON.parse((await get('/v1/conversation/local-file?window=page-1&path=.')).body)).toMatchObject({ kind: 'dir' });
     expect(JSON.parse(shown.body)).toMatchObject({ kind: 'markdown', name: 'notes.md', contents: '# Notes' });
     expect(shown.headers['cache-control']).toBe('no-cache');
+
+    // An open file tab reads again with the ETag it holds: an unchanged file answers 304, a changed one its new view and ETag.
+    const etag = String(shown.headers['etag']);
+
+    expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+    expect((await get('/v1/conversation/local-file?window=page-1&path=notes.md', { Cookie: cookie, 'If-None-Match': etag })).status).toBe(304);
+    writeFileSync(join(folder, 'notes.md'), '# Notes, revised');
+    const revised = await get('/v1/conversation/local-file?window=page-1&path=notes.md', { Cookie: cookie, 'If-None-Match': etag });
+
+    expect(revised.status).toBe(200);
+    expect(JSON.parse(revised.body)).toMatchObject({ contents: '# Notes, revised' });
+    expect(revised.headers['etag']).not.toBe(etag);
+    writeFileSync(join(folder, 'notes.md'), '# Notes');
 
     const picture = await get('/v1/conversation/local-file-raw?window=page-1&path=shot.png');
 

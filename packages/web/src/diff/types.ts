@@ -29,6 +29,11 @@ export interface DiffMount {
   dispose(): void;
 }
 
+/** A file's view, whose text can be replaced in place, keeping where it is scrolled to. */
+export interface FileMount extends DiffMount {
+  update(contents: string, version: string): void;
+}
+
 /** What the Changes tab's viewer knows of a row before its diff is read: enough for its header and a placeholder of about its height. */
 export interface ChangesRowInput {
   path: string;
@@ -86,6 +91,6 @@ export interface ChangesMount {
 /** What `diff.js` exports. */
 export interface DiffModule {
   mountDiff(host: HTMLElement, data: DiffData, version: string, options: DiffMountOptions): DiffMount | null;
-  mountFile(host: HTMLElement, data: FileData, version: string, options: FileMountOptions): DiffMount;
+  mountFile(host: HTMLElement, data: FileData, version: string, options: FileMountOptions): FileMount;
   mountChanges(host: HTMLElement, rows: ChangesRowInput[], options: ChangesMountOptions): ChangesMount;
 }

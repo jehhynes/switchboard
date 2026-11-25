@@ -108,6 +108,8 @@ export const DRAWER_HIDE_MS = 400;
 const DRAWER_TICK_MS = 100;
 /** How often an open History reads the hub again, so its times stay current, and how soon after a list change. */
 export const HISTORY_REFRESH_MS = 30_000;
+/** How often an open file tab in view is read again; an unchanged file answers 304. */
+export const FILE_POLL_MS = 2_000;
 export const FRAME_SHOW_DELAY_MS = 100;
 /** The longest a page layer's transition or animation is followed frame by frame for the website frame's holes. */
 export const LAYER_MOVE_MS = 1_000;
@@ -135,6 +137,8 @@ export interface PageDeps {
   loadConsole?(): Promise<ConsoleModule | null>;
   /** Loads the diff viewer's modules on first use; resolves null when they cannot load. */
   loadDiff?(): Promise<DiffModule | null>;
+  /** How often an open file tab in view is read again; `FILE_POLL_MS` when left out. */
+  filePollMs?: number;
   /** The build of the hub that served the page, from its `switchboard-build` meta tag, and how to reload, for a hub that restarts. */
   build?: string | null;
   reload?(): void;
@@ -591,7 +595,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     takePane: (pane) => takePane(pane),
     drawPane: (pane, tree) => drawPane(pane, tree),
     drawDiagrams: (pane) => drawDiagrams(pane),
+    inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (mainTab() === 'file' || (wide() && sideTab() === 'file')),
+    shown: () => `${state.key ?? ''} ${state.scope?.scopeGen ?? ''}`,
   });
+  // An open file tab is read again while in view, so a file the session changes shows its new version.
+  const filePoll = setInterval(() => localFiles.refresh(), deps.filePollMs ?? FILE_POLL_MS);
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
   const dropFileIcons = useFileIcons({ fetch: (...args) => readFetch(...args), loaded: () => draw() });
 
@@ -2956,6 +2964,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   window.addEventListener('pagehide', () => (keepScroll(), rememberTabs()), { signal: listening.signal });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && keepScroll(), { signal: listening.signal });
+  document.addEventListener('visibilitychange', () => localFiles.refresh(), { signal: listening.signal });
 
 
   /** Draws before the next repaint, once however many events ask for it before then. */
@@ -5647,6 +5656,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       clearInterval(seenTimer);
+      clearInterval(filePoll);
       clearInterval(historyTick ?? undefined);
       clearTimeout(historyChange ?? undefined);
       browserResize?.disconnect();

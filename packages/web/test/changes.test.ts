@@ -136,7 +136,7 @@ describe('the Changes list', () => {
         shown.className = 'fake';
         shown.textContent = `file ${data.path} at ${String(options.line)}`;
         host.replaceChildren(...(options.prefix === undefined ? [] : [options.prefix]), shown, ...(options.suffix === undefined ? [] : [options.suffix]), ...(options.meta === undefined ? [] : [options.meta]));
-        return { set: (layout, wrap) => fileSets.push(`${layout} ${wrap}`), dispose: () => {} };
+        return { set: (layout, wrap) => fileSets.push(`${layout} ${wrap}`), update: () => {}, dispose: () => {} };
       },
       mountChanges: (host, rows, options) => {
         const listeners: Array<() => void> = [];

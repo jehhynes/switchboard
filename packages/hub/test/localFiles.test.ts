@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -241,6 +241,15 @@ describe('openLocalFile', () => {
     expect(shot!.view).toMatchObject({ kind: 'image', size: 4, contents: null, tooLarge: false });
     expect((await shot!.handle!.readFile()).length).toBe(4);
     await shot!.handle!.close();
+    // Its time is in the view, so a picture rewritten at the same size still changes the view the page compares.
+    expect(typeof shot!.view.modified).toBe('number');
+    utimesSync(join(work, 'shot.PNG'), new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+    const touched = await openLocalFile(roots, 'shot.PNG');
+
+    await touched!.handle!.close();
+    expect(touched!.view.modified).toBe(1_700_000_000_000);
+    writeFileSync(join(work, 'note.txt'), 'text');
+    expect(await read('note.txt')).toMatchObject({ kind: 'text', modified: null });
     expect(await read('doc.pdf')).toMatchObject({ kind: 'pdf', size: 8, contents: null });
     expect(rawMime(join(work, 'shot.PNG'))).toBe('image/png');
     expect(rawMime(join(work, 'x.svg'))).toBe('image/svg+xml');

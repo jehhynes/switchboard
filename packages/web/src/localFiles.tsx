@@ -11,9 +11,9 @@ import { linkTarget, localFileUrl, localMarkdown } from './localLinks.js';
 import type { LocalFileData } from './localLinks.js';
 import { trusted } from './trusted.js';
 import { readVersion } from './readVersion.js';
-import type { DiffModule, DiffMount } from './diff/types.js';
+import type { DiffModule, FileMount } from './diff/types.js';
 
-type LocalEntry = { state: 'loading' } | { state: 'ok'; data: LocalFileData; version: string } | { state: 'error'; error: string };
+type LocalEntry = { state: 'loading' } | { state: 'ok'; data: LocalFileData; version: string; etag: string | null } | { state: 'error'; error: string };
 
 /** One file's tab: the target the link named, the line it named, and the file as read. */
 export interface LocalTab {
@@ -97,6 +97,10 @@ export interface LocalFilesDeps {
   drawPane(pane: HTMLElement, tree: ComponentChild): void;
   /** Draws the Mermaid diagrams in a pane. */
   drawDiagrams(pane: HTMLElement): void;
+  /** Whether the file tab is in view: the tab shown in its strip, on a page the operator can see. */
+  inView(): boolean;
+  /** What the page shows: its page key and scope generation, so an answer read for an earlier one, as before a reconnect or a change of session, is dropped. */
+  shown(): string;
 }
 
 /** The page's side of local file links: opens and closes their tabs, reads each file from the hub and draws the one shown. */
@@ -106,7 +110,9 @@ export class LocalFilesController {
   #ids = 0;
   #module: Promise<DiffModule | null> | null = null;
   /** The file view on each host it draws into, dropped once its host leaves the page. */
-  readonly #mounted = new Map<HTMLElement, DiffMount | null>();
+  readonly #mounted = new Map<HTMLElement, FileMount | null>();
+  /** The tabs being read, so a tab is never read twice at once. */
+  readonly #reading = new Set<LocalTab>();
 
   constructor(private readonly deps: LocalFilesDeps) {}
 
@@ -144,8 +150,12 @@ export class LocalFilesController {
       }
 
       void this.#read(tab);
-    } else if (line !== null && line !== tab.line) {
-      tab.line = line;
+    } else {
+      if (line !== null && line !== tab.line) {
+        tab.line = line;
+      }
+
+      void this.#read(tab, true);
     }
 
     this.view.open = tab.id;
@@ -178,28 +188,65 @@ export class LocalFilesController {
     }
   }
 
-  async #read(tab: LocalTab): Promise<void> {
+  /** Reads the tab shown again while it is in view, so a file changed on disk shows its new version (architecture.md § Web page, Local files). */
+  refresh(): void {
+    const tab = this.shown();
+
+    if (tab !== null && this.deps.inView()) {
+      void this.#read(tab, true);
+    }
+  }
+
+  /**
+   * Reads a tab's file. `again` reads a tab already shown, sending the ETag it holds, so an unchanged file answers 304 and nothing is drawn; such a
+   * read keeps what the tab shows when the hub does not answer or refuses for a reason other than the file being gone, as while it restarts.
+   */
+  async #read(tab: LocalTab, again = false): Promise<void> {
     const key = this.deps.key();
     const conversation = this.#for;
 
-    if (key === null) {
-      tab.entry = { state: 'error', error: 'Switchboard is not connected.' };
+    if (this.#reading.has(tab) || (again && tab.entry.state === 'loading')) {
       return;
     }
 
-    let entry: LocalEntry;
+    if (key === null) {
+      if (!again) {
+        tab.entry = { state: 'error', error: 'Switchboard is not connected.' };
+      }
 
-    try {
-      const response = await this.deps.fetch(localFileUrl(key, tab.target), { credentials: 'same-origin', cache: 'no-store' });
-      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-
-      entry = response.ok ? { state: 'ok', data: body as unknown as LocalFileData, version: readVersion() } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
-    } catch (failure) {
-      entry = { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
+      return;
     }
 
-    // An answer for a tab closed since, or for a conversation the page has left, is dropped.
-    if (conversation !== this.#for || !this.view.tabs.includes(tab)) {
+    const etag = again && tab.entry.state === 'ok' ? tab.entry.etag : null;
+    const shown = this.deps.shown();
+    let entry: LocalEntry | null;
+
+    this.#reading.add(tab);
+
+    try {
+      const response = await this.deps.fetch(localFileUrl(key, tab.target), { credentials: 'same-origin', cache: 'no-store', ...(etag === null ? {} : { headers: { 'If-None-Match': etag } }) });
+
+      if (response.status === 304 || (again && !response.ok && response.status !== 404)) {
+        entry = null;
+      } else {
+        const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+        entry = response.ok ? { state: 'ok', data: body as unknown as LocalFileData, version: readVersion(), etag: response.headers?.get?.('ETag') ?? null } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
+      }
+    } catch (failure) {
+      entry = again ? null : { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
+    } finally {
+      this.#reading.delete(tab);
+    }
+
+    // A first read answered for what the page showed before reads the file again for what it shows now, so the tab does not stay loading.
+    if (conversation === this.#for && shown !== this.deps.shown() && tab.entry.state === 'loading' && this.view.tabs.includes(tab)) {
+      void this.#read(tab);
+      return;
+    }
+
+    // An answer for a tab closed since, for a conversation the page has left or for what it showed before, is dropped, and a refusal read again changes nothing.
+    if (entry === null || conversation !== this.#for || shown !== this.deps.shown() || !this.view.tabs.includes(tab) || (entry.state === 'error' && tab.entry.state === 'error' && entry.error === tab.entry.error)) {
       return;
     }
 
@@ -227,9 +274,12 @@ export class LocalFilesController {
 
     const id = Number(button?.dataset['local']);
 
-    if (action === 'local-tab' && this.view.tabs.some((tab) => tab.id === id)) {
+    const chosen = this.view.tabs.find((tab) => tab.id === id);
+
+    if (action === 'local-tab' && chosen !== undefined) {
       this.view.open = id;
       this.deps.show();
+      void this.#read(chosen, true);
       return true;
     }
 
@@ -268,10 +318,21 @@ export class LocalFilesController {
   }
 
   #drawCode(pane: HTMLElement, tab: LocalTab, data: LocalFileData, version: string): void {
-    const id = `${tab.id}\u0000${version}\u0000${tab.line ?? ''}`;
+    const place = `${tab.id}\u0000${tab.line ?? ''}`;
+    const id = `${place}\u0000${version}`;
     let view = pane.querySelector<HTMLElement>(':scope > .diff-view.local-code');
 
     if (view?.dataset['local'] === id) {
+      return;
+    }
+
+    // A new version of the file shown replaces its text in the view, which keeps where it is scrolled to.
+    const shown = view?.dataset['place'] === place ? view.querySelector<HTMLElement>(':scope > .diff-host') : null;
+    const mounted = shown === null ? undefined : this.#mounted.get(shown);
+
+    if (view != null && mounted != null) {
+      mounted.update(data.contents ?? '', version);
+      view.dataset['local'] = id;
       return;
     }
 
@@ -279,6 +340,7 @@ export class LocalFilesController {
     view = document.createElement('div');
     view.className = 'diff-view local-code';
     view.dataset['local'] = id;
+    view.dataset['place'] = place;
 
     const host = document.createElement('div');
     const suffix = document.createElement('span');
@@ -326,6 +388,13 @@ export class LocalFilesController {
   }
 }
 
+/** A picture's or PDF's bytes, with its modification time, so a new version loads again. */
+function rawUrl(pageKey: string, data: LocalFileData): string {
+  const url = localFileUrl(pageKey, data.path, true);
+
+  return data.modified == null ? url : `${url}&v=${data.modified}`;
+}
+
 function LocalView({ tab, note, pageKey }: { tab: LocalTab; note: string | null; pageKey: string }): VNode {
   const data = tab.entry.state === 'ok' ? tab.entry.data : null;
   const path = data?.path ?? tab.target;
@@ -349,9 +418,9 @@ function LocalView({ tab, note, pageKey }: { tab: LocalTab; note: string | null;
       </ul>
     );
   } else if (data.kind === 'image') {
-    body = <img class="media" alt={data.name} src={localFileUrl(pageKey, data.path, true)} />;
+    body = <img class="media" alt={data.name} src={rawUrl(pageKey, data)} />;
   } else if (data.kind === 'pdf') {
-    body = <iframe class="artifact-frame artifact-pdf" referrerpolicy="no-referrer" src={localFileUrl(pageKey, data.path, true)} title={data.name}></iframe>;
+    body = <iframe class="artifact-frame artifact-pdf" referrerpolicy="no-referrer" src={rawUrl(pageKey, data)} title={data.name}></iframe>;
   } else {
     body = <div class="artifact-doc md-doc body">{trusted(localMarkdown(pageKey, data))}</div>;
   }

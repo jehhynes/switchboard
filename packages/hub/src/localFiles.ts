@@ -134,6 +134,8 @@ export interface LocalFileView {
   entries: LocalEntry[] | null;
   /** The folder had more entries than the listing holds. */
   more: boolean;
+  /** A picture's or PDF's modification time in epoch milliseconds, whose bytes the view does not carry, so a change to it changes the view; null otherwise. */
+  modified: number | null;
 }
 
 /**
@@ -313,7 +315,7 @@ export async function openLocalFile(roots: LocalRoots, target: string, checked?:
   await checked?.();
 
   const name = parse(real).base || real;
-  const base = { path: slashed(real), name, contents: null, tooLarge: false, size: null, entries: null, more: false };
+  const base = { path: slashed(real), name, contents: null, tooLarge: false, size: null, entries: null, more: false, modified: null };
 
   if (first.isDirectory()) {
     if (roots.listFolders === false) {
@@ -347,7 +349,7 @@ export async function openLocalFile(roots: LocalRoots, target: string, checked?:
   const ext = extOf(real);
 
   if (rawMime(real) !== null) {
-    return { real, handle, view: { ...base, kind: ext === 'pdf' ? 'pdf' : 'image', size, tooLarge: size > LOCAL_RAW_MAX_BYTES } };
+    return { real, handle, view: { ...base, kind: ext === 'pdf' ? 'pdf' : 'image', size, tooLarge: size > LOCAL_RAW_MAX_BYTES, modified: Number(info.mtimeMs) } };
   }
 
   const kind = MARKDOWN.has(ext) ? 'markdown' : 'text';

@@ -240,8 +240,13 @@ describe('local file tabs', () => {
   let root: HTMLElement;
   let gets: string[];
   let answers: Record<string, { status: number; body: unknown }>;
+  /** Each local-file read's If-None-Match, in order. */
+  let validators: Array<string | null>;
+  /** A read of this path waits until `release` is called. */
+  let held: { path: string; release: () => void } | null;
   let pages: Array<{ close(): void }>;
   const files: Array<{ path: string; contents: string | null; line: number | null }> = [];
+  const updates: string[] = [];
   const module: DiffModule = {
     mountDiff: () => null,
     mountChanges: () => {
@@ -254,7 +259,7 @@ describe('local file tabs', () => {
       shown.className = 'fake';
       shown.textContent = `file ${data.path} at ${String(options.line)}`;
       host.replaceChildren(shown, ...(options.suffix === undefined ? [] : [options.suffix]));
-      return { set: () => {}, dispose: () => {} };
+      return { set: () => {}, update: (contents) => updates.push(contents), dispose: () => {} };
     },
   };
 
@@ -263,8 +268,11 @@ describe('local file tabs', () => {
     document.body.replaceChildren(root);
     localStorage.clear();
     gets = [];
+    validators = [];
+    held = null;
     pages = [];
     files.length = 0;
+    updates.length = 0;
     answers = {
       '.wip/review.md': { status: 200, body: file({ path: 'D:/w/.wip/review.md', name: 'review.md', kind: 'markdown', contents: '# Review\n\n[shot](shots/a.png)' }) },
       'D:/w/.wip/shots/': { status: 200, body: file({ path: 'D:/w/.wip/shots', name: 'shots', kind: 'dir', entries: [{ name: 'old', dir: true }, { name: 'a.png', dir: false }] }) },
@@ -283,16 +291,27 @@ describe('local file tabs', () => {
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   const text = 'See [Review](.wip/review.md) · [9 screenshots](D:/w/.wip/shots/), [code](src/a.ts#L42), [pdf](doc.pdf), [log](big.log), [out](../secret.txt), [uri](file:///D:/w/src/a%20b.ts#L7-L9), [far](file:///E:/other/x.ts#L5) and [site](https://example.com/a).';
-  const start = (local = true) => {
-    const fetch = vi.fn(async (url: string) => {
+  const start = (local = true, filePollMs = 1_000_000) => {
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
       gets.push(url);
 
       const path = new URLSearchParams(url.slice(url.indexOf('?'))).get('path') ?? '';
       const answer = url.startsWith('/v1/conversation/local-file?') ? (answers[path] ?? { status: 404, body: { error: 'none' } }) : { status: 200, body: {} };
+      if (url.startsWith('/v1/conversation/local-file?')) {
+        validators.push((init?.headers as Record<string, string> | undefined)?.['If-None-Match'] ?? null);
+      }
 
-      return { status: answer.status, ok: answer.status === 200, json: async () => answer.body } as unknown as Response;
+      if (held?.path === path) {
+        await new Promise<void>((resolve) => (held!.release = resolve));
+      }
+
+      // The hub's ETag is a hash of the view; the view itself stands for it here.
+      const etag = answer.status === 200 ? JSON.stringify(answer.body) : null;
+      const status = etag !== null && (init?.headers as Record<string, string> | undefined)?.['If-None-Match'] === etag ? 304 : answer.status;
+
+      return { status, ok: status === 200, headers: { get: (name: string) => (name === 'ETag' ? etag : null) }, json: async () => answer.body } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadDiff: async () => module, local });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadDiff: async () => module, local, filePollMs });
     const source = FakeSource.last!;
     const scope = (scopeGen = 3) => ({ kind: 'page', key: 'pk', folder: 'D:/w', title: 'Fix it', scopeGen, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' });
     const session = { id: 's', title: 'Task', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
@@ -303,7 +322,7 @@ describe('local file tabs', () => {
     window.innerWidth = 1600;
     window.dispatchEvent(new Event('resize'));
     source.emit('hello', { key: 'pk', groups: [], scope: scope(), sessions: [session], items: [reply], more: false, status: null, artifacts: [], unread: 0 });
-    return { page, source, scope };
+    return { page, source, scope, session, reply };
   };
   const link = (label: string) => [...root.querySelectorAll<HTMLElement>('a.path-link')].find((one) => one.textContent === label)!;
   const tabs = () => [...root.querySelectorAll<HTMLElement>('.local-tab')].map((tab) => [tab.querySelector('.tab-label')!.textContent, tab.classList.contains('selected')]);
@@ -319,14 +338,16 @@ describe('local file tabs', () => {
     expect(root.querySelector('.local-view .artifact-title')!.textContent).toBe('D:/w/.wip/review.md');
     expect(root.querySelector('.local-view .artifact-doc h1')!.textContent).toBe('Review');
 
-    // The same link shows the same tab, read once.
+    // The same link shows the same tab, read again with its ETag, which an unchanged file answers with 304.
     link('Review').click();
     await flush();
-    expect(localGets()).toHaveLength(1);
+    expect(localGets()).toHaveLength(2);
+    expect(tabs()).toEqual([['review.md', true]]);
+    expect(root.querySelector('.local-view .artifact-doc h1')!.textContent).toBe('Review');
 
     root.querySelector<HTMLElement>('.local-view a.path-link')!.click();
     await flush();
-    expect(localGets()[1]).toBe(localFileUrl('pk', 'D:/w/.wip/shots/a.png'));
+    expect(localGets()[2]).toBe(localFileUrl('pk', 'D:/w/.wip/shots/a.png'));
     expect(tabs()).toEqual([['review.md', false], ['a.png', true]]);
     expect(root.querySelector('.local-view img.media')!.getAttribute('src')).toBe(localFileUrl('pk', 'D:/w/.wip/shots/a.png', true));
 
@@ -440,5 +461,187 @@ describe('local file tabs', () => {
     await flush();
     expect(root.querySelector('.local-view .empty')!.textContent).toBe(refusal.body.error);
     expect(tabs()).toEqual([['review.md', false], ['shots', false], ['secret.txt', false], ['x.ts', true]]);
+  });
+
+  describe('reading an open file again', () => {
+    const setVisibility = (state: 'visible' | 'hidden') => {
+      Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+    /** The next periodic read, and its answer drawn. */
+    const tick = async () => {
+      vi.advanceTimersByTime(10);
+      await flush();
+      await flush();
+    };
+    const review = (contents: string) => ({ status: 200, body: file({ path: 'D:/w/.wip/review.md', name: 'review.md', kind: 'markdown', contents }) });
+    const heading = () => root.querySelector('.local-view .artifact-doc h1')?.textContent;
+
+    beforeEach(() => vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] }));
+    afterEach(() => {
+      vi.useRealTimers();
+      setVisibility('visible');
+    });
+
+    it('shows a Markdown file changed on disk while its tab is in view, asking with the ETag it holds', async () => {
+      start(true, 10);
+      link('Review').click();
+      await flush();
+      const first = JSON.stringify(answers['.wip/review.md']!.body);
+
+      await tick();
+      // Unchanged, the read sends the ETag it holds and is answered 304, so the view stays.
+      expect(validators).toEqual([null, first]);
+      expect(heading()).toBe('Review');
+
+      answers['.wip/review.md'] = review('# Review, revised');
+      await tick();
+      expect(heading()).toBe('Review, revised');
+      expect(validators).toEqual([null, first, first]);
+
+      // The next read sends the new version's ETag.
+      await tick();
+      expect(validators.at(-1)).toBe(JSON.stringify(answers['.wip/review.md']!.body));
+    });
+
+    it('replaces the text of code in the view it is in, keeping its place, rather than drawing a new view', async () => {
+      start(true, 10);
+      link('code').click();
+      await flush();
+      await flush();
+      expect(files).toHaveLength(1);
+
+      answers['src/a.ts'] = { status: 200, body: file({ path: 'D:/w/src/a.ts', name: 'a.ts', kind: 'text', contents: 'const a = 2;' }) };
+      await tick();
+      expect(updates).toEqual(['const a = 2;']);
+      expect(files).toHaveLength(1);
+    });
+
+    it('keeps what it shows while the hub does not answer or refuses, says when the file is gone, and shows it once it is back', async () => {
+      start(true, 10);
+      link('Review').click();
+      await flush();
+      answers['.wip/review.md'] = { status: 500, body: { error: 'restarting' } };
+      await tick();
+      expect(heading()).toBe('Review');
+
+      answers['.wip/review.md'] = { status: 404, body: { error: 'No such file in this conversation’s folders.' } };
+      await tick();
+      expect(root.querySelector('.local-view .empty')!.textContent).toBe('No such file in this conversation’s folders.');
+
+      answers['.wip/review.md'] = review('# Back');
+      await tick();
+      expect(heading()).toBe('Back');
+    });
+
+    it('drops an answer read for what the page showed before, as before a change of session', async () => {
+      const { source, scope } = start(true, 10);
+
+      link('Review').click();
+      await flush();
+      answers['.wip/review.md'] = review('# From the earlier session');
+      held = { path: '.wip/review.md', release: () => {} };
+      await tick();
+      source.emit('scope', { scope: { ...scope(4), sessionId: 's2' } });
+      await flush();
+      held.release();
+      await flush();
+      await flush();
+      expect(heading()).toBe('Review');
+    });
+
+    it('reads a file again when its first read answered for what the page showed before, rather than staying loading', async () => {
+      const { source, scope } = start(true, 10);
+
+      held = { path: '.wip/review.md', release: () => {} };
+      link('Review').click();
+      await flush();
+      expect(root.querySelector('.local-view .empty')!.textContent).toBe('Reading the file…');
+      source.emit('scope', { scope: { ...scope(4), sessionId: 's2' } });
+      await flush();
+      const release = held.release;
+
+      held = null;
+      release();
+      await flush();
+      await flush();
+      expect(localGets()).toHaveLength(2);
+      expect(validators).toEqual([null, null]);
+      expect(heading()).toBe('Review');
+    });
+
+    it('reads nothing while the page is hidden, and reads at once when it shows again', async () => {
+      start(true, 10);
+      link('Review').click();
+      await flush();
+      setVisibility('hidden');
+      const before = localGets().length;
+
+      answers['.wip/review.md'] = review('# Seen later');
+      await tick();
+      await tick();
+      expect(localGets()).toHaveLength(before);
+      expect(heading()).toBe('Review');
+
+      // Shown again, it reads without waiting for the next periodic read.
+      setVisibility('visible');
+      await flush();
+      expect(localGets()).toHaveLength(before + 1);
+      expect(heading()).toBe('Seen later');
+    });
+
+    it('reads nothing while another tab shows in its place', async () => {
+      start(true, 10);
+      link('Review').click();
+      await flush();
+      root.querySelector<HTMLElement>('[data-side="status"]')!.click();
+      await flush();
+      const shownStatus = localGets().length;
+
+      await tick();
+      await tick();
+      expect(localGets()).toHaveLength(shownStatus);
+    });
+
+    it("reads nothing while a phone shows the list over the conversation", async () => {
+      const { source, scope, session, reply } = start(true, 10);
+      const row = { workItemId: 1, ticketId: null, title: 'Fix it', priority: null, time: null, ticket: 'gh 1', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null };
+      const hello = () => source.emit('hello', { key: 'pk', groups: [{ key: 'progress', title: 'In progress', glyph: '', empty: null, rows: [row] }], scope: scope(), sessions: [session], items: [reply], more: false, status: null, artifacts: [], unread: 0 });
+
+      window.innerWidth = 390;
+      window.dispatchEvent(new Event('resize'));
+      hello();
+      root.querySelector<HTMLElement>('#list [data-action="select"][data-work-item="1"]')!.click();
+      hello();
+      await flush();
+      expect(root.classList.contains('listing')).toBe(false);
+      link('Review').click();
+      await flush();
+      await tick();
+      const shown = localGets().length;
+
+      // Read on opening and again while in view.
+      expect(shown).toBe(2);
+      root.querySelector<HTMLElement>('[data-action="back"]')!.click();
+      await flush();
+      expect(root.classList.contains('listing')).toBe(true);
+      await tick();
+      await tick();
+      expect(localGets()).toHaveLength(shown);
+    });
+
+    it('loads a picture again when its time changes', async () => {
+      answers['D:/w/.wip/shots/a.png'] = { status: 200, body: file({ path: 'D:/w/.wip/shots/a.png', name: 'a.png', kind: 'image', modified: 1 }) };
+      start(true, 10);
+      link('9 screenshots').click();
+      await flush();
+      root.querySelector<HTMLElement>('.local-entry[title="a.png"]')!.click();
+      await flush();
+      expect(root.querySelector('.local-view img.media')!.getAttribute('src')).toBe(`${localFileUrl('pk', 'D:/w/.wip/shots/a.png', true)}&v=1`);
+
+      answers['D:/w/.wip/shots/a.png'] = { status: 200, body: file({ path: 'D:/w/.wip/shots/a.png', name: 'a.png', kind: 'image', modified: 2 }) };
+      await tick();
+      expect(root.querySelector('.local-view img.media')!.getAttribute('src')).toBe(`${localFileUrl('pk', 'D:/w/.wip/shots/a.png', true)}&v=2`);
+    });
   });
 });

@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { diffItem, mountDiff, mountFile } from '../src/diff/viewer.js';
 
 // Pierre's CodeView, recorded: the options each view is made and set with.
-const views = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>[] }>);
+const views = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>[]; items: unknown[][]; scrolls: number }>);
 
 vi.mock('@pierre/diffs', async (actual) => ({
   ...(await actual<typeof import('@pierre/diffs')>()),
   CodeView: class {
     readonly options: Record<string, unknown>[];
+    readonly items: unknown[][] = [];
+    scrolls = 0;
 
     constructor(options: Record<string, unknown>) {
       this.options = [options];
@@ -15,8 +17,12 @@ vi.mock('@pierre/diffs', async (actual) => ({
     }
 
     setup(): void {}
-    setItems(): void {}
-    scrollTo(): void {}
+    setItems(items: unknown[]): void {
+      this.items.push(items);
+    }
+    scrollTo(): void {
+      this.scrolls++;
+    }
     setSelectedLines(): void {}
     setOptions(options: Record<string, unknown>): void {
       this.options.push(options);
@@ -73,5 +79,21 @@ describe("the diff viewer's file header", () => {
       [prefix, suffix],
       [prefix, suffix],
     ]);
+  });
+});
+
+describe("the diff viewer's file view", () => {
+  it('replaces the text of a file read again in the same view, without scrolling back to the line', () => {
+    const mount = mountFile(document.createElement('div'), { path: 'a.ts', side: 'disk', contents: 'x', binary: false, tooLarge: false }, 'v1', { wrap: false, line: 5 });
+    const view = views.at(-1)!;
+
+    mount.update('y', 'v2');
+
+    expect(views.at(-1)).toBe(view);
+    expect(view.items).toEqual([
+      [{ id: 'a.ts', type: 'file', file: { name: 'a.ts', contents: 'x', cacheKey: 'v1' } }],
+      [{ id: 'a.ts', type: 'file', file: { name: 'a.ts', contents: 'y', cacheKey: 'v2' } }],
+    ]);
+    expect(view.scrolls).toBe(1);
   });
 });
