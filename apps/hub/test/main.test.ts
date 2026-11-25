@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
@@ -21,13 +22,18 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'switchboard-app-'));
 });
 
-afterEach(() => {
-  for (const child of children.splice(0)) {
-    child.kill();
-  }
+afterEach(async () => {
+  const running = children.splice(0).filter((child) => child.exitCode === null && child.signalCode === null);
 
-  rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-});
+  for (const child of running) child.kill();
+  try {
+    await until(() => running.every((child) => child.exitCode !== null || child.signalCode !== null) ? true : null, 5_000);
+  } catch {
+    throw new Error(`Test children still running: ${running.filter((child) => child.exitCode === null && child.signalCode === null).map((child) => child.pid).join(', ')}`);
+  } finally {
+    await rm(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  }
+}, 30_000);
 
 function start(...args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
   return startWith({}, ...args);
@@ -112,6 +118,27 @@ async function until<T>(check: () => T | null, within = 10_000): Promise<T> {
   }
 
   throw new Error('condition not met in time');
+}
+
+/** Stop the hub and wait for its process to release the test home. */
+async function stopAndWait(): Promise<void> {
+  const pid = record()?.pid;
+
+  await start('--stop').exited;
+  if (pid === undefined) return;
+  try {
+    await until(() => {
+      try {
+        process.kill(pid, 0);
+        return null;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+        throw error;
+      }
+    });
+  } catch (error) {
+    throw new Error(`Hub pid ${pid} did not exit after --stop`, { cause: error });
+  }
 }
 
 /** The status a page's conversation stream answers with `cookie`, closed once its headers arrive. */
@@ -199,7 +226,7 @@ describe('hub entry point', () => {
     expect(existsSync(configDir)).toBe(true);
     expect(existsSync(join(configDir, 'playbooks'))).toBe(false);
 
-    await start('--stop').exited;
+    await stopAndWait();
     expect((await first.exited).code).toBe(0);
   });
 
@@ -209,7 +236,7 @@ describe('hub entry point', () => {
 
     expect((await recorded()).configDir).toBe(resolve(imported));
     expect(JSON.parse(readFileSync(join(switchboardHome(home), 'config.json'), 'utf8'))).toEqual({ configDir: resolve(imported) });
-    await start('--stop').exited;
+    await stopAndWait();
     expect((await first.exited).code).toBe(0);
 
     const chosen = join(home, 'chosen');
@@ -222,7 +249,7 @@ describe('hub entry point', () => {
     const second = start('--idle-ms=60000', `--config=${imported}`);
 
     expect((await recorded()).configDir).toBe(resolve(chosen));
-    await start('--stop').exited;
+    await stopAndWait();
     expect((await second.exited).code).toBe(0);
     await until(() => (record() === null ? true : null));
 
@@ -308,7 +335,7 @@ describe('hub entry point', () => {
     expect(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks.Stop).toHaveLength(1);
     expect(JSON.parse(readFileSync(join(home, '.codex', 'hooks.json'), 'utf8')).hooks.Stop).toHaveLength(1);
 
-    await start('--stop').exited;
+    await stopAndWait();
     expect((await hub.exited).code).toBe(0);
   });
 
@@ -494,7 +521,7 @@ describe('hub entry point', () => {
     expect(await start('web', 'revoke', 'abcdef12').exited).toMatchObject({ code: 3, stderr: 'Refused: No device has the ID abcdef12.\n' });
     expect(await start('web', 'revoke', 'nope').exited).toMatchObject({ code: 3, stderr: 'Refused: Expected {id}, a device ID of 8 hex characters.\n' });
 
-    await start('--stop').exited;
+    await stopAndWait();
     expect((await hub.exited).code).toBe(0);
   });
 
@@ -504,7 +531,7 @@ describe('hub entry point', () => {
     const hub = start('--idle-ms=60000', '--code-mode-idle-ms=60000');
 
     await recorded();
-    await start('--stop').exited;
+    await stopAndWait();
     expect(await hub.exited).toMatchObject({ code: 0, stdout: expect.stringContaining('Code Mode idle limit: 60000 ms') });
   });
 
@@ -668,7 +695,7 @@ describe('hub entry point', () => {
       expect(JSON.parse(await get(after.port, '/page/ping', { Host: `127.0.0.1:${after.port}`, Cookie: cookie }))).toEqual({ build: after.build, signedIn: true });
       expect(JSON.parse(await get(after.port, '/page/ping'))).toEqual({ build: after.build, signedIn: false });
     } finally {
-      await start('--stop').exited;
+      await stopAndWait();
     }
   }, 60_000);
   it('waits on hub.js install --wait through a restart the hub begins by itself while the programs install, when no hub answers for a moment', async () => {
@@ -751,7 +778,7 @@ describe('hub entry point', () => {
     expect(refused.code).toBe(3);
     expect(refused.stderr).toBe('Refused: No hub bundle is installed.\n');
     expect((await start('restart', 'now').exited).code).toBe(1);
-    await start('--stop').exited;
+    await stopAndWait();
     await until(() => (record() === null ? true : null));
 
     const bundle = hubBundlePath(home);
@@ -774,7 +801,7 @@ describe('hub entry point', () => {
       expect(after.build).toBe(before.build);
       expect(restarted.stdout).toBe(`Restarting the hub (pid ${before.pid}, build ${before.build}) onto build ${before.build}.\nRestarted: pid ${after.pid}, build ${after.build}.\n`);
     } finally {
-      await start('--stop').exited;
+      await stopAndWait();
     }
   }, 60_000);
   it('drops NO_COLOR and FORCE_COLOR at startup, so the hubs that hub.js start, a restart and the supervisor start run without them (mechanics M149)', async () => {
@@ -799,7 +826,7 @@ describe('hub entry point', () => {
       expect(clean(0)).toBe(true);
       expect(await stopSupervisor(home)).toBe(true);
       expect((await supervisor.exited).code).toBe(0);
-      await start('--stop').exited;
+      await stopAndWait();
       await until(() => (record() === null ? true : null));
 
       // Started from a shell that has them, the hub sees them; everything it starts, its successor on hub.js restart included, does not.
@@ -811,7 +838,7 @@ describe('hub entry point', () => {
       expect((await startWith(colour, 'restart').exited).code).toBe(0);
       expect(lines().slice(from).some((line) => line.argv.some((argument) => argument.startsWith('--takeover=')))).toBe(true);
       expect(clean(from + 1)).toBe(true);
-      await start('--stop').exited;
+      await stopAndWait();
       await until(() => (record() === null ? true : null));
 
       from = lines().length;
@@ -820,7 +847,7 @@ describe('hub entry point', () => {
       expect(clean(from)).toBe(true);
     } finally {
       await stopSupervisor(home).catch(() => false);
-      await start('--stop').exited;
+      await stopAndWait();
       // The stopped hub may still hold hub.log for a moment; the home is deleted after the test.
       await until(() => (record() === null ? true : null));
     }
@@ -853,7 +880,7 @@ describe('hub entry point', () => {
 
       expect(again).toMatchObject({ code: 0, stdout: `The hub is already running: pid ${found.pid}, build ${found.build}, config folder ${resolve(configDir)}.\n` });
     } finally {
-      await start('--stop').exited;
+      await stopAndWait();
     }
 
     await until(() => (record() === null ? true : null));
@@ -867,7 +894,7 @@ describe('hub entry point', () => {
       expect((await recorded()).configDir).toBe(resolve(configDir));
     } finally {
       await until(() => (record() !== null ? true : null));
-      await start('--stop').exited;
+      await stopAndWait();
       await until(() => (record() === null ? true : null));
     }
   }, 60_000);
@@ -918,7 +945,7 @@ describe('hub entry point', () => {
       expect(log()).not.toContain('A hub is already running');
 
       // A deliberate stop stays stopped.
-      await start('--stop').exited;
+      await stopAndWait();
       await until(() => (log().includes('was stopped on purpose (a client asked it to stop)') ? true : null));
       await new Promise((done) => setTimeout(done, 1_000));
       expect(record()).toBeNull();
@@ -937,7 +964,7 @@ describe('hub entry point', () => {
       expect(record()).toBeNull();
     } finally {
       await stopSupervisor(home).catch(() => false);
-      await start('--stop').exited;
+      await stopAndWait();
     }
   }, 90_000);
 
@@ -1038,7 +1065,7 @@ describe('hub entry point', () => {
       expect(after.build).toBe(next);
       expect(waited.stdout).toMatch(new RegExp(`^Installed hub build ${next} in .*\\.\\nConfig folder: .*\\.\\nThe running hub \\(pid ${before.pid}, build ${before.build}\\) restarts onto it once it is quiet; waiting for that\\.\\n(It waits until it is quiet: .*\\.\\n)?Restarted: pid ${after.pid}, build ${next}\\.\\n$`));
     } finally {
-      await start('--stop').exited;
+      await stopAndWait();
     }
   }, 60_000);
 });
