@@ -10,12 +10,13 @@
     {
       "matches": ["https://github.com/*"],
       "js": ["layoutStart.js"],
-      "run_at": "document_start"
+      "css": ["content.css"],
+      "run_at": "document_start",
+      "all_frames": true
     },
     {
       "matches": ["https://github.com/*"],
       "js": ["content.js"],
-      "css": ["content.css"],
       "run_at": "document_idle"
     }
   ],

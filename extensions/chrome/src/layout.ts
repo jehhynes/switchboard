@@ -154,6 +154,38 @@ export function placeButtons(doc: Document, path: string, layout: Layout): void 
 }
 
 /**
+ * Applies the saved layout at once, before GitHub paints, and watches the page once its DOM is parsed. The manifest runs it in every frame,
+ * so an embedded link tab gets the buttons as a browser tab does; the board's content script runs in the top frame only.
+ */
+export function startLayout(
+  doc: Document,
+  storage: Pick<Storage, 'getItem' | 'setItem'>,
+  path: () => string = () => doc.location.pathname,
+): { stop(): void } {
+  let watch: { stop(): void } | null = null;
+  let stopped = false;
+  const begin = (): void => {
+    if (!stopped) watch = watchLayout(doc, storage, path);
+  };
+
+  applyLayout(doc, path(), readLayout(storage));
+
+  if (doc.readyState === 'loading') {
+    doc.addEventListener('DOMContentLoaded', begin, { once: true });
+  } else {
+    begin();
+  }
+
+  return {
+    stop: () => {
+      stopped = true;
+      doc.removeEventListener('DOMContentLoaded', begin);
+      watch?.stop();
+    },
+  };
+}
+
+/**
  * Keeps the layout and its buttons on GitHub's issue and pull request pages while GitHub renders them and moves between pages
  * without a reload. A click switches a setting for every repository and saves it; a change saved in another tab applies here too.
  */

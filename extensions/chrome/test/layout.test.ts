@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LAYOUT_ATTRIBUTES, LAYOUT_BUTTONS, LAYOUT_KEYS, applyLayout, isConversationPage, pageStorage, placeButtons, readLayout, watchLayout } from '../src/layout.js';
+import { LAYOUT_ATTRIBUTES, LAYOUT_BUTTONS, LAYOUT_KEYS, applyLayout, isConversationPage, pageStorage, placeButtons, readLayout, startLayout, watchLayout } from '../src/layout.js';
 
 const fixture = (name: string) => readFileSync(join(import.meta.dirname, 'fixtures', `layout-${name}.html`), 'utf8');
 const ISSUE = fixture('issue');
@@ -335,6 +335,58 @@ describe('watchLayout', () => {
     watcher.stop();
     group()!.remove();
     await vi.advanceTimersByTimeAsync(50);
+
+    expect(group()).toBeNull();
+  });
+});
+
+describe('startLayout', () => {
+  let stop: (() => void) | undefined;
+
+  afterEach(() => {
+    stop?.();
+    stop = undefined;
+    Reflect.deleteProperty(document, 'readyState');
+  });
+
+  it('applies the saved layout at once and places the buttons once the DOM is parsed', () => {
+    const storage = new MemoryStorage();
+
+    storage.setItem(LAYOUT_KEYS.wide, 'true');
+    document.body.innerHTML = ISSUE;
+    Object.defineProperty(document, 'readyState', { value: 'loading', configurable: true });
+    stop = startLayout(document, storage, () => ISSUE_PATH).stop;
+
+    expect(html().hasAttribute(LAYOUT_ATTRIBUTES.wide)).toBe(true);
+    expect(group()).toBeNull();
+
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+
+    expect(group()).not.toBeNull();
+    buttonFor('sidebar').click();
+    expect(storage.getItem(LAYOUT_KEYS.sidebar)).toBe('true');
+  });
+
+  it('places the buttons at once on a parsed page, and watches nothing once stopped', () => {
+    const storage = new MemoryStorage();
+
+    document.body.innerHTML = ISSUE;
+    stop = startLayout(document, storage, () => ISSUE_PATH).stop;
+
+    expect(group()).not.toBeNull();
+
+    stop();
+    stop = undefined;
+    buttonFor('sidebar').click();
+
+    expect(storage.getItem(LAYOUT_KEYS.sidebar)).toBeNull();
+  });
+
+  it('never watches a page stopped before its DOM was parsed', () => {
+    document.body.innerHTML = ISSUE;
+    Object.defineProperty(document, 'readyState', { value: 'loading', configurable: true });
+    startLayout(document, new MemoryStorage(), () => ISSUE_PATH).stop();
+    document.dispatchEvent(new Event('DOMContentLoaded'));
 
     expect(group()).toBeNull();
   });

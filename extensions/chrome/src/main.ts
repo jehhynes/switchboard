@@ -3,7 +3,6 @@ import { issueKey, watchBoard } from './board.js';
 import { watchCardMenus } from './menu.js';
 import { pageOpenUrl, watchPillClicks } from './open.js';
 import { cardsByIssue, watchPills } from './pills.js';
-import { pageStorage, watchLayout } from './layout.js';
 import { snoozeMenus } from './snooze.js';
 import type { SnoozeAnswer } from './snooze.js';
 
@@ -85,5 +84,3 @@ watchCardMenus(
 );
 
 watchPillClicks(document, open);
-
-watchLayout(document, pageStorage(window));
