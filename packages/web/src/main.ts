@@ -909,7 +909,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       input.value = input.value === '' || /\s$/.test(input.value) ? `${input.value}${added.trimStart()}` : `${input.value} ${added.trimStart()}`;
       input.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined);
+      // An open list was for the text before the piece.
       box.changed(input.value);
+      closeMenu();
       keepDraft();
       grow();
       refresh();
@@ -926,6 +928,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (input.value === '' || input.value === before) {
       input.value = text;
       box.changed(text);
+      closeMenu();
       keepDraft();
       grow();
       refresh();
@@ -1156,7 +1159,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const refresh = (): void => {
     send.disabled = !canSend();
   };
+  // Closing the list drops its request still on the way, so its answer does not open it again.
   const closeMenu = (): void => {
+    box.cancel();
     menuOpen = null;
     menu.hidden = true;
     mount(menu, null);
@@ -1177,7 +1182,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const slash = commandQuery(before);
     const ask = box.ask();
     const shown = state.scope?.scopeGen;
-    const current = (): boolean => box.current(ask) && shown === state.scope?.scopeGen;
+    const picked = selections;
+    const current = (): boolean => box.current(ask) && shown === state.scope?.scopeGen && picked === selections;
 
     if (mention !== null && state.key !== null) {
       const response = await readFetch(`/v1/conversation/files?window=${encodeURIComponent(state.key)}&q=${encodeURIComponent(mention.query)}`, { credentials: 'same-origin' }).catch(() => null);
@@ -1248,6 +1254,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     sending = true;
     input.readOnly = true;
     composerHost.classList.add('sending');
+    // A list open or asked for belongs to the text being sent.
+    closeMenu();
     refresh();
 
     // A send whose answer was lost is tried again with the same opId, by the retries and by the next Send of the same text, so the hub
@@ -1345,6 +1353,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       input.value = below(input.value);
       box.changed(input.value);
+      closeMenu();
       showError(error);
       keepDraft();
       grow();
@@ -1386,6 +1395,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     if (event.key === 'Escape') {
+      // Escape also drops a list asked for but not shown yet.
+      box.cancel();
+
       if (menuOpen !== null) {
         closeMenu();
       } else if (state.voice?.here === true && state.voice.speaking !== null) {
@@ -3520,6 +3532,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.sheet = null;
     leaveDraft();
     selections++;
+    closeMenu();
     view.artifact = null;
     // On a phone, a conversation opened from the list is a history entry of its own, which the browser's back, as Android's back button, leaves.
     if (listing && isPhone() && !conversationEntry(history.state)) {
@@ -3556,6 +3569,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     closeMenus();
     leaveDraft();
     selections++;
+    closeMenu();
     view.picker = false;
     showError(null);
     wanted = workItemId;

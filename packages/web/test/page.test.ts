@@ -7961,6 +7961,7 @@ describe('the page against late answers', () => {
     expect(posts.filter((post) => post.url.endsWith('/answer')).at(-1)?.body).toMatchObject({ requestId: 'q1', answer: { port: '8799', key: 'abc' } });
     page.close();
   });
+  const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
   /** Types `text` into the box as the operator does, the caret at its end. */
   const typeIn = (text: string) => {
     const input = root.querySelector('textarea')!;
@@ -8018,6 +8019,67 @@ describe('the page against late answers', () => {
     expect(sends().at(-1)).toMatchObject({ text: '/compact' });
     expect(sends().at(-1)).not.toHaveProperty('command');
     expect(sends()).toHaveLength(3);
+    page.close();
+  });
+  it("drops the composer list's answer that comes after Escape, a dictated piece or another selection, and closes an open list on a selection", async () => {
+    const { page, source } = start(/commands|files/);
+    const menu = root.querySelector<HTMLElement>('.composer-menu')!;
+
+    helloFor(source, 1, 3);
+    typeIn('/co');
+    key('Escape');
+    pending.shift()!.resolve(commands);
+    await flush();
+    expect(menu.hidden).toBe(true);
+
+    // A piece dictation joins changes the text the answer was for.
+    typeIn('/co');
+    source.emit('draft', { text: 'now', sessionId: 's1', added: 'now' });
+    expect(root.querySelector('textarea')!.value).toBe('/co now');
+    pending.shift()!.resolve(commands);
+    await flush();
+    expect(menu.hidden).toBe(true);
+
+    // A list already open closes on a piece, so Enter sends the text rather than picking for the text before it.
+    typeIn('/co');
+    pending.shift()!.resolve(commands);
+    await flush();
+    expect(menu.hidden).toBe(false);
+    source.emit('draft', { text: 'now more', sessionId: 's1', added: 'more' });
+    expect(menu.hidden).toBe(true);
+    expect(root.querySelector('textarea')!.value).toBe('/co more');
+
+    // Another work item chosen before its scope comes.
+    typeIn('see @sr');
+    click('[data-action="picker"]');
+    click('.conversation-menu [data-work-item="2"]');
+    pending.shift()!.resolve({ status: 200, body: { files: [{ path: 'src/a.ts', dir: false }] } });
+    await flush();
+    expect(menu.hidden).toBe(true);
+
+    // Sending closes a list open for the text sent, and drops one still on its way.
+    typeIn('/co');
+    pending.shift()!.resolve(commands);
+    await flush();
+    expect(menu.hidden).toBe(false);
+    root.querySelector<HTMLButtonElement>('.composer button.send')!.click();
+    expect(menu.hidden).toBe(true);
+    await flush();
+    typeIn('/co');
+    root.querySelector<HTMLButtonElement>('.composer button.send')!.click();
+    pending.shift()!.resolve(commands);
+    await flush();
+    expect(menu.hidden).toBe(true);
+
+    // A list already open closes at once.
+    helloFor(source, 1, 5);
+    typeIn('see @sr');
+    pending.shift()!.resolve({ status: 200, body: { files: [{ path: 'src/a.ts', dir: false }] } });
+    await flush();
+    expect(menu.hidden).toBe(false);
+    click('[data-action="picker"]');
+    click('.conversation-menu [data-work-item="2"]');
+    expect(menu.hidden).toBe(true);
     page.close();
   });
 });
