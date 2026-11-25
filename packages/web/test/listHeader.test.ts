@@ -840,6 +840,39 @@ describe('the list header (architecture.md § Web page)', () => {
   };
   const sent = (command: string) => posts.filter((post) => post.url.endsWith(`/${command}`));
 
+  it('draws its sheets at the page\'s root, over every column, with the list under them inert, and gives the focus back to the button that opened one', async () => {
+    const { page, source } = start();
+    const press = (selector: string) => {
+      root.querySelector(selector)!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      click(selector);
+    };
+
+    answers['/providers'] = { status: 200, body: PROVIDERS_ANSWER };
+    answers['/page-folders'] = { status: 200, body: PLACES };
+    hello(source, { header: header() });
+    // Not inside the list's column, whose drawer and phone views would stack or hide it.
+    expect(root.querySelector('#list-sheet')!.parentElement).toBe(root);
+    press('[data-action="list-new-session"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('New session');
+    expect(root.querySelector('.side')!.closest('[inert]')).not.toBeNull();
+    expect(root.querySelector('#list-sheet')!.hasAttribute('inert')).toBe(false);
+    press('#list-sheet [data-action="list-sheet-cancel"].sheet-button');
+    expect(root.querySelector('#list-sheet .sheet')).toBeNull();
+    expect(root.querySelector('[inert]')).toBeNull();
+    // Back to New session, not More Actions.
+    expect(document.activeElement).toBe(root.querySelector('[data-action="list-new-session"]'));
+
+    // One opened from More Actions' menu gives it back to More Actions.
+    press('.more-actions');
+    press('.more-menu [data-action="list-extension"]');
+    root.querySelector('#list-sheet .sheet')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('#list-sheet .sheet')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('.more-actions'));
+    page.close();
+  });
+
   it('opens one New session form from the + button, on the folder used last, the default provider and Default model (PRD R122)', async () => {
     const { page, source } = start();
 

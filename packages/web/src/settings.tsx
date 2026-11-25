@@ -15,6 +15,8 @@ export interface SettingsDeps {
   post(name: string, body: Record<string, unknown>): Promise<Answer>;
   /** Called once Settings closes, so the page can take the focus back. */
   closed?(): void;
+  /** Called once Settings or its question is drawn or removed, so the page makes what lies under the top dialog inert (layers.ts). */
+  layered?(): void;
 }
 
 
@@ -195,21 +197,10 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     }
   };
 
-  /** Makes the page under Settings inert while Settings shows, so Tab and clicks reach only Settings. */
-  const cover = (on: boolean): void => {
-    for (const sibling of host.parentElement?.children ?? []) {
-      // The page's toast (toast.tsx) stays live over Settings, so its Dismiss works and it is still read out.
-      if (sibling !== host && sibling.id !== 'toast') {
-        sibling.toggleAttribute('inert', on);
-      }
-    }
-  };
-
   const draw = (): void => {
-    cover(view.open);
-
     if (!view.open) {
       mount(host, null);
+      deps.layered?.();
       return;
     }
 
@@ -231,6 +222,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     for (const part of host.querySelectorAll('.settings > .settings-head, .settings > .settings-body, .settings > .settings-bar')) {
       part.toggleAttribute('inert', view.ask !== null);
     }
+
+    deps.layered?.();
   };
 
   /** Draws a page anew: the fields show the values read, not what was typed into the page before. */

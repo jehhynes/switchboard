@@ -3649,6 +3649,41 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("keeps a row's sheet modal: Snooze starts on its first choice, the page under it is inert, and closing it from Cancel or an Escape on the page's body gives the focus back to Actions", async () => {
+    const { page, source } = start();
+    const actions = [{ label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state' as const, confirm: null, input: null }];
+    // A press, as a pointer gives one, and the click after it; Safari's press does not focus a button.
+    const press = (selector: string) => {
+      root.querySelector(selector)!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      click(selector);
+    };
+    const snooze = () => {
+      press('button.actions');
+      press('.actions-menu [data-label="Snooze…"]');
+    };
+
+    hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', actions })])] });
+    snooze();
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze Fix it');
+    expect(document.activeElement).toBe(root.querySelector('.sheet input[name="snooze"]'));
+    expect(root.querySelector('#head')!.closest('[inert]')).not.toBeNull();
+    expect(root.querySelector('.side')!.closest('[inert]')).not.toBeNull();
+    expect(root.querySelector('.sheet')!.closest('[inert]')).toBeNull();
+    expect(root.querySelector('#toast')!.closest('[inert]')).toBeNull();
+    press('.sheet [data-action="sheet-cancel"]');
+    expect(root.querySelector('.sheet')).toBeNull();
+    expect(root.querySelector('[inert]')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('button.actions'));
+
+    // A press on the sheet's text leaves the focus on the page's body; Escape there still closes the sheet.
+    snooze();
+    (document.activeElement as HTMLElement).blur();
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(root.querySelector('.sheet')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('button.actions'));
+    page.close();
+  });
+
   it("runs the selected work item's row actions from the header: the main button, Stop session and Delete after their question, Snooze with a choice, and Copy", async () => {
     const { page, source } = start();
     const actions = [
@@ -5239,6 +5274,37 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await new Promise((done) => setTimeout(done, 60));
     // Stopped, it is no longer followed.
     expect(postMessage.mock.calls.length).toBe(sent);
+    page.close();
+  });
+
+  it("keeps the drawer open under a sheet from its header, past the pointer leaving it and a press in the sheet", () => {
+    vi.useFakeTimers();
+    localStorage.setItem('switchboard.listCollapsed', '1');
+    window.innerWidth = 1024;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+    const isOpen = () => root.classList.contains('drawer-open');
+    const side = root.querySelector<HTMLElement>('.side')!;
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
+    // Shown by a resting pointer, it hides once the pointer leaves, unless something holds it.
+    root.querySelector('.sliver')!.dispatchEvent(new Event('pointerenter'));
+    vi.advanceTimersByTime(DRAWER_REVEAL_MS);
+    expect(isOpen()).toBe(true);
+    root.querySelector<HTMLElement>('.more-actions')!.click();
+    root.querySelector<HTMLElement>('.more-menu [data-action="list-extension"]')!.click();
+    expect(root.querySelector('#list-sheet .sheet')).not.toBeNull();
+    side.dispatchEvent(new Event('pointerleave'));
+    vi.advanceTimersByTime(DRAWER_HIDE_MS * 3);
+    expect(isOpen()).toBe(true);
+    root.querySelector('#list-sheet .sheet')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(isOpen()).toBe(true);
+    // Closed, the sheet no longer holds it.
+    root.querySelector<HTMLElement>('#list-sheet [data-action="list-sheet-cancel"].sheet-button')!.click();
+    vi.advanceTimersByTime(DRAWER_HIDE_MS * 3);
+    expect(isOpen()).toBe(false);
+    vi.useRealTimers();
     page.close();
   });
 

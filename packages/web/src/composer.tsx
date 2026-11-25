@@ -7,7 +7,7 @@ import { providerMark } from '@switchboard/conversation/providerIcons';
 import { PROVIDERS } from './listHeader.js';
 import { trusted } from './trusted.js';
 
-/** The page's hosts: the list and its sheet and the drawer's sash, the sashes, the hidden list's sliver and the open drawer's backdrop, the conversation's header, pane, note and composer, the side column and the sheet. */
+/** The page's hosts: the list and the drawer's sash, the sashes, the hidden list's sliver and the open drawer's backdrop, the conversation's header, pane, note and composer, the side column, the list header's sheet and the page's sheet. */
 export function renderFrame(side: { min: number; max: number }, chat: { min: number; max: number }): VNode {
   return (
     <>
@@ -15,7 +15,6 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
         <div class="side-head"></div>
         <div class="conn-banner-host"></div>
         <div id="list"></div>
-        <div id="list-sheet"></div>
         <div class="sash drawer-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex={0} aria-valuemin={side.min} aria-valuemax={side.max} title="Drag to resize; double-click to reset"></div>
       </aside>
       <div class="sash side-sash" role="separator" aria-orientation="vertical" aria-label="Work items width" aria-controls="list" tabindex={0} aria-valuemin={side.min} aria-valuemax={side.max} title="Drag to resize; double-click to reset"></div>
@@ -33,6 +32,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
         <div class="detail-head"></div>
         <div class="detail-body scroll"></div>
       </aside>
+      <div id="list-sheet"></div>
       <div id="sheet"></div>
       <div id="connection"></div>
       <div class="live" aria-live="polite"></div>

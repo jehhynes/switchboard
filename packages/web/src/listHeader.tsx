@@ -1496,8 +1496,8 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
     if (heldTimer !== null) clearTimeout(heldTimer);
     view.sheet = null;
+    // The page gives the focus back to the control that opened the sheet (layers.ts).
     redraw();
-    host.querySelector<HTMLElement>('.more-actions')?.focus();
   };
   /** Create, or Run: sends the sheet; a refusal keeps it open with the hub's reason. */
   const sheetGo = async (): Promise<void> => {

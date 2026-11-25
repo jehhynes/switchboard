@@ -28,6 +28,7 @@ import { toast } from './toast.js';
 import { composerOptionId, renderComposer, renderComposerMenu, renderDraftNote, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { composerInput } from './composerInput.js';
 import { listHeader } from './listHeader.js';
+import { modalLayers } from './layers.js';
 import { PhoneVoice } from './phoneVoice.js';
 import { MicStart } from '@switchboard/conversation/voiceControls';
 import { browserBackPreview, swipeBack } from './swipeBack.js';
@@ -199,6 +200,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const composerHost = root.querySelector<HTMLElement>('#composer')!;
   const note = root.querySelector<HTMLElement>('#note')!;
   const sheetHost = root.querySelector<HTMLElement>('#sheet')!;
+  // The list header's sheets (listHeader.tsx), at the page's root like the others, so no column's stacking or display hides them.
+  const listSheet = root.querySelector<HTMLElement>('#list-sheet')!;
   // The persona dialog over the whole page, as Settings is.
   const personaHost = root.appendChild(document.createElement('div'));
   // The toast over the page (toast.tsx): every refusal and failure, a copy that worked and the needs-you message.
@@ -207,7 +210,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   toastHost.id = 'toast';
 
   const toastBox = toast(toastHost, { open: (workItemId) => void select(workItemId) });
-  let personaCovers = false;
   // The scope generation the persona dialog opened for, and each opening's number, so a late roster answer fills only the dialog that asked.
   let personaScope: number | null = null;
   let personaAsks = 0;
@@ -753,7 +755,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const listening = new AbortController();
   // Settings over the whole page (architecture.md § Web page); it reads settings.json again when the page comes back.
   const settingsHost = root.appendChild(document.createElement('div'));
-  const settingsPane = settings(settingsHost, { post: (name, body) => post(name, body), closed: () => root.querySelector<HTMLElement>('.more-actions')?.focus() });
+  // The open dialogs: the page under the top one inert, the focus kept in it and given back to its opener (layers.ts).
+  const modals = modalLayers(root);
+  const settingsPane = settings(settingsHost, { post: (name, body) => post(name, body), closed: () => root.querySelector<HTMLElement>('.more-actions')?.focus(), layered: () => modals.sync() });
 
   window.addEventListener('focus', () => void settingsPane.reload(), { signal: listening.signal });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void settingsPane.reload(), { signal: listening.signal });
@@ -827,7 +831,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const phoneVoice = local
     ? null
     : new PhoneVoice({ key: () => state.key, post: (name, body) => post(name, body), fetch: (url) => readFetch(url, { credentials: 'same-origin' }).then((response) => response.arrayBuffer?.()), changed: () => draw(), now: () => deps.now() });
-  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, root.querySelector<HTMLElement>('#list-sheet')!, {
+  const header = listHeader(root.querySelector<HTMLElement>('.side-head')!, list, listSheet, {
     fetch: (...args) => deps.fetch(...args),
     post: (name, body) => post(name, body),
     redraw: () => draw(),
@@ -2283,7 +2287,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const drawerKept = (): boolean => {
     const focused = document.activeElement;
 
-    return overDrawer || root.classList.contains('resizing') || view.rowMenu !== null || view.sheet !== null || drawer.querySelector('.menu, .sheet-backdrop') !== null || ((focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && drawer.contains(focused));
+    return overDrawer || root.classList.contains('resizing') || view.rowMenu !== null || view.sheet !== null || drawer.querySelector('.menu') !== null || listSheet.querySelector('.sheet-backdrop') !== null || ((focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && drawer.contains(focused));
   };
   const openDrawer = (how: 'open' | 'hover'): void => {
     if (!drawerMode()) {
@@ -2365,7 +2369,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   document.addEventListener(
     'pointerdown',
     (event) => {
-      if (view.drawer !== null && event.target instanceof Node && event.target !== backdrop && !drawer.contains(event.target) && !sheetHost.contains(event.target) && head.querySelector('.list-toggle')?.contains(event.target) !== true) {
+      if (view.drawer !== null && event.target instanceof Node && event.target !== backdrop && !drawer.contains(event.target) && !sheetHost.contains(event.target) && !listSheet.contains(event.target) && head.querySelector('.list-toggle')?.contains(event.target) !== true) {
         closeDrawer();
       }
     },
@@ -2485,7 +2489,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     mount(personaHost, renderPersonaDialog(state.session?.persona, view.personas));
-    coverForPersonas(view.personas !== null);
+    modals.sync();
     const focused = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement : null;
     const focusedRow = focused?.closest<HTMLElement>('.list-row')?.querySelector<HTMLElement>('.row')?.dataset['row'];
     const focusLink = focused?.matches('.pill') ? focused.dataset['link'] : undefined;
@@ -2801,21 +2805,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.tabFit = fit;
     return changed;
   };
-  // Makes the rest of the page inert while the persona dialog shows, so Tab and clicks reach only the dialog, as Settings does.
-  function coverForPersonas(on: boolean): void {
-    if (on === personaCovers) {
-      return;
-    }
-
-    personaCovers = on;
-
-    for (const child of root.children) {
-      // The toast stays live over the dialog, so its Dismiss works and it is still read out.
-      if (child !== personaHost && child !== toastHost) {
-        child.toggleAttribute('inert', on);
-      }
-    }
-  }
   /** Closes the persona dialog and gives the focus back to the view options button, under which the persona row opened it. */
   const closePersonas = (): void => {
     view.personas = null;
@@ -6052,6 +6041,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       browserResize?.disconnect();
       strips?.disconnect();
       settingsShown?.disconnect();
+      modals.close();
       clearInterval(promptTimer);
 
       for (const { timer } of commentTimers.values()) {
