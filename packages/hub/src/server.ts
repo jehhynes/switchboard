@@ -16,6 +16,7 @@ import { LOCAL_FILES_PAIRED_ONLY, rawMime } from './localFiles.js';
 import type { LocalOpened } from './localFiles.js';
 import { isWebSocketUpgrade } from './webSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
+import { OTHER_SIGN_IN, PAGE_GONE } from './windows.js';
 import { HUB_LOG_LINES, HUB_LOG_MAX_LINES } from './hubLog.js';
 import { appShortcut } from './appShortcut.js';
 import { zip } from './browserExtension.js';
@@ -303,7 +304,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     const stream = closing ? null : (options.conversation?.(key, write) ?? null);
 
     if (stream === null) {
-      json(response, 403, { error: 'Not in this window.' });
+      json(response, 403, { error: PAGE_GONE });
       return;
     }
 
@@ -428,7 +429,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     const hash = page?.access.sessionOf(cookie) ?? null;
 
     if (hash === null || pageKeySessions.get(key) !== hash || pageKeyOrigins.get(key) !== originOf(origin)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return { status: 403, body: { error: pageKeySessions.has(key) ? OTHER_SIGN_IN : PAGE_GONE } };
     }
 
     // At most VOICE_TICKETS_PER_PAGE per page key, the oldest dropped first, so the map stays small while taps that overlap, as Voice off and
@@ -814,12 +815,12 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     if (request.method === 'GET' && path === '/v1/conversation/files') {
       if (!page.isPage(window)) {
-        json(response, 403, { error: 'Not in this window.' });
+        json(response, 403, { error: PAGE_GONE });
         return true;
       }
 
       void page.files(window, url.searchParams.get('q') ?? '').then(
-        (files) => json(response, files === null ? 403 : 200, files === null ? { error: 'Not in this window.' } : { files }),
+        (files) => json(response, files === null ? 403 : 200, files === null ? { error: 'This page has no conversation folder to list files from.' } : { files }),
         (error: unknown) => json(response, 500, { error: String(error) }),
       );
       return true;
@@ -833,7 +834,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       }
 
       if (!page.isPage(window)) {
-        json(response, 403, { error: 'Not in this window.' });
+        json(response, 403, { error: PAGE_GONE });
         return true;
       }
 
@@ -852,7 +853,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       const raw = path.endsWith('-raw');
 
       if (page.localFile === undefined || !page.isPage(window) || pageKeyOrigins.get(window) !== originOf(origin) || pageKeySessions.get(window) !== page.access.sessionOf(request.headers.cookie)) {
-        json(response, 403, { error: 'Not in this window.' });
+        json(response, 403, { error: page.localFile !== undefined && page.isPage(window) ? OTHER_SIGN_IN : PAGE_GONE });
         return true;
       }
 
@@ -898,7 +899,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       if (request.headers.origin !== origin.origin) {
         refuse(403, 'The page posts only from its own origin.');
       } else if (!page.isPage(window)) {
-        refuse(403, 'Not in this window.');
+        refuse(403, PAGE_GONE);
       } else if (length !== null && (!Number.isSafeInteger(length) || length < 0)) {
         refuse(400, 'The file length is invalid.');
       } else if (length !== null && length > MAX_UPLOAD_BYTES) {
@@ -974,7 +975,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         }
 
         if (typeof key !== 'string' || !page.isPage(key)) {
-          json(response, 403, { error: 'Not in this window.' });
+          json(response, 403, { error: PAGE_GONE });
           return;
         }
 
@@ -1050,7 +1051,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     const hash = ticket?.hash ?? page.access.sessionOf(request.headers.cookie);
 
     if (!page.isPage(key) || pageKeySessions.get(key) !== hash || pageKeyOrigins.get(key) !== originOf(origin) || hash === null) {
-      refuse(403, 'Not in this window.');
+      refuse(403, page.isPage(key) ? OTHER_SIGN_IN : PAGE_GONE);
       return;
     }
 

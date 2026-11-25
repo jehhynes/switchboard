@@ -801,7 +801,7 @@ describe('the web page routes', () => {
       isPage: (key) => pages.has(key),
       list: () => [{ kind: 'item', title: 'T', conversations: [] }],
       files: async (key) => (key === 'page-1' ? [{ path: 'a.ts', dir: false }] : null),
-      changes: async (route, key, query) => (route === 'changes' && key === 'page-1' ? { status: 200, body: { rows: 'x'.repeat(2000), q: query.get('q') }, etag: 'e1' } : { status: 403, body: { error: 'Not in this window.' } }),
+      changes: async (route, key, query) => (route === 'changes' && key === 'page-1' ? { status: 200, body: { rows: 'x'.repeat(2000), q: query.get('q') }, etag: 'e1' } : { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } }),
       artifact: (key, name) => {
         const external = join(folder, 'report.md');
 
@@ -820,7 +820,7 @@ describe('the web page routes', () => {
       },
       console: (key, sessionId, write) => {
         if (key !== 'page-1' || sessionId !== 's1') {
-          return { status: 403, error: 'Not in this window.' };
+          return { status: 403, error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' };
         }
 
         write('size', { cols: 80, rows: 24 });
@@ -1828,7 +1828,7 @@ describe('the web page routes', () => {
     const refused = await send(server.port, 'GET', '/v1/conversation/console?window=page-1&sessionId=other', { Cookie: cookie });
 
     expect(refused.headers['content-type']).toBe('text/event-stream');
-    expect(refused.body).toBe('event: unavailable\ndata: {"reason":"Not in this window."}\n\n');
+    expect(refused.body).toBe('event: unavailable\ndata: {"reason":"This page now shows another work item or session, so that was not done. Check what it shows and try again."}\n\n');
 
     const chunks: string[] = [];
     const stream = request({ host: '127.0.0.1', port: server.port, path: '/v1/conversation/console?window=page-1&sessionId=s1', headers: { Host: `127.0.0.1:${server.port}`, Cookie: cookie } }, (response) => {

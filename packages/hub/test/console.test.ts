@@ -166,9 +166,9 @@ describe('the page console stream', () => {
     const t = setup();
 
     current = t.pageConsole;
-    expect(t.pageConsole.open('window-1', 's1', () => true, () => undefined)).toEqual({ status: 403, error: 'Not in this window.' });
-    expect(t.pageConsole.open('page-1', 's2', () => true, () => undefined)).toEqual({ status: 403, error: 'Not in this window.' });
-    expect(t.pageConsole.open('page-9', 's1', () => true, () => undefined)).toEqual({ status: 403, error: 'Not in this window.' });
+    expect(t.pageConsole.open('window-1', 's1', () => true, () => undefined)).toEqual({ status: 403, error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." });
+    expect(t.pageConsole.open('page-1', 's2', () => true, () => undefined)).toEqual({ status: 403, error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' });
+    expect(t.pageConsole.open('page-9', 's1', () => true, () => undefined)).toEqual({ status: 403, error: 'This page has no work item open, so that was not done. Open one and try again.' });
     expect(t.views).toEqual([]);
   });
 
@@ -271,7 +271,7 @@ describe('the page console keys', () => {
     await tick();
     t.scopes.set('page-1', { sessionId: 's2', scopeGen: 4 });
     release();
-    expect(await answer).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(await answer).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
     expect(t.calls).toEqual(['reserve s1 L1', 'release s1']);
 
     t.scopes.set('page-1', { sessionId: 's1', scopeGen: 4 });
@@ -327,8 +327,8 @@ describe('the page console keys', () => {
     expect((await t.pageConsole.input({ ...keys, cols: 80 })).status).toBe(400);
     expect((await t.pageConsole.input({ ...keys, cols: 0, rows: 30 })).status).toBe(400);
     expect((await t.pageConsole.input({ ...keys, opId: '' })).status).toBe(400);
-    expect(await t.pageConsole.input({ ...keys, opId: 'a', window: 'window-1' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(await t.pageConsole.input({ ...keys, opId: 'b', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(await t.pageConsole.input({ ...keys, opId: 'a', window: 'window-1' })).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
+    expect(await t.pageConsole.input({ ...keys, opId: 'b', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
     expect((await t.pageConsole.input({ ...keys, opId: 'c', scopeGen: 2 })).status).toBe(409);
     expect(await t.pageConsole.input({ ...keys, opId: 'd', launch: 'L0' })).toEqual({ status: 409, body: { error: SESSION_RELAUNCHED } });
     t.sessions.set('s1', held({ codeMode: false, execution: 'app-server', nativeSessionId: null } as Partial<Session>));

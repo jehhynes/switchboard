@@ -16,6 +16,14 @@ export const RETRY_MS = [500, 1_000, 2_000, 4_000];
  */
 export type Failure = 'network' | 'timeout' | 'unavailable' | 'signedOut' | 'refused' | 'bad';
 
+/**
+ * The hub's refusal of a command for a scope generation the page has not caught up with (`CONVERSATION_CHANGED` in
+ * packages/hub/src/conversation.ts). The hub keeps this text, which a page of an older build compares, so the page says it in its own words.
+ */
+const HUB_CONVERSATION_CHANGED = "The window's conversation changed.";
+/** What the page says for that refusal. */
+export const CONVERSATION_CHANGED = 'This page switched to another conversation or session, so that was not done. Try again.';
+
 /** What a failure says when the hub gave no reason of its own. */
 export const FAILURE_TEXT: Record<Failure, string> = {
   network: "Can't reach Switchboard. Try again.",
@@ -184,6 +192,8 @@ async function once(fetcher: typeof fetch, url: string, init: RequestInit): Prom
   // The hub's own reason stands for a refusal or a bad request; an unreachable or restarting hub, or a proxy's empty 502, reads plainly.
   if (failure === 'unavailable' || failure === 'signedOut' || (failure !== null && typeof body['error'] !== 'string')) {
     body = { ...body, error: FAILURE_TEXT[failure] };
+  } else if (body['error'] === HUB_CONVERSATION_CHANGED) {
+    body = { ...body, error: CONVERSATION_CHANGED };
   }
 
   return { status: response.status, body, failure };

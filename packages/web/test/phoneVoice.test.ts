@@ -351,9 +351,9 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
     holdTickets();
     voice.start();
-    held[0]!.resolve({ status: 403, body: { error: 'Not in this window.' } });
+    held[0]!.resolve({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
     await flush();
-    expect([voice.state, voice.error, sockets.length]).toEqual(['off', 'Not in this window.', 0]);
+    expect([voice.state, voice.error, sockets.length]).toEqual(['off', "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page.", 0]);
 
     voice.start();
     held[1]!.reject(new Error('offline'));

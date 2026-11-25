@@ -277,8 +277,8 @@ describe('PageChanges', gitTimeout, () => {
   it('refuses a key that is not a page, a page with no selection, and one with no folder', async () => {
     const changes = (isPage: boolean, shown: WindowScope | null) => new PageChanges({ isPage: () => isPage, scope: () => shown }).changes('p1');
 
-    expect(await changes(false, scope('x'))).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(await changes(true, null)).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(await changes(false, scope('x'))).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
+    expect(await changes(true, null)).toEqual({ status: 403, body: { error: 'This page has no work item open, so that was not done. Open one and try again.' } });
     expect((await changes(true, scope(null))).status).toBe(409);
   });
 

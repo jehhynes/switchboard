@@ -31,7 +31,7 @@ import { buildSnapshot } from './snapshot.js';
 import type { Snapshot } from './snapshot.js';
 import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
-import { liveScope, WindowScopes } from './windows.js';
+import { liveScope, PAGE_GONE, WindowScopes } from './windows.js';
 import { tailscaleIdentity } from './tailscale.js';
 import { readHubLog } from './hubLog.js';
 import type { RemoteAccess } from './page.js';
@@ -1190,7 +1190,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
 
         if (!scopes.isPage(body['window'])) {
-          return { status: 403, body: { error: 'Not in this window.' } };
+          return { status: 403, body: { error: PAGE_GONE } };
         }
 
         const refused = voice.toComputer(body['window']);

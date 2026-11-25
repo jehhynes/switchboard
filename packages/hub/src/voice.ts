@@ -7,6 +7,7 @@ import type { HeardTag } from '@switchboard/conversation';
 import { ENROLL_SECONDS } from '@switchboard/voice';
 import type { AlertCause, AwayReason, EnrollmentState, HubMessage, MicState, UtteranceTiming, VoiceDevice, VoiceMessage, VoiceTarget } from '@switchboard/voice';
 import type { VoiceConnection } from './voiceLink.js';
+import { REPLY_NOT_SHOWN } from './windows.js';
 import type { WindowScope } from './windows.js';
 
 /** A window's voice state (architecture.md § Voice): only whether the voice is here and what its own session's speech is doing. */
@@ -279,6 +280,14 @@ export const PHONE_PCM_FRAME = 1;
 /** The first byte of a binary frame the phone sends: its microphone's 16 kHz PCM (Voice on a phone). */
 export const PHONE_MIC_FRAME = 2;
 /** Why a paired device's page cannot turn on this computer's microphone. */
+/** Why a voice command for the page's session is refused while the voice is on another session or on none. */
+export const VOICE_NOT_HERE = "Voice is not on this page's session. Select Talk here to use it.";
+/** Why a voice command is refused while voice is off in Settings. */
+export const VOICE_IS_OFF = 'Voice is off. Turn it on in Settings on the computer that runs Switchboard.';
+/** Why a voice command is refused for a page that shows no session. */
+export const NO_SESSION_SHOWN = 'This page shows no session to use voice with.';
+/** Why Replay is refused while the voice process is not running. */
+export const VOICE_NOT_RUNNING = 'The voice process is not running, so the reply was not read again.';
 export const PHONE_MIC_HERE = 'Select Voice on this device before turning on the mic.';
 /** How long a hub that took over waits for the phone that had the voice to take it back, before the voice is off (architecture.md § Hub lifecycle). */
 export const PHONE_RESUME_MS = 30_000;
@@ -1137,7 +1146,7 @@ export class VoiceControl {
         return refused;
       }
     } else if (!this.view(key).here && this.#micOn) {
-      return 'Voice is not in this window.';
+      return this.#notHere(key);
     }
 
     this.#micOn = on;
@@ -1583,7 +1592,7 @@ export class VoiceControl {
       this.#takeBack(key);
     }
 
-    const refused = session === null ? 'This window has no session to talk to.' : this.#talkTo(session);
+    const refused = session === null ? NO_SESSION_SHOWN : this.#talkTo(session);
 
     if (refused === null) {
       this.#talkedFrom = key;
@@ -1607,10 +1616,15 @@ export class VoiceControl {
     }
   }
 
+  /** Why the voice is not on the page's session (`view(key).here` false): voice is off, the page shows no session, or the voice is on another session or none. */
+  #notHere(key: string): string {
+    return !this.deps.settings().enabled ? VOICE_IS_OFF : (this.deps.windows.scope(key)?.sessionId ?? null) === null ? NO_SESSION_SHOWN : VOICE_NOT_HERE;
+  }
+
   /** Stop speaking, only from the window the voice is in. */
   stopSpeaking(key: string): string | null {
     if (!this.view(key).here) {
-      return 'Voice is not in this window.';
+      return this.#notHere(key);
     }
 
     this.#client?.send({ type: 'stop' });
@@ -1640,11 +1654,15 @@ export class VoiceControl {
     const reply = this.deps.store.reply(replyId);
 
     if (scope === null || reply === null || reply.sessionId !== scope.sessionId) {
-      return 'Not in this window.';
+      return REPLY_NOT_SHOWN;
     }
 
-    if (!this.view(key).here || this.#client === null) {
-      return 'Voice is not in this window.';
+    if (!this.view(key).here) {
+      return this.#notHere(key);
+    }
+
+    if (this.#client === null) {
+      return VOICE_NOT_RUNNING;
     }
 
     if (reply.speak == null || speechOf(reply.speak) === '') {

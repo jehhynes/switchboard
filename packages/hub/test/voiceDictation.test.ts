@@ -185,7 +185,7 @@ describe('VoiceControl dictation', () => {
       { type: 'talk-here', sessionId: 's2' },
       { type: 'mic', on: true },
     ]);
-    expect(control.mic('k2', false)).toBe('Voice is not in this window.');
+    expect(control.mic('k2', false)).toBe("Voice is not on this page's session. Select Talk here to use it.");
     expect(control.mic('k1', false)).toBeNull();
     expect(connection.sent.at(-1)).toEqual({ type: 'mic', on: false });
   });

@@ -3,6 +3,7 @@ import { resumesHeld } from '@switchboard/core';
 import { refusal } from './conversation.js';
 import { SESSION_RELAUNCHED } from './runtime.js';
 import type { HeldViewHandlers } from './runtime.js';
+import { outOfScope } from './windows.js';
 import type { WindowScope } from './windows.js';
 
 /** The most text one `console-input` types: a pasted block, not a message, which the composer sends. */
@@ -66,10 +67,11 @@ export class PageConsole {
    * `unavailable` event with why and the end; a refusal, with no stream, for a key that is not a page's or a session it does not show.
    */
   open(key: string, sessionId: string, send: ConsoleSend, end: () => void): { close(): void } | { status: number; error: string } {
-    const scope = this.deps.isPage(key) ? this.deps.scope(key) : null;
+    const known = this.deps.isPage(key);
+    const scope = known ? this.deps.scope(key) : null;
 
     if (scope === null || scope.sessionId !== sessionId) {
-      return { status: 403, error: 'Not in this window.' };
+      return { status: 403, error: outOfScope(known, scope).body.error };
     }
 
     const session = this.deps.session(sessionId);
@@ -224,7 +226,7 @@ export class PageConsole {
 
   /** Why the keys cannot go to the session now: the page's scope, the session and the launch the page showed; null when they can. */
   #refused(window: string, scopeGen: number, sessionId: string, launch: string | null): { status: number; body: unknown } | null {
-    const refused = refusal(this.deps.isPage(window) ? this.deps.scope(window) : null, scopeGen, sessionId);
+    const refused = refusal({ known: this.deps.isPage(window), scope: this.deps.isPage(window) ? this.deps.scope(window) : null }, scopeGen, sessionId);
 
     if (refused !== null) {
       return refused;

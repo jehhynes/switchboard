@@ -487,6 +487,27 @@ describe('VoiceControl', () => {
     expect(connections[0]!.sent.slice(before)).toEqual([{ type: 'cancel', replyId: 'r1', off: true }, { type: 'cancel', replyId: 'r2', off: true }]);
   });
 
+  it('says why the voice is not on the page\'s session: voice off, no session shown, another session, or no voice process', async () => {
+    const off = setup({ enabled: false });
+
+    off.windows.set('k1', scope('k1', 1, 's1'));
+    expect(off.control.stopSpeaking('k1')).toBe('Voice is off. Turn it on in Settings on the computer that runs Switchboard.');
+
+    const { control, connections, windows, reply, settle } = setup();
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    windows.set('k2', scope('k2', 2, 's2'));
+    windows.set('k0', scope('k0', 9, null));
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' });
+    expect(control.stopSpeaking('k0')).toBe('This page shows no session to use voice with.');
+    expect(control.stopSpeaking('k2')).toBe("Voice is not on this page's session. Select Talk here to use it.");
+    reply('r1');
+    control.close();
+    expect(control.replay('k1', 'r1')).toBe('The voice process is not running, so the reply was not read again.');
+  });
+
   it('runs Talk here, Stop speaking and Replay only where they apply, and turns selecting a conversation into Talk here', async () => {
     const { control, connections, windows, full, reply, settle, focus } = setup();
 
@@ -496,20 +517,20 @@ describe('VoiceControl', () => {
     expect(control.talkHere('k1')).toBe('The voice process is starting.');
     control.update();
     await settle();
-    expect(control.talkHere('k0')).toBe('This window has no session to talk to.');
+    expect(control.talkHere('k0')).toBe('This page shows no session to use voice with.');
     full.delete('s2');
     expect(control.talkHere('k2')).toBe('Voice is not available for this session.');
     expect(control.talkHere('k1')).toBeNull();
     expect(connections[0]!.sent.at(-1)).toEqual({ type: 'talk-here', sessionId: 's1' });
 
-    expect(control.stopSpeaking('k1')).toBe('Voice is not in this window.');
-    expect(control.replay('k1', 'r1')).toBe('Not in this window.');
+    expect(control.stopSpeaking('k1')).toBe("Voice is not on this page's session. Select Talk here to use it.");
+    expect(control.replay('k1', 'r1')).toBe('That reply is not in the session this page shows, so it was not read again.');
     reply('r1');
-    expect(control.replay('k1', 'r1')).toBe('Voice is not in this window.');
+    expect(control.replay('k1', 'r1')).toBe("Voice is not on this page's session. Select Talk here to use it.");
     connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'talk-here' });
     expect(control.stopSpeaking('k1')).toBeNull();
     expect(connections[0]!.sent.at(-1)).toEqual({ type: 'stop' });
-    expect(control.replay('k2', 'r1')).toBe('Not in this window.');
+    expect(control.replay('k2', 'r1')).toBe('That reply is not in the session this page shows, so it was not read again.');
     reply('r5', { speak: null });
     expect(control.replay('k1', 'r5')).toBe('This reply has nothing to read aloud.');
     expect(control.replay('k1', 'r1')).toBeNull();

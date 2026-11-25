@@ -4,6 +4,7 @@ import { open, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { changesPlan } from '@switchboard/core';
 import type { ChangedPath, DiffRow } from '@switchboard/core';
+import { outOfScope } from './windows.js';
 import type { WindowScope } from './windows.js';
 
 /**
@@ -722,10 +723,11 @@ const RANGE_REFUSED = { status: 400, body: { error: 'Expected from base, HEAD or
 
 /** Why a page key gets no changes: not a page's, or no selected conversation with a folder yet. */
 function unscoped(deps: PageChangesDeps, key: string): ChangesReply | WindowScope {
-  const scope = deps.isPage(key) ? deps.scope(key) : null;
+  const known = deps.isPage(key);
+  const scope = known ? deps.scope(key) : null;
 
   if (scope === null) {
-    return { status: 403, body: { error: 'Not in this window.' } };
+    return outOfScope(known, scope);
   }
 
   return scope.cwd === null ? { status: 409, body: { error: 'This conversation has no folder yet.' } } : scope;

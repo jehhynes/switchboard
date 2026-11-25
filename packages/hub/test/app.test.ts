@@ -825,7 +825,7 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/page-settings-save']!({ window: 'page-1', opId: 'o', value: {}, version: 'stale' })).toMatchObject({ status: 409 });
     // Voice on the computer takes only a page's key.
     expect(await app.post['/v1/conversation/page-voice-computer']!({})).toEqual({ status: 400, body: { error: 'Expected {window}.' } });
-    expect(await app.post['/v1/conversation/page-voice-computer']!({ window: 'page-unknown' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(await app.post['/v1/conversation/page-voice-computer']!({ window: 'page-unknown' })).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
   });
 
   it('sets voice.briefReplies in settings.json for Brief replies, keeping the rest of the file but the old voice.expandReplies, and refuses a file it cannot save', async () => {

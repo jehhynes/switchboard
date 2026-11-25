@@ -4,6 +4,29 @@ import { windowOf } from './dock.js';
 import { pageGroups } from './page.js';
 import type { Snapshot } from './snapshot.js';
 
+/** Why the hub refuses a page key that no connected page holds, as after the page's stream ended or the hub restarted (403). */
+export const PAGE_GONE = "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page.";
+/** Why the hub refuses a request about a work item or session from a connected page that has none open (403). */
+export const NOTHING_OPEN = 'This page has no work item open, so that was not done. Open one and try again.';
+/** Why the hub refuses a request about a work item, session or message outside what the page shows, as after it opened another (403). */
+export const NOT_SHOWN = 'This page now shows another work item or session, so that was not done. Check what it shows and try again.';
+/** Why the hub refuses to select a work item it does not have, as after it was deleted, or a session that is not that work item's (403). */
+export const GONE_ITEM = 'Switchboard has no such work item, or that session is not one of its sessions.';
+/** Why the hub refuses to mark seen a reply or status that is not in the session the page shows (403). */
+export const NOT_IN_SESSION = 'That reply or status is not in the session this page shows.';
+/** Why the hub refuses to read a reply again that is not in the session the page shows (403). */
+export const REPLY_NOT_SHOWN = 'That reply is not in the session this page shows, so it was not read again.';
+/** Why the hub refuses a page key that another browser sign-in or origin holds (403). */
+export const OTHER_SIGN_IN = "This page's connection belongs to another sign-in or address. Reload the page.";
+
+/**
+ * The 403 for a request outside a page's scope (architecture.md § Window scope), saying which of the scope rule's facts failed: the key is no
+ * connected page's (`known` false), the page has no work item open (`scope` null), or the request names something the page does not show.
+ */
+export function outOfScope(known: boolean, scope: WindowScope | null): { status: 403; body: { error: string } } {
+  return { status: 403, body: { error: !known ? PAGE_GONE : scope === null ? NOTHING_OPEN : NOT_SHOWN } };
+}
+
 /** One of a page's conversations (architecture.md § Window scope): a work item of the selected work item's group. */
 export interface ConversationRef {
   workItemId: number;

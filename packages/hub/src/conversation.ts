@@ -19,6 +19,7 @@ import type { FolderRoots } from './folders.js';
 import { writeUpload } from './uploads.js';
 import { CATEGORIES, historyView } from './history.js';
 import type { PageActionExtra, PageFile, PageHeader, PageListGroup, PageRow } from './page.js';
+import { GONE_ITEM, NOT_IN_SESSION, outOfScope, PAGE_GONE, REPLY_NOT_SHOWN } from './windows.js';
 import type { ConversationRef, WindowScope, WindowScopes } from './windows.js';
 import type { VoiceView } from './voice.js';
 import { ClaudeConversationAdapter } from './claudeConversation.js';
@@ -433,6 +434,20 @@ export class ConversationService {
   /** The messages a stopped hub left open, which wait for a window rather than for this hub. */
   readonly #inherited = new Set<string>();
 
+  /** Whether the key is a connected page's, and its scope, for `refusal`. */
+  #page(window: string): { known: boolean; scope: WindowScope | null } {
+    const known = this.deps.windows.isPage(window);
+
+    return { known, scope: known ? this.deps.windows.scope(window) : null };
+  }
+
+  /** The 403 for a request outside the page's scope, saying which fact failed (`outOfScope`). */
+  #outside(window: unknown): { status: 403; body: { error: string } } {
+    const known = typeof window === 'string' && this.deps.windows.isPage(window);
+
+    return outOfScope(known, known ? this.deps.windows.scope(window as string) : null);
+  }
+
   /** Whether a message this hub stored is still being sent, so a hub restart waits for it (architecture.md § Hub lifecycle). */
   sending(): boolean {
     return this.deps.store.openMessages().some((message) => !this.#inherited.has(message.id));
@@ -585,7 +600,7 @@ export class ConversationService {
   async answer(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
     const { window, scopeGen, sessionId, requestId, answer } = body;
     if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof sessionId !== 'string' || typeof requestId !== 'string') return { status: 400, body: { error: 'Expected {window, scopeGen, sessionId, requestId, answer}.' } };
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+    const refused = refusal(this.#page(window), scopeGen, sessionId);
     if (refused !== null) return refused;
     const session = this.deps.store.session(sessionId);
     const adapter = session === null ? undefined : this.#adapter(session);
@@ -789,7 +804,7 @@ export class ConversationService {
       return { status: 400, body: { error: `Expected {window, scopeGen, opId, sessionId, ${fields}}.` } };
     }
 
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId);
+    const refused = refusal(this.#page(window), scopeGen, sessionId);
 
     if (refused !== null) {
       return refused;
@@ -1165,7 +1180,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const why = this.deps.setSource === undefined ? 'This hub cannot turn sources on or off from the page.' : this.deps.setSource(name, enabled);
@@ -1194,7 +1209,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window) || this.deps.windows.scope(window)?.workItemId !== workItemId) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const id = workItemId as number;
@@ -1253,10 +1268,10 @@ export class ConversationService {
     const scope = this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null;
 
     if (scope === null || scope.workItemId !== workItemId) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
-    const refused = refusal(scope, scopeGen, null);
+    const refused = refusal({ known: this.deps.windows.isPage(window), scope }, scopeGen, null);
 
     if (refused !== null) {
       return refused;
@@ -1304,7 +1319,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const done = this.#rowActions.get(`${window} ${opId}`);
@@ -1339,7 +1354,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const done = this.#rowActions.get(`${window} ${opId}`);
@@ -1374,10 +1389,10 @@ export class ConversationService {
     const scope = this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null;
 
     if (scope === null || scope.workItemId !== workItemId) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
-    const refused = refusal(scope, scopeGen, null);
+    const refused = refusal({ known: this.deps.windows.isPage(window), scope }, scopeGen, null);
 
     if (refused !== null) {
       return refused;
@@ -1428,7 +1443,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const done = this.#rowActions.get(`${window} ${opId}`);
@@ -1460,7 +1475,7 @@ export class ConversationService {
       return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } };
     }
 
-    const refused = refusal(this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null, scopeGen, sessionId);
+    const refused = refusal(this.#page(window), scopeGen, sessionId);
 
     if (refused !== null) {
       return refused;
@@ -1469,7 +1484,7 @@ export class ConversationService {
     const session = this.deps.store.session(sessionId);
 
     if (session === null) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     if (session.state !== 'ended') {
@@ -1491,7 +1506,7 @@ export class ConversationService {
    * session waiting on a question or a permission prompt, and the prompt its screen shows, or why not.
    */
   async #promptOf(window: string, scopeGen: number, sessionId: string): Promise<{ refused: { status: number; body: { error: string } } } | { session: Session; prompt: ScreenPrompt | null; keyAt: number | null }> {
-    const refused = refusal(this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null, scopeGen, sessionId);
+    const refused = refusal(this.#page(window), scopeGen, sessionId);
 
     if (refused !== null) {
       return { refused };
@@ -1630,10 +1645,10 @@ export class ConversationService {
     const scope = this.deps.windows.isPage(window) ? this.deps.windows.scope(window) : null;
 
     if (scope === null || scope.workItemId !== workItemId) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
-    const refused = refusal(scope, scopeGen, null);
+    const refused = refusal({ known: this.deps.windows.isPage(window), scope }, scopeGen, null);
 
     if (refused !== null) {
       return refused;
@@ -1660,7 +1675,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     this.deps.pageFocused?.(window, focused, notify);
@@ -1806,7 +1821,7 @@ export class ConversationService {
    */
   pageUpload(key: string, scopeGen: number, name: string, bytes: Uint8Array): { status: number; body: unknown } {
     const scope = this.deps.windows.isPage(key) ? this.deps.windows.scope(key) : null;
-    const refused = refusal(scope, scopeGen, null);
+    const refused = refusal({ known: this.deps.windows.isPage(key), scope }, scopeGen, null);
 
     if (refused !== null) {
       return refused;
@@ -2030,7 +2045,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     return { status: 200, body: this.deps.searchDone?.(text, since) ?? { rows: [], more: false } };
@@ -2049,7 +2064,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const history = this.deps.store.ticketHistory(ticketId as number);
@@ -2066,7 +2081,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(body['window'])) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(body['window']);
     }
 
     const why = this.deps.pollSources === undefined ? 'This hub cannot poll from the page.' : this.deps.pollSources();
@@ -2084,7 +2099,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(body['window'])) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(body['window']);
     }
 
     const detail = typeof body['detail'] === 'string' ? body['detail'] : undefined;
@@ -2123,7 +2138,7 @@ export class ConversationService {
     }
 
     if (typeof window !== 'string' || !this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const message = typeof prompt === 'string' ? prompt.trim() : '';
@@ -2190,7 +2205,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const remote = body['remote'] === true;
@@ -2218,7 +2233,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.isPage(window)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const done = this.#pageAdhocs.get(`${window} ${opId}`);
@@ -2494,10 +2509,10 @@ export class ConversationService {
     const scope = this.deps.windows.scope(window);
 
     if (scope === null) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
-    const refused = refusal(scope, scopeGen, sessionId);
+    const refused = refusal({ known: this.deps.windows.isPage(window), scope }, scopeGen, sessionId);
 
     if (refused !== null) {
       return refused;
@@ -2530,7 +2545,7 @@ export class ConversationService {
     const session = this.deps.store.session(sessionId);
 
     if (session === null) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return this.#outside(window);
     }
 
     const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
@@ -2850,7 +2865,7 @@ export class ConversationService {
       return { status: 400, body: { error: `Expected {window, scopeGen, opId, sessionId, ids}, with at most ${SEEN_MAX_IDS} IDs.` } };
     }
 
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId, true);
+    const refused = refusal(this.#page(window), scopeGen, sessionId, true);
 
     if (refused !== null) {
       return refused;
@@ -2859,7 +2874,7 @@ export class ConversationService {
     const marked = this.deps.store.markSeen(sessionId, ids as string[], this.deps.now());
 
     if (marked === null) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return { status: 403, body: { error: NOT_IN_SESSION } };
     }
 
     for (const id of marked.replies) {
@@ -2915,7 +2930,7 @@ export class ConversationService {
       return { status: 400, body: { error: `Expected {window, scopeGen, opId${fields}}.` } };
     }
 
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, null);
+    const refused = refusal(this.#page(window), scopeGen, null);
 
     if (refused !== null) {
       return refused;
@@ -2945,7 +2960,7 @@ export class ConversationService {
 
     const why = name === 'talk-here' ? voice.talkHere(window) : name === 'stop-speaking' ? voice.stopSpeaking(window) : voice.replay(window, replyId as string);
 
-    return why === null ? { status: 200, body: { done: true } } : { status: why === 'Not in this window.' ? 403 : 409, body: { error: why } };
+    return why === null ? { status: 200, body: { done: true } } : { status: why === REPLY_NOT_SHOWN ? 403 : 409, body: { error: why } };
   }
 
   /**
@@ -2963,7 +2978,7 @@ export class ConversationService {
       return { status: 400, body: { error: name === 'persona' ? 'Expected {window, scopeGen, opId, sessionId, personaId}.' : 'Expected {window, scopeGen, opId}.' } };
     }
 
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, name === 'persona' ? (sessionId as string) : null);
+    const refused = refusal(this.#page(window), scopeGen, name === 'persona' ? (sessionId as string) : null);
 
     if (refused !== null) {
       return refused;
@@ -3021,7 +3036,7 @@ export class ConversationService {
     }
 
     if (!this.deps.windows.select(window, workItemId as number, (sessionId as string | null | undefined) ?? null)) {
-      return { status: 403, body: { error: 'Not in this window.' } };
+      return { status: 403, body: { error: this.deps.windows.isPage(window) ? GONE_ITEM : PAGE_GONE } };
     }
 
     this.scopesChanged([window]);
@@ -3054,7 +3069,7 @@ export class ConversationService {
       return { status: 200, body: earlier };
     }
 
-    const refused = refusal(scope?.workItemId == null ? null : scope, scopeGen, null);
+    const refused = refusal({ known: this.deps.windows.isPage(window), scope: scope?.workItemId == null ? null : scope }, scopeGen, null);
 
     if (refused !== null) {
       return refused;
@@ -3101,7 +3116,7 @@ export class ConversationService {
     }
 
     const scope = this.deps.windows.scope(window);
-    const refused = refusal(scope, scopeGen, sessionId, true);
+    const refused = refusal({ known: this.deps.windows.isPage(window), scope }, scopeGen, sessionId, true);
 
     if (refused !== null) {
       return refused;
@@ -3123,7 +3138,7 @@ export class ConversationService {
       return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } };
     }
 
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId, true);
+    const refused = refusal(this.#page(window), scopeGen, sessionId, true);
 
     if (refused !== null) {
       return refused;
@@ -3145,7 +3160,7 @@ export class ConversationService {
       return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } };
     }
 
-    const refused = refusal(this.deps.windows.scope(window), scopeGen, sessionId, true);
+    const refused = refusal(this.#page(window), scopeGen, sessionId, true);
 
     if (refused !== null) {
       return refused;
@@ -3184,6 +3199,8 @@ export function typedText(message: ConversationMessage, expressive: boolean, cod
 }
 
 /** Why a command for a conversation the window no longer shows is refused. */
+// Kept as it is: an open page of an older build compares it to keep a send's opId for a retry; the page shows its own words for it
+// (packages/web/src/request.ts).
 export const CONVERSATION_CHANGED = "The window's conversation changed.";
 
 /** How many not-sent `opId`s the service remembers, for a `send` repeated after its message left the conversation. */
@@ -3202,9 +3219,11 @@ export const EARLIER_SESSION = 'This is an earlier session of the work item, sho
  * Why a command is refused: a session outside the window's scope, a scope generation that is no longer the window's, or, unless it only `reads`,
  * a command for an earlier session the page shows.
  */
-export function refusal(scope: WindowScope | null, scopeGen: number, sessionId: string | null, reads = false): { status: number; body: { error: string } } | null {
-  if (scope === null || (sessionId !== null && scope.sessionId !== sessionId)) {
-    return { status: 403, body: { error: 'Not in this window.' } };
+export function refusal(page: { known: boolean; scope: WindowScope | null }, scopeGen: number, sessionId: string | null, reads = false): { status: number; body: { error: string } } | null {
+  const { scope } = page;
+
+  if (!page.known || scope === null || (sessionId !== null && scope.sessionId !== sessionId)) {
+    return outOfScope(page.known, scope);
   }
 
   if (scope.scopeGen !== scopeGen) {

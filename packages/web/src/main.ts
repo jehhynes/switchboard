@@ -36,7 +36,7 @@ import { settings } from './settings.js';
 import { attachments, drawChips } from './attachments.js';
 import type { Attached } from './attachments.js';
 import { Connection } from './connection.js';
-import { COMMAND_MS, FAILURE_TEXT, NAVIGATION_MS, READ_MS, request, timedFetch, transient, UPLOAD_MS } from './request.js';
+import { COMMAND_MS, CONVERSATION_CHANGED, FAILURE_TEXT, NAVIGATION_MS, READ_MS, request, timedFetch, transient, UPLOAD_MS } from './request.js';
 import type { Answer } from './request.js';
 import { dotView, renderBanner, renderScreen, renderUpdate } from './connectionView.js';
 import type { ConnectionView } from './connectionView.js';
@@ -123,8 +123,6 @@ const HISTORY_CHANGE_MS = 1_000;
 const CONVERSATION_ENTRY = 'switchboardConversation';
 /** Where the page keeps the `opId` of each message sent without a settled answer, over a reload. */
 const SEND_OPS = 'switchboard.sendOps';
-/** The hub's refusal of a command for a scope generation the page has not caught up with (`CONVERSATION_CHANGED` in packages/hub/src/conversation.ts). */
-const CONVERSATION_CHANGED = "The window's conversation changed.";
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
 /** Where the page keeps New conversation…'s draft, by work item, with its provider and opId, over a reload. */

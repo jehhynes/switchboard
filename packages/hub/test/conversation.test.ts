@@ -5,13 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store, toneSection, toneVersion } from '@switchboard/core';
 import type { ConversationMessage, Interruption, Session as StoredSession } from '@switchboard/core';
 import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
-import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, sessionView, typedText } from '../src/conversation.js';
+import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, refusal, sessionView, typedText } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
 import type { ConversationAdapter, ConversationChanged } from '../src/conversationAdapter.js';
 import type { InputOutcome } from '@switchboard/conversation';
 import { dockView, windowOf } from '../src/dock.js';
 import { canonicalFolder } from '../src/folders.js';
 import { WindowScopes } from '../src/windows.js';
+import type { WindowScope } from '../src/windows.js';
 import type { Snapshot, WorkItemView } from '../src/snapshot.js';
 import { pageList } from '../src/page.js';
 import { questionIndex } from '../src/questions.js';
@@ -153,12 +154,13 @@ describe('hosted conversations on the page (architecture.md § Window scope)', (
     expect(theirs.frames.filter((frame) => frame.type === 'scope')).toEqual([]);
 
     // Commands name the shown session only; the other page's, the earlier selection's, or one sent at an older generation are refused.
-    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o2', sessionId: 'h2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o3', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o2', sessionId: 'h2', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.history({ window: mine.key, scopeGen: 2, opId: 'o3', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
     expect(service.history({ window: mine.key, scopeGen: 1, opId: 'o4', sessionId: 'h1', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
-    expect(service.seen({ window: theirs.key, scopeGen: 1, opId: 'o5', sessionId: 'h1', ids: [] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.send({ window: theirs.key, scopeGen: 1, opId: 'o6', sessionId: 'h1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.select({ window: 'forged', scopeGen: 1, opId: 'o7', workItemId: 2 })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.seen({ window: theirs.key, scopeGen: 1, opId: 'o5', sessionId: 'h1', ids: [] })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.send({ window: theirs.key, scopeGen: 1, opId: 'o6', sessionId: 'h1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.select({ window: 'forged', scopeGen: 1, opId: 'o7', workItemId: 2 })).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
+    expect(service.select({ window: mine.key, scopeGen: 2, opId: 'o8', workItemId: 999 })).toEqual({ status: 403, body: { error: 'Switchboard has no such work item, or that session is not one of its sessions.' } });
   });
 
   it("gives a folder-hosted conversation's page only that folder's conversations, never the item work in the folder, and refuses each the other's sessions", () => {
@@ -170,9 +172,9 @@ describe('hosted conversations on the page (architecture.md § Window scope)', (
 
     expect(scopes.scope(folder.key)).toMatchObject({ kind: 'page', workItemId: inFolder, sessionId: 'f1', conversations: [{ workItemId: inFolder, primary: false }] });
     expect(scopes.scope(itemPage.key)?.conversations).toEqual([{ workItemId: 2, primary: true }, { workItemId: inItem, primary: false }]);
-    expect(service.history({ window: folder.key, scopeGen: 1, opId: 'h1', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.history({ window: itemPage.key, scopeGen: 1, opId: 'h2', sessionId: 'f1', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.send({ window: itemPage.key, scopeGen: 1, opId: 'h3', sessionId: 'f1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.history({ window: folder.key, scopeGen: 1, opId: 'h1', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.history({ window: itemPage.key, scopeGen: 1, opId: 'h2', sessionId: 'f1', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.send({ window: itemPage.key, scopeGen: 1, opId: 'h3', sessionId: 'f1', launch: null, text: 'hi' })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
   });
 
   it('counts each conversation unread on its own and sends the dropdown when it changes, without moving the selection', async () => {
@@ -253,6 +255,18 @@ class FakeHeld {
     return this.cannotType_;
   }
 }
+
+describe('refusal', () => {
+  const shown: WindowScope = { kind: 'page', key: 'p', folder: null, title: 'T', scopeGen: 2, conversations: [], workItemId: 1, cwd: null, sessionId: 's1' };
+
+  it('says which scope fact failed: a key no page holds, a page with nothing open, another session, or a stale generation', () => {
+    expect(refusal({ known: false, scope: null }, 2, 's1')).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
+    expect(refusal({ known: true, scope: null }, 2, 's1')).toEqual({ status: 403, body: { error: 'This page has no work item open, so that was not done. Open one and try again.' } });
+    expect(refusal({ known: true, scope: shown }, 2, 's2')).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(refusal({ known: true, scope: shown }, 1, 's1')).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+    expect(refusal({ known: true, scope: shown }, 2, 's1')).toBeNull();
+  });
+});
 
 describe('canonicalFolder', () => {
   it('gives every spelling of a folder, by a link or in another case, its one real path, and none to a path that is no folder or is named like a workspace file', () => {
@@ -344,10 +358,10 @@ describe('ConversationService', () => {
     const before = { mine: mine.frames.length, theirs: theirs.frames.length };
 
     // Another window's item, an unknown ID, another session, a stale scope and a malformed body mark nothing.
-    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o1', sessionId: 's2', ids: [two, store.conversation('s3', null, 10).items[0]!.id] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o2', sessionId: 's2', ids: ['forged'] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o3', sessionId: 's3', ids: [] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.seen({ window: theirs.key, scopeGen: 1, opId: 'o4', sessionId: 's2', ids: [two] })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o1', sessionId: 's2', ids: [two, store.conversation('s3', null, 10).items[0]!.id] })).toEqual({ status: 403, body: { error: 'That reply or status is not in the session this page shows.' } });
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o2', sessionId: 's2', ids: ['forged'] })).toEqual({ status: 403, body: { error: 'That reply or status is not in the session this page shows.' } });
+    expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o3', sessionId: 's3', ids: [] })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.seen({ window: theirs.key, scopeGen: 1, opId: 'o4', sessionId: 's2', ids: [two] })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
     expect(service.seen({ window: mine.key, scopeGen: 0, opId: 'o5', sessionId: 's2', ids: [two] })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o6', sessionId: 's2', ids: 'x' }).status).toBe(400);
     expect(service.seen({ window: mine.key, scopeGen: 1, opId: 'o7', sessionId: 's2', ids: Array.from({ length: 201 }, () => two) }).status).toBe(400);
@@ -425,9 +439,9 @@ describe('ConversationService', () => {
     const other = open(3).key;
 
     expect(service.open('forged', () => undefined)).toBeNull();
-    expect(service.history({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.history({ window: other, scopeGen: 1, opId: 'o2', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.history({ window: 'forged', scopeGen: 1, opId: 'o3', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.history({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.history({ window: other, scopeGen: 1, opId: 'o2', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.history({ window: 'forged', scopeGen: 1, opId: 'o3', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
     expect(service.history({ window: key, scopeGen: 0, opId: 'o4', sessionId: 's2', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.history({ window: key, scopeGen: 1, sessionId: 's2' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } });
 
@@ -490,9 +504,9 @@ describe('ConversationService', () => {
     expect(latest.markdown).toBe('Three.');
     expect(service.statuses({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's2', before: latest.id, limit: 1 })).toMatchObject({ status: 200, body: { statuses: [{ markdown: 'Two.', fallback: false }], more: true } });
     expect(service.statuses({ window: key, scopeGen: 1, opId: 'o2', sessionId: 's2', before: null })).toMatchObject({ status: 200, body: { statuses: [{ markdown: 'Three.' }, { markdown: 'Two.' }, { markdown: 'One.' }], more: false } });
-    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o3', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.statuses({ window: other, scopeGen: 1, opId: 'o4', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.statuses({ window: 'forged', scopeGen: 1, opId: 'o5', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.statuses({ window: key, scopeGen: 1, opId: 'o3', sessionId: 's3', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.statuses({ window: other, scopeGen: 1, opId: 'o4', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.statuses({ window: 'forged', scopeGen: 1, opId: 'o5', sessionId: 's2', before: null })).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
     expect(service.statuses({ window: key, scopeGen: 0, opId: 'o6', sessionId: 's2', before: null })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.statuses({ window: key, scopeGen: 1, sessionId: 's2', before: 3 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } });
     // Another session's status as the cursor has nothing before it.
@@ -525,9 +539,9 @@ describe('ConversationService', () => {
         ],
       },
     });
-    expect(service.commands({ window: key, scopeGen: 1, opId: 'o2', sessionId: 's3' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.commands({ window: other, scopeGen: 1, opId: 'o3', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(service.commands({ window: 'forged', scopeGen: 1, opId: 'o4', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(service.commands({ window: key, scopeGen: 1, opId: 'o2', sessionId: 's3' })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.commands({ window: other, scopeGen: 1, opId: 'o3', sessionId: 's2' })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(service.commands({ window: 'forged', scopeGen: 1, opId: 'o4', sessionId: 's2' })).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
     expect(service.commands({ window: key, scopeGen: 0, opId: 'o5', sessionId: 's2' })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(service.commands({ window: key, scopeGen: 1, sessionId: 7 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } });
   });
@@ -700,9 +714,9 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
       },
       replyChanged: (reply) => void calls.push(`reply ${reply.opening}`),
       talkHere: (key) => (key === 'k1' ? null : 'Voice is off (voice.enabled).'),
-      stopSpeaking: () => 'Voice is not in this window.',
+      stopSpeaking: () => "Voice is not on this page's session. Select Talk here to use it.",
       setSpeakReplies: (on) => void calls.push(`speak-replies ${on}`),
-      replay: (_key, replyId) => (replyId === 'r-x' ? 'Not in this window.' : null),
+      replay: (_key, replyId) => (replyId === 'r-x' ? 'That reply is not in the session this page shows, so it was not read again.' : null),
       update: () => void calls.push('update'),
       selected: (key) => void calls.push(`selected ${key}`),
       expressive: () => true,
@@ -767,7 +781,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(store.session('s2')).toMatchObject({ personaId: null, personaPinned: false });
 
     // Another window's session, a stale generation, an unknown persona, a malformed body and voice off are refused.
-    expect(command('persona', { sessionId: 's3', personaId: 'nova' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(command('persona', { sessionId: 's3', personaId: 'nova' })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
     expect(command('persona', { sessionId: 's3', personaId: 'nova' }, theirs.key)).toMatchObject({ status: 200 });
     expect(command('persona', { sessionId: 's2', personaId: 'nova', scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(command('persona', { sessionId: 's2', personaId: 'vega' })).toEqual({ status: 409, body: { error: 'No persona vega in voice.personas.' } });
@@ -965,9 +979,9 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     expect(command('talk-here')).toEqual({ status: 200, body: { done: true } });
     expect(command('talk-here', {}, theirs.key)).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
-    expect(command('talk-here', {}, 'forged')).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(command('talk-here', {}, 'forged')).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
     expect(command('talk-here', { scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
-    expect(command('stop-speaking')).toEqual({ status: 409, body: { error: 'Voice is not in this window.' } });
+    expect(command('stop-speaking')).toEqual({ status: 409, body: { error: "Voice is not on this page's session. Select Talk here to use it." } });
     expect(command('speak-replies', { on: false })).toEqual({ status: 200, body: { on: false } });
     expect(command('speak-replies')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } });
     expect(command('replay', { replyId: 'r-1' })).toEqual({ status: 200, body: { done: true } });
@@ -984,7 +998,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(command('composer', { focused: true, draft: 'fix', listen: true })).toEqual({ status: 200, body: { done: true } });
     expect(calls.at(-1)).toBe('composer true fix listen');
     expect(command('composer', { focused: true, draft: 'fix', listen: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } });
-    expect(command('replay', { replyId: 'r-x' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(command('replay', { replyId: 'r-x' })).toEqual({ status: 403, body: { error: 'That reply is not in the session this page shows, so it was not read again.' } });
     expect(command('replay')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } });
     expect(service.voiceCommand('talk-here', { window: mine.key, scopeGen: 1 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } });
     expect(calls).toContain('speak-replies false');
@@ -1029,9 +1043,9 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const refused = (patch: Record<string, unknown>, window = key) => service.send(body(window, patch));
 
     expect(service.send({ window: key, scopeGen: 1, sessionId: 's2', text: 'x' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, text | answers: [{card, slug, letters, other}], command?}.' } });
-    expect(refused({}, 'forged')).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(refused({ sessionId: 's3', launch: 'launch-3' })).toEqual({ status: 403, body: { error: 'Not in this window.' } });
-    expect(refused({}, other)).toEqual({ status: 403, body: { error: 'Not in this window.' } });
+    expect(refused({}, 'forged')).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
+    expect(refused({ sessionId: 's3', launch: 'launch-3' })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
+    expect(refused({}, other)).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
     expect(refused({ scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(refused({ text: '  \n ' })).toEqual({ status: 400, body: { error: 'The message is empty.' } });
     expect(refused({ text: 'x'.repeat(10_001) })).toEqual({ status: 400, body: { error: 'The message is longer than 10,000 characters.' } });

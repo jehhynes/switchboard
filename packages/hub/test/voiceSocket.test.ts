@@ -300,9 +300,9 @@ describe('the voice socket on the page origin', () => {
     expect((await refused(phonePage.key, { ...good, 'Tailscale-User-Login': 'mallory@example.com' }))[0]).toBe(403);
     expect((await refused(phonePage.key, { ...good, 'Tailscale-Funnel-Request': '?1' }))[0]).toBe(403);
     // A page key that is no one's, another device's, or this computer's page's.
-    expect(await refused('page-99', good)).toEqual([403, 'Not in this window.']);
-    expect(await refused(otherPage.key, good)).toEqual([403, 'Not in this window.']);
-    expect(await refused(localPage.key, good)).toEqual([403, 'Not in this window.']);
+    expect(await refused('page-99', good)).toEqual([403, "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page."]);
+    expect(await refused(otherPage.key, good)).toEqual([403, "This page's connection belongs to another sign-in or address. Reload the page."]);
+    expect(await refused(localPage.key, good)).toEqual([403, "This page's connection belongs to another sign-in or address. Reload the page."]);
     // This computer's own page, with its own key and cookie, and a phone's cookie on this computer.
     expect(await refused(localPage.key, { Host: `127.0.0.1:${server.port}`, Cookie: localCookie, Origin: `http://127.0.0.1:${server.port}` })).toEqual([403, 'Use Voice on the computer to use this computer\'s microphone and speaker.']);
     expect(await refused(phonePage.key, { Host: `127.0.0.1:${server.port}`, Cookie: phone, Origin: `http://127.0.0.1:${server.port}` })).toEqual([401, 'Not signed in.']);
@@ -351,8 +351,8 @@ describe('the voice socket on the page origin', () => {
     await allow(phone, true);
 
     // A ticket only for a page key of the asking sign-in, and none from this computer's sign-in through the remote host.
-    expect(await ticketFor(otherPage.key)).toEqual({ status: 403, error: 'Not in this window.' });
-    expect(await ticketFor('page-99')).toEqual({ status: 403, error: 'Not in this window.' });
+    expect(await ticketFor(otherPage.key)).toEqual({ status: 403, error: "This page's connection belongs to another sign-in or address. Reload the page." });
+    expect(await ticketFor('page-99')).toEqual({ status: 403, error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." });
     expect((await ticketFor(phonePage.key, localCookie)).status).toBe(401);
 
     const first = await ticketFor(phonePage.key);

@@ -7096,7 +7096,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     window.innerWidth = 1440;
     history.replaceState(null, '', '#w=1&t=changes&f=src%2Fa.ts');
     // The reads' answers do not matter here: only that the page asks for them.
-    answers['/v1/conversation/changes'] = { status: 403, body: { error: 'Not in this window.' } };
+    answers['/v1/conversation/changes'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } };
     answers['/page-history'] = { status: 409, body: { error: 'No such ticket.' } };
     answers['/local-file'] = { status: 404, body: { error: 'not found' } };
 
@@ -7429,7 +7429,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
   it('keeps the Changes tab and a tab\'s scroll place through a new session of the work item, as Approve starts, reading the tab again, and drops them for another work item', async () => {
     window.innerWidth = 375;
-    answers['/v1/conversation/changes'] = { status: 403, body: { error: 'Not in this window.' } };
+    answers['/v1/conversation/changes'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } };
 
     const { page, source } = start();
     const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?')).length;
@@ -7586,7 +7586,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
 
     // The Changes tab, kept through a reconnect, reads its list again once the new stream shows the work item.
-    answers['/v1/conversation/changes'] = { status: 403, body: { error: 'Not in this window.' } };
+    answers['/v1/conversation/changes'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } };
     click('#head [data-action="diff-tab"]');
     const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?')).length;
     const before = reads();
@@ -7877,7 +7877,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     };
 
     type('Ship it');
-    answers['/send'] = { status: 403, body: { error: 'Not in this window.' } };
+    answers['/send'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } };
     click('button.send');
     await flush();
     await flush();
@@ -7901,7 +7901,8 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     answers['/send'] = { status: 409, body: { error: "The window's conversation changed." } };
     click('button.send');
     await vi.waitFor(() => expect(sends().at(-1)!.body['text']).toBe('Next'));
-    await vi.waitFor(() => expect(root.querySelector('#toast .toast-text')?.textContent ?? '').not.toBe(''));
+    // The hub keeps its old text for this refusal, which the page says in its own words.
+    await vi.waitFor(() => expect(root.querySelector('#toast .toast-text')?.textContent).toBe('This page switched to another conversation or session, so that was not done. Try again.'));
     const stale = sends().at(-1)!.body['opId'];
 
     expect(JSON.parse(localStorage.getItem('switchboard.sendOps')!)).toEqual({ '1': { key: expect.stringContaining('Next'), opId: stale } });
