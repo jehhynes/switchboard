@@ -76,7 +76,7 @@ const short = { ticket: 'dpaf 7', ticketNumber: '7', sourceKind: 'dpaf', url: 'h
 // The fifth row's seven pills, outside the narrow views: six short texts, then a long one that does not fit beside them at the phone's width,
 // so it drops out whole.
 const link = (badge) => ({ label: badge, url: 'https://example.com/' + badge, kind: 'url', badge, glyph: '\u{eb15}', mentioned: false });
-const many = { ticket: 'gh 9', playbook: 'dev:x', links: ['1', '2', '3', '4', '5', '6', 'A long seventh label'].map(link) };
+const many = { ticket: 'gh 9', ticketNumber: '9', playbook: 'dev:x', links: ['1', '2', '3', '4', '5', '6', 'A long seventh label'].map(link) };
 // The sixth row's long ad hoc key, of a source with no logo, and a link with a long label; the seventh's key, longer than the line, beside a
 // comment icon and a long playbook. The narrow views leave out the first, fifth and seventh rows, so the list fits a phone's height on its side.
 const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, sourceKind: 'adhoc', links: [link('A very long design document title')] };
