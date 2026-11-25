@@ -361,12 +361,18 @@ describe('dockView', () => {
     dashboard.links = [
       { id: 1, ticketId: 8, label: 'Issue', target: 'https://github.com/Acme/Widgets/issues/5', reportedAt: NOW, mentioned: false },
       { id: 2, ticketId: 8, label: 'Issue', target: 'https://github.com/alice/tools/issues/6', reportedAt: NOW, mentioned: false },
+      { id: 3, ticketId: 8, label: 'Issue', target: 'https://github.com/acme/widgets-dashboard/issues/7', reportedAt: NOW, mentioned: false },
     ];
     const keys = { homes: { github: 'acme/widgets' }, prefixes: { 'acme/widgets-dashboard': 'dash' } };
     const shown = (repoKeys?: typeof keys) => dockView(snapshot([dashboard], repoKeys === undefined ? {} : { repoKeys }), NOW, W).groups.flatMap((group) => group.rows)[0]!;
 
-    expect(shown(keys)).toMatchObject({ ticket: 'dash 63', links: [{ label: 'gh 5' }, { label: 'alice/tools#6' }] });
-    expect(shown(keys).search).toContain('dash 63 · gh 5 · alice/tools#6');
+    expect(shown(keys)).toMatchObject({ ticket: 'dash 63', links: [{ label: 'gh 5', badge: '5' }, { label: 'alice/tools#6', badge: 'alice/tools#6' }, { label: 'dash 7', badge: 'dash 7' }] });
+    // An issue in another GitHub source's home repository shows its number after GitHub's mark, that source's label read with it; a prefix that reads as a source's label stays.
+    const homes = { homes: { github: 'acme/widgets', personal: 'alice/tools' }, prefixes: { 'acme/widgets-dashboard': 'gh' } };
+    expect(shown(homes).links.map((link) => [link.label, link.badge])).toEqual([['gh 5', '5'], ['personal 6', '6'], ['gh 7', 'gh 7']]);
+    // Without repository keys every issue is named by GitHub's label, which its mark stands for.
+    expect(shown().links.map((link) => [link.label, link.badge])).toEqual([['gh 5', '5'], ['gh 6', '6'], ['gh 7', '7']]);
+    expect(shown(keys).search).toContain('dash 63 · gh 5 · alice/tools#6 · dash 7');
     expect(shown(keys).window?.name).toMatch(/^gh-acme-widgets-dashboard-63-/);
     expect(shown(keys).window?.name).toBe(shown().window?.name);
     expect(shown().ticket).toBe('gh acme/widgets-dashboard#63');
@@ -442,9 +448,9 @@ describe('dockView', () => {
 
     expect(shown.links).toEqual([
       { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002', kind: 'pr', badge: '19002', glyph: '\u{ea64}', mentioned: false },
-      { label: 'gh 18941', url: 'https://github.com/o/r/issues/18941', kind: 'issue', badge: 'gh 18941', glyph: '\u{ea84}', mentioned: false },
+      { label: 'gh 18941', url: 'https://github.com/o/r/issues/18941', kind: 'issue', badge: '18941', glyph: '\u{ea84}', mentioned: false },
       { label: 'Design doc', url: 'https://example.test/doc', kind: 'url', badge: 'Design doc', glyph: '\u{eb15}', mentioned: false },
-      { label: 'gh 20087', url: 'https://github.com/o/r/issues/20087', kind: 'issue', badge: 'gh 20087', glyph: '\u{ea84}', mentioned: true },
+      { label: 'gh 20087', url: 'https://github.com/o/r/issues/20087', kind: 'issue', badge: '20087', glyph: '\u{ea84}', mentioned: true },
     ]);
     expect(shown.returned).toBe(3);
   });

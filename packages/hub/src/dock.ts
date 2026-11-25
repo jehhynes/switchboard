@@ -41,7 +41,9 @@ import {
   terminalCommand,
   ticketKey,
   shownKey,
+  shownNumber,
   issueKey,
+  issueHome,
   issueOfUrl,
   waitTexts,
   limitTexts,
@@ -184,6 +186,11 @@ export interface DockRow {
   source: string;
   /** The source's plugin, such as `github`, which picks its icon; the source's name when it is no longer configured. */
   sourceKind: string;
+  /**
+   * The key without its source's label, such as `18941` for `gh 18941`, which the page shows after the source's logo; null where the key starts
+   * otherwise, as another repository's prefix or an ad hoc ticket's folder does.
+   */
+  ticketNumber: string | null;
   url: string;
   /** The mark, its codicon glyph and its meaning in words. */
   mark: { kind: Mark; glyph: string; title: string } | null;
@@ -231,7 +238,8 @@ export interface DockRow {
   search: string;
   /**
    * The ticket's links (PRD R52), a link to the ticket itself left out: `label` names it in the right-click menu (`PR #19002`, `gh 18941` or its
-   * label); `badge` and `glyph` draw it as a badge on line 2, a pull request as its number after the pull request icon, an issue as its key after GitHub's mark. A `mentioned` link,
+   * label); `badge` and `glyph` draw it as a badge on line 2, a pull request as its number after the pull request icon, an issue after GitHub's mark as its number, which `label`
+   * names with a GitHub source's label (`gh 18941`), or as its key where a repository's prefix starts it. A `mentioned` link,
    * found in the ticket's text (PRD R61), follows the others and is drawn muted. A pull request its source has read carries `pr`, its state,
    * review decision and checks (PRD R92).
    */
@@ -333,7 +341,7 @@ export function dockRow(snapshot: Snapshot, entry: WorkItemView | PoolView, grou
   const kind = snapshot.sourceStates.find((source) => source.name === entry.ticket.source)?.kind;
   const shown = 'status' in entry ? itemRow(entry, now, snapshot.namespaces, windows, order, snapshot.repoKeys) : poolRow(entry, now, snapshot.namespaces);
 
-  return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), sourceKind: kind ?? entry.ticket.source, search: searchText(entry, group, snapshot), links: linksOf(entry, snapshot.repoKeys, snapshot.pullRequests), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
+  return { ...shown, ticket: shownKey(entry.ticket, snapshot.repoKeys), ticketNumber: shownNumber(entry.ticket, snapshot.repoKeys), sourceKind: kind ?? entry.ticket.source, search: searchText(entry, group, snapshot), links: linksOf(entry, snapshot.repoKeys, snapshot.pullRequests), returned: entry.returned, comment: 'status' in entry ? commentOf(entry) : null, band };
 }
 
 function heldRow(snapshot: Snapshot, one: HeldSession, now: number, windows: string): DockHeld {
@@ -440,7 +448,7 @@ export function sourceGroups(states: Snapshot['sourceStates']): DockSourceGroup[
 }
 
 /** A work item's row; `order` is Ready for review's IDs in list order when the row is in that group, for its Move controls. */
-function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, keys: RepoKeys | undefined): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
+function itemRow(item: WorkItemView, now: number, namespaces: Record<string, string>, windows: string, order: number[] | null, keys: RepoKeys | undefined): Omit<DockRow, 'sourceKind' | 'ticketNumber' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const kind = markOf(item);
   const controls = order === null ? controlsOf(item) : [...controlsOf(item), ...moveControls(item, order)];
   const turn = item.ticket.snoozed ? null : turnOf(item);
@@ -487,7 +495,7 @@ function orMarkTitle(kind: Mark | null, details: DockText[]): DockText[] {
   return kind !== null && details.length === 0 ? [{ text: MARK_TITLES[kind], title: null, tone: null }] : details;
 }
 
-function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'sourceKind' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
+function poolRow(entry: PoolView, now: number, namespaces: Record<string, string>): Omit<DockRow, 'sourceKind' | 'ticketNumber' | 'search' | 'links' | 'returned' | 'comment' | 'band'> {
   const { ticket, triage } = entry;
   const { main, controls } = poolControls(entry);
   const triaging = triage !== null && triage.endedAt === null;
@@ -543,9 +551,16 @@ function linksOf(entry: WorkItemView | PoolView, keys: RepoKeys | undefined, pul
       return [{ label: link.label, url: link.target, kind: 'url', badge: link.label, glyph: LINK_GLYPH, mentioned }];
     }
 
-    return kind === 'pr'
-      ? [{ label: `PR #${number}`, url: link.target, kind, badge: number, glyph: PULL_REQUEST_GLYPH, mentioned, ...(pullRequests[link.target] === undefined ? {} : { pr: pullRequests[link.target] }) }]
-      : [{ label: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), url: link.target, kind, badge: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), glyph: GITHUB_GLYPH, mentioned }];
+    if (kind === 'pr') {
+      return [{ label: `PR #${number}`, url: link.target, kind, badge: number, glyph: PULL_REQUEST_GLYPH, mentioned, ...(pullRequests[link.target] === undefined ? {} : { pr: pullRequests[link.target] }) }];
+    }
+
+    const repo = issueOfUrl(link.target)?.repo ?? '';
+    const key = issueKey(entry.ticket.source, repo, number, keys, true);
+    // GitHub's mark stands for a GitHub source's label, such as `gh`, as on the ticket key; a repository's prefix stays.
+    const badge = issueHome(entry.ticket.source, repo, keys, true) === undefined ? key : number;
+
+    return [{ label: key, url: link.target, kind, badge, glyph: GITHUB_GLYPH, mentioned }];
   });
 }
 

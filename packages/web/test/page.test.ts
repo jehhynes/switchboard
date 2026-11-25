@@ -8,7 +8,7 @@ import { artifactUrl, collapsedGroups, newView, renderMicButton, renderVoice, ma
 import { renderArtifactView, renderStatus } from '../src/side.js';
 import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader, renderSideSwitch, renderTabs } from '../src/header.js';
-import { renderList } from '../src/list.js';
+import { renderList, sourceIcons } from '../src/list.js';
 import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
@@ -575,12 +575,16 @@ describe('drawing', () => {
     expect(first.querySelector('.mark')!.className).toBe('codicon codicon-eye mark');
     expect(first.querySelector('.mark')!.getAttribute('aria-label')).toBe('Review, then approve');
     expect(first.querySelector('.pill')!.className).toBe('pill ticket source-github');
-    // The ticket key is its text alone: it never shrinks to an icon.
-    expect(first.querySelector('.pill')!.innerHTML).toBe('<span class="pill-text">gh 1</span>');
+    // The ticket key has its source's logo to shrink to, hidden from screen readers, then its text, which stays its accessible name.
+    expect([...first.querySelector('.pill')!.children].map((child) => [child.tagName.toLowerCase(), child.getAttribute('class'), child.getAttribute('aria-hidden'), child.textContent])).toEqual([
+      ['svg', 'source-logo github', 'true', ''],
+      ['span', 'pill-text', null, 'gh 1'],
+    ]);
     expect(first.querySelector('.playbook')!.innerHTML).toBe('<span class="namespace">dev:</span>build');
     expect(root.querySelector('[data-work-item="2"]')!.className).toBe('row stripe-warning dim movable');
     expect(root.querySelectorAll('.voice-mark')).toHaveLength(0);
     expect(root.querySelector('[data-work-item="2"] .pill')!.className).toBe('pill ticket source-zoho');
+    expect(root.querySelector('[data-work-item="2"] .pill .source-logo')!.getAttribute('class')).toBe('source-logo zoho');
     expect(root.querySelector('[data-work-item="2"] .playbook')!.innerHTML).toBe('triage');
     // A running mark spins; a failed one is marked for the error colour, and no mark takes a tone.
     expect(root.querySelector('[data-work-item="3"] .mark')!.className).toBe('codicon codicon-loading mark codicon-modifier-spin');
@@ -608,7 +612,7 @@ describe('drawing', () => {
     const root = document.createElement('div');
     const links: PageRow['links'] = [
       { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002', kind: 'pr', badge: '19002', glyph: '\u{ea64}', mentioned: false },
-      { label: 'gh 18800', url: 'https://github.com/o/r/issues/18800', kind: 'issue', badge: 'gh 18800', glyph: null, mentioned: true },
+      { label: 'gh 18800', url: 'https://github.com/o/r/issues/18800', kind: 'issue', badge: '18800', glyph: null, mentioned: true },
     ];
     const details: PageRow['details'] = [
       { text: 'Rate limited · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' },
@@ -629,26 +633,22 @@ describe('drawing', () => {
     expect(head!.querySelector('.row-time')!.getAttribute('title')).toBe('In queue since 11:40');
     // Line 2 in the row's order, each pill's whole name and URL in its tooltip.
     expect([...line2!.children].map((child) => child.className)).toEqual(['codicon comment', 'playbook', 'pill ticket source-github', 'row-links']);
-    expect([...line2!.querySelectorAll('.row-links-shown > .pill')].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned', 'pill returned']);
+    expect([...line2!.querySelectorAll('.row-links > .pill')].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned', 'pill returned']);
     expect(line2!.querySelector('.comment')!.getAttribute('title')).toBe('Nov 20\nWaits on Sam');
     expect(line2!.querySelector('.ticket')!.getAttribute('title')).toBe('gh 1\nhttps://github.com/o/r/issues/1');
     expect(line2!.querySelector('.pr')!.textContent).toBe('\u{ea64}19002');
+    // An issue's source label before its number is hidden from view, GitHub's mark standing for it, but read with the number.
+    expect([...line2!.querySelectorAll('.row-links .link')].map((pill) => [pill.querySelector('.key-label')?.textContent ?? null, pill.querySelector('.pill-text')!.textContent])).toEqual([
+      [null, '19002'],
+      ['gh ', 'gh 18800'],
+    ]);
     expect(line2!.querySelector('.pr')!.getAttribute('title')).toBe('PR #19002\nhttps://github.com/o/r/pull/19002');
     // Every link pill has an icon to shrink to: an issue the hub sends no glyph for shows GitHub's mark.
-    expect([...line2!.querySelectorAll('.row-links-shown .pill')].map((pill) => pill.querySelector('.codicon')?.textContent)).toEqual(['\u{ea64}', '\u{ea84}', '\u{eae2}']);
+    expect([...line2!.querySelectorAll('.row-links .pill')].map((pill) => pill.querySelector('.codicon')?.textContent)).toEqual(['\u{ea64}', '\u{ea84}', '\u{eae2}']);
     expect(line2!.querySelector('.issue')!.getAttribute('title')).toBe('gh 18800, named in the ticket\nhttps://github.com/o/r/issues/18800');
     expect(line2!.querySelector('.returned .pill-text')!.textContent).toBe('2');
-    // The unseen boxes that decide which texts fit (page.css, Line 2): the pills as icons, then each pill's text; hidden from screen readers
-    // and holding nothing to focus or click.
-    const links2 = line2!.querySelector('.row-links')!;
-    expect([...links2.children].map((child) => [child.className, child.getAttribute('aria-hidden'), child.textContent])).toEqual([
-      ['row-links-box', null, '\u{ea64}19002\u{ea84}gh 18800\u{eae2}2'],
-      ['row-links-fit', 'true', '\u{ea64}\u{ea84}\u{eae2}'],
-      ['row-links-fit-text', 'true', '19002'],
-      ['row-links-fit-text', 'true', 'gh 18800'],
-      ['row-links-fit-text', 'true', '2'],
-    ]);
-    expect(links2.querySelectorAll('.row-links-fit [title], .row-links-fit [tabindex], .row-links-fit [data-action]')).toHaveLength(0);
+    // The link pills sit straight in their box, with no unseen copies to measure them by.
+    expect([...line2!.querySelector('.row-links')!.children].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned', 'pill returned']);
     // Line 3: the mark, then each detail in its tone with a muted separator between them, never before the first.
     expect(line3!.className).toBe('row-line row-details');
     expect(line3!.firstElementChild!.className).toBe('codicon codicon-watch mark');
@@ -3180,27 +3180,36 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("gives each of line 2's first fifteen link pills a text box of its own and the rest one box, each a pixel taller, so each text fits on its own (page.css, Line 2)", () => {
+  it("gives every pill on line 2 an icon to shrink to: a link the hub sends no glyph for the link icon, a key its source's logo in place of its label, and a source without a logo the plug (page.css, Line 2)", () => {
     const root = document.createElement('div');
     const links = Array.from({ length: 18 }, (_, i) => ({ label: `L${i}`, url: `https://x/${i}`, kind: 'url' as const, badge: `L${i}`, glyph: null, mentioned: false }));
 
-    root.innerHTML = html(renderList([listGroup('progress', [listRow(1, { links })])], null, new Set()));
+    const dpaf = { viewBox: '0 0 20 16', path: 'M0 0h20v16H0z', color: '#d33', width: 20 };
 
-    // The sixth pill's text has a box of its own, so it shows where it fits though the seventh's does not (check-shell.mjs measures that).
-    const boxes = [...root.querySelectorAll<HTMLElement>('.row-links-fit-text')];
+    root.innerHTML = html(renderList([listGroup('progress', [listRow(1, { links, ticketNumber: '1' }), listRow(2, { sourceKind: 'forum', ticket: 'forum 4', ticketNumber: '4' }), listRow(3, { sourceKind: 'zoho', ticket: 'zoho 7', ticketNumber: '7' }), listRow(4, { sourceKind: 'dpaf', ticket: 'dpaf 311', ticketNumber: '311' }), listRow(5, { ticket: 'dash 63' })])], null, new Set(), false, null, new Map(), false, null, { dpaf }));
 
-    expect(boxes.map((box) => box.textContent)).toEqual([...Array.from({ length: 15 }, (_, i) => `L${i}`), 'L15L16L17']);
-    expect(boxes.map((box) => box.style.height)).toEqual(Array.from({ length: 16 }, (_, i) => `${20 + i}px`));
-    // A container query for each box's height shows the text of its pill, the last box's for every pill from the sixteenth.
-    const css = readFileSync(join(__dirname, '../src/page.css'), 'utf8');
+    expect([...root.querySelectorAll('[data-work-item="1"] .row-links > .pill .codicon')].map((icon) => icon.textContent)).toEqual(Array(18).fill('\u{eb15}'));
+    // A key with its source's logo shows its number after it, its label hidden from view but read with it; the pill's tooltip has the whole key.
+    const key = (id: number) => root.querySelector(`[data-work-item="${id}"] .pill.ticket`)!;
+    const shown = (id: number) => [key(id).firstElementChild!.getAttribute('class'), key(id).querySelector('.key-label')?.textContent ?? null, key(id).querySelector('.pill-text')!.textContent, key(id).getAttribute('title')];
 
-    for (let index = 1; index < 16; index++) {
-      expect(css).toContain(`@container row-links (min-height: ${18 + index}.5px) { .row-line .row-links-shown > .pill:nth-child(${index}) .pill-text { display: inline; } }`);
-    }
+    expect(shown(1)).toEqual(['source-logo github', 'gh ', 'gh 1', 'gh 1']);
+    expect(shown(3)).toEqual(['source-logo zoho', 'zoho ', 'zoho 7', 'zoho 7']);
+    // A plugin's own logo, in its colour, for a source such as DPAF.
+    expect(shown(4)).toEqual(['source-logo dpaf custom', 'dpaf ', 'dpaf 311', 'dpaf 311']);
+    expect(key(4).querySelector('svg path')!.getAttribute('d')).toBe('M0 0h20v16H0z');
+    // A source with no logo shows the plug and its whole key, and a key another repository's prefix starts, which the hub sends no number for, shows whole.
+    expect(shown(2)).toEqual(['codicon codicon-plug source-logo', null, 'forum 4', 'forum 4']);
+    expect(shown(5)).toEqual(['source-logo github', null, 'dash 63', 'dash 63']);
+    // No unseen fit boxes: the list's width alone decides what shows.
+    expect(root.querySelector('.row-links-box, .row-links-shown, .row-links-fit, .row-links-fit-text')).toBeNull();
+  });
 
-    expect(css).toContain('@container row-links (min-height: 34.5px) { .row-line .row-links-shown > .pill:nth-child(n + 16) .pill-text { display: inline; } }');
-    // A link the hub sends no glyph for shrinks to the link icon.
-    expect([...root.querySelectorAll('.row-links-shown .pill .codicon')].map((icon) => icon.textContent)).toEqual(Array(18).fill('\u{eb15}'));
+  it("takes the source plugins' own logos from the list header's source icons, by kind", () => {
+    const icon = { viewBox: '0 0 16 16', path: 'M0 0h16v16H0z' };
+
+    expect(sourceIcons(null)).toEqual({});
+    expect(sourceIcons({ notes: [], sources: [{ kind: 'github', enabled: true, title: '', sources: [] }, { kind: 'dpaf', icon, enabled: false, title: '', sources: [] }], repoRoots: [], schedules: [] })).toEqual({ dpaf: icon });
   });
 
   it("draws line 2's pills the same on every redraw, however narrow the row, without measuring them (page.css, Line 2)", async () => {
@@ -3236,7 +3245,7 @@ describe('the page in use', () => {
     expect(changes).toEqual([]);
     expect(line()).toBe(first);
     // Every pill whole, its text shown: the key's number, the PR's number, the link's label and Returned's count.
-    expect([...root.querySelectorAll('[data-work-item="1"] .row-line > .pill, [data-work-item="1"] .row-links-shown > .pill')].map((pill) => [pill.className, pill.querySelector('.pill-text')!.textContent])).toEqual([
+    expect([...root.querySelectorAll('[data-work-item="1"] .row-line > .pill, [data-work-item="1"] .row-links > .pill')].map((pill) => [pill.className, pill.querySelector('.pill-text')!.textContent])).toEqual([
       ['pill ticket source-github', 'gh 1'],
       ['pill link pr', '21510'],
       ['pill link url', 'Design notes'],
@@ -8558,25 +8567,33 @@ describe("the list's CSS", () => {
     expect(one('.row-line')).not.toMatch(/font-size/);
     expect(one('.row-time')).not.toMatch(/font-size/);
     expect(one('.rows > li:first-child > .row')).toContain('border-top: none');
-    // Pills 18 px tall with 14 px icons and 12 px text; a key's logo 12 px; GitHub's key in GitHub's colour, not the foreground.
+    // Pills 18 px tall with 14 px icons and 12 px text; a key's logo 14 px; GitHub's key in GitHub's colour, not the foreground.
     expect(one('.row-line .pill')).toMatch(/height: 18px;.*font-size: 12px/);
     expect(one('.row-line .pill .codicon')).toBe('flex: none; font-size: 14px;');
-    // Line 2 by CSS alone: the playbook and pills keep their width and are never cut; the links' one-line box shrinks, its second line clipped,
-    // so a link that does not fit drops out whole.
-    expect(declarationsOf((each) => each === '.row-line .playbook')).toContain('flex: none; max-width: 100%; overflow-wrap: anywhere;');
-    expect(declarationsOf((each) => each === '.row-line .playbook').join(' ')).not.toMatch(/ellipsis|min-width|flex-shrink|flex: 0 1/);
-    expect(one('.row-line .comment + .playbook')).toBe('max-width: calc(100% - 22px);');
+    expect(one('.row-line .pill .source-logo')).toBe('flex: none; width: 14px; height: 14px;');
+    // A plugin's logo keeps its width's share at a pill's 14 px; a key's label is hidden from view only, so it stays in the key's accessible name.
+    expect(one('.row-line .pill svg.source-logo.custom')).toBe('width: calc(var(--source-icon-width) * 14 / 16);');
+    expect(one('.row-line .pill .key-label')).toBe('position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: pre;');
+    // A key takes at most 60% of the line, cut with an ellipsis past that, so the playbook keeps its room.
+    expect(one('.row-line .pill.ticket')).toBe('max-width: 60%;');
+    expect(one('.row-line .pill.ticket .pill-text')).toBe('min-width: 0; overflow: hidden; text-overflow: ellipsis;');
+    // Line 2 by CSS alone and by its width alone: one 18 px line, never wrapping, an inline-size container; the playbook or host cut with an
+    // ellipsis where it does not fit beside the key; the pills keep their width; the links' one-line box shrinks, its second line clipped, so a
+    // link that does not fit drops out whole.
+    expect(one('.row-line:not(.row-details)')).toBe('container: line2 / inline-size;');
+    expect(one('.row-line')).toMatch(/height: 18px;.*overflow: hidden;/);
+    expect(declarationsOf((each) => each.startsWith('.row-line')).join(' ')).not.toMatch(/flex-wrap: wrap; row-gap/);
+    expect(declarationsOf((each) => each === '.row-line .comment + .playbook')).toEqual([]);
+    expect(declarationsOf((each) => each === '.row-line .playbook')).toContain('flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;');
+    expect(declarationsOf((each) => each === '.row-line .playbook').join(' ')).not.toMatch(/overflow-wrap/);
     expect(one('.row-line .pill')).toMatch(/^flex: none;/);
     expect(one('.row-line .row-links')).toBe('flex: 1 1 0; min-width: 0; margin-left: -6px; display: flex; flex-wrap: wrap; height: 18px; overflow: hidden;');
-    // Where the playbook and the key do not fit on one line, the key wraps under the playbook rather than being cut.
-    expect(one('.row-line:not(.row-details)')).toBe('flex-wrap: wrap; row-gap: 3px; height: auto; min-height: 18px;');
     // An empty first item, so even the first pill wraps away rather than being cut.
-    expect(one('.row-line .row-links-shown::before')).toBe("content: ''; height: 18px;");
-    // A pill shows its text whole or not at all: hidden by default, shown by the container query for its place, never cut with an ellipsis.
-    expect(one('.row-line .row-links-shown .pill-text')).toBe('display: none;');
-    expect(one('.row-line .row-links-box')).toContain('container: row-links / size;');
-    expect(css).toContain('@container row-links (min-height: 19.5px) { .row-line .row-links-shown > .pill:nth-child(1) .pill-text { display: inline; } }');
-    expect(css).toContain('@container row-links (max-height: 18.5px) { .row-line .row-links-shown { width: auto; } }');
+    expect(one('.row-line .row-links::before')).toBe("content: ''; height: 18px;");
+    // Under 300 px every pill's text, the key's too, is hidden from view only, so it stays the pill's accessible name; never cut with an ellipsis.
+    expect(css).toContain('@container line2 (width < 300px) { .row-line .pill .pill-text { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); } }');
+    expect(css).not.toMatch(/\.pill-text \{[^}]*display: none/);
+    expect(css).not.toMatch(/row-links-(box|shown|fit)|@container row-links/);
     expect(declarationsOf((each) => each.startsWith('.row-line .row-links')).join(' ')).not.toMatch(/ellipsis/);
     expect(declarationsOf((each) => each === '.row-line .pill.ticket.source-github')).toEqual(['border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent);']);
     // Marks in the foreground, Failed in the error colour; the muted texts in the list's grey, #717171 in Light Modern.

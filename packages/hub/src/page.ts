@@ -457,6 +457,8 @@ export interface PageRow {
   time: DockRow['time'];
   /** The ticket's key, such as `gh 18941`, and its source's plugin, which colours its pill; `url` is the ticket's, empty for an ad-hoc one. */
   ticket: string;
+  /** The key without its source's label, shown after the source's logo; left out where the key starts otherwise (`DockRow.ticketNumber`). */
+  ticketNumber?: string;
   sourceKind: string;
   url: string;
   playbook: string;
@@ -741,6 +743,7 @@ export function pageRow(row: DockRow, workItemId: number | null, host: string | 
     priority: row.priority,
     time: row.time,
     ticket: row.ticket,
+    ...(row.ticketNumber === null ? {} : { ticketNumber: row.ticketNumber }),
     sourceKind: row.sourceKind,
     url: row.url,
     playbook: row.playbook,

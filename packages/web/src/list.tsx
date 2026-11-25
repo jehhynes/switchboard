@@ -2,8 +2,10 @@
 import type { ComponentChildren, VNode } from 'preact';
 import { MARK_ICONS, SPINNING_MARKS } from '@switchboard/core/group';
 import { bandOpen, rowKey } from './render.js';
-import type { PageGroup, PageRow } from '@switchboard/protocol';
+import type { PageGroup, PageHeader, PageRow } from '@switchboard/protocol';
 import type { DragView } from './reorder.js';
+import { hasSourceLogo, SourceLogo } from './listHeader.js';
+import type { SourceIcon } from '@switchboard/core';
 import { WindowRows } from './windowRows.js';
 
 /** The codicon Returned's pill shows. */
@@ -11,32 +13,31 @@ const RETURNED_GLYPH = '\u{eae2}';
 /** A link pill's codicon when the hub sends none: git-pull-request, github or link. */
 const LINK_GLYPHS: Record<PageRow['links'][number]['kind'], string> = { pr: '\u{ea64}', issue: '\u{ea84}', url: '\u{eb15}' };
 /**
- * Line 2's fit boxes that show the pills' texts one by one (page.css, Line 2), one a pill, so each pill shows its text where it fits; the last
- * holds the texts of the pills from this one on. page.css has a container query for each.
+ * A pill on line 2: its icon, a codicon glyph or `logo`, then its text, the full name in its tooltip; a `label`, such as a key's or an issue
+ * link's `gh `, before its number is hidden from view, as its icon stands for it, but read with it; where line 2 is narrow the page's CSS
+ * hides the text from view only, so it stays the pill's accessible name. `opens` makes a pill with a link open it; without it the pill is a
+ * label, a click on it the row's, while the browser pane shows the links.
  */
-const FIT_STEPS = 16;
-
-/**
- * A pill on line 2: its codicon glyph, if any, then its text, the full name in its tooltip. `opens` makes a pill with a link open it; without
- * it the pill is a label, a click on it the row's, while the browser pane shows the links.
- */
-function Pill({ classes, glyph, text, title, opens }: { classes: string; glyph: string | null; text: string; title: string; opens?: Record<string, string> }) {
+function Pill({ classes, glyph, logo, label, text, title, opens }: { classes: string; glyph?: string; logo?: VNode; label?: string; text: string; title: string; opens?: Record<string, string> }) {
   return (
     <span class={`pill ${classes}`} title={title} role={opens?.['data-action'] ? 'link' : undefined} tabIndex={opens?.['data-action'] ? 0 : undefined} {...opens}>
-      {glyph === null ? null : <span class="codicon" aria-hidden="true">{glyph}</span>}
-      <span class="pill-text">{text}</span>
+      {logo ?? (glyph === undefined ? null : <span class="codicon" aria-hidden="true">{glyph}</span>)}
+      <span class="pill-text">
+        {label === undefined ? null : <span class="key-label">{label}</span>}
+        {text}
+      </span>
     </span>
   );
 }
 
 /**
  * A row of the list, drawn in three lines from the hub's dock row: line 1 the priority dot, the title and the time; line 2 the
- * comment icon, the playbook with its namespace muted (or a hosted conversation's host), the ticket key as a pill in its source's colour, the
- * link pills and Returned, which the page's CSS shrinks to their icons, from the last, or leaves out whole where they do not fit (page.css,
- * Line 2); line 3 the mark and the
+ * comment icon, the playbook with its namespace muted (or a hosted conversation's host), the ticket key as a pill in its source's colour with
+ * its source's logo in place of its source's label, the link pills and Returned; the page's CSS shrinks every pill to its icon where line 2 is narrow and leaves out the link
+ * pills and Returned whole, from the last, where they do not fit (page.css, Line 2); line 3 the mark and the
  * details, a muted " · " between them, in their tones. The row's stripe is on its left edge.
  */
-function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, position }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; menuPoint: { x: number; y: number } | undefined; pillsOpen: boolean; movable: boolean; drag: DragView | null; position?: { index: number; total: number } }) {
+function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, position, icons }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; menuPoint: { x: number; y: number } | undefined; pillsOpen: boolean; movable: boolean; drag: DragView | null; position?: { index: number; total: number }; icons: Readonly<Record<string, SourceIcon>> }) {
   const kind = row.mark?.kind;
   const mark =
     row.mark === null || kind === undefined ? null : (
@@ -60,9 +61,13 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
   const hasMenu = row.actions.length + row.pastes.length + row.opens.length + row.links.length > 0 || row.url !== '' || row.history !== null;
   // Without the browser pane a pill with a link opens it instead of the row's click (PRD R52).
   const opens = (which: string): Record<string, string> => (pillsOpen ? { 'data-action': 'open-link', 'data-row': key, 'data-link': which } : {});
-  // The link pills and Returned, each with an icon it shrinks to where its text does not fit.
-  const pills: { classes: string; glyph: string; text: string; title: string; opens?: Record<string, string> }[] = [
-    ...row.links.map((link, index) => ({ classes: `link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, glyph: link.glyph ?? LINK_GLYPHS[link.kind], text: link.badge, title: `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`, opens: opens(String(index)) })),
+  // The key's source logo, a plugin's own or a built-in one, stands for its label, such as `gh`, which is left in for screen readers.
+  const icon = icons[row.sourceKind];
+  const number = (icon !== undefined || hasSourceLogo(row.sourceKind)) && row.ticketNumber !== undefined && row.ticket.endsWith(row.ticketNumber) ? row.ticketNumber : null;
+  // The link pills and Returned, each with an icon it shrinks to where line 2 is narrow.
+  // A link's name before its badge and a space, such as `gh ` of `gh 18941`, is read with it but hidden from view, as the link's icon stands for it.
+  const pills: { classes: string; glyph: string; label?: string; text: string; title: string; opens?: Record<string, string> }[] = [
+    ...row.links.map((link, index) => ({ classes: `link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, glyph: link.glyph ?? LINK_GLYPHS[link.kind], ...(link.label.endsWith(` ${link.badge}`) ? { label: link.label.slice(0, -link.badge.length) } : {}), text: link.badge, title: `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`, opens: opens(String(index)) })),
     ...(row.returned > 0 ? [{ classes: 'returned', glyph: RETURNED_GLYPH, text: String(row.returned), title: `Returned ${row.returned}: earlier work items with this playbook, or one it is a return of, were done for this ticket` }] : []),
   ];
   const details = row.details.map((detail, index) => [
@@ -91,30 +96,11 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
         <span class="row-line">
           {row.comment === null ? null : <span class="codicon comment" role="img" title={row.comment.title} aria-label="Comments">{row.comment.glyph}</span>}
           {playbook}
-          <Pill classes={`ticket source-${row.sourceKind}`} glyph={null} text={row.ticket} title={row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`} opens={row.url === '' ? {} : opens('ticket')} />
+          <Pill classes={`ticket source-${row.sourceKind}`} logo={<SourceLogo kind={row.sourceKind} enabled={true} icon={icon} />} {...(number === null ? {} : { label: row.ticket.slice(0, -number.length) })} text={number ?? row.ticket} title={row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`} opens={row.url === '' ? {} : opens('ticket')} />
           {pills.length === 0 ? null : (
             <span class="row-links">
-              <span class="row-links-box">
-                <span class="row-links-shown">
-                  {pills.map((pill) => (
-                    <Pill {...pill} />
-                  ))}
-                </span>
-              </span>
-              {/* Never shown: the pills as icons, then each pill's text, whose fit decides which texts show (page.css, Line 2). */}
-              <span class="row-links-fit" aria-hidden="true">
-                {pills.map((pill) => (
-                  <span class={`pill ${pill.classes}`}>
-                    <span class="codicon">{pill.glyph}</span>
-                  </span>
-                ))}
-              </span>
-              {pills.slice(0, FIT_STEPS).map((_, step) => (
-                <span class="row-links-fit-text" aria-hidden="true" style={`height: ${20 + step}px`}>
-                  {(step === FIT_STEPS - 1 ? pills.slice(step) : [pills[step]!]).map((pill) => (
-                    <span class="pill-text">{pill.text}</span>
-                  ))}
-                </span>
+              {pills.map((pill) => (
+                <Pill {...pill} />
               ))}
             </span>
           )}
@@ -133,6 +119,11 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
       )}
     </li>
   );
+}
+
+/** The source plugins' own logos by kind, from the list header's source icons. */
+export function sourceIcons(header: PageHeader | null): Record<string, SourceIcon> {
+  return Object.fromEntries((header?.sources ?? []).flatMap((group) => (group.icon === undefined ? [] : [[group.kind, group.icon]])));
 }
 
 /** A group's rows in runs of one band each, in their order; a row without a band is in a run with no heading. */
@@ -161,8 +152,9 @@ export function bandRuns(rows: readonly PageRow[]): Array<{ band: string | null;
  * and a rule that opens or closes it (`bands`, else `OPEN_BANDS`); a closed band still shows the selected row, and a search opens every band.
  `selected` is the work item whose conversation is open, or is opening, and only its row is drawn selected and `aria-current`; keyboard focus,
  * hover and an open row menu never move it, and the focus shows only as the focus ring (page.css). `drag` is a drag of a Ready for review row under way (reorder.ts): the dragged row and its drop line.
+ * `icons` are the source plugins' own logos by kind (`sourceIcons`), which key pills show before the built-in ones.
  */
-export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren; point?: { x: number; y: number } } | null = null, bands: ReadonlyMap<string, boolean> = new Map(), pillsOpen = false, drag: DragView | null = null): VNode | null {
+export function renderList(groups: readonly PageGroup[], selected: number | null, collapsed: ReadonlySet<string>, filtering = false, menu: { row: string; rows: ComponentChildren; point?: { x: number; y: number } } | null = null, bands: ReadonlyMap<string, boolean> = new Map(), pillsOpen = false, drag: DragView | null = null, icons: Readonly<Record<string, SourceIcon>> = {}): VNode | null {
   if (groups.every((group) => group.rows.length === 0)) {
     return filtering ? null : <p class="empty">No work items yet. They appear here when Switchboard starts one.</p>;
   }
@@ -176,12 +168,12 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
         const rowList = (shown: readonly PageRow[]) =>
           shown.length === 0 ? null : group.key === 'done' ? (
             <WindowRows rows={shown} selected={selected} renderRow={(row, index) => (
-              <Row key={rowKey(row)} row={row} selected={isSelected(row)} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} menuPoint={menu?.row === rowKey(row) ? menu.point : undefined} pillsOpen={pillsOpen} movable={false} drag={null} position={{ index, total: shown.length }} />
+              <Row key={rowKey(row)} row={row} selected={isSelected(row)} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} menuPoint={menu?.row === rowKey(row) ? menu.point : undefined} pillsOpen={pillsOpen} movable={false} drag={null} position={{ index, total: shown.length }} icons={icons} />
             )} />
           ) : (
             <ul class="rows">
               {shown.map((row) => (
-                <Row key={rowKey(row)} row={row} selected={isSelected(row)} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} menuPoint={menu?.row === rowKey(row) ? menu.point : undefined} pillsOpen={pillsOpen} movable={group.key === 'review' && row.workItemId !== null} drag={drag} />
+                <Row key={rowKey(row)} row={row} selected={isSelected(row)} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} menuPoint={menu?.row === rowKey(row) ? menu.point : undefined} pillsOpen={pillsOpen} movable={group.key === 'review' && row.workItemId !== null} drag={drag} icons={icons} />
               ))}
             </ul>
           );

@@ -552,14 +552,19 @@ export interface RepoKeys {
  * source's label, the source's own first.
  */
 export function issueKey(source: string, repo: string, number: string, keys: RepoKeys | undefined, link = false): string {
-  if (keys === undefined) {
-    return `gh ${number}`;
-  }
-
-  const home = repo === (keys.homes[source] ?? '') ? source : link ? Object.keys(keys.homes).find((name) => repo !== '' && keys.homes[name] === repo) : undefined;
-  const prefix = keys.prefixes[repo];
+  const home = issueHome(source, repo, keys, link);
+  const prefix = keys?.prefixes[repo];
 
   return home !== undefined ? `${sourceLabel(home)} ${number}` : prefix === undefined ? `${repo}#${number}` : `${prefix} ${number}`;
+}
+
+/** The source whose label {@link issueKey} names an issue by, a GitHub source, or undefined where a prefix or `owner/name` names it. */
+export function issueHome(source: string, repo: string, keys: RepoKeys | undefined, link = false): string | undefined {
+  if (keys === undefined) {
+    return 'github';
+  }
+
+  return repo === (keys.homes[source] ?? '') ? source : link ? Object.keys(keys.homes).find((name) => repo !== '' && keys.homes[name] === repo) : undefined;
 }
 
 /** The ticket's key as rows show it: {@link issueKey} for another repository's issue, else {@link ticketKey}. */
@@ -571,6 +576,25 @@ export function shownKey(ticket: { source: string; sourceKey: string; repoRoot?:
   const qualified = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(ticket.sourceKey);
 
   return qualified === null || keys === undefined ? ticketKey(ticket) : issueKey(ticket.source, qualified[1]!, qualified[2]!, keys);
+}
+
+/**
+ * The key {@link shownKey} gives without its source's label, such as `18941` for `gh 18941`, which the page shows after the source's logo;
+ * null where the key starts otherwise: another repository's prefix or an ad hoc ticket's folder.
+ */
+export function shownNumber(ticket: { source: string; sourceKey: string; repoRoot?: string }, keys: RepoKeys | undefined): string | null {
+  if (ticket.source === 'adhoc') {
+    return null;
+  }
+
+  // As shownKey: the source's label shows only for a plain key or an issue in the source's home repository, whatever another repository's prefix is.
+  const qualified = /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(ticket.sourceKey);
+
+  if (qualified === null || keys === undefined) {
+    return ticket.sourceKey;
+  }
+
+  return qualified[1] === (keys.homes[ticket.source] ?? '') ? qualified[2]! : null;
 }
 
 /** The repository, in lowercase, and number of a GitHub issue URL, or null. */

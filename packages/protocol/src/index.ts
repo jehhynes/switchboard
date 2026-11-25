@@ -200,6 +200,8 @@ export interface PageRow {
   priority: string | null;
   time: { text: string; title: string } | null;
   ticket: string;
+  /** The key without its source's label, such as `18941` for `gh 18941`, shown after the source's logo; left out where the key starts otherwise. */
+  ticketNumber?: string;
   sourceKind: string;
   /** The ticket's URL, for its pill's tooltip; empty for an ad-hoc ticket. */
   url: string;

@@ -20,6 +20,7 @@ import {
   startPromptText,
   stripeOf,
   shownKey,
+  shownNumber,
   waitTexts,
   limitTexts,
   limitTime,
@@ -31,6 +32,26 @@ describe('ad hoc key', () => {
   it('shows the folder name before the stored sequence', () => {
     expect(shownKey({ source: 'adhoc', sourceKey: '12', repoRoot: 'D:/git/switchboard/' }, undefined)).toBe('switchboard 12');
     expect(shownKey({ source: 'adhoc', sourceKey: '13', repoRoot: 'D:\\git\\support' }, undefined)).toBe('support 13');
+  });
+});
+
+describe('shownNumber', () => {
+  it("drops only the source's own label from the shown key, never another repository's prefix or an ad hoc folder", () => {
+    const keys = { homes: { github: 'o/r' }, prefixes: { 'acme/dash': 'dash' } };
+
+    expect(shownNumber({ source: 'github', sourceKey: '18941' }, keys)).toBe('18941');
+    expect(shownNumber({ source: 'github', sourceKey: 'o/r#5' }, keys)).toBe('5');
+    expect(shownNumber({ source: 'zoho', sourceKey: '7' }, keys)).toBe('7');
+    expect(shownNumber({ source: 'dpaf', sourceKey: '311' }, undefined)).toBe('311');
+    expect(shownNumber({ source: 'github', sourceKey: 'acme/dash#63' }, keys)).toBeNull();
+    expect(shownNumber({ source: 'github', sourceKey: 'acme/other#63' }, keys)).toBeNull();
+    expect(shownNumber({ source: 'adhoc', sourceKey: '12', repoRoot: 'D:/git/switchboard/' }, undefined)).toBeNull();
+    // Another repository whose prefix is the source's label keeps its key whole.
+    const clash = { homes: { github: 'o/r' }, prefixes: { 'acme/x': 'gh' } };
+
+    expect(shownKey({ source: 'github', sourceKey: 'acme/x#63' }, clash)).toBe('gh 63');
+    expect(shownNumber({ source: 'github', sourceKey: 'acme/x#63' }, clash)).toBeNull();
+    expect(shownNumber({ source: 'github', sourceKey: 'o/r#64' }, clash)).toBe('64');
   });
 });
 

@@ -11,7 +11,7 @@ import { LIGHT_SCHEME } from './console.js';
 import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from '@switchboard/protocol';
 import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
-import { renderList, renderListPane } from './list.js';
+import { renderList, renderListPane, sourceIcons } from './list.js';
 import { rowDrag } from './reorder.js';
 import type { DragView } from './reorder.js';
 import { menuRows, renderHeader, renderMaximize, renderSideSwitch, renderTabs } from './header.js';
@@ -2561,7 +2561,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const focusedRow = focused?.closest<HTMLElement>('.list-row')?.querySelector<HTMLElement>('.row')?.dataset['row'];
     const focusLink = focused?.matches('.pill') ? focused.dataset['link'] : undefined;
     if (listFocus !== null && !state.groups.some((group) => group.rows.some((row) => rowKey(row) === listFocus))) listFocus = null;
-    mount(list, renderListPane(renderList(listed.groups, listSelected(), view.collapsed, listed.filtering, rowMenu(), view.bands, true, dragView), header.end(listed.groups)));
+    mount(list, renderListPane(renderList(listed.groups, listSelected(), view.collapsed, listed.filtering, rowMenu(), view.bands, true, dragView, sourceIcons(state.header)), header.end(listed.groups)));
     // The rows may have moved under a still pointer.
     reorder.refresh();
     if (focusedRow !== undefined && document.activeElement !== focused) {

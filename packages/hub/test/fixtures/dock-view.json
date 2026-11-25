@@ -17,6 +17,7 @@
           },
           "playbook": "dev:develop",
           "ticket": "gh 113",
+          "ticketNumber": "113",
           "source": "github",
           "url": "https://github.com/o/r/issues/113",
           "mark": {
@@ -160,6 +161,7 @@
           },
           "playbook": "dev:develop",
           "ticket": "gh 107",
+          "ticketNumber": "107",
           "source": "github",
           "url": "https://github.com/o/r/issues/107",
           "mark": {
@@ -317,7 +319,7 @@
               "label": "gh 20087",
               "url": "https://github.com/o/r/issues/20087",
               "kind": "issue",
-              "badge": "gh 20087",
+              "badge": "20087",
               "glyph": "",
               "mentioned": true
             }
@@ -336,6 +338,7 @@
           },
           "playbook": "dev:develop",
           "ticket": "gh 110",
+          "ticketNumber": "110",
           "source": "github",
           "url": "https://github.com/o/r/issues/110",
           "mark": {
@@ -505,6 +508,7 @@
           },
           "playbook": "dev:develop",
           "ticket": "gh 114",
+          "ticketNumber": "114",
           "source": "github",
           "url": "https://github.com/o/r/issues/114",
           "mark": {
@@ -614,6 +618,7 @@
           },
           "playbook": "dev:develop",
           "ticket": "gh 108",
+          "ticketNumber": "108",
           "source": "github",
           "url": "https://github.com/o/r/issues/108",
           "mark": {
@@ -727,6 +732,7 @@
           },
           "playbook": "dev:develop",
           "ticket": "gh 115",
+          "ticketNumber": "115",
           "source": "github",
           "url": "https://github.com/o/r/issues/115",
           "mark": {
@@ -873,6 +879,7 @@
           },
           "playbook": "dev:develop",
           "ticket": "gh 109",
+          "ticketNumber": "109",
           "source": "github",
           "url": "https://github.com/o/r/issues/109",
           "mark": null,
@@ -992,6 +999,7 @@
           "time": null,
           "playbook": "dev:develop",
           "ticket": "gh 104",
+          "ticketNumber": "104",
           "source": "github",
           "url": "https://github.com/o/r/issues/104",
           "mark": null,
@@ -1078,6 +1086,7 @@
           },
           "playbook": "dev:develop",
           "ticket": "gh 111",
+          "ticketNumber": "111",
           "source": "github",
           "url": "https://github.com/o/r/issues/111",
           "mark": {
@@ -1171,6 +1180,7 @@
           },
           "playbook": "dev:develop",
           "ticket": "gh 112",
+          "ticketNumber": "112",
           "source": "github",
           "url": "https://github.com/o/r/issues/112",
           "mark": {
