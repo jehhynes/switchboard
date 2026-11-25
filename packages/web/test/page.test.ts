@@ -1618,7 +1618,8 @@ describe('the page', () => {
     // No reload for the new build: the page offers one, since a reload would end the phone's audio until the next tap.
     expect(reload).not.toHaveBeenCalled();
     expect(contexts).toHaveLength(1);
-    expect(root.querySelector('.conn-update')?.textContent).toBe('Update readyReload');
+    expect(root.querySelector('.conn-update')?.textContent).toBe('Update readyReload to use the new version of Switchboard.Reload');
+    expect(root.querySelector('.conn-update .codicon-sync')?.getAttribute('aria-hidden')).toBe('true');
 
     // Not once the voice is off on this phone either; only the chip's Reload reloads.
     sockets[1]!.onclose?.({ code: 4003, reason: 'Voice is no longer allowed on this device.' });
@@ -5179,6 +5180,20 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     for (const observer of sized.filter((one) => one.watched.some((element) => element.id === 'toast'))) observer.report();
     await flush();
     expect(shown()).toBe(false);
+    root.querySelector('#toast [data-action="toast-dismiss"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    expect(shown()).toBe(true);
+
+    // Update ready over the frame hides it too, and the frame comes back once the card goes.
+    const update = document.createElement('div');
+    update.className = 'conn-update';
+    boxes['conn-update'] = { left: 1200, top: 800, right: 1600, bottom: 860 };
+    root.querySelector('#connection')!.append(update);
+    await flush();
+    expect(shown()).toBe(false);
+    update.remove();
+    await settle();
+    expect(shown()).toBe(true);
     page.close();
   });
 
@@ -5256,6 +5271,17 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     backdrop.remove();
     await flush();
     expect(last()).toMatchObject({ left: 1000, holes: [], dim: 0, modal: false });
+
+    // Update ready over the frame is cut out of it, so an embedded site never hides it.
+    const update = document.createElement('div');
+    update.className = 'conn-update';
+    boxes['conn-update'] = { left: 1200, top: 800, right: 1600, bottom: 860 };
+    root.querySelector('#connection')!.append(update);
+    await flush();
+    expect(last()).toMatchObject({ left: 1000, holes: [{ left: 1200, top: 800, width: 400, height: 60 }], modal: false });
+    update.remove();
+    await flush();
+    expect(last()).toMatchObject({ left: 1000, holes: [] });
 
     // A layer sliding over the frame is followed each frame while its transition runs, not only when it ends.
     const sliding = document.createElement('div');

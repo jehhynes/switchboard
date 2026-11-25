@@ -5659,15 +5659,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   window.addEventListener('pagehide', () => iframe.configure(false), { signal: listening.signal });
   window.addEventListener('pageshow', () => { if (iframeAtLoad === (state.iframeBrowser === true)) iframe.configure(state.iframeBrowser === true); }, { signal: listening.signal });
   const iframePlace = setInterval(() => reportFrames(), 5_000);
-  // The sibling frame draws over the page. A host that cuts holes (iframeBrowser.holes) cuts each menu, popover, dialog, toast or the drawer
+  // The sibling frame draws over the page. A host that cuts holes (iframeBrowser.holes) cuts each menu, popover, dialog, toast, Update ready or the drawer
   // that overlaps the frame out of it, so the layer shows and takes the pointer, and darkens the frame under a modal backdrop, which then takes
-  // the pointer. An older host does not, so the frame hides under a modal dialog or the list's drawer, and under a menu, popover or toast only
+  // the pointer. An older host does not, so the frame hides under a modal dialog or the list's drawer, and under a menu, popover, toast or Update ready only
   // where that layer's box overlaps the frame's, as the More menu does when it drops from its strip over the Browser tab. A menu that opens
   // beside the frame, such as the session dropdown, leaves it showing.
   const frameLayers = (): FrameCover | undefined => {
     const slot = iframe.slotRect();
     if (slot === null) return undefined;
-    const layers: Element[] = [...root.querySelectorAll('.glass:not([hidden]), [role="menu"], [role="dialog"], [role="alertdialog"], #toast .toast')];
+    const layers: Element[] = [...root.querySelectorAll('.glass:not([hidden]), [role="menu"], [role="dialog"], [role="alertdialog"], #toast .toast, #connection .conn-update')];
     if (view.drawer !== null) layers.push(drawer);
     return frameCover(slot, layers, root.querySelectorAll('.drawer-backdrop, .sheet-backdrop, .settings-backdrop, .persona-backdrop'), root.querySelector('[aria-modal="true"], [role="alertdialog"]') !== null);
   };
@@ -5675,7 +5675,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const floating = (): boolean => {
     if (view.drawer !== null || root.querySelector('[aria-modal="true"], [role="alertdialog"]') !== null) return true;
     const slot = iframe.slotRect();
-    return slot !== null && [...root.querySelectorAll<HTMLElement>('.glass:not([hidden]), [role="menu"], [role="dialog"], #toast .toast')].some((layer) => overlaps(layer.getBoundingClientRect(), slot));
+    return slot !== null && [...root.querySelectorAll<HTMLElement>('.glass:not([hidden]), [role="menu"], [role="dialog"], #toast .toast, #connection .conn-update')].some((layer) => overlaps(layer.getBoundingClientRect(), slot));
   };
   let floatingShown = false;
   let framesHold: ReturnType<typeof setTimeout> | null = null;

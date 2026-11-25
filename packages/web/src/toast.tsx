@@ -18,7 +18,7 @@ export const TOAST_SHOWN_MS = 10_000;
 /** How often the page counts that time. */
 const TOAST_TICK_MS = 1_000;
 
-/** The toast: the message, a link to its work item when it has one, and Dismiss; nothing without a message. */
+/** The toast: the tone's icon, the message, a link to its work item when it has one, and Dismiss; nothing without a message. */
 export function renderToast(message: ToastMessage | null): VNode | null {
   if (message === null) {
     return null;
@@ -26,6 +26,7 @@ export function renderToast(message: ToastMessage | null): VNode | null {
 
   return (
     <div class={`toast ${message.tone}`} role={message.tone === 'warning' ? 'alert' : 'status'}>
+      <span class={`codicon codicon-${message.tone === 'warning' ? 'warning' : 'info'} toast-icon`} aria-hidden="true"></span>
       {message.workItemId === null ? (
         <span class="toast-text">{message.text}</span>
       ) : (

@@ -22,10 +22,13 @@ describe("the page's toast (toast.tsx)", () => {
     box.show('The work item no longer offers this.');
     expect(host.querySelector('.toast')!.className).toBe('toast warning');
     expect(host.querySelector('.toast')!.getAttribute('role')).toBe('alert');
+    expect(host.querySelector('.toast > .codicon')!.className).toBe('codicon codicon-warning toast-icon');
+    expect(host.querySelector('.toast > .codicon')!.getAttribute('aria-hidden')).toBe('true');
     box.show('Copied Reply.', 'info');
     expect(host.querySelectorAll('.toast')).toHaveLength(1);
     expect(host.querySelector('.toast')!.className).toBe('toast info');
     expect(host.querySelector('.toast')!.getAttribute('role')).toBe('status');
+    expect(host.querySelector('.toast > .codicon')!.className).toBe('codicon codicon-info toast-icon');
     expect(text()).toBe('Copied Reply.');
     // Clearing a refusal leaves a message that is not one; clearing all hides it.
     box.clear('warning');

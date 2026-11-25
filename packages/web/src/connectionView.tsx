@@ -1,5 +1,5 @@
 // What the page shows of its connection (architecture.md § Web page, Connection): a dot in the heads, a banner once offline, a screen in the
-// page's place when it never connected or is signed out, and the Update ready chip. Nothing changes during the grace period.
+// page's place when it never connected or is signed out, and the Update ready card. Nothing changes during the grace period.
 import type { VNode } from 'preact';
 import type { ConnectionState } from './connection.js';
 
@@ -113,7 +113,11 @@ export function renderScreen(view: ConnectionView, local: boolean, now: number):
 export function renderUpdate(view: ConnectionView): VNode | null {
   return !view.update || view.state === 'signedOut' ? null : (
     <div class="conn-update" role="status">
-      <span>Update ready</span>
+      <span class="codicon codicon-sync conn-update-icon" aria-hidden="true"></span>
+      <span class="conn-update-text">
+        <strong>Update ready</strong>
+        <span>Reload to use the new version of Switchboard.</span>
+      </span>
       <button type="button" class="conn-reload" data-action="conn-reload">
         Reload
       </button>
