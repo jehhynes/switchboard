@@ -1270,9 +1270,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     toEnd();
 
-    // Sending leaves the box, so later spoken turns send on their own again (architecture.md § Dictation).
+    // While dictating, the box keeps the focus until the hub takes the message, so what is heard meanwhile joins the draft rather than
+    // sending; the hub's draft starts empty, and what it hears waits for the answer (architecture.md § Dictation).
     if (state.voice?.here === true && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic) && document.activeElement === input) {
-      input.blur();
+      tellHub();
     }
 
     const answer = await sent;
@@ -1331,6 +1332,24 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       showError(notSent(answer));
     } else {
       giveBack(from, '', notSent(answer));
+    }
+
+    if (from === draftOf && answer.status === 200 && late === undefined) {
+      // Taken: the box gives up the focus, so later spoken turns send on their own again.
+      if (state.voice?.here === true && !['off', 'idle-off', 'unavailable'].includes(state.voice.mic) && document.activeElement === input) {
+        input.blur();
+      }
+    } else if (from === draftOf) {
+      // Not taken: the box keeps its text and the focus, dictation heard meanwhile joins its end, and the hub's draft becomes the box's.
+      const heard = dictated !== null && dictated.sessionId === target.sessionId ? dictated.text.trim() : '';
+
+      if (heard !== '') {
+        input.value = input.value === '' || /\s$/.test(input.value) ? `${input.value}${heard}` : `${input.value} ${heard}`;
+        box.changed(input.value);
+        keepDraft();
+      }
+
+      tellHub();
     }
 
     for (const one of held.splice(0)) {
@@ -1444,6 +1463,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (row !== null) {
       event.preventDefault();
       choose(Number(row.dataset['index']));
+    }
+  });
+  // A press on Send leaves the focus in the box, so dictation keeps joining the draft while the message is on its way; Tab still reaches it.
+  send.addEventListener('mousedown', (event) => {
+    if (document.activeElement === input) {
+      event.preventDefault();
     }
   });
   send.addEventListener('click', () => void submit());

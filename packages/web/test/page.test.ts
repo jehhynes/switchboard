@@ -8115,6 +8115,44 @@ describe('the page against late answers', () => {
     expect(sends()).toEqual([]);
     page.close();
   });
+  it('keeps the focus in the box while a send is on its way with the mic on, keeping dictation in the draft, and gives it up only once the hub took the message (architecture.md § Dictation)', async () => {
+    const { page, source } = start(/send/);
+    const input = root.querySelector('textarea')!;
+    const told = () => posts.filter((post) => post.url.endsWith('/composer')).map((post) => post.body);
+
+    helloFor(source, 1, 3);
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
+    input.focus();
+    typeIn('fix it');
+    key('Enter');
+    await flush();
+    expect(document.activeElement).toBe(input);
+    expect(told().at(-1)).toMatchObject({ focused: true, draft: '' });
+
+    // A piece heard meanwhile waits for the answer; refused, it joins the text kept, and the hub's draft becomes the box's.
+    source.emit('draft', { text: 'and more', sessionId: 's1', added: 'and more' });
+    pending.shift()!.resolve({ status: 409, body: { error: 'The session ended.' } });
+    await flush();
+    expect(input.value).toBe('fix it and more');
+    expect(document.activeElement).toBe(input);
+    expect(told().at(-1)).toMatchObject({ focused: true, draft: 'fix it and more' });
+
+    // Sent with Send, whose press leaves the focus in the box, and taken: the box empties and gives up the focus, so spoken turns send on
+    // their own again.
+    const sendButton = root.querySelector<HTMLButtonElement>('.composer button.send')!;
+
+    expect(sendButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))).toBe(false);
+    sendButton.click();
+    await flush();
+    expect(document.activeElement).toBe(input);
+    pending.shift()!.resolve({ status: 200, body: { message: { id: 'm5' } } });
+    await flush();
+    expect(input.value).toBe('');
+    expect(document.activeElement).not.toBe(input);
+    expect(told().at(-1)).toMatchObject({ focused: false, draft: '' });
+    expect(sends().map((one) => one['text'])).toEqual(['fix it', 'fix it and more']);
+    page.close();
+  });
 });
 
 describe("the list's CSS", () => {
