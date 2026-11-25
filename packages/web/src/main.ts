@@ -26,6 +26,7 @@ import { renderPersonaDialog } from './personas.js';
 import { renderSheet } from './sheet.js';
 import { toast } from './toast.js';
 import { renderComposer, renderComposerMenu, renderDraftNote, renderEndedNote, renderFrame, renderShared } from './composer.js';
+import { composerInput } from './composerInput.js';
 import { listHeader } from './listHeader.js';
 import { PhoneVoice } from './phoneVoice.js';
 import { MicStart } from '@switchboard/conversation/voiceControls';
@@ -908,6 +909,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       input.value = input.value === '' || /\s$/.test(input.value) ? `${input.value}${added.trimStart()}` : `${input.value} ${added.trimStart()}`;
       input.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined);
+      box.changed(input.value);
       keepDraft();
       grow();
       refresh();
@@ -923,6 +925,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Any other draft, as the hub's emptied one once a turn sent, replaces the box only while it holds nothing typed since.
     if (input.value === '' || input.value === before) {
       input.value = text;
+      box.changed(text);
       keepDraft();
       grow();
       refresh();
@@ -966,8 +969,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Why a message was not sent: the hub's reason, or the plain words for no answer. */
   const notSent = (answer: Answer): string => (transient(answer.failure) ? `Not sent. ${String(answer.body['error'])}` : String(answer.body['error'] ?? 'Not sent. Try again.'));
   let draftOf: number | null = null;
-  let chosen: string | null = null;
-  let walk: { index: number; draft: string } | null = null;
+  const box = composerInput();
   // Why a message of another work item was not sent, shown when the composer shows that work item again.
   const errors = new Map<number, string>();
   // The messages this page sent, by ID, and not-sent events whose send had not answered yet, so a late refusal finds its text.
@@ -977,7 +979,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const held: Array<{ text: string; error: string; workItemId: number | null }> = [];
   let menuOpen: { kind: 'files'; start: number; items: Array<{ path: string; dir: boolean }> } | { kind: 'commands'; items: Array<{ name: string; description: string }> } | null = null;
   let active = 0;
-  let asked = 0;
 
   /** How many times the operator chose a work item or a session, so an answer that arrives later leaves a newer choice alone. */
   let selections = 0;
@@ -1143,7 +1144,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     keepNewDraft(view.newDraft.workItemId, null);
     view.newDraft = null;
     input.value = draftOf === null ? '' : (drafts()[draftOf] ?? '');
-    chosen = null;
+    box.reset();
     showError(null);
     grow();
     refresh();
@@ -1174,9 +1175,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const before = input.value.slice(0, input.selectionStart);
     const mention = mentionQuery(before);
     const slash = commandQuery(before);
-    const ask = ++asked;
+    const ask = box.ask();
     const shown = state.scope?.scopeGen;
-    const current = (): boolean => ask === asked && shown === state.scope?.scopeGen;
+    const current = (): boolean => box.current(ask) && shown === state.scope?.scopeGen;
 
     if (mention !== null && state.key !== null) {
       const response = await readFetch(`/v1/conversation/files?window=${encodeURIComponent(state.key)}&q=${encodeURIComponent(mention.query)}`, { credentials: 'same-origin' }).catch(() => null);
@@ -1212,10 +1213,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (mention !== null) {
         input.setRangeText(`${mention} `, open.start, input.selectionEnd, 'end');
+        box.changed(input.value);
       }
     } else {
-      chosen = `/${open.items[index].name}`;
-      input.value = `${chosen} `;
+      input.value = box.choose(open.items[index].name);
       input.setSelectionRange(input.value.length, input.value.length);
     }
 
@@ -1240,7 +1241,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const typed = input.value;
     const mentions = files.flatMap((one) => mentionOf(one.path!.replaceAll('\\', '/')) ?? []);
     const text = mentions.length === 0 ? typed : typed.trim() === '' ? mentions.join(' ') : `${typed.replace(/\s+$/, '')} ${mentions.join(' ')}`;
-    const asCommand = chosen !== null && (text.trim() === chosen || text.startsWith(`${chosen} `)) && !text.trim().includes('\n');
+    const asCommand = box.asCommand(text);
     const target = { sessionId: state.session.id, launch: state.session.launch };
     const from = draftOf;
 
@@ -1292,7 +1293,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (from === draftOf) {
         input.value = dictated !== null && dictated.sessionId === target.sessionId ? dictated.text : '';
-        chosen = null;
+        box.changed(input.value);
         showError(null);
         confirmSent();
       }
@@ -1328,7 +1329,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       giveBack(one.workItemId, one.text, one.error);
     }
 
-    walk = null;
+    box.changed(input.value);
     grow();
     refresh();
   };
@@ -1343,6 +1344,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       input.value = below(input.value);
+      box.changed(input.value);
       showError(error);
       keepDraft();
       grow();
@@ -1363,7 +1365,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   input.addEventListener('scroll', () => void (mirror.scrollTop = input.scrollTop));
   input.addEventListener('input', () => {
-    walk = null;
+    box.changed(input.value);
     grow();
     refresh();
     keepDraft();
@@ -1394,24 +1396,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     // Up and Down at the box's first and last lines walk the session's earlier messages, and give the draft back after the newest.
-    if ((event.key === 'ArrowUp' && !input.value.slice(0, input.selectionStart).includes('\n')) || (event.key === 'ArrowDown' && walk !== null && !input.value.slice(input.selectionEnd).includes('\n'))) {
-      const texts = sentTexts(state.items);
-      const index = walk === null ? texts.length - 1 : walk.index + (event.key === 'ArrowUp' ? -1 : 1);
+    // A recalled `/name` goes escaped; the draft given back after the newest keeps the command chosen in it.
+    if ((event.key === 'ArrowUp' && !input.value.slice(0, input.selectionStart).includes('\n')) || (event.key === 'ArrowDown' && box.walking && !input.value.slice(input.selectionEnd).includes('\n'))) {
+      const recalled = box.recall(event.key === 'ArrowUp', input.value, sentTexts(state.items));
 
-      if (event.key === 'ArrowUp' && (texts.length === 0 || index < 0)) {
+      if (recalled === null) {
         return;
       }
 
-      walk ??= { index, draft: input.value };
-
-      if (index >= texts.length) {
-        input.value = walk.draft;
-        walk = null;
-      } else {
-        walk.index = index;
-        input.value = texts[index]!;
-      }
-
+      input.value = recalled;
       event.preventDefault();
       grow();
       refresh();
@@ -1509,6 +1502,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   composerHost.querySelector('button.slash')!.addEventListener('click', () => {
     if (input.value === '' && !input.disabled && !draftShown()) {
       input.value = '/';
+      box.changed('/');
       input.focus();
       input.setSelectionRange(1, 1);
       void follow();
@@ -1775,8 +1769,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         input.value = keptNew.text;
         void askProviders(view.newDraft);
       }
-      chosen = null;
-      walk = null;
+      box.reset();
       showError(id === null ? null : (errors.get(id) ?? null));
       closeMenu();
       contextMenu = 'closed';
@@ -5023,7 +5016,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.tab = 'conversation';
     input.value = '';
     keepNewDraft(workItemId, draft);
-    chosen = null;
+    box.reset();
     closeMenu();
     showError(null);
     draw();
@@ -5087,7 +5080,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (view.newDraft === draft) {
         view.newDraft = null;
         input.value = draftOf === null ? '' : (drafts()[draftOf] ?? '');
-        chosen = null;
+        box.reset();
         showError(null);
       }
 

@@ -7961,6 +7961,65 @@ describe('the page against late answers', () => {
     expect(posts.filter((post) => post.url.endsWith('/answer')).at(-1)?.body).toMatchObject({ requestId: 'q1', answer: { port: '8799', key: 'abc' } });
     page.close();
   });
+  /** Types `text` into the box as the operator does, the caret at its end. */
+  const typeIn = (text: string) => {
+    const input = root.querySelector('textarea')!;
+
+    input.value = text;
+    input.setSelectionRange(text.length, text.length);
+    input.dispatchEvent(new Event('input'));
+  };
+  const key = (name: string, init: KeyboardEventInit = {}) => root.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...init }));
+  const commands = { status: 200, body: { commands: [{ name: 'compact', description: 'Compact it' }, { name: 'clear', description: '' }] } };
+  const sends = () => posts.filter((post) => post.url.endsWith('/send')).map((post) => post.body);
+
+  it('sends a /name recalled or typed again by hand escaped, and the chosen one as a command while the text starts with it (architecture.md § Slash commands)', async () => {
+    const { page, source } = start(/commands/);
+    const input = root.querySelector('textarea')!;
+
+    helloFor(source, 1, 3, [message('m1', 1, { text: '/compact' })]);
+    const choose = async () => {
+      typeIn('/co');
+      pending.shift()!.resolve(commands);
+      await flush();
+      key('Tab');
+      expect(input.value).toBe('/compact ');
+    };
+
+    // Chosen, then emptied: an earlier /compact recalled goes as a message.
+    await choose();
+    typeIn('');
+    key('ArrowUp');
+    expect(input.value).toBe('/compact');
+    key('Enter');
+    await flush();
+    expect(sends().at(-1)).toMatchObject({ text: '/compact' });
+    expect(sends().at(-1)).not.toHaveProperty('command');
+
+    // Chosen, a walk up and back down: the draft comes back still chosen.
+    await choose();
+    key('ArrowUp');
+    expect(input.value).toBe('/compact');
+    key('ArrowDown');
+    expect(input.value).toBe('/compact ');
+    key('Enter');
+    await flush();
+    expect(sends().at(-1)).toMatchObject({ text: '/compact ', command: true });
+
+    // Chosen, emptied and typed again by hand: a message.
+    await choose();
+    typeIn('');
+    typeIn('/compact');
+    pending.shift()!.resolve({ status: 200, body: { commands: [] } });
+    await flush();
+    key('Escape');
+    key('Enter');
+    await flush();
+    expect(sends().at(-1)).toMatchObject({ text: '/compact' });
+    expect(sends().at(-1)).not.toHaveProperty('command');
+    expect(sends()).toHaveLength(3);
+    page.close();
+  });
 });
 
 describe("the list's CSS", () => {
