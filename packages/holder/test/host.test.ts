@@ -19,6 +19,8 @@ async function started(options: Parameters<typeof startHost>[0] = {}): Promise<T
   return current;
 }
 
+/** A wait on a screen replayed in xterm, which runs real timers: Vitest's default test timeout rather than expect.poll's one second. */
+const REPLAY_WAIT_MS = 5_000;
 const spawnRequest = (session: string, extra: Record<string, unknown> = {}) => ({ session, label: `label-${session}`, file: 'claude', args: ['--session-id', session], cwd: 'D:/work', env: { A: '1' }, cols: 100, rows: 30, ...extra });
 
 describe('handshake', () => {
@@ -429,8 +431,7 @@ describe('attach', () => {
 
       const one = await attachTo(state, `s${index}`, 100, 30);
 
-      await tick();
-      expect(one.isReplayed()).toBe(true);
+      await expect.poll(one.isReplayed, { timeout: REPLAY_WAIT_MS }).toBe(true);
 
       const terminal = new headless.Terminal({ cols: 100, rows: 30, allowProposedApi: true });
 
@@ -934,8 +935,7 @@ describe('view', () => {
 
     const one = await viewOf(state, 's1');
 
-    await tick();
-    expect(one.isReplayed()).toBe(true);
+    await expect.poll(one.isReplayed, { timeout: REPLAY_WAIT_MS }).toBe(true);
     expect(one.events[0]).toEqual([80, 24]);
     expect(String(one.events[1])).toContain('hello');
     expect(state.ptys[0]!.sizes).toEqual([]);
