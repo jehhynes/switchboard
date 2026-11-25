@@ -287,6 +287,13 @@ function headerSuffix(fileDiff: FileDiffMetadata, collapsed: ReadonlySet<string>
 let lastVersion = 0;
 
 /**
+ * Each read diff's cache key, kept while the page holds its `DiffData`, so a view mounted again, as when the tab is chosen again, draws it with
+ * the workers' highlighted lines rather than colouring it again; a new read is a new object and gets a new key. The item's own version is
+ * still new at each `setRow`, since Pierre's `updateItem` skips an item whose version it already has.
+ */
+const cacheKeys = new WeakMap<DiffData, string>();
+
+/**
  * Draws every row of the Changes list into `host` as one scrolling view (PRD R118, architecture.md § Web page): each row a CodeView item, a
  * placeholder about its height until the page gives its diff, so the scroll bar covers the whole change from the start and a jump never waits
  * for the rows above. Pierre mounts only the items on screen and keeps the first visible line still when an item above changes height.
@@ -410,7 +417,11 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
         item = syntheticItem(row, 'note', content.note, 1, bump());
       } else {
         const version = bump();
-        const read = diffItem(content.data, `${path} ${version}`) as CodeViewDiffItem<undefined> | null;
+        const cacheKey = cacheKeys.get(content.data) ?? `${path} ${version}`;
+
+        cacheKeys.set(content.data, cacheKey);
+
+        const read = diffItem(content.data, cacheKey) as CodeViewDiffItem<undefined> | null;
 
         if (read !== null) {
           kinds.set(read.fileDiff, { kind: 'diff', path });

@@ -70,6 +70,32 @@ describe("the Changes tab's highlight cache keys", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it('MountChanges_SameReadShownInALaterView_KeepsItsCacheKeyWithANewVersion', () => {
+    // The tab chosen again mounts a new view and gives it the diffs the page holds; a diff read again is a new object.
+    const read = data(later);
+    const one = mounted();
+
+    one.setRow(row.path, { data: read });
+    one.dispose();
+
+    const two = mounted();
+
+    two.setRow(row.path, { data: read });
+    two.setCollapsed(row.path, true);
+    two.setRow(row.path, { data: read });
+    two.setRow(row.path, { data: data(later) });
+
+    const [shown] = diffs(views[0]!);
+    const [again, collapsed, afterCollapse, readAgain] = views[1]!.drawn.slice(1);
+
+    expect(again!.fileDiff.cacheKey).toBe(shown!.fileDiff.cacheKey);
+    expect(afterCollapse!.fileDiff.cacheKey).toBe(shown!.fileDiff.cacheKey);
+    expect(readAgain!.fileDiff.cacheKey).not.toBe(shown!.fileDiff.cacheKey);
+    // Each update has a version of its own, so Pierre never skips one, and the collapse holds.
+    expect(new Set([shown, again, collapsed, afterCollapse, readAgain].map((item) => item!.version)).size).toBe(5);
+    expect(afterCollapse!.collapsed).toBe(true);
+  });
+
   it("MountChanges_PoolHoldsAnEarlierViewsHighlight_DrawsTheLaterDiffWithoutMissingLines", async () => {
     const one = mounted();
 
