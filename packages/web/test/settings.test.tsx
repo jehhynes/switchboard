@@ -126,6 +126,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
   let answers: Record<string, Answer | ((body: Record<string, unknown>) => Answer)>;
 
   beforeEach(() => {
+    // A desktop's width, whose navigation opens a group under its entry; the phone's drill-down has tests of its own.
+    window.innerWidth = 1280;
     vi.useFakeTimers();
     posts = [];
     answers = { 'page-settings-read': { status: 200, body: config({ sessions: { installHooks: false } }) }, 'page-settings-check': { status: 200, body: { errors: [] } }, 'page-devices': { status: 200, body: { devices: [] } } };
@@ -177,7 +179,9 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     await opened();
 
     expect(named('page-settings-read')).toHaveLength(1);
-    expect(texts('.settings-nav-entry .settings-nav-label').slice(0, 5)).toEqual(['General', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'Voice']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['General', 'Sources', 'Playbooks', 'Schedules', 'Voice settings', 'Personas']);
+    expect(texts('.settings-nav-entry.group[aria-expanded="false"] .settings-nav-label')).toEqual(['Sources', 'Playbooks', 'Schedules', 'Personas']);
     expect(host.querySelector('.settings-nav-entry.current')?.textContent).toContain('General');
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
     // The hub keeps the config folder outside settings.json, so General names it and the command that changes it.
@@ -545,30 +549,63 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-nav .settings-nav-message')?.textContent).toBe('Switchboard did not answer: offline');
   });
 
-  it('on a phone shows the navigation first, drills into a page and goes back with Back', async () => {
-    await opened();
-
-    expect(host.querySelector('.settings')?.getAttribute('data-drill')).toBe('nav');
-    host.querySelector<HTMLButtonElement>('.settings-nav-entry')!.click();
-    await settle();
-    expect(host.querySelector('.settings')?.getAttribute('data-drill')).toBe('page');
-    host.querySelector<HTMLButtonElement>('.settings-back')!.click();
-    await settle();
-    expect(host.querySelector('.settings')?.getAttribute('data-drill')).toBe('nav');
-    expect(document.activeElement?.textContent).toContain('General');
-
-    // In the phone's layout, here a phone on its side, the page's title takes the focus from the hidden navigation, also after an Add entry.
-    const width = window.innerWidth;
-
+  it('on a phone shows the navigation first, drills into a group and a page, and goes back up one level at a time with Back', async () => {
+    // A phone on its side: the phone's layout by its screen, though the window is wide.
     vi.stubGlobal('screen', { width: 390, height: 844 });
     window.innerWidth = 844;
     onTestFinished(() => {
-      window.innerWidth = width;
       vi.unstubAllGlobals();
     });
+    answers['page-settings-read'] = { status: 200, body: config({ sessions: { installHooks: false }, playbooks: { 'dev:x': { description: 'X', template: 'Do' } } }) };
+    await opened();
 
-    [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.textContent?.includes('New GitHub source'))!.click();
+    const settingsBox = host.querySelector('.settings')!;
+    const back = () => host.querySelector<HTMLButtonElement>('.settings-back')!.click();
+    const go = async (key: string) => {
+      host.querySelector<HTMLButtonElement>(`.settings-nav-entry[data-key="${key}"]`)!.click();
+      await settle();
+    };
+
+    expect(settingsBox.getAttribute('data-drill')).toBe('nav');
+    expect(settingsBox.getAttribute('data-depth')).toBe('0');
+    await go('general');
+    expect(settingsBox.getAttribute('data-drill')).toBe('page');
+    expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
+    back();
     await settle();
+    expect(settingsBox.getAttribute('data-drill')).toBe('nav');
+    expect(document.activeElement?.textContent).toContain('General');
+
+    // Playbooks drills into its own list, a namespace into its, which starts with the namespace's table.
+    await go('playbooks');
+    expect(settingsBox.getAttribute('data-depth')).toBe('1');
+    expect(texts('.settings-nav-heading')).toEqual(['Playbooks']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['dev', '+ New playbook']);
+    await go('namespace:dev');
+    expect(texts('.settings-nav-heading')).toEqual(['dev']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['All dev playbooks', 'x']);
+    await go('playbook:dev:x');
+    expect(settingsBox.getAttribute('data-drill')).toBe('page');
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev:x');
+
+    // Back goes up one level at a time: the namespace's list, Playbooks' list, then the categories with the focus on Playbooks.
+    back();
+    await settle();
+    expect(texts('.settings-nav-heading')).toEqual(['dev']);
+    expect(host.querySelector('.settings-nav-entry.current')?.getAttribute('data-key')).toBe('playbook:dev:x');
+    back();
+    await settle();
+    expect(texts('.settings-nav-heading')).toEqual(['Playbooks']);
+    expect(document.activeElement?.getAttribute('data-key')).toBe('namespace:dev');
+    back();
+    await settle();
+    expect(settingsBox.getAttribute('data-depth')).toBe('0');
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'Voice']);
+    expect(document.activeElement?.getAttribute('data-key')).toBe('playbooks');
+
+    // An Add entry's new page takes the focus from the hidden navigation.
+    await go('sources');
+    await go('add-source:github');
     expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
     expect(document.activeElement?.textContent).toBe('GitHub');
   });
@@ -600,6 +637,8 @@ describe('Settings sources (architecture.md § Web page)', () => {
   };
 
   beforeEach(() => {
+    // A desktop's width, whose navigation opens a group under its entry; the phone's drill-down has tests of its own.
+    window.innerWidth = 1280;
     vi.useFakeTimers();
     posts = [];
     answers = { 'page-settings-read': { status: 200, body: config(file, { enabled: { github: true } }) }, 'page-settings-check': { status: 200, body: { errors: [] } } };
@@ -626,15 +665,33 @@ describe('Settings sources (architecture.md § Web page)', () => {
   };
   const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
   const headings = () => [...host.querySelectorAll('.settings-section-heading')].map((node) => (node.querySelector('.settings-toggle-label') ?? node).textContent);
-  const entry = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label)!;
+  const entry = (label: string) => {
+    const find = () => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label);
+
+    // A group's entries show once it is open: the lists' groups first, then a namespace's, which opens its table.
+    for (const selector of ['.settings-nav-entry.group[aria-expanded="false"]:not([data-page])', '.settings-nav-entry.group[aria-expanded="false"]']) {
+      let closed: HTMLButtonElement | null;
+
+      while (find() === undefined && (closed = host.querySelector<HTMLButtonElement>(selector)) !== null) {
+        closed.click();
+      }
+    }
+
+    return find()!;
+  };
   const control = <T extends HTMLElement>(path: string) => host.querySelector<T>(`[data-path="${path}"] input, [data-path="${path}"] select, [data-path="${path}"] textarea`)!;
   const settle = () => vi.advanceTimersByTimeAsync(0);
 
   it("lists the sources in file order under Sources, noting one that is off, then New <kind> source for each kind without one and New source", async () => {
     await open();
 
-    expect(texts('.settings-nav-heading')[0]).toBe('Sources');
-    expect(texts('.settings-nav-entry .settings-nav-label').slice(0, 6)).toEqual(['General', 'GitHub', 'personal (GitHub)', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
+    const sources = host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="sources"]')!;
+
+    // Closed, Sources counts its sources, leaving out the Add entries.
+    expect(sources.querySelector('.settings-nav-count')?.textContent).toBe('2');
+    sources.click();
+    await settle();
+    expect(texts('.settings-nav-children[aria-label="Sources"] .settings-nav-label')).toEqual(['GitHub', 'personal (GitHub)', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
     expect(entry('GitHub').querySelector('.settings-nav-note')).toBeNull();
     expect(entry('personal (GitHub)').querySelector('.settings-nav-note')?.textContent).toBe('off');
   });
@@ -695,7 +752,11 @@ describe('Settings sources (architecture.md § Web page)', () => {
     await settle();
     [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')][0]!.click();
     await settle();
-    expect(texts('.settings-nav-entry .settings-nav-label').slice(0, 6)).toEqual(['General', 'personal (GitHub)', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
+    expect(texts('.settings-nav-children[aria-label="Sources"] .settings-nav-label')).toEqual(['personal (GitHub)', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
+    // Sources, closed, carries the unsaved mark of the source removed from it.
+    host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="sources"]')!.click();
+    await settle();
+    expect(host.querySelector('.settings-nav-entry[data-key="sources"] .settings-dirty')).not.toBeNull();
     expect(host.querySelector('.settings-status')?.textContent).toBe('Unsaved changes');
   });
 

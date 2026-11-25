@@ -28,6 +28,8 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
   const idle = { state: 'idle', endsAt: null, error: null, enrolledAt: null };
 
   beforeEach(() => {
+    // A desktop's width, whose navigation opens a group under its entry; the phone's drill-down has tests of its own.
+    window.innerWidth = 1280;
     vi.useFakeTimers();
     posts = [];
     answers = { 'page-settings-read': { status: 200, body: config(file) }, 'page-settings-check': { status: 200, body: { errors: [] } }, 'page-voice-enroll': { status: 200, body: { enrollment: idle } } };
@@ -54,7 +56,20 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
   };
   const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
   const headings = () => [...host.querySelectorAll('.settings-section-heading')].map((node) => (node.querySelector('.settings-toggle-label') ?? node).textContent);
-  const entry = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label)!;
+  const entry = (label: string) => {
+    const find = () => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label);
+
+    // A group's entries show once it is open: the lists' groups first, then a namespace's, which opens its table.
+    for (const selector of ['.settings-nav-entry.group[aria-expanded="false"]:not([data-page])', '.settings-nav-entry.group[aria-expanded="false"]']) {
+      let closed: HTMLButtonElement | null;
+
+      while (find() === undefined && (closed = host.querySelector<HTMLButtonElement>(selector)) !== null) {
+        closed.click();
+      }
+    }
+
+    return find()!;
+  };
   const control = <T extends HTMLElement>(path: string) => host.querySelector<T>(`[data-path="${path}"] input, [data-path="${path}"] select, [data-path="${path}"] textarea`)!;
   const checked = () => posts.filter((one) => one.name === 'page-settings-check').at(-1)!.body['settings'] as { voice?: Record<string, unknown> };
   const pick = (path: string, value: string) => {
@@ -75,13 +90,14 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(0);
   };
 
-  it('ends the navigation with Voice: Voice settings, each persona by its name or ID, and New persona', async () => {
+  it('ends the navigation with Voice: Voice settings, then Personas with each persona by its name or ID, and New persona', async () => {
     await open();
 
-    const labels = texts('.settings-nav-entry .settings-nav-label');
-
-    expect(texts('.settings-nav-heading')).toEqual(['Sources', 'Playbooks', 'Schedules', 'Voice']);
-    expect(labels.slice(labels.indexOf('Voice settings'))).toEqual(['Voice settings', 'Nova', 'Sage', 'x', '+ New persona']);
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'Voice']);
+    expect(texts('.settings-nav-category:last-child .settings-nav-list > .settings-nav-entry .settings-nav-label')).toEqual(['Voice settings', 'Personas']);
+    host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="personas"]')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(texts('.settings-nav-children[aria-label="Personas"] .settings-nav-label')).toEqual(['Nova', 'Sage', 'x', '+ New persona']);
   });
 
   it("draws the Voice page's sections, the playbooks' personas with a missing playbook marked, and Assign for a task playbook without one", async () => {

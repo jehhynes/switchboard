@@ -5,7 +5,7 @@ import { mount } from './island.js';
 import { isPhone } from './layout.js';
 import { QrCode, usedText } from './listHeader.js';
 import type { Device, Pairing } from './listHeader.js';
-import { applyPlaybookCell, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, nav, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
+import { applyPlaybookCell, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, nav, navEntry, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
 import type { Enrollment, Field, FieldOption, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -34,6 +34,11 @@ interface View {
   open: boolean;
   /** On a phone, the navigation list or the page it drilled into. */
   drill: 'nav' | 'page';
+  /** On a phone, the groups drilled into, outermost first; the navigation shows the last one's entries, or the categories when empty. */
+  navPath: string[];
+  /** The navigation's groups the operator opened or closed; one holding the page shown is open unless closed. */
+  expanded: Set<string>;
+  collapsed: Set<string>;
   /** Why settings.json could not be read, or null. */
   error: string | null;
   /** What a read discarded, or null. */
@@ -77,7 +82,7 @@ export interface Settings {
 
 /** Settings drawn into `host`: the navigation, the page and the bar, and a phone's list that drills into each page. */
 export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
-  const view: View = { open: false, drill: 'nav', error: null, notice: null, opened: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE() };
+  const view: View = { open: false, drill: 'nav', navPath: [], expanded: new Set(), collapsed: new Set(), error: null, notice: null, opened: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE() };
   let state: EditorState | null = null;
   let loads = 0;
   let seq = 0;
@@ -431,6 +436,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     state!.setDraft(next);
     state!.page = page;
     view.drill = 'page';
+    view.collapsed.clear();
     view.typing.clear();
     edited();
 
@@ -767,6 +773,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
     state.page = page;
     view.drill = 'page';
+    // The group holding the new page opens, even one the operator closed.
+    view.collapsed.clear();
     redraw();
     host.querySelector<HTMLElement>('.settings-page')?.scrollTo?.({ top: 0 });
 
@@ -779,9 +787,49 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   const handlers: Handlers = {
     navigate,
     back: () => {
+      const left = view.drill === 'page' ? null : (view.navPath.pop() ?? null);
+
       view.drill = 'nav';
       draw();
-      host.querySelector<HTMLElement>('.settings-nav-entry.current, .settings-nav-entry')?.focus();
+      // The entry Back came from takes the focus: the group left, else the page shown.
+      (left === null ? undefined : [...host.querySelectorAll<HTMLElement>('.settings-nav-entry')].find((one) => one.dataset['key'] === left))?.focus();
+
+      if (!host.contains(document.activeElement) || document.activeElement === document.body) {
+        host.querySelector<HTMLElement>('.settings-nav-entry.current, .settings-nav-entry')?.focus();
+      }
+    },
+    openGroup: (key) => {
+      const entry = state === null ? null : navEntry(nav(state), key);
+
+      if (entry === null || state === null) {
+        return;
+      }
+
+      // A phone shows one level at a time, so a group drills into its entries.
+      if (isPhone()) {
+        view.navPath.push(key);
+        view.drill = 'nav';
+        draw();
+        host.querySelector<HTMLElement>('.settings-nav-entry')?.focus();
+        return;
+      }
+
+      // A group with a page of its own, such as a namespace's table, opens it; pressed on that page, it opens or closes as another group does.
+      if (entry.page !== undefined && state.page !== entry.page) {
+        view.expanded.add(key);
+        navigate(entry.page);
+        return;
+      }
+
+      if (navOpen(view, entry)) {
+        view.collapsed.add(key);
+        view.expanded.delete(key);
+      } else {
+        view.expanded.add(key);
+        view.collapsed.delete(key);
+      }
+
+      draw();
     },
     close: requestClose,
     edit,
@@ -883,6 +931,9 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
       view.open = true;
       view.drill = 'nav';
+      view.navPath = [];
+      view.expanded.clear();
+      view.collapsed.clear();
       view.notice = null;
       view.error = null;
       redraw();
@@ -911,6 +962,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 interface Handlers {
   navigate(page: string): void;
   back(): void;
+  /** A group's entry: opens or closes it, or on a phone drills into it. */
+  openGroup(key: string): void;
   close(): void;
   edit(field: Field, input: string, checked?: boolean): void;
   toggleSection(key: string): void;
@@ -938,7 +991,7 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
   return (
     // A press on the backdrop, not on the dialog, closes Settings as Close does.
     <div class="settings-backdrop" onClick={(event) => event.target === event.currentTarget && on.close()}>
-      <div class="settings" data-drill={view.drill} role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="settings" data-drill={view.drill} data-depth={view.navPath.length} role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="settings-head">
           <button type="button" class="icon settings-back" aria-label="All settings" title="All settings" onClick={on.back}>
             <span class="codicon codicon-chevron-left" aria-hidden="true"></span>
@@ -952,7 +1005,7 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
         </div>
         <div class="settings-body">
           <nav class="settings-nav" aria-label="Settings pages">
-            {state === null ? <p class="settings-message settings-nav-message">{view.error ?? 'Reading the settings…'}</p> : nav(state).map((entry) => <NavRow entry={entry} on={on} />)}
+            {state === null ? <p class="settings-message settings-nav-message">{view.error ?? 'Reading the settings…'}</p> : <Nav state={state} view={view} on={on} />}
           </nav>
           <div class="settings-page">
             {view.notice === null ? null : <p class="settings-notice">{view.notice}</p>}
@@ -989,22 +1042,100 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
   );
 }
 
-function NavRow({ entry, on }: { entry: NavEntry; on: Handlers }) {
-  if (entry.kind === 'heading') {
-    return <h2 class="settings-nav-heading">{entry.label}</h2>;
+/** Whether a group's entries show under it: when the operator opened it, or it holds the page shown, unless the operator closed it. */
+function navOpen(view: View, entry: NavEntry): boolean {
+  return !view.collapsed.has(entry.key) && (view.expanded.has(entry.key) || entry.current);
+}
+
+/**
+ * The navigation: each category's heading over its entries, a group's entries nested under it while it is open. On a phone that drilled into
+ * a group, that group's entries alone, under its name, starting with its own page.
+ */
+function Nav({ state, view, on }: { state: EditorState; view: View; on: Handlers }) {
+  const categories = nav(state);
+  const inside = view.navPath.length === 0 ? null : navEntry(categories, view.navPath[view.navPath.length - 1]!);
+
+  if (inside !== null) {
+    return (
+      <div class="settings-nav-category">
+        <h2 class="settings-nav-heading">{inside.label}</h2>
+        <div class="settings-nav-list">
+          {inside.page === undefined ? null : <NavButton entry={{ ...inside, kind: 'item', key: `${inside.key}/page`, label: inside.pageLabel ?? inside.label, current: state.page === inside.page }} open={false} on={on} />}
+          {(inside.children ?? []).map((entry) => (
+            <NavButton entry={entry} open={false} on={on} />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
-    <button type="button" class={`settings-nav-entry ${entry.kind}${entry.current ? ' current' : ''}`} aria-current={entry.current ? 'page' : undefined} onClick={() => (entry.addSource !== undefined ? on.addSource(entry.addSource) : entry.page !== undefined && on.navigate(entry.page))}>
+    <>
+      {categories.map((category) => (
+        <div class="settings-nav-category">
+          <h2 class="settings-nav-heading">{category.label}</h2>
+          <div class="settings-nav-list">
+            {category.entries.map((entry) => (
+              <NavRow entry={entry} view={view} on={on} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function NavRow({ entry, view, on }: { entry: NavEntry; view: View; on: Handlers }) {
+  if (entry.kind !== 'group') {
+    return <NavButton entry={entry} open={false} on={on} />;
+  }
+
+  const open = navOpen(view, entry);
+
+  return (
+    <>
+      <NavButton entry={entry} open={open} on={on} />
+      {open ? (
+        <div class="settings-nav-children" role="group" aria-label={entry.label}>
+          {(entry.children ?? []).map((child) => (
+            <NavRow entry={child} view={view} on={on} />
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function NavButton({ entry, open, on }: { entry: NavEntry; open: boolean; on: Handlers }) {
+  const isGroup = entry.kind === 'group';
+  // A group is the page shown only when that is its own page; it holds the page shown otherwise.
+  const current = isGroup ? entry.page !== undefined && entry.children !== undefined && entry.current && !entry.children.some((child) => child.current) : entry.current;
+
+  return (
+    <button
+      type="button"
+      class={`settings-nav-entry ${entry.kind}${current ? ' current' : ''}`}
+      data-key={entry.key}
+      data-page={entry.page}
+      aria-current={current ? 'page' : undefined}
+      aria-expanded={isGroup ? open : undefined}
+      onClick={() => (isGroup ? on.openGroup(entry.key) : entry.addSource !== undefined ? on.addSource(entry.addSource) : entry.page !== undefined && on.navigate(entry.page))}
+    >
+      {isGroup ? <span class={`codicon codicon-chevron-${open ? 'down' : 'right'} settings-nav-twisty`} aria-hidden="true"></span> : null}
       <span class="settings-nav-label">{entry.kind === 'add' ? `+ ${entry.label}` : entry.label}</span>
       {entry.note === undefined ? null : <span class="settings-nav-note">{entry.note}</span>}
+      {isGroup && (entry.count ?? 0) > 0 ? (
+        <span class="settings-nav-count" aria-label={`${entry.count} pages`}>
+          {entry.count}
+        </span>
+      ) : null}
       {entry.dirty ? (
-        <span class="settings-dirty" title="Unsaved changes" aria-label="Unsaved changes">
+        <span class={`settings-dirty${isGroup ? ' settings-group-mark' : ''}`} title="Unsaved changes" aria-label="Unsaved changes">
           ●
         </span>
       ) : null}
       {entry.errors ? (
-        <span class="settings-errors" title="Errors" aria-label="Errors">
+        <span class={`settings-errors${isGroup ? ' settings-group-mark' : ''}`} title="Errors" aria-label="Errors">
           ⚠
         </span>
       ) : null}

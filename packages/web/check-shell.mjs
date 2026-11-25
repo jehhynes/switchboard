@@ -27,9 +27,9 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings', 'settings-table'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings-nav', 'settings', 'settings-table'] },
 ];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings', 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', 'settings', 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -417,10 +417,13 @@ const PROBES = `(() => {
 
 const OPEN = {
   history: ['[data-action=actions]', '[data-action=row-history]'],
+  // Settings as it opens: on a phone its navigation's categories alone.
+  'settings-nav': ['[data-action=list-more]', '[data-action=list-settings]'],
   // General, which a phone's Settings opens on its navigation rather than shows.
   settings: ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry.item'],
   // A namespace's playbooks table.
-  'settings-table': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry.namespace'],
+  // On a phone Playbooks and the namespace drill into their lists, the namespace's starting with its table; on a desktop they open in place.
+  'settings-table': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="playbooks"]', '.settings-nav-entry[data-key="namespace:dev"]', '.settings-nav-entry.item[data-page="namespace:dev"], .settings-page-title h2'],
   drawer: ['[data-action=drawer]'],
   sheet: ['[data-action=actions]', '[data-action=row-action][data-label=Delete]'],
   persona: ['[data-action=view-menu]', '[data-action=persona]'],
@@ -686,7 +689,7 @@ try {
         }
         const found = missing.length > 0 ? ['could not open the view: no ' + missing.join(', ')] : failures(view, size, m);
 
-        if (view.startsWith('settings') && missing.length === 0) found.push(...settingsFailures(view, size, await evaluate(SETTINGS)));
+        if (view.startsWith('settings') && view !== 'settings-nav' && missing.length === 0) found.push(...settingsFailures(view, size, await evaluate(SETTINGS)));
 
         if (view === 'tabs' && missing.length === 0) {
           const more = await evaluate(moreOnTop);
@@ -779,7 +782,7 @@ try {
             }
           }
           for (const one of small) found.push('a touch target under 44 px: ' + one);
-          if (view.startsWith('settings') && checks === 0) found.push('Settings showed no checkbox to measure');
+          if (view.startsWith('settings') && view !== 'settings-nav' && checks === 0) found.push('Settings showed no checkbox to measure');
         }
 
         // Each link pill's and key's accessible name is its text, whether it shows its text or its icon alone.

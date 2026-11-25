@@ -31,6 +31,8 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
   };
 
   beforeEach(() => {
+    // A desktop's width, whose navigation opens a group under its entry; the phone's drill-down has tests of its own.
+    window.innerWidth = 1280;
     vi.useFakeTimers();
     posts = [];
     answers = { 'page-settings-read': { status: 200, body: config(file, { inUse: { 'dev:build': 2 } }) }, 'page-settings-check': { status: 200, body: { errors: [] } } };
@@ -56,7 +58,20 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     return pane;
   };
   const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
-  const entry = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label)!;
+  const entry = (label: string) => {
+    const find = () => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label);
+
+    // A group's entries show once it is open: the lists' groups first, then a namespace's, which opens its table.
+    for (const selector of ['.settings-nav-entry.group[aria-expanded="false"]:not([data-page])', '.settings-nav-entry.group[aria-expanded="false"]']) {
+      let closed: HTMLButtonElement | null;
+
+      while (find() === undefined && (closed = host.querySelector<HTMLButtonElement>(selector)) !== null) {
+        closed.click();
+      }
+    }
+
+    return find()!;
+  };
   const control = <T extends HTMLElement>(path: string) => host.querySelector<T>(`[data-path="${path}"] input, [data-path="${path}"] select, [data-path="${path}"] textarea`)!;
   const settle = () => vi.advanceTimersByTimeAsync(0);
   const checked = () => posts.filter((one) => one.name === 'page-settings-check').at(-1)!.body['settings'] as { playbooks: Record<string, unknown> };
@@ -67,13 +82,31 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     box.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
-  it('lists each namespace with its playbooks under Playbooks, then New playbook, marking an entry it cannot read', async () => {
+  it('nests each namespace with its playbooks under Playbooks, then New playbook, marking an entry it cannot read on every group around it', async () => {
     await open();
 
-    const labels = texts('.settings-nav-entry .settings-nav-label');
+    // Playbooks starts closed under Work, counting its playbooks and carrying the error mark of the one it cannot read.
+    const playbooks = host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="playbooks"]')!;
 
-    expect(labels.slice(labels.indexOf('dev'), labels.indexOf('+ New playbook') + 1)).toEqual(['dev', 'build', 'triage', 'ops', 'broken', '+ New playbook']);
-    expect(texts('.settings-nav-heading').slice(0, 2)).toEqual(['Sources', 'Playbooks']);
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'Voice']);
+    expect(playbooks.getAttribute('aria-expanded')).toBe('false');
+    expect(playbooks.querySelector('.settings-nav-count')?.textContent).toBe('3');
+    expect(playbooks.querySelector('.settings-errors')).not.toBeNull();
+    expect(host.querySelector('[data-key="playbook:dev:build"]')).toBeNull();
+    playbooks.click();
+    await settle();
+    expect(playbooks.getAttribute('aria-expanded')).toBe('true');
+    expect(texts('.settings-nav-children[aria-label="Playbooks"] > .settings-nav-entry .settings-nav-label')).toEqual(['dev', 'ops', '+ New playbook']);
+    // A namespace opens its table and its playbooks under it; pressed again there, it closes and the table stays.
+    entry('dev').click();
+    await settle();
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev playbooks');
+    expect(texts('.settings-nav-children[aria-label="dev"] .settings-nav-label')).toEqual(['build', 'triage']);
+    expect(entry('dev').classList.contains('current')).toBe(true);
+    entry('dev').click();
+    await settle();
+    expect(host.querySelector('.settings-nav-children[aria-label="dev"]')).toBeNull();
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev playbooks');
     expect(entry('broken').querySelector('.settings-errors')).not.toBeNull();
     expect(entry('ops').querySelector('.settings-errors')).not.toBeNull();
     expect(entry('build').querySelector('.settings-errors')).toBeNull();

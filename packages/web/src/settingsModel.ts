@@ -1564,62 +1564,118 @@ export function pageHasErrors(state: EditorState, page: string): boolean {
   return [...errorPages(state).values()].includes(page);
 }
 
-/** A navigation entry: a heading, a page, or an Add entry. */
+/**
+ * A navigation entry: a page, an Add entry, or a group of entries under a page or a list's name, such as Sources or a namespace, which
+ * nests them and counts its pages. A group carries the unsaved and error marks of everything in it.
+ */
 export interface NavEntry {
-  kind: 'heading' | 'item' | 'add' | 'namespace';
+  kind: 'item' | 'add' | 'group';
+  /** Unique in the navigation: the page, the Add entry's page or kind, or the group's name. */
+  key: string;
   label: string;
   page?: string;
   /** For an Add entry that adds rather than opens a page: the source kind New <kind> source adds. */
   addSource?: string;
   note?: string;
+  /** A group's pages, counted for when it is collapsed. */
+  count?: number;
+  /** For a group with a page of its own, that page's label in a phone's list of the group. */
+  pageLabel?: string;
+  children?: NavEntry[];
+  /** The page shown, or for a group, a page in it. */
   current: boolean;
   dirty: boolean;
   errors: boolean;
 }
 
-const heading = (label: string): NavEntry => ({ kind: 'heading', label, current: false, dirty: false, errors: false });
+/** A labelled part of the navigation. */
+export interface NavCategory {
+  label: string;
+  entries: NavEntry[];
+}
 
-const add = (state: EditorState, label: string, page: string): NavEntry => ({ kind: 'add', label, page, current: state.page === page, dirty: false, errors: false });
+const add = (state: EditorState, label: string, page: string): NavEntry => ({ kind: 'add', key: page, label, page, current: state.page === page, dirty: false, errors: false });
+
+/**
+ * A group of `children`, with a page of its own when `page` is given; it is current, unsaved or in error when it or any entry in it is, and
+ * unsaved too when the part of settings.json at `path` changed, as when an entry was removed from it.
+ */
+function group(state: EditorState, key: string, label: string, children: NavEntry[], page?: { page: string; label: string }, path?: string): NavEntry {
+  const own = page === undefined ? null : item(state, page.page, label);
+  const all = own === null ? children : [own, ...children];
+
+  return {
+    kind: 'group',
+    key,
+    label,
+    ...(page === undefined ? {} : { page: page.page, pageLabel: page.label }),
+    count: children.reduce((sum, child) => sum + (child.kind === 'group' ? (child.count ?? 0) : child.kind === 'item' ? 1 : 0), 0),
+    children,
+    current: all.some((entry) => entry.current),
+    dirty: all.some((entry) => entry.dirty) || (path !== undefined && state.draft !== null && json(getAt(state.draft, path)) !== json(getAt(state.config.settings.value, path))),
+    errors: all.some((entry) => entry.errors),
+  };
+}
 
 /** The navigation, in the order a ticket takes: its source, its playbook, the schedules that start playbooks, then voice, an optional feature. */
-export function nav(state: EditorState): NavEntry[] {
+export function nav(state: EditorState): NavCategory[] {
   const sources = state.sourceNames;
-  const entries: NavEntry[] = [item(state, 'general', 'General'), heading('Sources')];
-
-  for (const name of sources) {
-    entries.push(item(state, `source:${name}`, sourceTitle(state, name), state.config.enabled[name] === true ? undefined : 'off'));
-  }
+  const sourceEntries: NavEntry[] = sources.map((name) => item(state, `source:${name}`, sourceTitle(state, name), state.config.enabled[name] === true ? undefined : 'off'));
 
   for (const kind of state.config.sourceKinds.filter((entry) => !sources.includes(entry))) {
-    entries.push({ kind: 'add', label: `New ${sourceLabel(kind, state.config)} source`, addSource: kind, current: false, dirty: false, errors: false });
+    sourceEntries.push({ kind: 'add', key: `add-source:${kind}`, label: `New ${sourceLabel(kind, state.config)} source`, addSource: kind, current: false, dirty: false, errors: false });
   }
 
-  entries.push(add(state, 'New source', 'new-source'));
-  entries.push(heading('Playbooks'));
+  sourceEntries.push(add(state, 'New source', 'new-source'));
 
-  for (const space of state.namespaces) {
-    const page = `namespace:${space}`;
+  const playbookEntries: NavEntry[] = state.namespaces.map((space) =>
+    group(
+      state,
+      `namespace:${space}`,
+      space,
+      state.namespacePlaybooks(space).map((name) => item(state, `playbook:${name}`, name.includes(':') ? name.slice(name.indexOf(':') + 1) : name)),
+      { page: `namespace:${space}`, label: `All ${space} playbooks` },
+    ),
+  );
 
-    entries.push({ kind: 'namespace', label: space, page, current: state.page === page, dirty: pageDirty(state, page), errors: pageHasErrors(state, page) });
+  playbookEntries.push(add(state, 'New playbook', 'new-playbook'));
 
-    for (const name of state.namespacePlaybooks(space)) {
-      entries.push(item(state, `playbook:${name}`, name.includes(':') ? name.slice(name.indexOf(':') + 1) : name));
+  return [
+    {
+      label: 'Work',
+      entries: [
+        item(state, 'general', 'General'),
+        group(state, 'sources', 'Sources', sourceEntries, undefined, 'sources'),
+        group(state, 'playbooks', 'Playbooks', playbookEntries, undefined, 'playbooks'),
+        group(state, 'schedules', 'Schedules', [...state.scheduleNames.map((name) => item(state, `schedule:${name}`, name)), add(state, 'New schedule', 'new-schedule')], undefined, 'schedules'),
+      ],
+    },
+    {
+      label: 'Voice',
+      entries: [item(state, 'voice', 'Voice settings'), group(state, 'personas', 'Personas', [...state.personas.map((_, index) => item(state, `persona:${index}`, state.personaLabel(index))), add(state, 'New persona', 'new-persona')], undefined, 'voice.personas')],
+    },
+  ];
+}
+
+/** The entry for `key` anywhere in the navigation, or null. */
+export function navEntry(categories: readonly NavCategory[], key: string): NavEntry | null {
+  const find = (entries: readonly NavEntry[]): NavEntry | null => {
+    for (const entry of entries) {
+      const found = entry.key === key ? entry : find(entry.children ?? []);
+
+      if (found !== null) {
+        return found;
+      }
     }
-  }
 
-  entries.push(add(state, 'New playbook', 'new-playbook'));
-  entries.push(heading('Schedules'));
-  entries.push(...state.scheduleNames.map((name) => item(state, `schedule:${name}`, name)));
-  entries.push(add(state, 'New schedule', 'new-schedule'));
-  entries.push(heading('Voice'));
-  entries.push(item(state, 'voice', 'Voice settings'));
-  entries.push(...state.personas.map((_, index) => item(state, `persona:${index}`, state.personaLabel(index))));
-  entries.push(add(state, 'New persona', 'new-persona'));
-  return entries;
+    return null;
+  };
+
+  return find(categories.flatMap((category) => category.entries));
 }
 
 function item(state: EditorState, page: string, label: string, note?: string): NavEntry {
-  return { kind: 'item', label, page, ...(note === undefined ? {} : { note }), current: state.page === page, dirty: pageDirty(state, page), errors: pageHasErrors(state, page) };
+  return { kind: 'item', key: page, label, page, ...(note === undefined ? {} : { note }), current: state.page === page, dirty: pageDirty(state, page), errors: pageHasErrors(state, page) };
 }
 
 /**
