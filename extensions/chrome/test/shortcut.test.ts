@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { downloadedIcon, shortcutRequest } from '../src/shortcut.js';
+import { downloadedIcon, shortcutIconFile, shortcutRequest } from '../src/shortcut.js';
 
 function downloads(state: 'complete' | 'in_progress' | 'interrupted' | 'missing' = 'complete') {
   let listener: ((change: { id: number }) => void) | null = null;
@@ -18,6 +18,11 @@ describe('shortcut icon download', () => {
     expect(await downloadedIcon(api, 'chrome-extension://test/switchboard.ico')).toBe('D:\\My downloads\\Switchboard\\switchboard.ico');
     expect(api.download).toHaveBeenCalledWith({ url: 'chrome-extension://test/switchboard.ico', filename: 'Switchboard/switchboard.ico', conflictAction: 'overwrite', saveAs: false });
     expect(api.onChanged.removeListener).toHaveBeenCalledOnce();
+  });
+  it('saves a named icon, such as the Linux launcher PNG, in the same Downloads folder', async () => {
+    const { api } = downloads();
+    await downloadedIcon(api, 'data:image/png;base64,AA==', 'switchboard.png');
+    expect(api.download).toHaveBeenCalledWith({ url: 'data:image/png;base64,AA==', filename: 'Switchboard/switchboard.png', conflictAction: 'overwrite', saveAs: false });
   });
   it('waits for its own download and handles completion after the first search', async () => {
     const { api, change } = downloads('in_progress');
@@ -46,6 +51,15 @@ describe('shortcut icon download', () => {
   });
 });
 
+
+describe('shortcut icon choice', () => {
+  it('saves the PNG for a Linux request and the ICO otherwise, including from a page older than the format field', () => {
+    expect(shortcutIconFile({ type: 'iframe-shortcut', format: 'png' })).toEqual({ asset: 'icon-256.png', type: 'image/png', filename: 'switchboard.png' });
+    for (const message of [{ type: 'iframe-shortcut' }, { type: 'iframe-shortcut', format: 'ico' }, { type: 'iframe-shortcut', format: 'PNG' }, null]) {
+      expect(shortcutIconFile(message)).toEqual({ asset: 'switchboard.ico', type: 'image/x-icon', filename: 'switchboard.ico' });
+    }
+  });
+});
 
 describe('shortcut request authorization', () => {
   it.each([

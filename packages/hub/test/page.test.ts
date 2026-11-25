@@ -1394,6 +1394,10 @@ describe('the web page routes', () => {
     expect(unzip(local.body).get('Switchboard.lnk')!.toString('utf16le')).toContain(encodeURIComponent(url.origin));
     expect((await download({ Cookie: localCookie }, path + '&origin=https://evil.test')).status).toBe(400);
     expect((await download({ Cookie: localCookie }, '/page/switchboard-shortcut.zip?browser=cmd')).status).toBe(400);
+    const linux = await download({ Cookie: localCookie }, '/page/switchboard-shortcut.zip?system=linux&profile=Default&icon=%2Fhome%2Falex%2FDownloads%2FSwitchboard%2Fswitchboard.png');
+    expect(linux.status).toBe(200); expect([...unzip(linux.body).keys()]).toEqual(['switchboard.desktop']);
+    expect(unzip(linux.body).get('switchboard.desktop')!.toString('utf8')).toContain(encodeURIComponent(url.origin).replaceAll('%', '%%'));
+    expect((await download({ Cookie: localCookie }, '/page/switchboard-shortcut.zip?system=linux&icon=C%3A%5Cswitchboard.ico')).status).toBe(400);
     remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
     const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'Tailscale-User-Login': 'alex@example.com' };
     const link = new URL(access.pair('pc.tail.ts.net').url);

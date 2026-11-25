@@ -45,4 +45,16 @@ For a browser installed only for your Windows user or in the other Program Files
 
 The shortcut has Switchboard's icon and a Windows app identity matched to the selected browser profile. The extension host supplies a multi-size icon for its window. This does not register an installed PWA or write your Start menu automatically. Each launch can create another window.
 
+### App shortcut on Linux
+
+On a Linux computer with GNOME on Wayland and Google Chrome:
+
+1. Open the signed-in Switchboard web page in Chrome, in the profile with the extension.
+2. Choose More Actions → Download app shortcut…, select Linux, enter the profile directory as for Windows and select Download shortcut.
+3. Extract `switchboard-shortcut.zip` and move `switchboard.desktop` to `~/.local/share/applications`.
+4. Keep `Switchboard/switchboard.png` in your Downloads folder; the launcher names its actual location.
+5. Open Switchboard from Activities, then right-click its dock icon and choose Pin to Dash.
+
+The launcher runs `google-chrome` from your PATH. Its window groups under the launcher's icon because the launcher names the window's app ID, which follows the profile directory; download a new launcher if the hub origin, profile or icon location changes. A Chrome web app installed from the address bar is a separate app without embedded browser tabs; remove it if you use this launcher. Chromium, Edge, Flatpak or Snap builds of Chrome, X11 sessions and other desktops are not supported.
+
 Open the app once while connected to verify the hub and warm its shell cache. Later offline starts and reloads may show that cached shell for the verified origin; it contains no work items or conversations. Website frames stay hidden until live origin, setting and sign-in checks pass again. An unknown origin or explicit refusal cannot use the offline fallback; a refusal forgets the earlier verification. When connectivity returns, the open app verifies again and reconnects. Desktop notification permission must still be granted from the ordinary page.

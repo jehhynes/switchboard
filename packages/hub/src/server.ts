@@ -18,7 +18,7 @@ import { isWebSocketUpgrade } from './webSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
 import { OTHER_SIGN_IN, PAGE_GONE } from './windows.js';
 import { HUB_LOG_LINES, HUB_LOG_MAX_LINES } from './hubLog.js';
-import { appShortcut } from './appShortcut.js';
+import { appShortcut, linuxAppShortcut } from './appShortcut.js';
 import { zip } from './browserExtension.js';
 import type { VoiceDevice } from './voiceSocket.js';
 
@@ -672,14 +672,16 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
-    // A portable Windows shortcut for this signed-in page's origin.
+    // A portable Windows shortcut or Linux launcher for this signed-in page's origin.
     if (request.method === 'GET' && path === '/page/switchboard-shortcut.zip') {
       try {
-        const shortcut = zip([{ name: 'Switchboard.lnk', body: appShortcut(origin.origin, url.searchParams) }]);
+        const shortcut = zip([url.searchParams.has('system')
+          ? { name: 'switchboard.desktop', body: Buffer.from(linuxAppShortcut(origin.origin, url.searchParams)) }
+          : { name: 'Switchboard.lnk', body: appShortcut(origin.origin, url.searchParams) }]);
         response.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="switchboard-shortcut.zip"', 'Content-Length': shortcut.length, 'Cache-Control': 'no-store' });
         response.end(shortcut);
       } catch {
-        json(response, 400, { error: 'Invalid shortcut options. Choose Chrome or Edge, a profile directory and a supported installation location.' });
+        json(response, 400, { error: 'Invalid shortcut options. Choose a supported browser, a profile directory and a supported installation location.' });
       }
       return true;
     }
