@@ -1,7 +1,7 @@
-// Checks the page's shell at iPhone sizes and an iPad's in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
+// Checks the page's shell at iPhone sizes and an iPad's, and its tabs on a desktop, in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
 // app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer, a sheet,
-// the persona dialog, a work item with more tabs than fit, and the list at 200 and 300 px. Every tab shown keeps its label, no tab passes its strip, and
-// the More menu lies above everything under it. Line 2's playbook or host is never cut; each of its pills is whole, its icon alone with no text
+// the persona dialog, a work item with more tabs than fit, and the list at 200 and 300 px. Every tab shown keeps its label, no tab passes its strip,
+// a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, and the More menu lies above everything under it. Line 2's playbook or host is never cut; each of its pills is whole, its icon alone with no text
 // showing, or left out whole, never cut, at several list widths down to 200 px; a pill shows its text exactly where it and the texts before
 // it fit beside the icons; the ticket key always shows whole; a pill left out is no
 // keyboard stop; and line 2 paints the same while the same list is sent again.
@@ -24,6 +24,8 @@ const SIZES = [
   { device: 'iphone', orientation: 'portrait', width: 393, height: 793, screen: [393, 852], insets: { top: 0, bottom: 34, left: 0, right: 0 }, phone: true },
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
+  // A desktop with a mouse, for the tabs view only: its close marks are the small ones, not touch targets.
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs'] },
 ];
 const VIEWS = ['list', 'narrow', 'narrow-300', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
@@ -53,6 +55,10 @@ if (view === 'drawer') localStorage.setItem('switchboard.listCollapsed', '1'); e
 // Every view starts as a first start: all views share one browser profile, and a start with no work item in its hash (the list's, Settings')
 // would otherwise come back to the work item an earlier view kept, and a conversation to the place an earlier drag left it (route.ts).
 localStorage.removeItem('switchboard.route');
+// Each view's artifacts are new to the page and it keeps no tabs, so the tabs view's changed artifacts are unread and History has no tab,
+// whatever an earlier view showed.
+localStorage.removeItem('switchboard.artifactsSeen');
+localStorage.removeItem('switchboard.tabs');
 sessionStorage.removeItem('switchboard.scroll');
 const now = Date.now();
 const row = (id, title, patch = {}) => ({ workItemId: id, ticketId: id, title, priority: null, time: null, ticket: 'gh ' + id, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null, ...patch });
@@ -81,12 +87,14 @@ for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
 }
 history.replaceState(null, '', location.search + (open ? '#w=1' : '#'));
-// The tabs view's work item has more artifacts, with long titles, than any strip here fits.
-const artifacts = view === 'tabs' ? Array.from({ length: 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
+// The tabs view's work item has more artifacts, with long titles but the newest's, than any strip here fits.
+const artifacts = view === 'tabs' ? Array.from({ length: 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: i === 9 ? 'Plan' : 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
 class FakeSource {
   constructor() {
     this.listeners = {};
-    setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: open ? [session] : [], items, more: false, status: null, artifacts, unread: 0 }), 20);
+    setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: open ? [session] : [], items, more: false, status: view === 'tabs' ? { id: 'st', sessionId: 's', at: now, markdown: 'Built.', fallback: false, unread: true } : null, artifacts, unread: 0 }), 20);
+    // The tabs view's artifacts change after the page first shows them, so each is unread until its tab shows it.
+    if (view === 'tabs') setTimeout(() => artifacts.forEach((artifact) => this.emit('artifact', { artifact: { ...artifact, updatedAt: artifact.updatedAt + 60000 } })), 120);
     if (listing) setInterval(() => this.emit('list', { groups }), 120);
   }
   addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); }
@@ -203,6 +211,34 @@ const measure = `(() => {
         more: strip.querySelector('.tab-more') !== null,
         cut: [...strip.querySelectorAll('.tab-label')].filter((label) => !shown(label) || label.getBoundingClientRect().width < Math.min(43.5, label.scrollWidth - 0.5)).map((label) => label.textContent),
         past: tabs.filter((tab) => { const box = tab.getBoundingClientRect(); return box.left < edge.left - 0.5 || box.right > edge.right + 0.5; }).map(name),
+        // Each unread dot of a tab: where it lies against its label, its tab and its close mark, and whether hiding it changes the tab's width.
+        dots: [...strip.querySelectorAll('.tab .unread-dot:not(.tab-badge > *)')].filter(shown).map((dot) => {
+          const tab = dot.closest('.tab');
+          const label = dot.previousElementSibling?.classList.contains('tab-label') ? dot.previousElementSibling.getBoundingClientRect() : null;
+          const box = dot.getBoundingClientRect();
+          const close = tab.querySelector('.tab-close .codicon')?.getBoundingClientRect() ?? null;
+          const tabBox = tab.getBoundingClientRect();
+          const cut = tab.querySelector('.tab-label');
+          // The tab's width and its label's as drawn, as fitStripTabs measures them, and the tab's own widest, unconstrained by the strip.
+          const widths = () => {
+            const drawn = [tab.getBoundingClientRect().width, cut.getBoundingClientRect().width];
+
+            tab.style.flex = 'none';
+            tab.style.width = 'max-content';
+            const widest = tab.getBoundingClientRect().width;
+
+            tab.style.flex = '';
+            tab.style.width = '';
+            return [...drawn, widest];
+          };
+          const width = widths();
+
+          dot.style.display = 'none';
+          const without = widths();
+
+          dot.style.display = '';
+          return { tab: tab.querySelector('.tab-label')?.textContent, cut: (tab.querySelector('.tab-label')?.scrollWidth ?? 0) > (tab.querySelector('.tab-label')?.clientWidth ?? 0), closable: close !== null, label: label && { left: label.left, right: label.right, top: label.top, bottom: label.bottom }, dot: { left: box.left, right: box.right, top: box.top, bottom: box.bottom }, tabBox: { top: tabBox.top, right: tabBox.right }, close: close && { left: close.left, right: close.right, top: close.top, bottom: close.bottom }, widthChange: Math.max(...width.map((one, i) => Math.abs(one - without[i]))) };
+        }),
       };
     }),
     tops: { header: top('.header'), listHeader: top('.list-header'), settingsHead: top('.settings-head'), personaHead: top('.persona-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
@@ -216,8 +252,8 @@ const OPEN = {
   drawer: ['[data-action=drawer]'],
   sheet: ['[data-action=actions]', '[data-action=row-action][data-label=Delete]'],
   persona: ['[data-action=view-menu]', '[data-action=persona]'],
-  // An artifact chosen from More, so the strip keeps it beside the tabs it always keeps.
-  tabs: ['.tab-more-button', '.tab-menu [data-action=artifact]'],
+  // An artifact chosen from More, so the strip keeps it beside the tabs it always keeps: the oldest, so the newest stays unread where it has room.
+  tabs: ['.tab-more-button', '.tab-menu [data-action=artifact][data-path="chat/a0.md"]'],
 };
 
 /** Opens the More menu again and answers whether it lies above everything at the centres of its rows in view, and inside the viewport. */
@@ -271,6 +307,29 @@ function failures(view, size, m) {
   for (const strip of m.strips) {
     if (strip.cut.length > 0) out.push('a tab strip hides or cuts below five characters the labels ' + strip.cut.slice(0, 4).join(', '));
     if (strip.past.length > 0) out.push('a tab passes its strip: ' + strip.past.slice(0, 4).join(', '));
+  }
+  // A tab's unread dot sits at its label's top-right, inside its tab, clear of its close mark, and takes no width.
+  const dots = m.strips.flatMap((strip) => strip.dots);
+
+  for (const one of dots) {
+    const where = 'the unread dot of the tab ' + (one.tab ?? '?');
+
+    if (one.label === null) {
+      out.push(where + ' does not follow its label');
+      continue;
+    }
+    if (one.dot.left < one.label.right - 1 || one.dot.left > one.label.right + 2) out.push(where + ' starts at ' + one.dot.left + ', not at its label\'s end, ' + one.label.right);
+    if (one.dot.bottom > (one.label.top + one.label.bottom) / 2 || one.dot.top < one.tabBox.top) out.push(where + ' is not at its label\'s top: ' + one.dot.top + ' to ' + one.dot.bottom + ' for a label ' + one.label.top + ' to ' + one.label.bottom);
+    if (one.dot.right > one.tabBox.right + 0.5) out.push(where + ' passes its tab');
+    if (one.close !== null && one.dot.right > one.close.left - 0.5 && one.dot.left < one.close.right + 0.5 && one.dot.bottom > one.close.top - 0.5 && one.dot.top < one.close.bottom + 0.5) out.push(where + ' covers its close mark');
+    if (Math.abs(one.widthChange) > 0.5) out.push(where + ' changes its tab\'s or label\'s width by ' + one.widthChange + ' px');
+  }
+  // The tabs view's Status and artifacts are unread: Status's dot, a tab without a close mark, shows at every size, and an artifact's, with a
+  // close mark, cut or not, wherever the strip has room for an artifact tab besides the one shown.
+  if (view === 'tabs') {
+    if (!dots.some((one) => !one.closable)) out.push('no unread dot on a tab without a close mark');
+    if (!(size.phone && size.orientation === 'portrait') && !dots.some((one) => one.closable)) out.push('no unread dot on an artifact tab');
+    if (size.device === 'ipad' && !(dots.some((one) => one.closable && one.cut) && dots.some((one) => one.closable && !one.cut))) out.push('no unread dot on both a cut and a whole artifact title');
   }
   // The tabs view's strip has more tabs than fit, so More holds the rest.
   if (view === 'tabs' && !m.strips.some((strip) => strip.more)) out.push('no strip shows More for a work item with more tabs than fit');
@@ -361,9 +420,10 @@ try {
       for (const view of VIEWS) {
         // A phone shows the list or the conversation, never a drawer, in either orientation.
         if (view === 'drawer' && size.phone) continue;
-        await send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, screenWidth: size.screen[0], screenHeight: size.screen[1], deviceScaleFactor: size.phone ? 3 : 2, mobile: true });
-        await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-        await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }, { name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] });
+        if (size.views !== undefined && !size.views.includes(view)) continue;
+        await send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, screenWidth: size.screen[0], screenHeight: size.screen[1], deviceScaleFactor: size.phone ? 3 : 2, mobile: size.mouse !== true });
+        await send('Emulation.setTouchEmulationEnabled', { enabled: size.mouse !== true, maxTouchPoints: 5 });
+        await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }, { name: 'hover', value: size.mouse ? 'hover' : 'none' }, { name: 'pointer', value: size.mouse ? 'fine' : 'coarse' }] });
         await send('Emulation.setSafeAreaInsetsOverride', { insets: size.insets });
         await send('Page.navigate', { url: base + '?view=' + view });
         await evaluate('new Promise((done) => { const wait = () => (document.querySelector("#root .header, #root .list-header") ? setTimeout(done, 200) : setTimeout(wait, 50)); wait(); })');

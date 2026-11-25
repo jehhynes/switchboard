@@ -152,6 +152,8 @@ describe('question cards in replies', () => {
       const shown = dot(markup, `${tab} .unread-dot`);
 
       expect(shown?.getAttribute('role')).toBe('img');
+      // Right after the label, so page.css draws it at the label's top-right.
+      expect(shown?.previousElementSibling?.className).toBe('tab-label');
       expect(shown?.getAttribute('aria-label')).toBe('Unread');
       expect(shown?.getAttribute('title')).toBe('Unread');
       expect(host.querySelector(tab)?.textContent).toBe('Status');
@@ -166,11 +168,12 @@ describe('question cards in replies', () => {
     expect(dot(html(renderStatus(seen, 2)), '.unread-dot')).toBeNull();
   });
 
-  it("draws a tab's unread dot over its end padding and the dropdown's dot alike, so the dot leaves the tab's width as it was", () => {
+  it("draws a tab's unread dot at its label's top-right, over the gap after it, and the dropdown's dot alike, so the dot leaves the tab's width as it was", () => {
     const page = readFileSync(join(__dirname, '../src/page.css'), 'utf8');
     const picker = readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/picker.css'), 'utf8');
 
-    expect(page).toContain('.tab > .unread-dot { position: absolute;');
+    expect(page).toContain('.tab .tab-label + .unread-dot { flex: none; position: relative; top: -6px; margin: 0 -7px 0 -6px; }');
+    expect(page).not.toMatch(/\.tab(:has\([^)]*\))? > \.unread-dot/);
     expect(page).not.toContain('.status-new');
     expect(picker).toMatch(/^\.unread-dot \{[^}]*width: 7px; height: 7px; border-radius: 50%; background: var\(--vscode-activityBarBadge-background\);/m);
   });
@@ -2780,7 +2783,7 @@ describe('the page in use', () => {
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     click('#detail [data-side="status"]');
     source.emit('artifact', { artifact: { path: 'chat/a4.md', owner: 'chat', kind: 'note', title: 'Note 4', ext: 'md', type: 'markdown', updatedAt: 20_000 } });
-    const tabDot = (path: string) => root.querySelector(`#detail .artifact-tab[data-path="${path}"] > .unread-dot`);
+    const tabDot = (path: string) => root.querySelector(`#detail .artifact-tab[data-path="${path}"] .tab-open > .tab-label + .unread-dot`);
 
     expect(tabDot('chat/a4.md')).not.toBeNull();
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/a4.md"] .tab-open')!.getAttribute('aria-label')).toBe('Note 4, unread');
@@ -2813,8 +2816,8 @@ describe('the page in use', () => {
     source.emit('artifact', { artifact: artifact('chat/plan.md', 'markdown', 'md') });
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).toBeNull();
     source.emit('artifact', { artifact: { ...artifact('chat/plan.md', 'markdown', 'md'), updatedAt: 2_000 } });
-    expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"] > .unread-dot')).not.toBeNull();
-    expect(root.querySelector('#detail .artifact-tab[data-path="chat/p.html"] > .unread-dot')).toBeNull();
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"] .tab-open > .tab-label + .unread-dot')).not.toBeNull();
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/p.html"] .unread-dot')).toBeNull();
     page.close();
   });
 

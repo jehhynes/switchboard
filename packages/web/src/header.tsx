@@ -362,7 +362,7 @@ export interface ArtifactStrip {
 
 /**
  * An artifact's tab: its kind's icon, its title, and a close mark beside it in one cell, so each takes the keyboard on its own; with the unread
- * dot while this device has not shown its version (`unreadArtifacts`).
+ * dot after its title while this device has not shown its version (`unreadArtifacts`).
  */
 function ArtifactTab({ artifact, selected, unread }: { artifact: ArtifactView; selected: boolean; unread: boolean }) {
   return (
@@ -370,8 +370,8 @@ function ArtifactTab({ artifact, selected, unread }: { artifact: ArtifactView; s
       <button class="tab-open" type="button" role="tab" aria-selected={selected} tabindex={selected ? 0 : -1} title={`${artifact.title} · ${artifact.kind}`} aria-label={unread ? `${artifact.title}, unread` : artifact.title}>
         <FileIcon path={artifact.path} />
         <span class="tab-label">{artifact.title}</span>
+        {unread ? <UnreadDot /> : null}
       </button>
-      {unread ? <UnreadDot /> : null}
       <button class="tab-close" type="button" data-action="close-artifact" data-path={artifact.path} aria-label={`Close ${artifact.title}`} title="Close" tabindex={selected ? 0 : -1}>
         <span class="codicon codicon-close" aria-hidden="true"></span>
       </button>

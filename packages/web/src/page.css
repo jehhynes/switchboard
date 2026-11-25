@@ -492,10 +492,9 @@ button.picker > .codicon-chevron-down { order: 2; }
 .tab .tab-label { min-width: var(--sb-tab-label-least); max-width: var(--sb-tab-label-max); overflow: hidden; text-overflow: ellipsis; }
 .tab-open .tab-label { flex: 1 1 auto; }
 .tab .codicon { flex: none; font-size: 14px; }
-/* A tab's unread dot sits in its end padding, level with the label's top, so it changes neither the tab's width nor where its label sits. */
-.tab > .unread-dot { position: absolute; top: 10px; right: 4px; }
-/* An artifact tab's dot sits in its top corner, above its close mark rather than over it. */
-.tab:has(> .tab-close) > .unread-dot { top: 4px; right: 3px; }
+/* A tab's unread dot sits at its label's top-right, as a superscript, whether the label is cut or not. Its margins cancel the gap before it and its
+   own width, so it is drawn over the gap after the label and changes neither the tab's width nor where its label or close mark sits. */
+.tab .tab-label + .unread-dot { flex: none; position: relative; top: -6px; margin: 0 -7px 0 -6px; }
 /* A file's type icon (fileIcons.tsx): its Seti character at 150% of the text, centred in a 16-pixel box, as VS Code's Explorer and tabs draw it. */
 .file-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; }
 .file-icon::before { font-family: seti; font-size: 150%; font-style: normal; font-weight: normal; line-height: 1; -webkit-font-smoothing: antialiased; }
@@ -520,8 +519,6 @@ button.picker > .codicon-chevron-down { order: 2; }
 @container (max-width: 480px) {
   .tab { --sb-tab-pad: 9px; }
   .tab-more > .tab { --sb-tab-pad: 8px; }
-  .tab > .unread-dot { top: 8px; right: 0; }
-  .tab:has(> .tab-close) > .unread-dot { top: 3px; right: 1px; }
 }
 /* The More menu's rows share its columns, so each row's kind lines up under the one above: the title takes the room left and is cut first, and a
    kind longer than a word is cut at 14 characters so it cannot crowd the title out. The menu may reach past its strip, up to 480 px and the
