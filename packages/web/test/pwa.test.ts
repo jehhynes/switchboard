@@ -254,7 +254,7 @@ describe('the installable page', () => {
 
   it("leaves a reply's copy button out on a touch screen, where the text is copied as the system does, and keeps a code block's", () => {
     const css = PAGE_ASSETS['page.css']!.body;
-    const touch = /@media \(hover: none\), \(pointer: coarse\) \{\n  \.code-block > \.copy \{ opacity: 1; \}\n  \.meta \.copy \{ display: none; \}\n/.exec(css);
+    const touch = /@media \(hover: none\), \(pointer: coarse\) \{\n  \.code-block > \.copy \{ opacity: 1; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; \}\n  \.meta \.copy \{ display: none; \}\n/.exec(css);
 
     expect(touch).not.toBeNull();
     // The hover rule a desktop uses is unchanged.

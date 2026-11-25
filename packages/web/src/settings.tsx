@@ -1157,13 +1157,15 @@ function Table({ table, on }: { table: PlaybookTable; on: Handlers }) {
               {row.cells.map((cell, index) => (
                 <td>
                   {cell === null ? null : (
-                    <input
-                      type="checkbox"
-                      aria-label={`${row.label}: ${table.columns[index]!.label}`}
-                      checked={cell.checked}
-                      disabled={!cell.enabled}
-                      onChange={(event) => on.editCell(row.name, table.columns[index]!.path, (event.currentTarget as HTMLInputElement).checked)}
-                    />
+                    <label class="settings-box">
+                      <input
+                        type="checkbox"
+                        aria-label={`${row.label}: ${table.columns[index]!.label}`}
+                        checked={cell.checked}
+                        disabled={!cell.enabled}
+                        onChange={(event) => on.editCell(row.name, table.columns[index]!.path, (event.currentTarget as HTMLInputElement).checked)}
+                      />
+                    </label>
                   )}
                 </td>
               ))}
@@ -1403,7 +1405,7 @@ function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: 
   const { field } = shown;
 
   if (field.kind === 'boolean') {
-    return <input type="checkbox" id={id} checked={shown.checked} onChange={(event) => on.edit(field, '', (event.currentTarget as HTMLInputElement).checked)} />;
+    return <label class="settings-box"><input type="checkbox" id={id} checked={shown.checked} onChange={(event) => on.edit(field, '', (event.currentTarget as HTMLInputElement).checked)} /></label>;
   }
 
   if (field.kind === 'select') {
@@ -1459,7 +1461,7 @@ function GroupRow({ views, on }: { views: FieldView[]; on: Handlers }) {
       <div class="settings-input settings-group">
         {views.map((shown) => (
           <span class="settings-check" title={shown.field.help === '' ? undefined : shown.field.help}>
-            <input type="checkbox" id={inputId(shown.field.path)} checked={shown.checked} onChange={(event) => on.edit(shown.field, '', (event.currentTarget as HTMLInputElement).checked)} />
+            <label class="settings-box"><input type="checkbox" id={inputId(shown.field.path)} checked={shown.checked} onChange={(event) => on.edit(shown.field, '', (event.currentTarget as HTMLInputElement).checked)} /></label>
             <label for={inputId(shown.field.path)}>{shown.field.label}</label>
             <Errors errors={shown.errors} />
           </span>

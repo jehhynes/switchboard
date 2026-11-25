@@ -105,7 +105,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
 
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev:build');
     expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Kind', 'Start', 'Reports', 'Approve sends the work', 'Working directory', 'Agent', 'Permission mode', 'Model', 'Return of', 'Focus page', 'Prompt']);
-    expect(texts('.settings-check label')).toEqual(['Automatically', 'Needs a worktree', 'Done', 'Approval', 'Worktree', 'Playbook', 'Paste']);
+    expect(texts('.settings-check label:not(.settings-box)')).toEqual(['Automatically', 'Needs a worktree', 'Done', 'Approval', 'Worktree', 'Playbook', 'Paste']);
     expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['Sessions setting (auto)', 'default', 'auto', 'plan', 'bypassPermissions']);
     expect(control<HTMLInputElement>('model').placeholder).toBe('Sessions setting (Claude’s default)');
     expect(host.querySelector<HTMLButtonElement>('[data-path="template"] .settings-info')!.title).toBe('Variables: {{ticket.title}}. Switchboard adds the commands for the checked reports, with stage and link.');

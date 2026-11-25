@@ -4,7 +4,8 @@
 // a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, and the More menu lies above everything under it. Line 2's playbook or host is never cut; each of its pills is whole, its icon alone with no text
 // showing, or left out whole, never cut, at several list widths down to 200 px; a pill shows its text exactly where it and the texts before
 // it fit beside the icons; the ticket key always shows whole; a pill left out is no
-// keyboard stop, and a pill shown is one only in the list's Tab stop row; and line 2 paints the same while the same list is sent again.
+// keyboard stop, and a pill shown is one only in the list's Tab stop row; and line 2 paints the same while the same list is sent again. Every
+// control shown is a touch target of at least 44 px each way.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -27,7 +28,7 @@ const SIZES = [
   // A desktop with a mouse, for the tabs view only: its close marks are the small ones, not touch targets.
   { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs'] },
 ];
-const VIEWS = ['list', 'narrow', 'narrow-300', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet', 'persona', 'tabs'];
+const VIEWS = ['list', 'narrow', 'narrow-300', 'conversation', 'empty', 'history', 'settings', 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
 /** --shots <dir> saves a screenshot of each view there. */
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
@@ -78,7 +79,7 @@ const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empt
 // The list at its narrowest, 200 px, where line 2 wraps, and at 300 px, where line 2's pills shrink to their icons.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
 const listing = view === 'list' || narrow !== null;
-const open = !listing && view !== 'settings';
+const open = !listing && !view?.startsWith('settings');
 if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list { width: ' + narrow + 'px !important; min-width: 0 !important; max-width: none !important; flex: none !important; }</style>');
 // A title longer than any header here fits, so the header shows how much of it is left beside the main control.
 const longTitle = 'Call Center dialer stops receiving incoming calls when its registration lapses';
@@ -88,7 +89,7 @@ const personas = [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', per
 const items = [];
 for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
-  items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
+  items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : i === 28 ? '\\n\\n~~~\\nnpm run build\\n~~~' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
 }
 history.replaceState(null, '', location.search + (open ? '#w=1' : '#'));
 // The tabs view's work item has more artifacts, with long titles but the newest's, than any strip here fits.
@@ -121,7 +122,9 @@ if (listing) {
 }
 // History's tab reads a ticket with one entry per day over a week, so its pane scrolls.
 const historyView = { key: 'gh 1', title: 'Fix it', url: '', facts: [{ label: 'Status', value: 'Running' }], links: [], reconstructed: false, recordedSince: null, sections: [{ key: 'w1', workItemId: 1, title: 'dev:build', status: 'Running', tone: 'accent', facts: [], prompt: null, entries: Array.from({ length: 40 }, (_, i) => ({ key: 'e' + i, at: now - (40 - i) * 3600000, category: 'session', icon: 'play', text: 'Entry ' + i, lines: [], detail: null, shortId: null, links: [], tone: null, reconstructed: false, refused: null, stateChange: false })) }] };
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : {}), text: async () => '' });
+// Settings reads a file with checkboxes on General and in the playbooks' table.
+const settingsRead = { settings: { path: 'C:/home/settings.json', version: 'v1', value: { sessions: { codeMode: true }, playbooks: { 'dev:build': { description: 'Build it', template: 'Build.' }, 'dev:plan': { description: 'Plan it', template: 'Plan.', autoStart: true } } }, error: null }, permissionModes: ['default', 'auto'], codexPermissionModes: ['default'], providers: ['claude', 'codex'], templateVariables: [], sourceKinds: ['github'], sourceLabels: { github: 'GitHub' }, inUse: {}, enabled: {}, configDir: 'C:/home' };
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -269,9 +272,57 @@ const measure = `(() => {
 })()`;
 
 /** What each view opens with, clicked in order. */
+/**
+ * The touch targets under 44 px in the open view (architecture.md § Web page, Phones first), each as its name and size; `checks` counts the checkboxes
+ * measured, so a view meant to show some proves it did.
+ */
+const TOUCH = `(() => {
+  const shown = (node) => { for (let one = node; one; one = one.parentElement) { const style = getComputedStyle(one); if (style.display === 'none' || style.visibility === 'hidden') return false; } return true; };
+  const name = (node) => node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/ +/).join('.') : '');
+  let checks = 0;
+  const small = (() => {
+    // Every control shown is a touch target of at least 44 px each way (architecture.md § Web page, Phones first), measured as its box cut by
+    // every ancestor that clips without scrolling. Not held to it: line 2's pills, whose press is an open question; links inside prose; and a
+    // tab's own buttons, which fill their tab between its 1 px top and bottom borders, its whole height less those.
+  return [...document.querySelectorAll('button, a[href], [role="tab"], [role="menuitem"], [role="link"], [role="button"], input[type="checkbox"], input[type="radio"], select, summary')].filter(shown).flatMap((node) => {
+      if (node.matches('.row .pill, :is(.body, .artifact-doc, .sheet-detail, .hist-body p, .group-empty) a')) return [];
+      // A checkbox or radio takes presses on its label too, which holds it (settings.tsx).
+      const target = node.matches('input[type="checkbox"], input[type="radio"]') ? (node.closest('label') ?? node) : node;
+      const whole = target.getBoundingClientRect();
+      if (whole.width === 0 || whole.height === 0 || whole.bottom <= 0 || whole.top >= innerHeight || whole.right <= 0 || whole.left >= innerWidth) return [];
+      if (node.matches('input[type="checkbox"]')) checks++;
+      let { left, top, right, bottom } = whole;
+      for (let one = target.parentElement; one && one !== document.body; one = one.parentElement) {
+        const style = getComputedStyle(one);
+        const clip = one.getBoundingClientRect();
+        // One partly scrolled out of a scroller's view is whole once scrolled to, so it is not measured here.
+        if (/auto|scroll/.test(style.overflowX + style.overflowY) && (whole.top < clip.top + one.clientTop - 0.5 || whole.bottom > clip.top + one.clientTop + one.clientHeight + 0.5 || whole.left < clip.left + one.clientLeft - 0.5 || whole.right > clip.left + one.clientLeft + one.clientWidth + 0.5)) return [];
+        if (!/hidden|clip/.test(style.overflowX + style.overflowY)) continue;
+        left = Math.max(left, clip.left + one.clientLeft); top = Math.max(top, clip.top + one.clientTop);
+        right = Math.min(right, clip.left + one.clientLeft + one.clientWidth); bottom = Math.min(bottom, clip.top + one.clientTop + one.clientHeight);
+      }
+      const width = right - left;
+      const height = bottom - top;
+      const tab = node.parentElement?.matches('.tab') ? node.parentElement : null;
+      const tall = tab === null ? height >= 43.5 : tab.getBoundingClientRect().height >= 43.5 && height >= tab.clientHeight - 0.5;
+      return width >= 43.5 && tall ? [] : [name(node) + ' ' + Math.round(width) + 'x' + Math.round(height)];
+    });
+  })();
+  return { small, checks };
+})()`;
+
+/** A toast with its work item's link and Dismiss (toast.tsx), and the console's foot with Reconnect (console.ts). */
+const PROBES = `(() => {
+  document.getElementById('toast').insertAdjacentHTML('beforeend', '<div class="toast warning"><button type="button" class="toast-text toast-open">A failed thing</button><button type="button" class="icon dismiss" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>');
+  document.body.insertAdjacentHTML('beforeend', '<div class="console" style="position: fixed; left: 0; bottom: 0; width: 300px"><div class="console-foot"><p class="console-note">Ended.</p><button type="button" class="console-reconnect">Reconnect</button></div></div>');
+})()`;
+
 const OPEN = {
   history: ['[data-action=actions]', '[data-action=row-history]'],
-  settings: ['[data-action=list-more]', '[data-action=list-settings]'],
+  // General, which a phone's Settings opens on its navigation rather than shows.
+  settings: ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry.item'],
+  // A namespace's playbooks table.
+  'settings-table': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry.namespace'],
   drawer: ['[data-action=drawer]'],
   sheet: ['[data-action=actions]', '[data-action=row-action][data-label=Delete]'],
   persona: ['[data-action=view-menu]', '[data-action=persona]'],
@@ -475,6 +526,8 @@ try {
           await wait(150);
         }
 
+        // The toast and the console's foot, which the fake hub never raises, drawn with their own classes so their touch targets are measured.
+        if (view === 'conversation') await evaluate(PROBES);
         await wait(200);
         const m = await evaluate(measure);
 
@@ -555,6 +608,28 @@ try {
           const dragged = JSON.parse(await state());
 
           if (dragged.page !== 0 || dragged.header !== before.header || dragged.panel !== scrolled.panel) found.push('a drag on the header moved the page: ' + JSON.stringify(dragged));
+        }
+
+        // Every control's touch target, where the view opened and then down each scroller, a view's height at a time, so a control out of
+        // view at first is measured too.
+        if (missing.length === 0 && size.mouse !== true) {
+          const small = new Set();
+          let checks = 0;
+          const take = async () => { const touch = await evaluate(TOUCH); touch.small.forEach((one) => small.add(one)); checks += touch.checks; };
+          const scrollers = await evaluate('[...document.querySelectorAll("body *")].filter((node) => /auto|scroll/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight + 1).length');
+
+          await take();
+          for (let index = 0; index < scrollers; index++) {
+            for (let step = 1; step <= 40; step++) {
+              const moved = await evaluate('(() => { const node = [...document.querySelectorAll("body *")].filter((node) => /auto|scroll/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight + 1)[' + index + ']; if (!node || node.scrollTop + node.clientHeight >= node.scrollHeight - 1) return false; node.scrollTop += node.clientHeight * 0.8; return true; })()');
+
+              if (!moved) break;
+              await wait(60);
+              await take();
+            }
+          }
+          for (const one of small) found.push('a touch target under 44 px: ' + one);
+          if (view.startsWith('settings') && checks === 0) found.push('Settings showed no checkbox to measure');
         }
 
         results.push({ name, ...m });

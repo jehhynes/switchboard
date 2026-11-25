@@ -837,7 +837,7 @@ body.artifact-window > .artifact-view { height: 100%; }
    block's copy button always shows, and a reply's copy button on the metadata line is left out, since the reply's text is selected and copied
    as the system does. */
 @media (hover: none), (pointer: coarse) {
-  .code-block > .copy { opacity: 1; }
+  .code-block > .copy { opacity: 1; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
   .meta .copy { display: none; }
   button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .artifact-open, .toast .dismiss, .conn-update button.conn-reload { min-height: 44px; }
   .qc-menu-button { min-width: 44px; }
@@ -948,6 +948,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 .persona-head { flex: none; display: flex; align-items: center; gap: 4px; min-height: 35px; padding: 0 4px 0 12px; border-bottom: 1px solid var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); }
 .persona-title { flex: 1; margin: 0; font-size: 13px; font-weight: 600; }
 .persona-head button.icon { justify-content: center; min-width: 26px; height: 26px; }
+@media (hover: none), (pointer: coarse) { .persona-head button.icon { min-width: 44px; min-height: 44px; } }
 .persona-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px; }
 .persona-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .persona-option { display: flex; align-items: flex-start; gap: 6px; box-sizing: border-box; width: 100%; padding: 8px 10px 8px 4px; border: none; border-radius: 4px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -1070,6 +1071,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
    outline, and inside the box, so the tab strip and the header beside it never cover it; isolated, so it never rises above the page's menus. */
 .console.typing::after { content: ''; position: absolute; inset: 0; z-index: 50; border: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent); pointer-events: none; }
 .console > .empty { padding: 20px; }
+@media (hover: none), (pointer: coarse) { .console-reconnect { min-height: 44px; } }
 .console-reconnect { flex: none; padding: 2px 8px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, #313131); font: inherit; cursor: pointer; }
 /* The screen never scrolls: the font fits xterm.js's screen into it, and a screen too large even at the smallest font is cut off, so xterm.js's
    scrollbar is the console's only one and its scrollbars never change the area the console fits to. */
@@ -1185,7 +1187,7 @@ ol.hist-timeline { list-style: none; margin: 0; padding: 4px 12px 10px; }
   .hist-entry { grid-template-columns: 62px 24px minmax(0, 1fr); }
   .hist-gap { display: none; }
 }
-@media (hover: none), (pointer: coarse) { .hist-toolbar button.icon, .history-view button.hist-chip, .history-view button.hist-link { min-height: 44px; } }
+@media (hover: none), (pointer: coarse) { .hist-toolbar button.icon, .history-view button.hist-chip, .history-view button.hist-link { min-height: 44px; } .hist-toolbar button.icon { min-width: 44px; } .hist-filter { flex-basis: 120px; } }
 
 /* A question card on a phone (design § 6): the full width of the timeline at 14 px. */
 :where(html.phone) .question-card.qc { max-width: none; font-size: 14px; }
@@ -1208,7 +1210,7 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 @keyframes sb-toast-in { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 /* A touch screen's bars are 44 px tall. */
-@media (hover: none), (pointer: coarse) { #toast { top: calc(var(--sb-top) + 96px); } }
+@media (hover: none), (pointer: coarse) { #toast { top: calc(var(--sb-top) + 96px); } .toast .dismiss { min-width: 44px; } .toast-open { min-height: 44px; } }
 /* The connection (architecture.md § Web page, Connection; connectionView.tsx): the dot in the heads, the offline banner over the list and the
    conversation, the dimmed content it explains, the screen in the page's place, and the Update ready chip. */
 .conn-dot { flex: none; display: inline-block; width: 8px; height: 8px; margin: 0 8px 0 4px; border-radius: 50%; align-self: center; }
