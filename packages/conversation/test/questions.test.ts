@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answerBrief, answerMessage, answersIn, BATCH, cardLinks, carriedQuestions, cardSteps, cardUtterance, currentStep, deriveSlug, draftAnswers, moveStep, parseQuestions, pickLetter, questionBrief, questionLedger, questionLines, questionSegments, questionSpeech, resolveAnswers, sendLabel, setOther, stripQuestionMarkup, withdrawals, withoutEndingQuestions } from '../src/questions.js';
+import { answerBrief, answerMessage, answersIn, BATCH, cardLinks, carriedQuestions, cardSteps, cardUtterance, currentStep, deriveSlug, draftAnswers, moveStep, parseQuestions, pickLetter, questionBrief, questionLedger, questionLines, questionSegments, questionSpeech, resolveAnswers, sendLabel, setComment, stripQuestionMarkup, withdrawals, withoutEndingQuestions, withoutMultiAsk } from '../src/questions.js';
 import type { CardLinks, LedgerItem, LinkItem, QuestionLedger, StoredAnswer } from '../src/questions.js';
 
 /** The shape the conversation rules show, with a second question. */
@@ -156,14 +156,15 @@ describe('the answer message the hub writes (design § 4)', () => {
 
   it('writes one line per answered question with its slug, its text, and the label alone', () => {
     expect(answerMessage([{ question: first!, letters: ['A'], other: '' }, { question: second!, letters: [], other: '' }, { question: third!, letters: [], other: ' only for the list,\n  not the  sheet ' }])).toBe(
-      '[answers]\n- persona-registered: Register a persona as soon as you save it, or only after its voice check passes? → A) Register on save\n- design-first: Mock up the phone layout before I build it? → Other: only for the list, not the sheet',
+      '[answers]\n- persona-registered: Register a persona as soon as you save it, or only after its voice check passes? → A) Register on save\n- design-first: Mock up the phone layout before I build it? → Comment: only for the list, not the sheet',
     );
   });
 
-  it('joins several picks with "; ", puts Other last, writes a dismissal, and is empty with nothing answered', () => {
+  it('joins several picks with "; ", puts the comment last, writes a dismissal, and is empty with nothing answered', () => {
     const multi = parseQuestions('1. Where? Pick any that apply. {#where-shown}\n   - A) Web page\n   - B) Dock\n   - C) VS Code view')[0]!;
 
-    expect(answerMessage([{ question: multi, letters: ['C', 'A'], other: 'and the phone' }])).toBe('[answers]\n- where-shown: Where? Pick any that apply. → A) Web page; C) VS Code view; Other: and the phone');
+    expect(answerMessage([{ question: multi, letters: ['C', 'A'], other: 'and the phone' }])).toBe('[answers]\n- where-shown: Where? Pick any that apply. → A) Web page; C) VS Code view; Comment: and the phone');
+    expect(answerMessage([{ question: first!, letters: ['B'], other: ' only for new personas ' }])).toBe('[answers]\n- persona-registered: Register a persona as soon as you save it, or only after its voice check passes? → B) Register after the voice check; Comment: only for new personas');
     expect(answerMessage([{ question: first!, letters: [], other: '', dismissed: true }])).toBe('[answers]\n- persona-registered: Register a persona as soon as you save it, or only after its voice check passes? → No answer (dismissed)');
     expect(answerMessage([{ question: first!, letters: [], other: '   ' }])).toBe('');
   });
@@ -183,12 +184,24 @@ describe('resolving a message against the open questions (design § 4)', () => {
     ]);
   });
 
+  it('reads a pick with a comment, a comment alone, and an older Other line in [answers]', () => {
+    const text = '[answers]\n- persona-registered: Register a persona as soon as you save it, or only after its voice check passes? → B) Register after the voice check; Comment: only for new ones\n- design-first: Mock up the phone layout before I build it? → Comment: list only\n- phone-layout: How should the persona list look on a phone? → A) x; Other: older form';
+
+    expect(resolveAnswers(text, open)).toEqual([
+      { replyId: 'r1', slug: 'persona-registered', letters: ['B'], other: 'only for new ones' },
+      { replyId: 'r1', slug: 'design-first', letters: [], other: 'list only' },
+      { replyId: 'r1', slug: 'phone-layout', letters: ['A'], other: 'older form' },
+    ]);
+    expect(resolveAnswers('comment: list only', open, { replyId: 'r1', slug: 'design-first' })).toEqual([{ replyId: 'r1', slug: 'design-first', letters: [], other: 'list only' }]);
+  });
+
   it('reads "slug B", "slug: B", several on one line, and "slug other: …"', () => {
     expect(resolveAnswers('persona-registered B, phone-layout: a', open)).toEqual([
       { replyId: 'r1', slug: 'persona-registered', letters: ['B'], other: '' },
       { replyId: 'r1', slug: 'phone-layout', letters: ['A'], other: '' },
     ]);
     expect(resolveAnswers('design-first other: only the list', open)).toEqual([{ replyId: 'r1', slug: 'design-first', letters: [], other: 'only the list' }]);
+    expect(resolveAnswers('design-first comment: only the list', open)).toEqual([{ replyId: 'r1', slug: 'design-first', letters: [], other: 'only the list' }]);
     // A lower-case letter in running text is not a pick.
     expect(resolveAnswers('phone-layout a lot better now', open)).toEqual([]);
   });
@@ -430,22 +443,29 @@ describe('a card\'s draft and stepper (design § 6)', () => {
   const ledger = questionLedger([reply('r1', NEW)]);
   const card = ledger.cards.get('reply:r1')!;
 
-  it('starts at the first question, picks a single option and moves on, except on the last step', () => {
+  it('starts at the first question, picks a single option and stays on it, drops it when picked again unless told not to', () => {
     expect(currentStep(card, undefined)!.question.slug).toBe('persona-registered');
 
     const first = pickLetter(card, undefined, 'persona-registered', 'A');
 
-    expect(first).toEqual({ draft: { step: 'persona-registered', picks: { 'persona-registered': { letters: ['A'], other: null } } }, advance: true });
-    expect(pickLetter(card, first.draft, 'design-first', 'B').advance).toBe(false);
+    expect(first).toEqual({ step: 'persona-registered', picks: { 'persona-registered': { letters: ['A'], other: null } } });
+    expect(currentStep(card, first)!.question.slug).toBe('persona-registered');
+    expect(pickLetter(card, first, 'persona-registered', 'B').picks['persona-registered']!.letters).toEqual(['B']);
+    expect(pickLetter(card, first, 'persona-registered', 'A').picks['persona-registered']!.letters).toEqual([]);
+    expect(pickLetter(card, first, 'persona-registered', 'A', false).picks['persona-registered']!.letters).toEqual(['A']);
     // A letter the question does not offer changes nothing.
-    expect(pickLetter(card, first.draft, 'phone-layout', 'D')).toEqual({ draft: first.draft, advance: false });
+    expect(pickLetter(card, first, 'phone-layout', 'D')).toBe(first);
   });
 
-  it('opens Other, clearing a single choice once it has text, and moves Back, Next and to a step', () => {
-    const picked = pickLetter(card, undefined, 'phone-layout', 'A').draft;
+  it('keeps a comment beside a pick either way round, a comment alone answers, and moves Back, Next and to a step', () => {
+    const picked = pickLetter(card, undefined, 'phone-layout', 'A');
+    const commented = setComment(card, picked, 'phone-layout', 'but wider');
 
-    expect(setOther(card, picked, 'phone-layout', '').picks['phone-layout']).toEqual({ letters: ['A'], other: '' });
-    expect(setOther(card, picked, 'phone-layout', 'neither').picks['phone-layout']).toEqual({ letters: [], other: 'neither' });
+    expect(commented.picks['phone-layout']).toEqual({ letters: ['A'], other: 'but wider' });
+    expect(pickLetter(card, commented, 'phone-layout', 'B').picks['phone-layout']).toEqual({ letters: ['B'], other: 'but wider' });
+    expect(pickLetter(card, commented, 'phone-layout', 'A').picks['phone-layout']).toEqual({ letters: [], other: 'but wider' });
+    expect(draftAnswers(card, pickLetter(card, commented, 'phone-layout', 'A')).map(({ one }) => one.question.slug)).toEqual(['phone-layout']);
+    expect(setComment(card, picked, 'phone-layout', '').picks['phone-layout']).toEqual({ letters: ['A'], other: '' });
     expect(moveStep(card, picked, 'next').step).toBe('design-first');
     expect(moveStep(card, picked, 'back').step).toBe('persona-registered');
     expect(moveStep(card, { step: 'persona-registered', picks: {} }, 'back').step).toBe('persona-registered');
@@ -475,9 +495,13 @@ describe('voice (design § 7)', () => {
     const question = parseQuestions(NEW)[0]!;
 
     expect(questionSpeech(question, 1, 3)).toBe(
-      "Question 1 of 3. Persona registration. Register a persona as soon as you save it, or only after its voice check passes? Today Save registers it at once. I keep building the phone layout whichever you pick. A: Register on save, recommended: keeps today's behaviour; a broken voice shows an error the first time it speaks. B: Register after the voice check: Save takes about 2 s longer. A new persona cannot be picked until its check plays. Or say Other.",
+      "Question 1 of 3. Persona registration. Register a persona as soon as you save it, or only after its voice check passes? Today Save registers it at once. I keep building the phone layout whichever you pick. A: Register on save, recommended: keeps today's behaviour; a broken voice shows an error the first time it speaks. B: Register after the voice check: Save takes about 2 s longer. A new persona cannot be picked until its check plays. Or say Comment and your words.",
     );
-    expect(questionSpeech(parseQuestions('1. **Port** in use? {#port-choice}\n   - A) `8765`\n   - B) 8799')[0]!, 1, 1)).toBe('Port in use? A: 8765. B: 8799. Or say Other.');
+    expect(questionSpeech(parseQuestions('1. **Port** in use? {#port-choice}\n   - A) `8765`\n   - B) 8799')[0]!, 1, 1)).toBe('Port in use? A: 8765. B: 8799. Or say Comment and your words.');
+    // A multi-choice question says so, once.
+    expect(questionSpeech(parseQuestions('1. Where? {#where-shown}\n   Pick any number.\n   - A) Web page\n   - B) Dock')[0]!, 1, 1)).toBe('Where? Pick any number. Select all that apply. A: Web page. B: Dock. Or say Comment and your words.');
+    expect(questionSpeech(parseQuestions('1. Where should it show? Select all that apply. {#where-shown}\n   - A) Web page\n   - B) Dock')[0]!, 1, 1)).toBe('Where should it show? Select all that apply. A: Web page. B: Dock. Or say Comment and your words.');
+    expect(questionSpeech(parseQuestions('1. Where should it show? {#where-shown}\n   Any that apply.\n   - A) Web page\n   - B) Dock')[0]!, 1, 1)).toBe('Where should it show? Any that apply. Select all that apply. A: Web page. B: Dock. Or say Comment and your words.');
   });
 
   it('reads the card grammar from a whole utterance, homophones included, and nothing else', () => {
@@ -495,7 +519,9 @@ describe('voice (design § 7)', () => {
     ]);
     expect(cardUtterance('The second one.')).toEqual({ type: 'pick-index', index: 1 });
     expect(cardUtterance('the recommended one')).toEqual({ type: 'recommended' });
-    expect(cardUtterance('Other, only the list.')).toEqual({ type: 'other', text: 'only the list' });
+    expect(cardUtterance('Comment, only the list.')).toEqual({ type: 'comment', text: 'only the list' });
+    expect(cardUtterance('Other, only the list.')).toEqual({ type: 'comment', text: 'only the list' });
+    expect(cardUtterance('comment')).toEqual({ type: 'comment', text: '' });
     expect(['back', 'Next.', 'skip', 'repeat', 'send', 'send them'].map((one) => cardUtterance(one)?.type)).toEqual(['back', 'next', 'next', 'repeat', 'send', 'send']);
     expect(['fix the login flow', 'B and C', 'be careful', 'otherwise fine', ''].map(cardUtterance)).toEqual([null, null, null, null, null]);
   });
@@ -644,10 +670,33 @@ describe('the short forms the answered rows and the Answers bubble show', () => 
     expect(questionBrief(plainText!)).toBe('The page has no menu.');
   });
 
-  it('gives the chosen labels without letters or Markdown, then Other, or the dismissal', () => {
+  it('gives the chosen labels without letters or Markdown, then the comment, or the dismissal', () => {
     const [question] = parseQuestions('1. Which? {#which-one}\n   - A) **Start now**\n   - B) Ask first\n   - C) Never');
 
-    expect(answerBrief(question!, ['A', 'C'], '  my  own ')).toBe('Start now; Never; Other: my own');
+    expect(answerBrief(question!, ['A', 'C'], '  my  own ')).toBe('Start now; Never; Comment: my own');
+    expect(answerBrief(question!, [], 'my own')).toBe('Comment: my own');
     expect(answerBrief(question!, [], '', true)).toBe('No answer (dismissed)');
+  });
+});
+
+describe('several options (rules.ts, "Select all that apply.")', () => {
+  it('takes several options when the question asks for them, by the rules\' phrase or the older ones, and one otherwise', () => {
+    const [asked, older, single] = parseQuestions(
+      '1. Which pages need the header? Select all that apply. {#header-pages}\n   - A) List\n   - B) Settings\n2. Where? {#where-shown}\n   Pick one or more.\n   - A) Web\n   - B) Dock\n3. Which port? {#port-choice}\n   - A) 8765\n   - B) 8799',
+    );
+
+    expect([asked!.multi, older!.multi, single!.multi]).toEqual([true, true, false]);
+    expect(asked!.text).toBe('Which pages need the header? Select all that apply.');
+  });
+
+  it('leaves a closing request for several out of the shown text only, and never empties it', () => {
+    const shown = (line: string): string => withoutMultiAsk(parseQuestions(`1. ${line} {#some-slug}\n   - A) x\n   - B) y`)[0]!);
+
+    expect(shown('Which pages? Select all that apply.')).toBe('Which pages?');
+    expect(shown('Which pages? (select all that apply)')).toBe('Which pages?');
+    expect(shown('Which pages? Choose any that apply')).toBe('Which pages?');
+    expect(shown('Select all that apply.')).toBe('Select all that apply.');
+    // A request inside the sentence, not closing it, stays.
+    expect(shown('Which page is the select all that apply page?')).toBe('Which page is the select all that apply page?');
   });
 });

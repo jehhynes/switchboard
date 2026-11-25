@@ -1,12 +1,12 @@
 /**
  * The question card (PRD R103, architecture.md § Conversation view), drawn by the web page as HTML
- * strings: one question at a time, with progress dots, the topic, question and context, full-width options with their descriptions, Other, a
- * summary of the picks, Back and Next or Send; the questions already settled as rows under it. Its buttons carry `data-action`s each front end
- * handles: `card-pick`, `card-other`, `card-step`, `card-back`, `card-next`, `card-send`, `card-menu`, `card-dismiss`, `goto-card` and
+ * strings: one question at a time, with progress dots, the topic, question and context, full-width options with their descriptions and no
+ * letters, a Comment field, Back and Next or Send; the questions already settled as rows under it. Its buttons carry `data-action`s each front
+ * end handles: `card-pick`, `card-step`, `card-back`, `card-next`, `card-send`, `card-menu`, `card-dismiss`, `goto-card` and
  * `goto-message`. It never scrolls or handles touch itself, so a pan over it scrolls the conversation. Imports only the questions module, for
  * browser bundles.
  */
-import { answerBrief, cardLater, cardSteps, currentStep, draftAnswers, picked, plain, questionBrief, sendLabel } from './questions.js';
+import { answerBrief, cardLater, cardSteps, currentStep, draftAnswers, picked, plain, questionBrief, sendLabel, withoutMultiAsk } from './questions.js';
 import type { CardDraft, LedgerCard, LedgerQuestion } from './questions.js';
 
 function escape(text: string): string {
@@ -111,12 +111,15 @@ function doneHead(card: LedgerCard): string {
   return `<div class="qc-head qc-done"><span class="qc-progress">${what}</span>${link}</div>`;
 }
 
+/** What a multi-choice question's card says under it. */
+const MULTI_HINT = 'Select all that apply';
+
 /** The words an assistive reader hears for a step: "Question 2 of 3: How should the persona list look on a phone?" */
 export function stepAnnouncement(card: LedgerCard, draft: CardDraft | undefined): string {
   const steps = cardSteps(card);
   const current = currentStep(card, draft);
 
-  return current === null ? '' : `Question ${steps.indexOf(current) + 1} of ${steps.length}: ${current.question.text.replace(/[*_`]/g, '')}`;
+  return current === null ? '' : `Question ${steps.indexOf(current) + 1} of ${steps.length}: ${withoutMultiAsk(current.question).replace(/[*_`]/g, '')}${current.question.multi ? ` ${MULTI_HINT}.` : ''}`;
 }
 
 /** A question card as HTML: the open stepper over the settled rows, or the settled summary once nothing is open. */
@@ -151,39 +154,31 @@ export function renderQuestionCard(card: LedgerCard, draft: CardDraft | undefine
       }</span>`
     : '';
   const head = `<div class="qc-head"><span class="qc-progress">Question ${at + 1} of ${steps.length}</span>${steps.length > 1 ? `<span class="qc-dots">${dots}</span>` : ''}${menu}</div>`;
+  const shown = withoutMultiAsk(question);
+  const hintId = `qc-hint-${key}-${slug}`;
   const body =
     (question.topic === null ? '' : `<div class="qc-topic">${escape(question.topic)}</div>`) +
-    `<div class="qc-question">${render.inline(question.text)}</div>` +
-    (question.context === '' ? '' : `<div class="qc-context">${render.inline(question.context)}</div>`);
+    `<div class="qc-question">${render.inline(shown)}</div>` +
+    (question.context === '' ? '' : `<div class="qc-context">${render.inline(question.context)}</div>`) +
+    (question.multi ? `<div class="qc-hint" id="${escape(hintId)}">${MULTI_HINT}</div>` : '');
   const role = question.multi ? 'checkbox' : 'radio';
+  // The letters stay in the data only: an option shows a radio or check mark, and the keys 1 to 8 pick by position.
   const options = question.options
     .map((option) => {
       const on = pick?.letters.includes(option.letter) === true;
 
       return (
         `<button type="button" class="qc-option${on ? ' qc-selected' : ''}" role="${role}" aria-checked="${on}" data-action="card-pick" data-card="${key}" data-slug="${slug}" data-letter="${option.letter}"${disabled}>` +
-        `<span class="qc-letter" aria-hidden="true">${option.letter}</span><span class="qc-option-body"><span class="qc-label">${render.inline(option.label)}</span>${option.recommended ? '<span class="qc-recommended">Recommended</span>' : ''}${
+        `<span class="qc-mark qc-mark-${role}" aria-hidden="true"></span><span class="qc-option-body"><span class="qc-label">${render.inline(option.label)}</span>${option.recommended ? '<span class="qc-recommended">Recommended</span>' : ''}${
           option.description === '' ? '' : `<span class="qc-desc">${render.inline(sentenceCase(option.description))}</span>`
         }</span></button>`
       );
     })
     .join('');
-  const otherOn = pick?.other != null;
-  const other =
-    `<button type="button" class="qc-option qc-other-option${otherOn ? ' qc-selected' : ''}" role="${role}" aria-checked="${otherOn}" data-action="card-other" data-card="${key}" data-slug="${slug}"${disabled}>` +
-    `<span class="qc-letter" aria-hidden="true">…</span><span class="qc-option-body"><span class="qc-label">Other</span><span class="qc-desc">Write your own answer.</span></span></button>` +
-    (otherOn ? `<textarea class="question-other qc-other" data-card="${key}" data-slug="${slug}" rows="2" placeholder="Your answer" aria-label="Your own answer"${disabled}>${escape(pick!.other!)}</textarea>` : '');
-  const summary =
-    steps.length < 2
-      ? ''
-      : `<div class="qc-summary">${steps
-          .map((one) => {
-            const given = draft?.picks[one.question.slug];
-            const shown = !picked(given) ? '–' : [...given!.letters, ...((given!.other ?? '').trim() === '' ? [] : ['Other'])].join(', ');
-
-            return `<button type="button" class="qc-chip" data-action="card-step" data-card="${key}" data-slug="${escape(one.question.slug)}">${escape(briefLead(plain(questionBrief(one.question))))} <b>${escape(shown)}</b></button>`;
-          })
-          .join('')}</div>`;
+  const commentId = `qc-comment-${key}-${slug}`;
+  const comment =
+    `<div class="qc-comment-box"><label class="qc-comment-label" for="${escape(commentId)}">Comment</label>` +
+    `<textarea id="${escape(commentId)}" class="qc-comment" data-card="${key}" data-slug="${slug}" rows="2" placeholder="Add to your choice, or answer in your own words"${disabled}>${escape(pick?.other ?? '')}</textarea></div>`;
   const count = draftAnswers(card, draft).length;
   const last = at === steps.length - 1;
   const forward = last
@@ -194,21 +189,24 @@ export function renderQuestionCard(card: LedgerCard, draft: CardDraft | undefine
     : '';
   const more = later === 0 ? '' : `<p class="qc-later">${later} more question${later === 1 ? '' : 's'} after these</p>`;
 
-  return `<div class="question-card qc" data-card="${key}" data-card-key="${key}" data-step="${slug}" role="group" aria-label="${escape(`Questions: question ${at + 1} of ${steps.length}`)}" tabindex="-1">${head}<span class="qc-sr" aria-live="polite">${escape(stepAnnouncement(card, draft))}</span>${body}<div class="qc-options" role="${question.multi ? 'group' : 'radiogroup'}" aria-label="${escape(question.text)}">${options}${other}</div>${summary}${more}${footer}${note}${settledRows(settled, render)}</div>`;
+  return `<div class="question-card qc" data-card="${key}" data-card-key="${key}" data-step="${slug}" role="group" aria-label="${escape(`Questions: question ${at + 1} of ${steps.length}`)}" tabindex="-1">${head}<span class="qc-sr" aria-live="polite">${escape(stepAnnouncement(card, draft))}</span>${body}<div class="qc-options" role="${question.multi ? 'group' : 'radiogroup'}" aria-label="${escape(plain(shown))}"${question.multi ? ` aria-describedby="${escape(hintId)}"` : ''}>${options}</div>${comment}${more}${footer}${note}${settledRows(settled, render)}</div>`;
 }
 
-/** What a key pressed while a card has the focus does (design § 6): A–H pick, O opens Other, Enter goes on or sends, Backspace goes back. */
-export function cardKeyAction(key: string, inField: boolean): { type: 'pick'; letter: string } | { type: 'other' } | { type: 'forward' } | { type: 'back' } | null {
+/**
+ * What a key pressed while a card has the focus does (design § 6): 1–8 pick the option at that place, since the card shows no letters, Down and
+ * Up move the focus between its options, Enter goes on or sends, Backspace goes back.
+ */
+export function cardKeyAction(key: string, inField: boolean): { type: 'pick'; index: number } | { type: 'move'; by: 1 | -1 } | { type: 'forward' } | { type: 'back' } | null {
   if (inField) {
     return null;
   }
 
-  if (/^[a-h]$/i.test(key)) {
-    return { type: 'pick', letter: key.toUpperCase() };
+  if (key === 'ArrowDown' || key === 'ArrowUp') {
+    return { type: 'move', by: key === 'ArrowDown' ? 1 : -1 };
   }
 
-  if (key === 'o' || key === 'O') {
-    return { type: 'other' };
+  if (/^[1-8]$/.test(key)) {
+    return { type: 'pick', index: Number(key) - 1 };
   }
 
   return key === 'Enter' ? { type: 'forward' } : key === 'Backspace' ? { type: 'back' } : null;
@@ -244,9 +242,9 @@ export function renderAnswersBubble(text: string, answered: readonly LedgerQuest
       const said = split === -1 ? '' : rest.slice(split + 3);
       const dismissed = said === 'No answer (dismissed)';
       const question = one === undefined ? (split === -1 ? rest : rest.slice(0, split)) : plain(questionBrief(one.question));
-      const other = said.search(/(?:^|; )Other: /);
+      const other = said.search(/(?:^|; )(?:Comment|Other): /);
       const picks = other === -1 ? said : said.slice(0, other);
-      const answer = dismissed ? 'Dismissed' : one?.answer == null ? picks.replace(/(^|; )[A-H]\) /g, '$1') + (other === -1 ? '' : said.slice(other)) : answerBrief(one.question, one.answer.letters, one.answer.other);
+      const answer = dismissed ? 'Dismissed' : one?.answer == null ? picks.replace(/(^|; )[A-H]\) /g, '$1') + (other === -1 ? '' : said.slice(other).replace(/^(; )?Other: /, '$1Comment: ')) : answerBrief(one.question, one.answer.letters, one.answer.other);
       const shown = answer === '' ? '' : ` <span class="${dismissed ? 'answers-dismissed' : 'answers-answer'}">${escape(answer)}</span>`;
 
       return `<div class="answers-line"${asked === null ? '' : ` title="${escape(asked)}"`}><span class="answers-question">${escape(answer === '' ? question : briefLead(question))}</span>${shown}</div>`;

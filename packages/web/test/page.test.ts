@@ -13,7 +13,7 @@ import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
 import { SEND_RETRY_MS } from '../src/main.js';
-import { ADVANCE_MS, LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, OTHER_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, FRAME_SHOW_DELAY_MS, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
+import { LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, COMMENT_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, FRAME_SHOW_DELAY_MS, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import { BACKOFF_MS, GRACE_MS, JITTER } from '../src/connection.js';
 import { NAVIGATION_MS } from '../src/request.js';
@@ -189,14 +189,15 @@ describe('question cards in replies', () => {
     expect(host.querySelector('.question-card.qc-collapsed .qc-progress')?.textContent).toBe('Question answered');
   });
 
-  it('draws each option as a full-width button with a letter badge, its label and description, and Other last', () => {
+  it('draws each option as a full-width button with a mark and no letter, its label and description, and a Comment field under them', () => {
     const host = document.createElement('div');
 
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: 'Before I go on:\n\n1. Port? {#port-choice}\n   - A) 8765 (recommended) — the default.\n   - B) 8799' })]), newView()));
     const options = [...host.querySelectorAll('.qc-option')];
 
-    expect(options.map((one) => one.textContent)).toEqual(['A8765RecommendedThe default.', 'B8799', '…OtherWrite your own answer.']);
-    expect(options.map((one) => [...one.children].map((child) => child.className))).toEqual(Array(3).fill(['qc-letter', 'qc-option-body']));
+    expect(options.map((one) => one.textContent)).toEqual(['8765RecommendedThe default.', '8799']);
+    expect(options.map((one) => [...one.children].map((child) => child.className))).toEqual(Array(2).fill(['qc-mark qc-mark-radio', 'qc-option-body']));
+    expect(host.querySelector('.qc-options + .qc-comment-box textarea.qc-comment')).not.toBeNull();
     // The shared styles reach the page's bundle.
     expect(readFileSync(join(__dirname, '../build.mjs'), 'utf8')).toContain("'@switchboard/conversation/questionCard.css'");
   });
@@ -2146,7 +2147,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
 
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
     expect(input.disabled).toBe(false);
     // The same short placeholder in every conversation, not its title.
@@ -2171,7 +2172,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
 
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
     const live = root.querySelector<HTMLElement>('.live-words')!;
 
     expect(live.hidden).toBe(true);
@@ -2207,7 +2208,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
     source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: true, error: null } });
 
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
     const hint = root.querySelector<HTMLElement>('.composer-hint')!;
     const told = () => posts.filter((post) => post.url.endsWith('/composer')).map((post) => post.body);
 
@@ -2286,7 +2287,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
 
     helloOn(1, 's');
 
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
     const live = root.querySelector<HTMLElement>('.live-words')!;
 
     input.value = 'typed first';
@@ -2320,7 +2321,7 @@ it('shows the context meter as one ring in the composer, its numbers in the tool
 
     const slot = root.querySelector<HTMLElement>('.composer-controls .context-meter')!;
     const ring = () => slot.querySelector<HTMLButtonElement>('button.context-ring')!;
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
     expect(ring().textContent).toBe('');
     expect(ring().classList.contains('warn')).toBe(true);
@@ -2374,7 +2375,7 @@ it('shows the context meter as one ring in the composer, its numbers in the tool
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ conversation: 'read-only', state: 'idle', reason: 'The session is unobserved: sessions.installHooks is off.' })], items: [], more: false, status: null, artifacts: [] });
 
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
     expect(input.disabled).toBe(true);
     expect(input.placeholder).toBe('The session is unobserved: sessions.installHooks is off.');
@@ -3614,7 +3615,7 @@ describe('the page in use', () => {
     await flush();
     expect(moves()).toEqual([[1, 'Move up'], [1, 'Move down']]);
 
-    press(root.querySelector('textarea')!, 'ArrowUp');
+    press(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, 'ArrowUp');
     press(document.body, 'ArrowUp', { shiftKey: true });
     press(document.body, 'ArrowUp', { ctrlKey: true });
     press(document.body, 'ArrowUp', { altKey: false });
@@ -5846,10 +5847,10 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       // One question at a time, with the draft on the hub and a send of the answered one only.
       click('.still-open [data-action="card-pick"][data-letter="B"]');
       expect(posts.filter((post) => post.url.endsWith('/card-draft')).at(-1)?.body).toMatchObject({ sessionId: 's', card: 'reply:gone', draft: { step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } } });
-      await vi.advanceTimersByTimeAsync(ADVANCE_MS);
+      expect(step()).toBe('port-choice');
+      click('.still-open [data-action="card-next"]');
       expect(step()).toBe('keep-route');
-      click('.still-open [data-action="card-other"]');
-      expect(section()!.querySelector('textarea.qc-other')).not.toBeNull();
+      expect(section()!.querySelector('textarea.qc-comment')).not.toBeNull();
       click('.still-open [data-action="card-send"]');
       await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(0);
@@ -5916,21 +5917,21 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       click('[data-action="card-pick"][data-letter="B"]');
       expect(root.querySelector('[data-letter="B"]')!.getAttribute('aria-checked')).toBe('true');
       expect(drafts().at(-1)).toEqual({ step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } });
-      // A single-choice pick moves on after 200 ms.
+      // A pick stays on its question, so a comment can follow it; Next moves on.
+      await vi.advanceTimersByTimeAsync(1000);
       expect(step()).toBe('port-choice');
-      await vi.advanceTimersByTimeAsync(ADVANCE_MS);
+      click('[data-action="card-next"]');
       expect(step()).toBe('keep-route');
       expect(root.querySelector('[data-action="card-send"]')!.textContent).toBe('Send 1 of 2');
       click('[data-action="card-back"]');
       expect(step()).toBe('port-choice');
       click('[data-action="card-next"]');
-      // Other opens a field; its text reaches the hub once the typing pauses.
-      click('[data-action="card-other"]');
-      const other = root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+      // The Comment field's text reaches the hub once the typing pauses.
+      const other = root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
 
       other.value = 'keep it, for now';
       other.dispatchEvent(new Event('input', { bubbles: true }));
-      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS);
       expect(drafts().at(-1)).toEqual({ step: 'keep-route', picks: { 'port-choice': { letters: ['B'], other: null }, 'keep-route': { letters: [], other: 'keep it, for now' } } });
 
       // The hub's draft, as another device changed it, shows once the hub has carried this page's last draft back to it.
@@ -5959,27 +5960,91 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     }
   });
 
-  it('answers a card from the keyboard: letters pick, O opens Other, Enter goes on and sends, Backspace goes back', async () => {
+  it('sends a pick with a comment, and a comment typed just before a pick, Next or Send, never waiting for the pause', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    try {
+      const { page, source } = start();
+      const asked = '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove';
+      const drafts = () => posts.filter((post) => post.url.endsWith('/card-draft')).map((post) => post.body['draft']);
+      const type = (text: string) => {
+        const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
+
+        field.value = text;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+
+      hello(source, { items: [reply('r1', 2, { opening: asked })], questions: { sessionId: 's', since: 0, open: 2, oldest: 'reply:r1', drafts: {}, dismissed: [] } });
+      // A comment typed, then at once a pick: the pick's draft carries the comment.
+      type('unless 2 is taken');
+      click('[data-action="card-pick"][data-letter="A"]');
+      expect(drafts().at(-1)).toEqual({ step: 'port-choice', picks: { 'port-choice': { letters: ['A'], other: 'unless 2 is taken' } } });
+      // Picking the picked option again drops it and leaves the comment as the answer.
+      click('[data-action="card-pick"][data-letter="A"]');
+      expect(root.querySelector('[data-letter="A"]')!.getAttribute('aria-checked')).toBe('false');
+      expect(root.querySelector<HTMLButtonElement>('[data-action="card-next"]')!.disabled).toBe(false);
+      // A comment alone enables Next at once, before the typing pauses.
+      type('');
+      expect(root.querySelector<HTMLButtonElement>('[data-action="card-next"]')!.disabled).toBe(true);
+      type('either');
+      expect(root.querySelector<HTMLButtonElement>('[data-action="card-next"]')!.disabled).toBe(false);
+      click('[data-action="card-pick"][data-letter="B"]');
+      // Next straight after typing carries the newest comment.
+      type('unless it is taken');
+      click('[data-action="card-next"]');
+      expect(drafts().at(-1)).toEqual({ step: 'keep-route', picks: { 'port-choice': { letters: ['B'], other: 'unless it is taken' } } });
+      // Send counts a comment typed alone at once.
+      expect(root.querySelector('[data-action="card-send"]')!.textContent).toBe('Send 1 of 2');
+      type('next week');
+      expect(root.querySelector('[data-action="card-send"]')!.textContent).toBe('Send 2 answers');
+      click('[data-action="card-pick"][data-letter="B"]');
+      click('[data-action="card-send"]');
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.find((post) => post.url.endsWith('/send'))?.body['answers']).toEqual([
+        { card: 'reply:r1', slug: 'port-choice', letters: ['B'], other: 'unless it is taken' },
+        { card: 'reply:r1', slug: 'keep-route', letters: ['B'], other: 'next week' },
+      ]);
+      page.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('answers a card from the keyboard: numbers pick by place, arrows move between options, Enter goes on and sends, Backspace goes back', async () => {
     const { page, source } = start();
     const asked = '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove';
     const key = (name: string, target: Element = root.querySelector('.question-card')!) => target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
     const step = () => root.querySelector('.question-card')!.getAttribute('data-step');
 
     hello(source, { items: [reply('r1', 2, { opening: asked })], questions: { sessionId: 's', since: 0, open: 2, oldest: 'reply:r1', drafts: {}, dismissed: [] } });
+    // Letters no longer pick; the second option is 2.
     key('b');
+    expect(root.querySelector('[data-letter="B"]')!.getAttribute('aria-checked')).toBe('false');
+    key('2');
     expect(root.querySelector('[data-letter="B"]')!.getAttribute('aria-checked')).toBe('true');
+    key('9');
+    expect(root.querySelector('[data-letter="B"]')!.getAttribute('aria-checked')).toBe('true');
+    // Down and Up move the focus between the options, stopping at the ends.
+    key('ArrowDown');
+    expect(document.activeElement?.getAttribute('data-letter')).toBe('A');
+    key('ArrowDown', document.activeElement!);
+    key('ArrowDown', document.activeElement!);
+    expect(document.activeElement?.getAttribute('data-letter')).toBe('B');
+    key('ArrowUp', document.activeElement!);
+    expect(document.activeElement?.getAttribute('data-letter')).toBe('A');
     key('Enter');
     expect(step()).toBe('keep-route');
     key('Backspace');
     expect(step()).toBe('port-choice');
     key('Enter');
-    key('o');
-    expect(root.querySelector('textarea.qc-other')).not.toBeNull();
-    // Letters typed in Other are its text, not picks.
-    expect(key('a', root.querySelector('textarea.qc-other')!)).toBe(true);
-    root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!.value = 'later';
-    root.querySelector('textarea.qc-other')!.dispatchEvent(new Event('input', { bubbles: true }));
-    key('Enter', root.querySelector('textarea.qc-other')!);
+    // Keys typed in the Comment field are its text, not picks; Shift+Enter there adds a line.
+    expect(key('1', root.querySelector('textarea.qc-comment')!)).toBe(true);
+    expect(root.querySelector('textarea.qc-comment')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true }))).toBe(true);
+    expect(step()).toBe('keep-route');
+    root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!.value = 'later';
+    root.querySelector('textarea.qc-comment')!.dispatchEvent(new Event('input', { bubbles: true }));
+    key('Enter', root.querySelector('textarea.qc-comment')!);
     await flush();
     expect(posts.find((post) => post.url.endsWith('/send'))?.body).toMatchObject({ answers: [{ slug: 'port-choice', letters: ['B'] }, { slug: 'keep-route', letters: [], other: 'later' }] });
     page.close();
@@ -5992,28 +6057,26 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       const { page, source } = start();
       const questions = { sessionId: 's', since: 0, open: 2, oldest: 'reply:r1', drafts: {}, dismissed: [] };
       const drafts = () => posts.filter((post) => post.url.endsWith('/card-draft')).map((post) => post.body);
-      const field = (card: string) => root.querySelector<HTMLTextAreaElement>(`textarea.qc-other[data-card="${card}"]`)!;
+      const field = (card: string) => root.querySelector<HTMLTextAreaElement>(`textarea.qc-comment[data-card="${card}"]`)!;
       const type = (card: string, text: string) => {
         field(card).value = text;
         field(card).dispatchEvent(new Event('input', { bubbles: true }));
       };
 
       hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' }), reply('r2', 3, { opening: '1. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove' })], questions });
-      click('.question-card[data-card="reply:r1"] [data-action="card-other"]');
-      click('.question-card[data-card="reply:r2"] [data-action="card-other"]');
       await vi.advanceTimersByTimeAsync(0);
       posts = [];
 
       type('reply:r1', 'first');
-      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS / 2);
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS / 2);
       // Typing in another card leaves this one's pause running.
       type('reply:r2', 'second');
       // The hub's older draft, as another device last sent it, does not take the place of the text not sent yet.
       source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': { step: 'port-choice', picks: { 'port-choice': { letters: ['A'], other: null } } } } } });
       expect(field('reply:r1').value).toBe('first');
-      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS / 2);
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS / 2);
       expect(drafts()).toEqual([expect.objectContaining({ sessionId: 's', scopeGen: 3, card: 'reply:r1', draft: { step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'first' } } } })]);
-      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS / 2);
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS / 2);
       expect(drafts().map((one) => [one['card'], (one['draft'] as { picks: Record<string, { other: string }> }).picks])).toEqual([
         ['reply:r1', { 'port-choice': { letters: [], other: 'first' } }],
         ['reply:r2', { 'keep-route': { letters: [], other: 'second' } }],
@@ -6026,7 +6089,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       await vi.advanceTimersByTimeAsync(0);
       expect(posts.map((post) => post.url.split('/').at(-1))).toEqual(['card-draft', 'select']);
       expect(drafts()[0]).toMatchObject({ sessionId: 's', scopeGen: 3, card: 'reply:r1', draft: { picks: { 'port-choice': { other: 'third' } } } });
-      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS);
       expect(drafts()).toHaveLength(1);
       page.close();
     } finally {
@@ -6040,14 +6103,13 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     try {
       const { page, source } = start();
       const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
-      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-other[data-card="reply:r1"]')!;
+      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-comment[data-card="reply:r1"]')!;
       const older = { step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'older' } } };
 
       hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
-      click('[data-action="card-other"]');
       field().value = 'newest';
       field().dispatchEvent(new Event('input', { bubbles: true }));
-      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS);
       expect(posts.filter((post) => post.url.endsWith('/card-draft')).at(-1)?.body['draft']).toEqual({ step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'newest' } } });
 
       // The hub answered; events it sent before it took the draft arrive after, with an older draft or none.
@@ -6070,7 +6132,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     try {
       const { page, source } = start();
       const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
-      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-other[data-card="reply:r1"]')!;
+      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-comment[data-card="reply:r1"]')!;
       const draft = (other: string) => ({ step: 'port-choice', picks: { 'port-choice': { letters: [], other } } });
       // Another device picks B.
       const picked = { step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } };
@@ -6078,7 +6140,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       const type = async (text: string) => {
         field().value = text;
         field().dispatchEvent(new Event('input', { bubbles: true }));
-        await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+        await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS);
       };
       const held = () => {
         let release = (): void => {};
@@ -6088,7 +6150,6 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       };
 
       hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
-      click('[data-action="card-other"]');
       await vi.advanceTimersByTimeAsync(0);
 
       // Its own draft carried back, then another device's, both before the hub's answer: the other device's shows once the answer comes.
@@ -6105,22 +6166,22 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       expect(chose()).toBe('true');
 
       // An older draft refused after the newest was carried back changes nothing.
-      click('[data-action="card-other"]');
       await vi.advanceTimersByTimeAsync(0);
       slow = held();
       answers['/card-draft'] = { status: 409, body: { error: 'x' }, wait: slow.wait };
       await type('first');
       answers['/card-draft'] = { status: 200, body: {} };
       await type('second');
-      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': draft('second') } } });
+      // The comment keeps the other device's pick beside it.
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': { step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: 'second' } } } } } });
       slow.release();
       await vi.advanceTimersByTimeAsync(0);
-      expect(chose()).toBe('false');
-      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': picked } } });
+      expect(field().value).toBe('second');
       expect(chose()).toBe('true');
+      source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': { step: 'port-choice', picks: { 'port-choice': { letters: ['A'], other: null } } } } } });
+      expect(root.querySelector('.question-card[data-card="reply:r1"] [data-letter="A"]')!.getAttribute('aria-checked')).toBe('true');
 
       // A work item chosen while Other text is on its way wins over one chosen before it.
-      click('[data-action="card-other"]');
       await vi.advanceTimersByTimeAsync(0);
       slow = held();
       answers['/card-draft'] = { status: 200, body: {}, wait: slow.wait };
@@ -6145,14 +6206,13 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     try {
       const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
       hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
-      click('[data-action="card-other"]');
       await vi.advanceTimersByTimeAsync(0);
       let release = () => {};
       answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>(done => release = done) };
-      const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+      const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
       field.value = 'acknowledged';
       field.dispatchEvent(new Event('input', { bubbles: true }));
-      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS);
       const mine = { step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'acknowledged' } } };
       const other = { step: 'port-choice', picks: { 'port-choice': { letters: ['B'], other: null } } };
       source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': mine } } });
@@ -6173,14 +6233,13 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
       const items = [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })];
       hello(source, { items, questions });
-      click('[data-action="card-other"]');
       await vi.advanceTimersByTimeAsync(0);
-      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
       field().value = 'keep across reconnect';
       field().dispatchEvent(new Event('input', { bubbles: true }));
       // The stream reconnects and the hub shows the same session at a new scope generation before the typing pauses.
       hello(source, { key: 'reconnected', items, questions, scope: { ...scope, scopeGen: 1 } });
-      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS);
       expect(posts.filter((post) => post.url.endsWith('/card-draft')).at(-1)?.body).toMatchObject({ sessionId: 's', scopeGen: 1, draft: { picks: { 'port-choice': { other: 'keep across reconnect' } } } });
       expect(field()?.value).toBe('keep across reconnect');
     } finally {
@@ -6195,10 +6254,9 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     try {
       const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
       hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
-      click('[data-action="card-other"]');
       await vi.advanceTimersByTimeAsync(0);
       const type = (text: string) => {
-        const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+        const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
         field.value = text;
         field.dispatchEvent(new Event('input', { bubbles: true }));
       };
@@ -6231,13 +6289,12 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     try {
       const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
       hello(source, { items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
-      click('[data-action="card-other"]');
       await vi.advanceTimersByTimeAsync(0);
       answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>(done => release = done) };
-      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-other')!;
+      const field = () => root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
       field().value = 'acknowledged';
       field().dispatchEvent(new Event('input', { bubbles: true }));
-      await vi.advanceTimersByTimeAsync(OTHER_SETTLE_MS);
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS);
       source.emit('questions', { questions: { ...questions, drafts: { 'reply:r1': { step: 'port-choice', picks: { 'port-choice': { letters: [], other: 'acknowledged' } } } } } });
       await vi.advanceTimersByTimeAsync(19_900);
       field().value = 'newest still typing';
@@ -6579,7 +6636,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     hello(source);
 
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
     answers['/files'] = { status: 200, body: { files: [{ path: 'src/my file.ts', dir: false }] } };
     input.value = 'see @my';
@@ -6622,7 +6679,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     source.emit('message', { message: message('m9', 9, { delivery: 'not-sent', error: 'The holder did not answer.', text: 'lost words' }), giveBack: true });
     // One this page did not send stays out of its composer.
     source.emit('message', { message: message('m8', 8, { delivery: 'not-sent', error: 'x', text: 'not mine' }) });
-    expect(root.querySelector('textarea')!.value).toBe('lost words');
+    expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('lost words');
     expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The holder did not answer.');
     // While the voice is elsewhere, one Talk here takes the cluster's place; here, Speak replies, with no Stop beside it while a reply plays.
     expect(root.querySelector('[data-voice="speak-replies"]')).toBeNull();
@@ -6663,7 +6720,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(posts.filter((post) => post.url.endsWith('/mic-timing')).map((post) => [post.body['outcome'], (post.body['steps'] as Array<{ step: string }>).map((one) => one.step)])).toEqual([['paused-other-app', ['hub answered', 'voice confirmed']]]);
 
     // Focusing the box and leaving it tell the hub, for the focus rule of dictation.
-    const box = root.querySelector('textarea')!;
+    const box = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
     box.focus();
     box.blur();
@@ -7054,7 +7111,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     history.replaceState(null, '', '#w=1');
 
     const first = start();
-    const input = () => root.querySelector('textarea')!;
+    const input = () => root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
     hello(first.source);
     click('[data-action="picker"]');
@@ -7338,7 +7395,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     hello(source);
 
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
     const sends = () => posts.filter((post) => post.url.endsWith('/send'));
 
     input.value = 'Ship it';
@@ -7562,7 +7619,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     hello(source);
 
-    const box = () => root.querySelector('textarea')!;
+    const box = () => root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
     const sends = () => posts.filter((post) => post.url.endsWith('/send'));
     const type = (text: string) => {
       box().value = text;
@@ -7644,7 +7701,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     hello(source);
 
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
     expect(root.querySelector('.header .conn-dot')?.getAttribute('aria-label')).toBe('Connected');
     source.emit('error', {});
@@ -7777,7 +7834,7 @@ describe('the page against late answers', () => {
   const scopeOf = (workItemId: number, scopeGen: number, sessionId: string) => ({ ...scope, workItemId, scopeGen, sessionId, conversations: [1, 2].map((id) => ({ ...scope.conversations[0]!, workItemId: id, title: `W${id}`, sessionId: `s${id}` })) });
   const helloFor = (source: FakeSource, workItemId: number, scopeGen: number, items: unknown[] = []) => source.emit('hello', { key: 'pk', groups: [], scope: scopeOf(workItemId, scopeGen, `s${workItemId}`), sessions: [session({ id: `s${workItemId}` })], items, more: true, status: null, artifacts: [] });
   const type = (text: string) => {
-    const input = root.querySelector('textarea')!;
+    const input = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
 
     input.value = text;
     input.dispatchEvent(new Event('input'));
@@ -7792,18 +7849,18 @@ describe('the page against late answers', () => {
     source.emit('message', { message: message('m1', 9, { workItemId: 1, delivery: 'not-sent', error: 'The holder did not answer.', text: 'first words' }) });
     pending.shift()!.resolve({ status: 200, body: { message: { id: 'm1' } } });
     await flush();
-    expect(root.querySelector('textarea')!.value).toBe('first words');
+    expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('first words');
     expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The holder did not answer.');
 
     type('second words');
     pending.shift()!.resolve({ status: 200, body: { message: { id: 'm2' } } });
     await flush();
-    expect(root.querySelector('textarea')!.value).toBe('');
+    expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('');
     helloFor(source, 2, 4);
     source.emit('message', { message: message('m2', 10, { workItemId: 1, delivery: 'not-sent', error: 'The session ended.', text: 'second words' }) });
-    expect(root.querySelector('textarea')!.value).toBe('');
+    expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('');
     helloFor(source, 1, 5);
-    expect(root.querySelector('textarea')!.value).toBe('second words');
+    expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('second words');
     expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The session ended.');
     page.close();
   });
@@ -7850,7 +7907,7 @@ describe('the page against late answers', () => {
     source.emit('message', { message: message('m5', 9, { workItemId: 1, delivery: 'not-sent', error: 'The session ended.', text: '[answers]\n- pick: Pick: → A) x' }) });
     expect(root.querySelector('.qc-error')!.textContent).toBe('The session ended.');
     expect(root.querySelector<HTMLButtonElement>('[data-action="card-send"]')!.disabled).toBe(false);
-    expect(root.querySelector<HTMLTextAreaElement>('textarea:not(.qc-other)')!.value).toBe('');
+    expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('');
     page.close();
   });
 

@@ -1480,12 +1480,12 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     it('writes the [answers] message a Send posts, stores its links, and types it', async () => {
       const { service, store, open, body, held, view } = setupCards();
       const mine = open(2);
-      const answer = service.send(body(mine.key, { text: undefined, answers: [card(), card({ slug: 'keep-route', letters: [], other: ' keep it,\n for now ' })] }));
+      const answer = service.send(body(mine.key, { text: undefined, answers: [card({ other: 'unless it is taken' }), card({ slug: 'keep-route', letters: [], other: ' keep it,\n for now ' })] }));
 
       expect(answer.status).toBe(200);
-      expect(messageOf(answer).text).toBe('[answers]\n- port-choice: Which port? → B) 8799\n- keep-route: Keep the old route? → Other: keep it, for now');
+      expect(messageOf(answer).text).toBe('[answers]\n- port-choice: Which port? → B) 8799; Comment: unless it is taken\n- keep-route: Keep the old route? → Comment: keep it, for now');
       expect(store.message(messageOf(answer).id)?.answers).toEqual([
-        { replyId: 'q1', slug: 'port-choice', letters: ['B'], other: '', via: 'card' },
+        { replyId: 'q1', slug: 'port-choice', letters: ['B'], other: 'unless it is taken', via: 'card' },
         { replyId: 'q1', slug: 'keep-route', letters: [], other: 'keep it, for now', via: 'card' },
       ]);
       await settled(() => expect(held.writes.join('')).toContain('[answers]'));
@@ -1625,23 +1625,47 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
       const { service, store, open, view } = setupCards();
       const mine = open(2);
 
-      expect(service.cardSpeech('s2', 'q1')).toEqual({ id: 'card:q1#port-choice', text: 'Question 1 of 2. Port. Which port? A: 8765, recommended: the default. B: 8799: free on this machine. Or say Other.' });
+      expect(service.cardSpeech('s2', 'q1')).toEqual({ id: 'card:q1#port-choice', text: 'Question 1 of 2. Port. Which port? A: 8765, recommended: the default. B: 8799: free on this machine. Or say Comment and your words.' });
       expect(service.cardUtterance(mine.key, 's2', 'fix the login flow')).toBeNull();
       expect(service.cardUtterance(mine.key, 's2', 'repeat')).toEqual({ say: service.cardSpeech('s2', 'q1')!.text });
       expect(service.cardUtterance(mine.key, 's2', 'the fourth one')).toEqual({ say: 'There is no such option.' });
       expect(service.cardUtterance(mine.key, 's2', 'send')).toEqual({ say: 'Nothing to send yet. Pick an answer first.' });
-      expect(service.cardUtterance(mine.key, 's2', 'the recommended one')).toEqual({ say: 'A. Question 2 of 2. Keep the old route? A: Keep it. B: Remove it. Or say Other.' });
+      expect(service.cardUtterance(mine.key, 's2', 'the recommended one')).toEqual({ say: 'A. Question 2 of 2. Keep the old route? A: Keep it. B: Remove it. Or say Comment and your words.' });
       expect(service.drafts('s2').get('reply:q1')).toEqual({ step: 'keep-route', picks: { 'port-choice': { letters: ['A'], other: null } } });
       expect(service.cardUtterance(mine.key, 's2', 'back')?.say).toMatch(/^Question 1 of 2/);
       expect(service.cardUtterance(mine.key, 's2', 'next')?.say).toMatch(/^Question 2 of 2/);
-      expect(service.cardUtterance(mine.key, 's2', 'Other, keep it for a week.')).toEqual({ say: 'Other. Sending 2 answers.' });
+      // A pick that answers the last question waits, so a comment can follow it; saying the pick again keeps it.
+      expect(service.cardUtterance(mine.key, 's2', 'B')).toEqual({ say: 'B. Say send, or say Comment and your words.' });
+      expect(service.cardUtterance(mine.key, 's2', 'B')).toEqual({ say: 'B. Say send, or say Comment and your words.' });
+      expect(service.drafts('s2').get('reply:q1')?.picks['keep-route']).toEqual({ letters: ['B'], other: null });
+      expect(service.cardUtterance(mine.key, 's2', 'Comment')).toEqual({ say: 'Say Comment and then your words.' });
+      expect(service.cardUtterance(mine.key, 's2', 'Comment, keep it for a week.')).toEqual({ say: 'Comment added. Sending 2 answers.' });
 
       const sent = store.conversation('s2', null, 10).items.filter((item) => item.type === 'message').at(-1)!;
 
-      expect(sent).toMatchObject({ origin: 'voice', text: '[answers]\n- port-choice: Which port? → A) 8765\n- keep-route: Keep the old route? → Other: keep it for a week' });
+      expect(sent).toMatchObject({ origin: 'voice', text: '[answers]\n- port-choice: Which port? → A) 8765\n- keep-route: Keep the old route? → B) Remove it; Comment: keep it for a week' });
       expect((sent as { answers?: Array<{ via: string }> }).answers?.map((one) => one.via)).toEqual(['voice', 'voice']);
       expect(service.cardSpeech('s2', 'q1')).toBeNull();
       expect(service.cardUtterance(mine.key, 's2', 'B')).toBeNull();
+    });
+
+    it('sends a one-question card by voice on "send" after its pick, and a comment alone, said as the older "other", at once', () => {
+      const { service, store, open } = setupCards();
+      const mine = open(2);
+      const last = (): unknown => store.conversation('s2', null, 10).items.filter((item) => item.type === 'message').at(-1);
+
+      ask(store, 'q2', '1. Ship it today? {#ship-today}\n   - A) Ship now — tag the release\n   - B) Wait — after the review');
+      // The operator works in the first card.
+      service.cardCommand('card-draft', { window: mine.key, scopeGen: 1, opId: 'd1', sessionId: 's2', card: 'reply:q1', draft: { step: 'port-choice', picks: {} } });
+      expect(service.cardUtterance(mine.key, 's2', 'Other, neither port')).toEqual({ say: expect.stringMatching(/^Comment added\. Question 2 of 2/) });
+      expect(service.cardUtterance(mine.key, 's2', 'A')).toEqual({ say: 'A. Say send, or say Comment and your words.' });
+      expect(last()).toBeUndefined();
+      expect(service.cardUtterance(mine.key, 's2', 'send')).toEqual({ say: 'Sending 2 answers.' });
+      expect(last()).toMatchObject({ text: '[answers]\n- port-choice: Which port? → Comment: neither port\n- keep-route: Keep the old route? → A) Keep it' });
+      // The one-question card is current now: its pick waits for send too.
+      expect(service.cardUtterance(mine.key, 's2', 'B')).toEqual({ say: 'B. Say send, or say Comment and your words.' });
+      expect(service.cardUtterance(mine.key, 's2', 'send')).toEqual({ say: 'Sending one answer.' });
+      expect(last()).toMatchObject({ text: '[answers]\n- ship-today: Ship it today? → B) Wait' });
     });
   });
 

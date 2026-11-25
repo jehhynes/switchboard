@@ -2,7 +2,7 @@ import { countsUnread, inTranscript, summarizeMessage } from '@switchboard/core'
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
-import { ArtifactFolder, realInside, EXTERNAL_NAME, ExternalArtifacts, externalFile, externalName, inGit, joinMessages, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
+import { ArtifactFolder, realInside, EXTERNAL_NAME, ExternalArtifacts, externalFile, externalName, inGit, joinMessages, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setComment, SLUG } from '@switchboard/conversation';
 import type { CardDraft, CarriedQuestion, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
 import type { MessageAnswer } from '@switchboard/core';
 import { carriedCards, dismissedAt, questionIndex, questionsSince } from './questions.js';
@@ -934,8 +934,9 @@ export class ConversationService {
 
   /**
    * A whole utterance applied to the session's open card when it is a card command (design § 7): a letter, an ordinal, "the recommended one",
-   * "other, …", "back", "next", "repeat" or "send". A single-choice pick moves on and reads the next unanswered question; once every question of
-   * the card's batch has a pick, its answers are sent as a `[spoken] [voice] [answers]` message. What to say back, or null for dictation.
+   * "comment, …" (or "other, …"), "back", "next", "repeat" or "send". A single-choice pick or a comment moves on and reads the next unanswered
+   * question; once every question of the card's batch has an answer, a comment or "send" sends them as a `[spoken] [voice] [answers]` message,
+   * and a pick asks for either, so a comment can still follow it. What to say back, or null for dictation.
    */
   cardUtterance(key: string, sessionId: string, text: string): { say: string } | null {
     const command = cardUtterance(text);
@@ -986,36 +987,41 @@ export class ConversationService {
       }
       case 'send':
         return draftAnswers(card, drafts.get(card.key)).length === 0 ? { say: 'Nothing to send yet. Pick an answer first.' } : send('');
-      case 'other': {
+      case 'comment': {
         if (command.text === '') {
-          return { say: 'Say Other and then your answer.' };
+          return { say: 'Say Comment and then your words.' };
         }
 
-        const draft = setOther(card, drafts.get(card.key), step.question.slug, command.text);
+        // The comment joins any option picked before it, as on the card.
+        const draft = setComment(card, drafts.get(card.key), step.question.slug, command.text);
 
         save(draft);
-        return this.#afterVoicePick(card, draft, steps, step, 'Other.', speak, save, send);
+        return step.question.multi ? { say: 'Comment added. Say next when you are done.' } : this.#afterVoicePick(card, draft, steps, step, 'Comment added.', speak, save, send);
       }
       default: {
         if (letter === undefined || !options.some((option) => option.letter === letter)) {
           return { say: command.type === 'recommended' ? 'No option is recommended.' : 'There is no such option.' };
         }
 
-        const { draft } = pickLetter(card, drafts.get(card.key), step.question.slug, letter);
+        // A spoken letter picks it, never drops it, so saying it again keeps the answer.
+        const draft = pickLetter(card, drafts.get(card.key), step.question.slug, letter, false);
 
         save(draft);
-        return step.question.multi ? { say: `${letter}. Say next when you are done.` } : this.#afterVoicePick(card, draft, steps, step, `${letter}.`, speak, save, send);
+        return step.question.multi ? { say: `${letter}. Say next when you are done.` } : this.#afterVoicePick(card, draft, steps, step, `${letter}.`, speak, save, send, false);
       }
     }
   }
 
-  /** After a spoken answer: sends the card once every question of its batch has one, else moves to the next question without one and reads it. */
-  #afterVoicePick(card: LedgerCard, draft: CardDraft, steps: LedgerQuestion[], step: LedgerQuestion, said: string, speak: (draft: CardDraft) => string, save: (draft: CardDraft) => void, send: (said: string) => { say: string }): { say: string } {
+  /**
+   * After a spoken answer: moves to the next question without one and reads it; once every question of its batch has one, sends the card after a
+   * comment, but after a pick (`sendNow` false) waits for "send" or a comment, which could not be added once sent.
+   */
+  #afterVoicePick(card: LedgerCard, draft: CardDraft, steps: LedgerQuestion[], step: LedgerQuestion, said: string, speak: (draft: CardDraft) => string, save: (draft: CardDraft) => void, send: (said: string) => { say: string }, sendNow = true): { say: string } {
     const after = steps.slice(steps.indexOf(step) + 1).concat(steps.slice(0, steps.indexOf(step)));
     const next = after.find((one) => !picked(draft.picks[one.question.slug]));
 
     if (next === undefined) {
-      return send(`${said} `);
+      return sendNow ? send(`${said} `) : { say: `${said} Say send, or say Comment and your words.` };
     }
 
     const moved = moveStep(card, draft, next.question.slug);
@@ -3224,7 +3230,7 @@ function closedReason(state: string): string {
   }
 }
 
-/** A card draft from a command body, checked: a step slug or null, and picks by slug of letters A to H and an Other text or null; null when malformed. */
+/** A card draft from a command body, checked: a step slug or null, and picks by slug of letters A to H and a comment or null; null when malformed. */
 function parseDraft(value: unknown): CardDraft | null {
   if (typeof value !== 'object' || value === null) {
     return null;

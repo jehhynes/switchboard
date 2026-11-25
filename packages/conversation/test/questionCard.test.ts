@@ -31,7 +31,7 @@ describe('the question card (design § 6)', () => {
   const ledger = questionLedger([reply('r1', NEW)]);
   const card = ledger.cards.get('reply:r1')!;
 
-  it('shows one question at a time with its progress, topic, context, options and Other, no slug, and Next disabled until a pick', () => {
+  it('shows one question at a time with its progress, topic, context, options without letters and a Comment field, no slug, and Next disabled until a pick', () => {
     const view = host(renderQuestionCard(card, undefined, { canAnswer: true, inline }));
 
     expect(view.querySelector('.qc-progress')?.textContent).toBe('Question 1 of 3');
@@ -41,29 +41,35 @@ describe('the question card (design § 6)', () => {
     expect(view.querySelector('.qc-topic')?.textContent).toBe('Persona registration');
     expect(view.querySelector('.qc-question')?.textContent).toBe('Register on save, or after its voice check?');
     expect(view.querySelector('.qc-context')?.textContent).toBe('Today Save registers it at once.');
-    expect([...view.querySelectorAll('.qc-option')].map((one) => one.textContent)).toEqual(["ARegister on saveRecommendedKeeps today's behaviour.", 'BRegister after the voice checkSave takes about 2 s longer.', '…OtherWrite your own answer.']);
+    expect([...view.querySelectorAll('.qc-option')].map((one) => one.textContent)).toEqual(["Register on saveRecommendedKeeps today's behaviour.", 'Register after the voice checkSave takes about 2 s longer.']);
+    expect([...view.querySelectorAll('.qc-option')].map((one) => [one.getAttribute('role'), one.querySelector('.qc-mark')?.className, one.querySelector('.qc-mark')?.getAttribute('aria-hidden')])).toEqual(Array(2).fill(['radio', 'qc-mark qc-mark-radio', 'true']));
+    expect(view.querySelector('.qc-letter, .qc-summary, .qc-chip, [data-action="card-other"]')).toBeNull();
     expect(view.querySelector('.qc-options')?.getAttribute('role')).toBe('radiogroup');
+    expect(view.querySelector('.qc-hint')).toBeNull();
+    // The Comment field is always there, empty, and labelled.
+    const comment = view.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
+
+    expect(comment.textContent).toBe('');
+    expect(view.querySelector(`label[for="${comment.id}"]`)?.textContent).toBe('Comment');
     expect(view.querySelector('[data-action="card-back"]')?.hasAttribute('disabled')).toBe(true);
     expect(view.querySelector('[data-action="card-next"]')?.hasAttribute('disabled')).toBe(true);
     expect(view.querySelector('.qc-sr')?.textContent).toBe('Question 1 of 3: Register on save, or after its voice check?');
-    expect([...view.querySelectorAll('.qc-chip')].map((one) => one.textContent)).toEqual(['Persona registration: –', 'Phone layout: –', 'Design first? –']);
   });
 
-  it('marks the pick, fills its dot, enables Next and shows the picks in the summary', () => {
+  it('marks the pick, fills its dot and enables Next', () => {
     const view = host(renderQuestionCard(card, { step: 'persona-registered', picks: { 'persona-registered': { letters: ['A'], other: null } } }, { canAnswer: true, inline }));
 
     expect(view.querySelector('.qc-option.qc-selected')?.getAttribute('data-letter')).toBe('A');
     expect(view.querySelector('.qc-option[data-letter="A"]')?.getAttribute('aria-checked')).toBe('true');
     expect(view.querySelector('.qc-dot.qc-filled')).not.toBeNull();
     expect(view.querySelector('[data-action="card-next"]')?.hasAttribute('disabled')).toBe(false);
-    expect(view.querySelector('.qc-chip')?.textContent).toBe('Persona registration: A');
   });
 
-  it('opens a text area under Other, and offers Send 2 of 3 on the last step when one question is left', () => {
-    const view = host(renderQuestionCard(card, { step: 'design-first', picks: { 'persona-registered': { letters: ['A'], other: null }, 'design-first': { letters: [], other: 'only the list' } } }, { canAnswer: true, inline }));
+  it('shows a comment beside a pick, and offers Send 2 of 3 on the last step when one question is left', () => {
+    const view = host(renderQuestionCard(card, { step: 'design-first', picks: { 'persona-registered': { letters: ['A'], other: null }, 'design-first': { letters: ['B'], other: 'only the list' } } }, { canAnswer: true, inline }));
 
-    expect(view.querySelector('textarea.qc-other')?.textContent).toBe('only the list');
-    expect(view.querySelector('.qc-other-option')?.getAttribute('aria-checked')).toBe('true');
+    expect(view.querySelector('textarea.qc-comment')?.textContent).toBe('only the list');
+    expect(view.querySelector('.qc-option.qc-selected')?.getAttribute('data-letter')).toBe('B');
     expect(view.querySelector('[data-action="card-send"]')?.textContent).toBe('Send 2 of 3');
     expect(view.querySelector('[data-action="card-send"]')?.hasAttribute('disabled')).toBe(false);
     expect(view.querySelector('[data-action="card-next"]')).toBeNull();
@@ -133,7 +139,7 @@ describe('the question card (design § 6)', () => {
     expect(view.querySelector('.qc-done .qc-progress')?.textContent).toBe('All 2 questions settled');
     expect(view.querySelector('.qc-collapsed')).toBeNull();
     expect([...view.querySelectorAll('.qc-row')].map((row) => [row.querySelector('.qc-state')?.getAttribute('title'), row.querySelector('.qc-state .codicon')?.className, row.querySelector('.qc-row-main')?.textContent])).toEqual([
-      ['Answered', 'codicon codicon-check', 'Port: 8765; the default port; Other: and log it'],
+      ['Answered', 'codicon codicon-check', 'Port: 8765; the default port; Comment: and log it'],
       ['Dismissed', 'codicon codicon-dash', 'Keep the old route for now?You dismissed it; the session was told.'],
     ]);
     expect(view.textContent).not.toMatch(/port-choice|keep-route|A\)|recommended/);
@@ -167,20 +173,26 @@ describe('the question card (design § 6)', () => {
 });
 
 describe('the card keys (design § 6)', () => {
-  it('picks A–H, opens Other with O, goes on with Enter and back with Backspace, and leaves a field\'s typing alone', () => {
-    expect(cardKeyAction('b', false)).toEqual({ type: 'pick', letter: 'B' });
-    expect(cardKeyAction('O', false)).toEqual({ type: 'other' });
+  it('picks by place with 1–8, moves with Down and Up, goes on with Enter and back with Backspace, takes no letters, and leaves a field\'s typing alone', () => {
+    expect(cardKeyAction('2', false)).toEqual({ type: 'pick', index: 1 });
+    expect(cardKeyAction('8', false)).toEqual({ type: 'pick', index: 7 });
+    expect(cardKeyAction('9', false)).toBeNull();
+    expect(cardKeyAction('ArrowDown', false)).toEqual({ type: 'move', by: 1 });
+    expect(cardKeyAction('ArrowUp', false)).toEqual({ type: 'move', by: -1 });
+    expect(cardKeyAction('b', false)).toBeNull();
+    expect(cardKeyAction('O', false)).toBeNull();
+    expect(cardKeyAction('2', true)).toBeNull();
+    expect(cardKeyAction('ArrowDown', true)).toBeNull();
     expect(cardKeyAction('Enter', false)).toEqual({ type: 'forward' });
     expect(cardKeyAction('Backspace', false)).toEqual({ type: 'back' });
     expect(cardKeyAction('z', false)).toBeNull();
-    expect(cardKeyAction('b', true)).toBeNull();
   });
 });
 
 describe('the Answers bubble (design § 4)', () => {
   it('hides the tag and the slugs, shows each line as "Short question: Choice", with the Questions link in its header', () => {
     const ledger = questionLedger([reply('r1', NEW), { type: 'message', id: 'm1', text: 'x', withdrawn: false, delivery: 'sent', at: 20, answers: [{ replyId: 'r1', slug: 'persona-registered', letters: ['A'], other: '', via: 'card' }] }]);
-    const text = '[spoken] [answers]\n- persona-registered: Register on save, or after its voice check? → A) Register on save\n- design-first: Mock it up first? → Other: a → b\n- phone-layout: How should the list look? → No answer (dismissed)\n- old-one: Which? → B) Two; C) Three';
+    const text = '[spoken] [answers]\n- persona-registered: Register on save, or after its voice check? → A) Register on save\n- design-first: Mock it up first? → Comment: a → b\n- phone-layout: How should the list look? → No answer (dismissed)\n- old-one: Which? → B) Two; C) Three';
     const view = host(renderAnswersBubble(text, ledger.answers.get('m1')!));
 
     expect(isAnswerMessage(text)).toBe(true);
@@ -188,12 +200,14 @@ describe('the Answers bubble (design § 4)', () => {
     expect(view.querySelector('.answers-head .answers-title')?.textContent).toBe('Answers');
     expect([...view.querySelectorAll('.answers-line')].map((line) => [line.querySelector('.answers-question')?.textContent, line.querySelector('.answers-answer, .answers-dismissed')?.textContent])).toEqual([
       ['Persona registration:', 'Register on save'],
-      ['Mock it up first?', 'Other: a → b'],
+      ['Mock it up first?', 'Comment: a → b'],
       ['How should the list look?', 'Dismissed'],
       ['Which?', 'Two; Three'],
     ]);
-    // An unknown question's Other text keeps what looks like a letter.
-    expect(host(renderAnswersBubble('[answers]\n- gone-one: Which? → B) Two; Other: Step A; B) keep it', [])).querySelector('.answers-answer')?.textContent).toBe('Two; Other: Step A; B) keep it');
+    // An unknown question's comment keeps what looks like a letter, and an older Other line reads as a comment.
+    expect(host(renderAnswersBubble('[answers]\n- gone-one: Which? → B) Two; Comment: Step A; B) keep it', [])).querySelector('.answers-answer')?.textContent).toBe('Two; Comment: Step A; B) keep it');
+    expect(host(renderAnswersBubble('[answers]\n- gone-one: Which? → B) Two; Other: Step A', [])).querySelector('.answers-answer')?.textContent).toBe('Two; Comment: Step A');
+    expect(host(renderAnswersBubble('[answers]\n- gone-one: Which? → Other: mine', [])).querySelector('.answers-answer')?.textContent).toBe('Comment: mine');
     expect(view.querySelector('.answers-line')?.getAttribute('title')).toBe('Register on save, or after its voice check?');
     expect(view.querySelector('.answers-head [data-action="goto-card"]')?.getAttribute('data-target-card')).toBe('reply:r1');
     expect(view.textContent).not.toMatch(/persona-registered|design-first|phone-layout|old-one/);
@@ -201,13 +215,31 @@ describe('the Answers bubble (design § 4)', () => {
   });
 });
 
-describe('the picks summary', () => {
-  it('names each question by its short form, never its slug', () => {
-    const two = questionLedger([reply('r1', '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Keep the route? {#keep-route}\n   - A) Yes\n   - B) No')]);
-    const view = host(renderQuestionCard(two.cards.get('reply:r1')!, undefined, { canAnswer: true, inline }));
+describe('a multi-choice question', () => {
+  it('says that several can be chosen, with check marks, a hint the group names, and the closing request said once', () => {
+    const multi = questionLedger([reply('r1', '1. Which pages need the header? Select all that apply. {#header-pages}\n   - A) List\n   - B) Settings\n   - C) Voice')]);
+    const view = host(renderQuestionCard(multi.cards.get('reply:r1')!, { step: 'header-pages', picks: { 'header-pages': { letters: ['A', 'C'], other: 'and the phone' } } }, { canAnswer: true, inline }));
+    const hint = view.querySelector('.qc-hint')!;
 
-    expect([...view.querySelectorAll('.qc-chip')].map((one) => one.textContent)).toEqual(['Which port? –', 'Keep the route? –']);
-    expect(view.textContent).not.toMatch(/port-choice|keep-route/);
+    expect(view.querySelector('.qc-question')?.textContent).toBe('Which pages need the header?');
+    expect(hint.textContent).toBe('Select all that apply');
+    expect(view.querySelector('.qc-options')?.getAttribute('role')).toBe('group');
+    expect(view.querySelector('.qc-options')?.getAttribute('aria-describedby')).toBe(hint.id);
+    expect([...view.querySelectorAll('.qc-option')].map((one) => [one.getAttribute('role'), one.getAttribute('aria-checked'), one.querySelector('.qc-mark')?.className])).toEqual([
+      ['checkbox', 'true', 'qc-mark qc-mark-checkbox'],
+      ['checkbox', 'false', 'qc-mark qc-mark-checkbox'],
+      ['checkbox', 'true', 'qc-mark qc-mark-checkbox'],
+    ]);
+    expect(view.querySelector('textarea.qc-comment')?.textContent).toBe('and the phone');
+    expect(view.querySelector('.qc-sr')?.textContent).toBe('Question 1 of 1: Which pages need the header? Select all that apply.');
+  });
+
+  it('shows the hint for a question an older phrase made multi-choice, keeping its text', () => {
+    const multi = questionLedger([reply('r1', '1. Where? Pick one or more. {#where-shown}\n   - A) Web\n   - B) Dock')]);
+    const view = host(renderQuestionCard(multi.cards.get('reply:r1')!, undefined, { canAnswer: true, inline }));
+
+    expect(view.querySelector('.qc-question')?.textContent).toBe('Where? Pick one or more.');
+    expect(view.querySelector('.qc-hint')?.textContent).toBe('Select all that apply');
   });
 });
 

@@ -41,7 +41,7 @@ const QUESTION = /^\s{0,3}(?:[-*+]\s+)?(?:\*\*|__)?(\d{1,2})[.)](?:\*\*|__)?\s+(
  */
 const OPTION = /^\s*(?:[-*+]\s+)?(?:\*\*|__)?(?:\(([A-Ha-h])\)|([A-Ha-h])\)|([A-H])[.:])(?:\*\*|__)?\s+(.*\S)\s*$/;
 const FENCE = /^\s*(`{3,}|~{3,})/;
-/** A question that says it takes several options. */
+/** A question that says it takes several options; the rules ask for "Select all that apply." (rules.ts). */
 const MULTI = /\b(?:all that apply|any that apply|one or more|(?:choose|pick|select) (?:any|all|several|multiple|more than one)|multiple choices?)\b/i;
 /** A question's id at the end of its line. */
 const SLUG_MARK = /\s*\{#([a-z][a-z0-9-]{2,39})\}\s*$/;
@@ -704,7 +704,7 @@ export function plain(text: string): string {
     .trim();
 }
 
-/** What an entry answers, as its line ends: "A) Label; C) Label; Other: text", or "No answer (dismissed)". */
+/** What an entry answers, as its line ends: "A) Label; C) Label; Comment: text", "Comment: text" alone, or "No answer (dismissed)". */
 export function answerSummary(question: Question, letters: readonly string[], other: string, dismissed = false): string {
   if (dismissed) {
     return 'No answer (dismissed)';
@@ -713,7 +713,17 @@ export function answerSummary(question: Question, letters: readonly string[], ot
   const picked = question.options.filter((option) => letters.includes(option.letter)).map((option) => `${option.letter}) ${plain(option.label)}`);
   const free = other.replace(/\s+/g, ' ').trim();
 
-  return [...picked, ...(free === '' ? [] : [`Other: ${free}`])].join('; ');
+  return [...picked, ...(free === '' ? [] : [`Comment: ${free}`])].join('; ');
+}
+
+/** The request for several options at the end of a question, as "Select all that apply." or "(select all that apply)". */
+const MULTI_ASK = /\s*\(?(?:select|choose|pick) (?:all|any) that apply[.!]?\)?[.]?\s*$/i;
+
+/** A question's text as the card shows it: without a closing "Select all that apply.", which the card says in its own hint. */
+export function withoutMultiAsk(question: Question): string {
+  const text = question.multi ? question.text.replace(MULTI_ASK, '').trim() : question.text;
+
+  return text === '' ? question.text : text;
 }
 
 /**
@@ -730,7 +740,7 @@ export function questionBrief(question: Question): string {
   return sentences.length < 2 ? question.text : (sentences.filter((one) => /\?["'`*_)]*$/.test(one)).at(-1) ?? question.text);
 }
 
-/** What an answer chose, as the answered rows and the Answers bubble show it: the chosen labels without their letters, then "Other: text". */
+/** What an answer chose, as the answered rows and the Answers bubble show it: the chosen labels without their letters, then "Comment: text". */
 export function answerBrief(question: Question, letters: readonly string[], other: string, dismissed = false): string {
   if (dismissed) {
     return 'No answer (dismissed)';
@@ -739,12 +749,12 @@ export function answerBrief(question: Question, letters: readonly string[], othe
   const picked = question.options.filter((option) => letters.includes(option.letter)).map((option) => plain(option.label));
   const free = other.replace(/\s+/g, ' ').trim();
 
-  return [...picked, ...(free === '' ? [] : [`Other: ${free}`])].join('; ');
+  return [...picked, ...(free === '' ? [] : [`Comment: ${free}`])].join('; ');
 }
 
 /**
  * The message the hub writes for answers (design § 4): `[answers]`, then one line per question in the order given,
- * `- <slug>: <question as plain text> → <answer>`. Entries with no pick, no Other text and no dismissal are left out; empty when none is left.
+ * `- <slug>: <question as plain text> → <answer>`. Entries with no pick, no comment and no dismissal are left out; empty when none is left.
  */
 export function answerMessage(entries: readonly AnswerEntry[]): string {
   const lines = entries.flatMap((entry) => {
@@ -779,7 +789,7 @@ function loneLetter(text: string): string | null {
 
 /**
  * The questions a message answers (design § 4), read once when the hub stores it, against the questions open then (`open`, in ask order):
- * `[answers]` lines by slug; `slug B`, `slug: B, C` or `slug other: …`; a lone letter or "other: …" for `current`, the open card's
+ * `[answers]` lines by slug, their comment after `Comment:` or the older `Other:`; `slug B`, `slug: B, C`, `slug comment: …` or `slug other: …`; a lone letter, "comment: …" or "other: …" for `current`, the open card's
  * current question, or the only open question; and legacy "1A", "2 Other: …" against the newest card's open questions only. Letters a question
  * does not offer are dropped; empty when it answers none.
  */
@@ -821,7 +831,7 @@ export function resolveAnswers(message: string, open: readonly OpenQuestion[], c
         continue;
       }
 
-      const otherAt = /(?:^|;\s*)Other:\s*/i.exec(answer);
+      const otherAt = /(?:^|;\s*)(?:Comment|Other):\s*/i.exec(answer);
       const picks = otherAt === null ? answer : answer.slice(0, otherAt.index);
       const letters = [...picks.matchAll(/(?:^|;\s*)([A-H])\)/g)].map((pick) => pick[1]!);
 
@@ -831,10 +841,10 @@ export function resolveAnswers(message: string, open: readonly OpenQuestion[], c
     return [...found.values()];
   }
 
-  // "slug B", "slug: B, C", "slug other: text", one per line or comma-separated on one line.
+  // "slug B", "slug: B, C", "slug comment: text" or "slug other: text", one per line or comma-separated on one line.
   const slugs = open.map((one) => one.question.slug).sort((a, b) => b.length - a.length);
   const escaped = slugs.map((slug) => slug.replace(/[-]/g, '\\-')).join('|');
-  const named = new RegExp(`(?:^|[\\s,;(])(${escaped}):?\\s+(?:([Oo]ther):?\\s*([^\\n]*)|((?:[A-H]|[a-h](?=\\s*(?:$|[,.;!\\n])))(?:\\s*(?:,|and|&|\\+)\\s*(?:[A-H]|[a-h](?=\\s*(?:$|[,.;!\\n]))))*)(?![\\w-]))`, 'gm');
+  const named = new RegExp(`(?:^|[\\s,;(])(${escaped}):?\\s+(?:([Oo]ther|[Cc]omment):?\\s*([^\\n]*)|((?:[A-H]|[a-h](?=\\s*(?:$|[,.;!\\n])))(?:\\s*(?:,|and|&|\\+)\\s*(?:[A-H]|[a-h](?=\\s*(?:$|[,.;!\\n]))))*)(?![\\w-]))`, 'gm');
 
   for (const match of text.matchAll(named)) {
     const one = bySlug(match[1]!);
@@ -848,10 +858,10 @@ export function resolveAnswers(message: string, open: readonly OpenQuestion[], c
     return [...found.values()];
   }
 
-  // A lone letter, or "other: …", answers the open card's current question, or the only open question.
+  // A lone letter, "comment: …" or "other: …" answers the open card's current question, or the only open question.
   const target = (current === null ? undefined : open.find((one) => one.replyId === current.replyId && one.question.slug === current.slug)) ?? (open.length === 1 ? open[0] : undefined);
   const lone = loneLetter(text) ?? (/^[a-z]+$/i.test(text) ? (LETTER_WORDS[text.toLowerCase()] ?? null) : null);
-  const otherOnly = /^other\s*[:,-]\s*([\s\S]+)$/i.exec(text);
+  const otherOnly = /^(?:comment|other)\s*[:,-]\s*([\s\S]+)$/i.exec(text);
 
   if (target !== undefined && (lone !== null || otherOnly !== null)) {
     put(target, lone === null ? [] : [lone], otherOnly?.[1] ?? '');
@@ -1229,9 +1239,10 @@ export function questionLedger(
 
 // ---- The card's draft: where the operator is in a card, kept by the hub ----
 
-/** What the operator picked for a question so far: the letters, and the Other text, null while Other is not open. */
+/** What the operator picked for a question so far: the letters, and the comment, null or empty for none. */
 export interface CardPick {
   letters: string[];
+  /** The comment, beside the letters or alone; named `other` in drafts, `send` bodies and stored answers since it began as an Other answer. */
   other: string | null;
 }
 
@@ -1241,7 +1252,7 @@ export interface CardDraft {
   picks: Record<string, CardPick>;
 }
 
-/** Whether a pick answers its question: a letter, or Other text. */
+/** Whether a pick answers its question: a letter, a comment, or both. */
 export const picked = (pick: CardPick | undefined): boolean => pick !== undefined && (pick.letters.length > 0 || (pick.other ?? '').trim() !== '');
 
 /** The questions a card's stepper shows: its open questions, the first `BATCH` of them. */
@@ -1262,37 +1273,33 @@ export function currentStep(card: LedgerCard, draft: CardDraft | undefined): Led
 }
 
 /**
- * A draft after a letter is picked: a single-choice question takes that letter and closes Other, and moves on (`advance`, design open choice 4)
- * unless it is the last step; a multi-choice question toggles it and stays.
+ * A draft after a letter is picked, keeping the comment: a multi-choice question toggles the letter; a single-choice question takes it, or
+ * drops it when it was already picked and `toggle` is on, as a click on the picked option does, so a comment can stand alone.
  */
-export function pickLetter(card: LedgerCard, draft: CardDraft | undefined, slug: string, letter: string): { draft: CardDraft; advance: boolean } {
+export function pickLetter(card: LedgerCard, draft: CardDraft | undefined, slug: string, letter: string, toggle = true): CardDraft {
   const one = cardSteps(card).find((step) => step.question.slug === slug);
   const base: CardDraft = { step: slug, picks: { ...(draft?.picks ?? {}) } };
 
   if (one === undefined || !one.question.options.some((option) => option.letter === letter)) {
-    return { draft: draft ?? base, advance: false };
+    return draft ?? base;
   }
 
   const pick = base.picks[slug] ?? { letters: [], other: null };
+  const had = pick.letters.includes(letter);
 
-  if (one.question.multi) {
-    base.picks[slug] = { ...pick, letters: pick.letters.includes(letter) ? pick.letters.filter((one) => one !== letter) : [...pick.letters, letter].sort() };
-    return { draft: base, advance: false };
-  }
+  base.picks[slug] = {
+    ...pick,
+    letters: one.question.multi ? (had ? pick.letters.filter((one) => one !== letter) : [...pick.letters, letter].sort()) : had && toggle ? [] : [letter],
+  };
 
-  base.picks[slug] = { letters: [letter], other: null };
-
-  const steps = cardSteps(card);
-
-  return { draft: base, advance: steps.findIndex((step) => step.question.slug === slug) < steps.length - 1 };
+  return base;
 }
 
-/** A draft with Other opened, or its text set, for a question; a single-choice question's letter is cleared once Other has text. */
-export function setOther(card: LedgerCard, draft: CardDraft | undefined, slug: string, text: string): CardDraft {
-  const one = cardSteps(card).find((step) => step.question.slug === slug);
+/** A draft with a question's comment set, keeping its letters. */
+export function setComment(card: LedgerCard, draft: CardDraft | undefined, slug: string, text: string): CardDraft {
   const pick = draft?.picks[slug] ?? { letters: [], other: null };
 
-  return { step: slug, picks: { ...(draft?.picks ?? {}), [slug]: { letters: one?.question.multi === true || text.trim() === '' ? pick.letters : [], other: text } } };
+  return { step: slug, picks: { ...(draft?.picks ?? {}), [slug]: { letters: pick.letters, other: text } } };
 }
 
 /** A draft moved to the step before or after the current one, or to a step by slug; unchanged at either end. */
@@ -1324,8 +1331,8 @@ export function sendLabel(answered: number, total: number): string {
 const SPOKEN_COUNT = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
 
 /**
- * A question read aloud (design § 7): its place, topic, text and context, each option with its label, a recommendation and its description, and
- * "Or say Other." Plain text, without the slug or Markdown.
+ * A question read aloud (design § 7): its place, topic, text and context, "Select all that apply." for a multi-choice question that does not say
+ * so, each option with its letter, label, a recommendation and its description, and how to comment. Plain text, without the slug or Markdown.
  */
 export function questionSpeech(question: Question, step: number, total: number): string {
   const sentence = (text: string): string => {
@@ -1338,26 +1345,27 @@ export function questionSpeech(question: Question, step: number, total: number):
     question.topic === null ? '' : sentence(question.topic.replace(/[?:.]$/, '')),
     sentence(question.text),
     sentence(question.context),
+    question.multi && withoutMultiAsk(question) === question.text ? 'Select all that apply.' : '',
     ...question.options.map((option) => {
       const label = plain(option.label);
       const description = plain(option.description);
 
       return `${option.letter}: ${label}${option.recommended ? ', recommended' : ''}${description === '' ? '.' : `: ${sentence(description)}`}`;
     }),
-    'Or say Other.',
+    'Or say Comment and your words.',
   ];
 
   return parts.filter((part) => part !== '').join(' ');
 }
 
 /** What an utterance does to the open card (design § 7), or null when it is ordinary dictation. */
-export type CardUtterance = { type: 'pick'; letter: string } | { type: 'pick-index'; index: number } | { type: 'recommended' } | { type: 'other'; text: string } | { type: 'back' } | { type: 'next' } | { type: 'repeat' } | { type: 'send' };
+export type CardUtterance = { type: 'pick'; letter: string } | { type: 'pick-index'; index: number } | { type: 'recommended' } | { type: 'comment'; text: string } | { type: 'back' } | { type: 'next' } | { type: 'repeat' } | { type: 'send' };
 
 const ORDINALS: Record<string, number> = { first: 0, second: 1, third: 2, fourth: 3, '1st': 0, '2nd': 1, '3rd': 2, '4th': 3 };
 
 /**
  * The card grammar for a whole utterance (design § 7): a letter, with the recogniser's homophones ("ay", "bee", "see", "dee"), "option B",
- * "B please", "the first one", "the recommended one"; "other, …" with its text; "back", "next" or "skip", "repeat", "send". Null for anything else.
+ * "B please", "the first one", "the recommended one"; "comment, …", or the older "other, …", with its text; "back", "next" or "skip", "repeat", "send". Null for anything else.
  */
 export function cardUtterance(utterance: string): CardUtterance | null {
   const text = utterance
@@ -1365,10 +1373,10 @@ export function cardUtterance(utterance: string): CardUtterance | null {
     .replace(/[.!?]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  const other = /^other\b[\s,:.-]*(.*)$/i.exec(utterance.trim().replace(/\s+/g, ' '));
+  const comment = /^(?:comment|other)\b[\s,:.-]*(.*)$/i.exec(utterance.trim().replace(/\s+/g, ' '));
 
-  if (other !== null && /^other\b/i.test(utterance.trim())) {
-    return { type: 'other', text: other[1]!.replace(/[.!?]+$/, '').trim() };
+  if (comment !== null) {
+    return { type: 'comment', text: comment[1]!.replace(/[.!?]+$/, '').trim() };
   }
 
   const words = text.replace(/[,]/g, ' ').replace(/\s+/g, ' ').trim();

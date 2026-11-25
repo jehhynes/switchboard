@@ -18,7 +18,7 @@ import { menuRows, renderHeader, renderMaximize, renderSideSwitch, renderTabs } 
 import { CHAT_MIN, chatNeed, fitLayout, isPhone, sideLimit, sideWidth, type Layout } from './layout.js';
 import { pageLedger, renderTimeline } from './timeline.js';
 import { fitFade } from './replyFade.js';
-import { cardSteps, currentStep, draftAnswers, moveStep, pickLetter, setOther } from '@switchboard/conversation/questions';
+import { cardSteps, currentStep, draftAnswers, moveStep, pickLetter, picked, sendLabel, setComment } from '@switchboard/conversation/questions';
 import type { CardDraft as SharedDraft, LedgerCard } from '@switchboard/conversation/questions';
 import { cardKeyAction, isAnswerMessage, questionsWaiting } from '@switchboard/conversation/questionCard';
 import { renderArtifacts, renderArtifactView, renderEmpty, renderStatus } from './side.js';
@@ -63,10 +63,8 @@ import type { BrowserIdentity } from './iframeBrowser.js';
 const OPEN_IN_VSCODE = 'Open in VS Code';
 
 /** The stream's event types the page reads. */
-/** How long after a single-choice pick the card moves to the next question (design open choice 4). */
-export const ADVANCE_MS = 200;
-/** How long typing in a card's Other field pauses before the hub hears it. */
-export const OTHER_SETTLE_MS = 400;
+/** How long typing in a card's Comment field pauses before the hub hears it. */
+export const COMMENT_SETTLE_MS = 400;
 
 export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'status', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'questions', 'needs', 'config', 'viewed'];
 /** How long an unread reply or status must be visible on a focused page before it counts as seen (architecture.md § Unread). */
@@ -2852,7 +2850,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       frame = null;
     }
 
-    // A card is drawn anew from HTML, so the control that had the focus in it gets it back, with an Other field's caret.
+    // A card is drawn anew from HTML, so the control that had the focus in it gets it back, with a Comment field's caret.
     const focus = cardFocus();
 
     drawRegions();
@@ -3464,7 +3462,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     return state.scope === null || state.key === null ? null : String(state.scope.workItemId ?? '');
   }
 
-  /** The newest `select`, and the Other text it waits to send first. */
+  /** The newest `select`, and the comment it waits to send first. */
   let selecting = 0;
   let flushing: Promise<unknown> | null = null;
   /**
@@ -3474,10 +3472,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const select = async (workItemId: number, sameHead = false, sessionId: string | null = null): Promise<void> => {
     const mine = ++selecting;
 
-    // Other text still waiting goes to its conversation before the page moves on, while the hub still takes it from this page; a later choice
+    // comment still waiting goes to its conversation before the page moves on, while the hub still takes it from this page; a later choice
     // wins over this one while it waits.
-    if (otherTimers.size > 0) {
-      const all = Promise.all([flushing, flushOther()]);
+    if (commentTimers.size > 0) {
+      const all = Promise.all([flushing, flushComments()]);
 
       flushing = all;
       void all.finally(() => {
@@ -3841,7 +3839,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   const cardNow = (key: string): LedgerCard | null => pageLedger(state).cards.get(key) ?? null;
   const cardDraftOf = (key: string): SharedDraft | undefined => view.cards.get(key)?.local ?? state.questions?.drafts[key];
-  /** Drops a card's own draft once the hub holds it: nothing on its way, no Other text waiting, and the last draft sent carried back. */
+  /** Drops a card's own draft once the hub holds it: nothing on its way, no comment waiting, and the last draft sent carried back. */
   const settleCard = (ui: CardDraft): boolean => {
     if (ui.local === null || ui.pending > 0 || ui.unsent === true || ui.awaiting !== undefined) {
       return false;
@@ -3867,20 +3865,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** The conversation a card command goes to: the session shown, at the scope generation it is shown at. */
   type CardTarget = { sessionId: string; scopeGen: number };
   const cardTarget = (): CardTarget | null => (state.session === null ? null : { sessionId: state.session.id, scopeGen: state.scope?.scopeGen ?? -1 });
-  /** Each card's Other text waiting for the typing to pause, by `<session ID> <card key>`, with the conversation it was typed in. */
-  const otherTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; target: CardTarget; key: string }>();
-  let advanceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Each card's comment waiting for the typing to pause, by `<session ID> <card key>`, with the conversation it was typed in. */
+  const commentTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; target: CardTarget; key: string }>();
   /**
-   * Shows a card's new draft and tells the hub, for the conversation shown or the one given; `quiet` leaves the page undrawn, as while an Other
-   * field is typed in. The draft carries any Other text still waiting, so its timer goes.
+   * Shows a card's new draft and tells the hub, for the conversation shown or the one given; `quiet` leaves the page undrawn, as while a Comment
+   * field is typed in. The draft carries any comment still waiting, so its timer goes.
    */
   const setDraft = (key: string, draft: SharedDraft, quiet = false, target: CardTarget | null = cardTarget()): Promise<void> => {
     const ui = cardUi(key);
-    const waiting = target === null ? undefined : otherTimers.get(`${target.sessionId} ${key}`);
+    const waiting = target === null ? undefined : commentTimers.get(`${target.sessionId} ${key}`);
 
     if (waiting !== undefined) {
       clearTimeout(waiting.timer);
-      otherTimers.delete(`${target!.sessionId} ${key}`);
+      commentTimers.delete(`${target!.sessionId} ${key}`);
     }
 
     ui.local = draft;
@@ -3925,10 +3922,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
     });
   };
-  /** Sends each card's Other text still waiting for a pause now, to the session it was typed in, as before the page shows another conversation. */
-  const flushOther = (): Promise<unknown> =>
+  /** Sends each card's comment still waiting for a pause now, to the session it was typed in, as before the page shows another conversation. */
+  const flushComments = (): Promise<unknown> =>
     Promise.all(
-      [...otherTimers.values()].map(({ target, key }) => {
+      [...commentTimers.values()].map(({ target, key }) => {
         const local = cardUi(key).local;
 
         return local === null ? undefined : setDraft(key, local, true, target);
@@ -3972,35 +3969,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       setDraft(key, moveStep(card, cardDraftOf(key), to));
     }
   };
-  /** Picks a letter; a single-choice pick moves on after `ADVANCE_MS` (design open choice 4), unless the operator moved first. */
+  /** Picks or drops a letter; the card stays on the question, so its comment can follow, until Next. */
   const pickCard = (key: string, slug: string, letter: string): void => {
     const card = cardNow(key);
 
-    if (card === null) {
-      return;
-    }
-
-    const { draft, advance } = pickLetter(card, cardDraftOf(key), slug, letter);
-
-    setDraft(key, draft);
-
-    if (advance) {
-      clearTimeout(advanceTimer ?? undefined);
-      advanceTimer = setTimeout(() => {
-        const now = cardNow(key);
-
-        if (now !== null && currentStep(now, cardDraftOf(key))?.question.slug === slug) {
-          stepCard(key, 'next');
-        }
-      }, ADVANCE_MS);
-    }
-  };
-  const openOther = (key: string, slug: string): void => {
-    const card = cardNow(key);
-
     if (card !== null) {
-      setDraft(key, setOther(card, cardDraftOf(key), slug, cardDraftOf(key)?.picks[slug]?.other ?? ''));
-      [...root.querySelectorAll<HTMLTextAreaElement>('textarea.qc-other')].find((field) => field.dataset['card'] === key)?.focus();
+      setDraft(key, pickLetter(card, cardDraftOf(key), slug, letter));
     }
   };
   /** The control in a card that has the focus, to give it back after a draw. */
@@ -4016,7 +3990,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const data = ['action', 'slug', 'letter'].map((name) => (active.dataset[name] === undefined ? '' : `[data-${name}="${active.dataset[name]!.replace(/["\\]/g, (char) => `\\${char}`)}"]`)).join('');
     const field = active instanceof HTMLTextAreaElement;
 
-    return { card: key, selector: field ? '.qc-other' : data === '' ? '' : data, start: field ? active.selectionStart : null, end: field ? active.selectionEnd : null };
+    return { card: key, selector: field ? '.qc-comment' : data === '' ? '' : data, start: field ? active.selectionStart : null, end: field ? active.selectionEnd : null };
   };
   const restoreCardFocus = (focus: ReturnType<typeof cardFocus>): void => {
     if (focus === null || document.activeElement?.closest('.question-card.qc') != null) {
@@ -4641,9 +4615,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'card-pick':
         pickCard(button!.dataset['card']!, button!.dataset['slug']!, button!.dataset['letter']!);
         break;
-      case 'card-other':
-        openOther(button!.dataset['card']!, button!.dataset['slug']!);
-        break;
       case 'card-step':
         stepCard(button!.dataset['card']!, button!.dataset['slug']!);
         break;
@@ -4754,11 +4725,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    if (!field.classList?.contains('qc-other')) {
+    if (!field.classList?.contains('qc-comment')) {
       return;
     }
 
-    // Typing in Other keeps the page undrawn, so the field keeps its caret; the hub hears it once the typing pauses, and the buttons follow then.
+    // Typing a comment keeps the page undrawn, so the field keeps its caret; the hub hears it once the typing pauses, and the buttons follow then.
     const key = field.dataset['card']!;
     const slug = field.dataset['slug']!;
     const card = cardNow(key);
@@ -4767,13 +4738,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    const draft = setOther(card, cardDraftOf(key), slug, field.value);
+    const draft = setComment(card, cardDraftOf(key), slug, field.value);
     const ui = cardUi(key);
     const target = cardTarget();
 
     // Held as this page's until a card-draft carries it, whatever `questions` events come meanwhile.
     ui.local = draft;
     ui.unsent = true;
+
+    // The page stays undrawn, so Next and Send follow the comment here: a comment alone answers the question.
+    const cardEl = field.closest<HTMLElement>('.question-card.qc');
+    const next = cardEl?.querySelector<HTMLButtonElement>('[data-action="card-next"]');
+    const send = cardEl?.querySelector<HTMLButtonElement>('[data-action="card-send"]');
+    const locked = ui.sending || !(state.connected && state.session?.conversation === 'full');
+
+    if (next != null) {
+      next.disabled = locked || !picked(draft.picks[slug]);
+    }
+
+    if (send != null && !ui.sending) {
+      const count = draftAnswers(card, draft).length;
+
+      send.disabled = locked || count === 0;
+      send.textContent = sendLabel(count, cardSteps(card).length);
+    }
 
     if (target === null) {
       return;
@@ -4782,8 +4770,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Each card waits for its own pause and sends its newest text to the conversation it was typed in.
     const id = `${target.sessionId} ${key}`;
 
-    clearTimeout(otherTimers.get(id)?.timer);
-    otherTimers.set(id, { target, key, timer: setTimeout(() => setDraft(key, cardUi(key).local ?? draft, true, target), OTHER_SETTLE_MS) });
+    clearTimeout(commentTimers.get(id)?.timer);
+    commentTimers.set(id, { target, key, timer: setTimeout(() => setDraft(key, cardUi(key).local ?? draft, true, target), COMMENT_SETTLE_MS) });
   }, { signal: listening.signal });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
@@ -4812,7 +4800,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   }, { signal: listening.signal });
   root.addEventListener('keydown', (event) => {
-    // A question card's keys while it has the focus (design § 6): A–H pick, O opens Other, Enter goes on or sends, Backspace goes back.
+    // A question card's keys while it has the focus (design § 6): 1–8 pick by place, Down and Up move between options, Enter goes on or sends
+    // (Shift+Enter adds a line to the comment), Backspace goes back.
     const cardEl = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('.question-card.qc') : null;
 
     if (cardEl !== null && !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing) {
@@ -4824,16 +4813,23 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (action !== null && step !== null && !(inField && event.key === 'Enter' && event.shiftKey)) {
         // A button's own Enter clicks it.
-        if (action.type === 'forward' && event.target instanceof HTMLButtonElement && !event.target.matches('.qc-other')) {
+        if (action.type === 'forward' && event.target instanceof HTMLButtonElement && !event.target.matches('.qc-comment')) {
           return;
         }
 
         event.preventDefault();
 
-        if (action.type === 'pick') {
-          pickCard(key, step.question.slug, action.letter);
-        } else if (action.type === 'other') {
-          openOther(key, step.question.slug);
+        if (action.type === 'move') {
+          const options = [...cardEl.querySelectorAll<HTMLButtonElement>('.qc-option')];
+          const at = options.indexOf(event.target as HTMLButtonElement);
+
+          options[at === -1 ? (action.by === 1 ? 0 : options.length - 1) : Math.min(options.length - 1, Math.max(0, at + action.by))]?.focus();
+        } else if (action.type === 'pick') {
+          const option = step.question.options[action.index];
+
+          if (option !== undefined) {
+            pickCard(key, step.question.slug, option.letter);
+          }
         } else if (action.type === 'back') {
           stepCard(key, 'back');
         } else {
@@ -5998,7 +5994,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       settingsShown?.disconnect();
       clearInterval(promptTimer);
 
-      for (const { timer } of otherTimers.values()) {
+      for (const { timer } of commentTimers.values()) {
         clearTimeout(timer);
       }
 
