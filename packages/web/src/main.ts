@@ -4872,6 +4872,32 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
   }, { signal: listening.signal });
+  // A press in a website's frame, an artifact's frame or another window sends the page no pointerdown, only its window's blur, so the page's
+  // menus close when its window loses the focus, as a desktop app's menus do. Sheets and dialogs stay.
+  window.addEventListener('blur', () => {
+    const open = view.picker || view.actions || view.viewMenu || view.rowMenu !== null || view.tabMenu;
+    const closed = [changes.pointerDown(null), closeCardMenus(null)].includes(true);
+
+    // The composer's own lists draw themselves.
+    if (menuOpen !== null) {
+      closeMenu();
+    }
+
+    if (contextMenu !== 'closed') {
+      setContextMenu('closed');
+    }
+
+    if (open) {
+      view.picker = false;
+      view.viewMenu = false;
+      view.tabMenu = false;
+      closeMenus();
+    }
+
+    if (open || closed) {
+      draw();
+    }
+  }, { signal: listening.signal });
   root.addEventListener('keydown', (event) => {
     // A question card's keys while it has the focus (design § 6): 1–8 pick by place, Down and Up move between options, Enter goes on or sends
     // (Shift+Enter adds a line to the comment), Backspace goes back.

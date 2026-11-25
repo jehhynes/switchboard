@@ -6144,6 +6144,45 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     page.close();
   });
 
+  it("closes the page's menus, not its sheets, when its window loses the focus, as to a press in a website's frame", async () => {
+    const { page, source } = start();
+    const asked = '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2';
+    const actions = [{ label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state' as const, confirm: null, input: null }];
+    const blur = () => window.dispatchEvent(new Event('blur'));
+
+    hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', actions })])], items: [reply('r1', 2, { opening: asked })], questions: { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] } });
+    for (const [opener, menu] of [['button.actions', '.actions-menu'], ['button.view-options', '.view-options-menu'], ['[data-action="card-menu"]', '.qc-menu'], ['.more-actions', '.more-menu']]) {
+      click(opener!);
+      expect(root.querySelector(menu!)).not.toBeNull();
+      blur();
+      expect(root.querySelector(menu!)).toBeNull();
+    }
+
+    // The composer's file list and the context meter's menu too.
+    const input = root.querySelector('textarea')!;
+
+    answers['/files'] = { status: 200, body: { files: [{ path: 'src/a.ts', dir: false }] } };
+    input.value = '@a';
+    input.setSelectionRange(2, 2);
+    input.dispatchEvent(new Event('input'));
+    await flush();
+    await flush();
+    expect(root.querySelector<HTMLElement>('.composer-menu')!.hidden).toBe(false);
+    blur();
+    expect(root.querySelector<HTMLElement>('.composer-menu')!.hidden).toBe(true);
+    source.emit('session', { session: session({ context: { used: 20_000, window: 200_000, compactAt: 167_000, model: 'claude-sonnet-4-6' } }) });
+    click('button.context-ring');
+    expect(root.querySelector('.context-menu')).not.toBeNull();
+    blur();
+    expect(root.querySelector('.context-menu')).toBeNull();
+
+    click('button.actions');
+    click('.actions-menu [data-label="Snooze…"]');
+    blur();
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze Fix it');
+    page.close();
+  });
+
   it('answers a card from the keyboard: numbers pick by place, arrows move between options, Enter goes on and sends, Backspace goes back', async () => {
     const { page, source } = start();
     const asked = '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove';

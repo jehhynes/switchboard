@@ -1887,6 +1887,14 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   };
 
   document.addEventListener('pointerdown', outside);
+  // And when the page's window loses the focus, as to a press in a website's frame (main.ts).
+  const blurred = (): void => {
+    if (view.menu !== null) {
+      closeMenu(false);
+    }
+  };
+
+  window.addEventListener('blur', blurred);
 
   return {
     openExtension,
@@ -1934,6 +1942,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         clearTimeout(folderTimer);
       }
       document.removeEventListener('pointerdown', outside);
+      window.removeEventListener('blur', blurred);
     },
   };
 }
