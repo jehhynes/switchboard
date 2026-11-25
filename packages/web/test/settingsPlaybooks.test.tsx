@@ -123,7 +123,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
 
     entry('build').click();
     await settle();
-    expect(control<HTMLSelectElement>('permissionMode').options[0]!.textContent).toBe('Sessions setting (auto)');
+    expect(control<HTMLSelectElement>('permissionMode').options[0]!.textContent).toBe('From Sessions: auto');
     expect(control<HTMLSelectElement>('permissionMode').value).toBe('');
 
     entry('gh').click();
@@ -142,14 +142,14 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Approve sends the work', 'Agent', 'Permission mode', 'Model', 'Working directory', 'Prompt']);
     expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Kind, Return of, Focus page');
     expect(texts('.settings-check label:not(.settings-box)')).toEqual(['Automatically', 'Needs a worktree', 'Done', 'Approval', 'Worktree', 'Playbook', 'Paste']);
-    expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['Sessions setting (auto)', 'default', 'auto', 'plan', 'bypassPermissions']);
-    expect(control<HTMLInputElement>('model').placeholder).toBe('Sessions setting (Claude’s default)');
+    expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['From Sessions: auto', 'default', 'auto', 'plan', 'bypassPermissions']);
+    expect(control<HTMLInputElement>('model').placeholder).toBe('From Sessions: Claude’s default');
     expect(host.querySelector('[data-path="template"] .settings-help')?.textContent).toBe('Variables: {{ticket.title}}. Switchboard adds the commands for the checked reports, with stage and link.');
 
     // Codex offers its own modes and its sessions setting.
     pick('provider', 'codex');
     await settle();
-    expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['Sessions setting (default)', 'default', 'bypassPermissions']);
+    expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['From Sessions: default', 'default', 'bypassPermissions']);
 
     // Unchecking Approval drops Approve sends with it.
     host.querySelector<HTMLInputElement>('#settings-field-reports_approval')!.click();

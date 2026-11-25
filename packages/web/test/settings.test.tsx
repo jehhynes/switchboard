@@ -208,12 +208,13 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
     expect(host.querySelector('.settings-lede')?.textContent).toBe('How playbook and ad-hoc sessions run. A playbook can set its own agent, model and permission mode.');
     expect(headings()).toEqual(['All agents', 'Claude', 'Codex']);
-    expect(texts('.settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Model', 'Permission mode', 'Model', 'Permission mode']);
+    expect(texts('.settings-caption label')).toEqual(['Default agent', 'Sessions at once', 'Model', 'Permission mode', 'Model', 'Permission mode']);
     // A clean file has nothing to say, so the bar and its Save and Discard do not show.
     expect(host.querySelector('.settings-bar')).toBeNull();
     expect(button('Save')).toBeUndefined();
-    // A field shows its default as its placeholder, and a select its default choice.
-    expect(field<HTMLInputElement>('sessions.concurrency').placeholder).toBe('2');
+    // An empty field says what applies: a default as Default, a description of it as itself; a select shows its default choice.
+    expect(field<HTMLInputElement>('sessions.concurrency').placeholder).toBe('Default: 2');
+    expect(field<HTMLInputElement>('sessions.model').placeholder).toBe("Claude's default");
     expect(field<HTMLSelectElement>('sessions.provider').value).toBe('claude');
     expect([...field<HTMLSelectElement>('sessions.provider').options].map((option) => option.textContent)).toEqual(['Claude', 'Codex']);
     expect(field<HTMLSelectElement>('sessions.codex.permissionMode').value).toBe('auto');
@@ -228,22 +229,26 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
       return { title: host.querySelector('.settings-page-title h2')?.textContent, headings: headings(), labels: texts('.settings-section:not(.advanced) .settings-caption label') };
     };
 
-    expect(await shown('triage')).toEqual({ title: 'Triage', headings: ['Classifier', 'Advanced'], labels: ['Model', 'Concurrency'] });
-    expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Timeout (seconds)');
-    expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Replies', 'Diffs'], labels: ['Needs-you alerts from', 'Needs-you sound', 'Collapse details', 'Layout', 'Wrap long lines'] });
+    expect(await shown('triage')).toEqual({ title: 'Triage', headings: ['Classifier', 'Advanced'], labels: ['Model', 'Triages at once'] });
+    expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Give up after');
+    host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
+    await settle();
+    // A number's unit follows it rather than sitting in its label.
+    expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-unit')?.textContent).toBe('s');
+    expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Replies', 'Diffs'], labels: ['Show alerts in', 'Needs-you sound', 'Collapse details', 'Layout', 'Wrap long lines'] });
     // Spoken alerts are on Speaking, which a line in Notifications opens.
     expect(host.querySelector('.settings-link-row')?.textContent).toBe('Spoken alerts, which the voice says, are on Speaking.Open Speaking');
     host.querySelector<HTMLButtonElement>('.settings-link-row button')!.click();
     await settle();
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Speaking');
     await go('display');
-    expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Web app when open', 'Web page when open', 'System notification']);
+    expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Installed app, else a notification', 'Any open page, else a notification', 'Notifications only']);
     // The diff viewer's layout and wrapping, set once for every page.
     expect([...field<HTMLSelectElement>('web.diffLayout').options].map((one) => one.value)).toEqual(['auto', 'split', 'stacked']);
     expect([...field<HTMLSelectElement>('web.diffWrap').options].map((one) => one.textContent)).toContain('Off');
     expect(await shown('devices')).toEqual({ title: 'Devices', headings: ['Paired devices', 'Remote access', 'Advanced'], labels: ['Tailscale'] });
     expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Allowed hosts, Allowed logins');
-    expect(await shown('advanced')).toEqual({ title: 'Advanced', headings: ['Experiments', 'Programs', 'Developer', 'Settings file'], labels: ['Code Mode (experimental)', 'Embedded browser tabs', 'Claude Code path', 'Codex path', 'Node.js path', 'Install hooks', 'Friction debriefs'] });
+    expect(await shown('advanced')).toEqual({ title: 'Advanced', headings: ['Experiments', 'Programs', 'Developer', 'Settings file'], labels: ['Code Mode', 'Embedded browser tabs', 'Claude Code path', 'Codex path', 'Node.js path', 'Install hooks', 'Friction debriefs'] });
     // Install hooks shows the file's false over its default true.
     expect(field<HTMLInputElement>('sessions.installHooks').checked).toBe(false);
     // The hub keeps the config folder outside settings.json, so Advanced names it and how to change it, without a warning's colour.
@@ -728,6 +733,15 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     await go('add-source:github');
     expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
     expect(document.activeElement?.textContent).toBe('GitHub');
+
+    // Removing it opens Sessions, from which Back goes to the categories, not the Sources list it was reached from.
+    button('Remove source').click();
+    await settle();
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
+    back();
+    await settle();
+    expect(settingsBox.getAttribute('data-depth')).toBe('0');
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
   });
 
   it("shows a field's help under its label, read with its control, and no help where it has none", async () => {
@@ -735,14 +749,14 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     const help = host.querySelector('[data-path="sessions.concurrency"] .settings-help')!;
 
-    expect(help.textContent).toBe('Sessions that run at once, 1 to 10. A start with no free slot waits as queued.');
-    expect(help.closest('.settings-caption')?.querySelector('label')?.textContent).toBe('Concurrency');
+    expect(help.textContent).toBe('1 to 10. A start with no free slot waits as queued.');
+    expect(help.closest('.settings-caption')?.querySelector('label')?.textContent).toBe('Sessions at once');
     expect(field<HTMLInputElement>('sessions.concurrency').getAttribute('aria-describedby')).toBe(help.id);
     await go('triage');
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
     await settle();
-    expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-help')).toBeNull();
-    expect(field<HTMLInputElement>('triage.timeoutSeconds').hasAttribute('aria-describedby')).toBe(false);
+    expect(host.querySelector('[data-path="triage.concurrency"] .settings-help')).toBeNull();
+    expect(field<HTMLInputElement>('triage.concurrency').hasAttribute('aria-describedby')).toBe(false);
     // An on/off setting is a switch on its row's right.
     await go('advanced');
     expect(field<HTMLInputElement>('sessions.codeMode').getAttribute('role')).toBe('switch');
@@ -827,7 +841,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
 
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('GitHub');
     expect(headings()).toEqual(['Connection', 'Work', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Repository', 'Logins', 'Require assignee', 'Wait for blockers', 'Include closed issues', 'Project owner', 'Project number', 'Status field', 'Assigned statuses', 'Repo root', 'Namespace', 'Triage playbook', 'Setup prompt', 'Poll interval (seconds)']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Repository', 'Logins', 'Require assignee', 'Wait for blockers', 'Include closed issues', 'Project owner', 'Project number', 'Status field', 'Assigned statuses', 'Repo root', 'Namespace', 'Triage playbook', 'Setup prompt', 'Poll every']);
     expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Kind, Roles file, Branch pattern, gh path, Page limit');
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
     await settle();

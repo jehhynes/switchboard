@@ -5,7 +5,7 @@ import { mount } from './island.js';
 import { isPhone } from './layout.js';
 import { QrCode, usedText } from './listHeader.js';
 import type { Device, Pairing } from './listHeader.js';
-import { applyPlaybookCell, configFolderHelp, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, HOME, nav, navEntry, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
+import { applyPlaybookCell, configFolderHelp, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, HOME, nav, navEntry, navPathTo, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
 import type { Enrollment, Field, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -438,6 +438,11 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     state!.page = page;
     view.drill = 'page';
     view.collapsed.clear();
+
+    // On a phone Back goes up the new page's own lists, such as Sessions' none after a source is removed.
+    if (isPhone()) {
+      view.navPath = navPathTo(nav(state!), page);
+    }
     view.typing.clear();
     edited();
 
@@ -763,6 +768,12 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     view.drill = 'page';
     // The group holding the new page opens, even one the operator closed.
     view.collapsed.clear();
+
+    // On a phone Back goes up the new page's own lists, as if the operator had drilled to it, also from a link on another page.
+    if (isPhone()) {
+      view.navPath = navPathTo(nav(state), page);
+    }
+
     redraw();
     host.querySelector<HTMLElement>('.settings-page')?.scrollTo?.({ top: 0 });
 
@@ -1185,6 +1196,7 @@ function SectionBlock({ state, section, pageOff, view, on }: { state: EditorStat
           {section.block === 'enroll' ? <EnrollRow view={view} on={on} /> : null}
           {section.block === 'devices' ? <DevicesBlock remote={view.remote} on={on} /> : null}
           {section.block === 'file' ? <FileBlock state={state} /> : null}
+          {section.block === 'used-by' ? <UsedBy playbooks={section.usedBy ?? []} on={on} /> : null}
           {section.link === undefined ? null : (
             <div class="settings-row action settings-link-row">
               <p class="settings-help">{section.link.text}</p>
@@ -1422,6 +1434,27 @@ function EnrollRow({ view, on }: { view: View; on: Handlers }) {
   );
 }
 
+/** A persona's playbooks, each a link to its page, or a line saying none takes it. */
+function UsedBy({ playbooks, on }: { playbooks: readonly string[]; on: Handlers }) {
+  return (
+    <div class="settings-row action settings-used-by">
+      {playbooks.length === 0 ? (
+        <p class="settings-help">No playbook takes this persona. Give it one on the Personas page or a playbook's page.</p>
+      ) : (
+        <ul class="settings-links">
+          {playbooks.map((playbook) => (
+            <li>
+              <button type="button" class="link" onClick={() => on.navigate(`playbook:${playbook}`)}>
+                {playbook}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** Says the voice is off, above settings that need it, with a link to its switch on Speaking. */
 function VoiceOff({ on }: { on: Handlers }) {
   return (
@@ -1503,7 +1536,10 @@ function FieldRow({ field: shown, view, on }: { field: FieldView; view: View; on
   return (
     <div class={`settings-row ${field.kind}`} data-path={field.path}>
       <div class="settings-caption">
-        <label for={id}>{field.label}</label>
+        <label for={id}>
+          {field.label}
+          {field.required === true ? <span class="settings-required">Required</span> : null}
+        </label>
         {field.help === '' ? null : (
           <p class="settings-help" id={`${id}-help`}>
             {field.help}
@@ -1543,7 +1579,7 @@ function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: 
       <select id={id} class="sheet-select settings-select" aria-describedby={described} onChange={(event) => on.edit(field, (event.currentTarget as HTMLSelectElement).value)}>
         {options.some((option) => option.value === chosen) ? null : <option value={chosen} selected hidden></option>}
         {options.map((option) => (
-          <option value={option.value} selected={option.value === chosen}>
+          <option value={option.value} title={option.title} selected={option.value === chosen}>
             {option.label}
           </option>
         ))}
@@ -1557,24 +1593,41 @@ function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: 
     // A multiline box grows with its text up to 20 lines for a prompt and 8 for a list, then scrolls.
     const rows = Math.max(field.kind === 'prompt' ? 4 : 2, Math.min(field.kind === 'prompt' ? 20 : 8, value.split('\n').length + 1));
 
-    return <textarea id={id} class={`settings-text ${field.kind}`} aria-describedby={described} rows={rows} placeholder={field.placeholder} value={value} onInput={(event) => on.edit(field, (event.currentTarget as HTMLTextAreaElement).value)}></textarea>;
+    return <textarea id={id} class={`settings-text ${field.kind}`} aria-describedby={described} rows={rows} placeholder={hintOf(field)} value={value} onInput={(event) => on.edit(field, (event.currentTarget as HTMLTextAreaElement).value)}></textarea>;
   }
 
   const numeric = field.kind === 'integer' || field.kind === 'number';
-
-  return (
+  const box = (
     <input
       type="text"
       id={id}
       class={`settings-text${numeric ? ' numeric' : ''}`}
       aria-describedby={described}
       inputMode={field.kind === 'integer' ? 'numeric' : field.kind === 'number' ? 'decimal' : undefined}
-      placeholder={field.placeholder}
+      placeholder={hintOf(field)}
+      required={field.required === true}
       value={value}
       spellcheck={false}
       onInput={(event) => on.edit(field, (event.currentTarget as HTMLInputElement).value)}
     />
   );
+
+  // A unit follows its number, out of the label.
+  return field.unit === undefined ? (
+    box
+  ) : (
+    <span class="settings-with-unit">
+      {box}
+      <span class="settings-unit" aria-hidden="true">
+        {field.unit}
+      </span>
+    </span>
+  );
+}
+
+/** What an empty field shows: its hint, such as an example or where its value comes from, else its default. */
+function hintOf(field: Field): string | undefined {
+  return field.hint ?? (field.placeholder === undefined ? undefined : `Default: ${field.placeholder}`);
 }
 
 /** A checkbox group's row: one checkbox per field, labelled with its own name and explained by its tooltip; the group's name unless its section has it. */

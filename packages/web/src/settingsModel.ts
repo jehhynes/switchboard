@@ -9,13 +9,16 @@ export type FieldKind = 'text' | 'integer' | 'number' | 'boolean' | 'select' | '
 export interface FieldOption {
   value: string;
   label: string;
+  /** A tooltip, such as a persona's ID beside its name. */
+  title?: string;
 }
 
 /**
  * A setting or playbook field: `path` is a dotted path from the settings root, or a playbook field name; `help` explains
  * it, empty for none; `placeholder` is the value that applies when it is empty; `fallback` a checkbox's value when the key is absent;
  * `listDefault` a list whose default is not empty, so an absent key shows the default and an emptied list is saved as `[]`. Adjacent checkboxes
- * with the same `group` share one row under that label.
+ * with the same `group` share one row under that label. An empty text or number field shows `hint`, else "Default: <placeholder>"; `unit`
+ * follows a number field, and `required` marks a field the hub needs.
  */
 export interface Field {
   path: string;
@@ -23,6 +26,9 @@ export interface Field {
   kind: FieldKind;
   help: string;
   placeholder?: string;
+  hint?: string;
+  unit?: string;
+  required?: boolean;
   /** For a select, the choice shown while the value is not a string, such as a number or null. */
   invalidChoice?: string;
   options?: readonly FieldOption[];
@@ -40,7 +46,9 @@ export interface Section {
   fields: readonly Field[];
   advanced?: boolean;
   summary?: string;
-  block?: 'devices' | 'file' | 'enroll';
+  block?: 'devices' | 'file' | 'enroll' | 'used-by';
+  /** For a persona's Used by, the playbooks that take it. */
+  usedBy?: string[];
   /** Whether its settings do nothing while the voice is off, so it is dimmed then. */
   needsVoice?: boolean;
   /** A line in its card that leads to another page, such as Speaking for the spoken alerts. */
@@ -560,12 +568,11 @@ export const SPEECH_STYLES = ['none', 'pair', 'upbeat', 'deadpan', 'expressive']
 /** The choices of `voice.duplex.local` and `voice.duplex.remote`, as core's `DUPLEX_MODES` lists them. */
 const DUPLEX_MODES: FieldOption[] = [
   { value: 'auto', label: 'Auto' },
-  { value: 'full', label: 'Full duplex' },
-  { value: 'half', label: 'Half duplex' },
+  { value: 'full', label: 'Always listen' },
+  { value: 'half', label: 'Pause while speaking' },
 ];
 
-const DUPLEX_INFO =
-  'Whether the mic listens while the voice speaks. Auto listens when capture cancels the echo; otherwise it pauses while a reply plays until it measures that replies do not reach the mic, as with headphones. Full duplex always listens, so talking over a reply stops it; choose it with headphones. Half duplex always pauses.';
+const DUPLEX_INFO = 'Whether you can talk over a reply to stop it. Auto keeps listening when the mic cancels echo, else pauses until replies prove not to reach it, as with headphones.';
 
 const capitalized = (text: string): string => (text === '' ? text : text[0]!.toUpperCase() + text.slice(1));
 
@@ -580,7 +587,7 @@ function stringSetting(state: EditorState, path: string, fallback: string): stri
 
 /** The roster's personas as choices: each persona with an ID, by its name and ID, in roster order. */
 export function personaOptions(state: EditorState): FieldOption[] {
-  return [...new Set(state.personaIds)].map((id) => ({ value: id, label: `${state.personaName(id)} (${id})` }));
+  return [...new Set(state.personaIds)].map((id) => ({ value: id, label: state.personaName(id), title: id }));
 }
 
 /** The choice that stands for a value that is not a string; a colon keeps it apart from any persona ID (`SEGMENT`). */
@@ -613,36 +620,34 @@ export function speakingFields(state: EditorState): Section[] {
     {
       heading: 'Voice',
       fields: [
-        { path: 'voice.enabled', label: 'Enabled', kind: 'boolean', help: 'Read replies aloud: the voice process, Speak replies, Talk here and personas. Off, nothing is spoken and no session gets a persona.', fallback: false },
-        { path: 'voice.outputDevice', label: 'Output device', kind: 'text', help: 'Part of the playback device’s name, such as Speakers. Empty uses the system default.', placeholder: 'System default' },
+        { path: 'voice.enabled', label: 'Voice on', kind: 'boolean', help: 'Starts the voice process, for speaking and listening. Off, nothing is spoken or heard and no session gets a persona.', fallback: false },
+        { path: 'voice.outputDevice', label: 'Speaker', kind: 'text', help: 'Part of the playback device’s name, such as Speakers.', hint: 'System default' },
       ],
     },
     {
       heading: 'Replies',
       fields: [
-        { path: 'voice.voice', label: 'Voice', kind: 'select', help: 'The voice replies are read in when no persona applies. OpenAI recommends Marin and Cedar.', placeholder: 'marin', options: withCurrent(choices(TTS_VOICES), getAt(value, 'voice.voice')) },
-        { path: 'voice.style', label: 'Style', kind: 'select', help: 'How replies are read when no persona applies, unless Expressive delivery is on.', placeholder: 'none', options: withCurrent(choices(SPEECH_STYLES), getAt(value, 'voice.style')) },
+        { path: 'voice.voice', label: 'Voice', kind: 'select', help: 'Used when no persona applies. OpenAI recommends Marin and Cedar.', placeholder: 'marin', options: withCurrent(choices(TTS_VOICES), getAt(value, 'voice.voice')) },
+        { path: 'voice.style', label: 'Style', kind: 'select', help: 'Used when no persona applies, unless Expressive delivery is on.', placeholder: 'none', options: withCurrent(choices(SPEECH_STYLES), getAt(value, 'voice.style')) },
         { path: 'voice.speed', label: 'Speed', kind: 'number', help: '0.25 to 1.5; 1 is the voice’s own pace.', placeholder: '1' },
-        { path: 'voice.expressive', label: 'Expressive delivery', kind: 'boolean', help: 'Ask Claude for a tone line with each spoken reply, and read the reply in that tone instead of the style.', fallback: false },
-        { path: 'voice.awayMinutes', label: 'Away timeout (minutes)', kind: 'integer', help: '1 to 1440. With the focus outside every Switchboard window for this long, the voice stops speaking for its session.', placeholder: '2' },
+        { path: 'voice.expressive', label: 'Expressive delivery', kind: 'boolean', help: 'Ask for a tone with each spoken reply, and read it in that tone instead of the style.', fallback: false },
+        { path: 'voice.awayMinutes', label: 'Stop speaking after away', kind: 'integer', help: '1 to 1440, with the focus outside every Switchboard window.', placeholder: '2', unit: 'min' },
       ],
     },
     {
       heading: 'Spoken alerts',
       needsVoice: true,
       fields: [
-        { path: 'voice.spokenAlerts', label: 'Spoken alerts', kind: 'boolean', help: 'When a session the voice is not speaking for finishes or waits on you, say so, as in “Hey Alex? Tinker finished Fix the badge.”, and read its reply if you answer “yes” or “tell me”.', fallback: true },
-        { path: 'voice.operatorName', label: 'Your name', kind: 'text', help: 'The name alerts call you by. Empty says only “Hey?”.', placeholder: 'No name' },
+        { path: 'voice.spokenAlerts', label: 'Spoken alerts', kind: 'boolean', help: 'Say when another session finishes or waits on you, as in “Hey Alex? Tinker finished Fix the badge.”, and read its reply if you answer “yes”.', fallback: true },
+        { path: 'voice.operatorName', label: 'Your name', kind: 'text', help: 'What alerts call you. Empty says only “Hey?”.', hint: 'No name' },
         { path: 'voice.alertOn.finished', label: 'A turn finishes', kind: 'boolean', help: '', fallback: true, group: 'Alert when' },
         { path: 'voice.alertOn.question', label: 'A question', kind: 'boolean', help: '', fallback: true, group: 'Alert when' },
         { path: 'voice.alertOn.permission', label: 'A permission prompt', kind: 'boolean', help: '', fallback: true, group: 'Alert when' },
-        { path: 'voice.alertAnswerSeconds', label: 'Answer window (seconds)', kind: 'integer', help: '3 to 60. How long the voice listens for your answer after an alert, even after the away or mic idle timeout; the mic must be on.', placeholder: '10' },
+        { path: 'voice.alertAnswerSeconds', label: 'Answer window', kind: 'integer', help: '3 to 60. How long the voice listens for your answer after an alert; the mic must be on.', placeholder: '10', unit: 's' },
       ],
     },
   ];
 }
-
-const DUPLEX_INFO_TAIL = ' Used while Switchboard runs in a Remote Desktop session.';
 
 /**
  * The Listening page (architecture.md § Dictation, § Voice check and barge-in): the microphone with the voice enrolment, dictation, talking
@@ -651,37 +656,37 @@ const DUPLEX_INFO_TAIL = ' Used while Switchboard runs in a Remote Desktop sessi
  */
 export function listeningFields(): Section[] {
   return [
-    { heading: 'Microphone', block: 'enroll', needsVoice: true, fields: [{ path: 'voice.inputDevice', label: 'Input device', kind: 'text', help: 'Part of the capture device’s name, such as Headset. Empty uses the system default.', placeholder: 'System default' }] },
+    { heading: 'Microphone', block: 'enroll', needsVoice: true, fields: [{ path: 'voice.inputDevice', label: 'Microphone', kind: 'text', help: 'Part of the capture device’s name, such as Headset.', hint: 'System default' }] },
     {
       heading: 'Dictation',
       needsVoice: true,
       fields: [
-        { path: 'voice.endPauseMs', label: 'End-of-message pause (ms)', kind: 'integer', help: '500 to 20000. How long a pause ends a dictated message; turn detection shortens it when the words look finished.', placeholder: '3000' },
-        { path: 'voice.micIdleMinutes', label: 'Mic idle timeout (minutes)', kind: 'integer', help: '0 to 1440. After this many minutes of silence the mic stops listening, even with the voice here; 0 never stops it.', placeholder: '10' },
+        { path: 'voice.endPauseMs', label: 'End of message after', kind: 'integer', help: '500 to 20000. A pause this long sends what you said; shorter when the words look finished.', placeholder: '3000', unit: 'ms' },
+        { path: 'voice.micIdleMinutes', label: 'Stop listening after', kind: 'integer', help: '0 to 1440 minutes of silence; 0 never stops.', placeholder: '10', unit: 'min' },
       ],
     },
     {
       heading: 'Talking over replies',
       needsVoice: true,
       fields: [
-        { path: 'voice.duplex.local', label: 'Duplex on this computer', kind: 'select', help: DUPLEX_INFO, placeholder: 'auto', options: DUPLEX_MODES },
-        { path: 'voice.duplex.remote', label: 'Duplex over Remote Desktop', kind: 'select', help: `${DUPLEX_INFO}${DUPLEX_INFO_TAIL}`, placeholder: 'auto', options: DUPLEX_MODES },
-        { path: 'voice.halfDuplexTailMs', label: 'Listening pause after speech (ms)', kind: 'integer', help: '0 to 5000. With no echo cancellation, as over Remote Desktop, the mic stops listening while the voice speaks and for this long after, and talking over a reply does not stop it.', placeholder: '800' },
+        { path: 'voice.duplex.local', label: 'On this computer', kind: 'select', help: DUPLEX_INFO, placeholder: 'auto', options: DUPLEX_MODES },
+        { path: 'voice.duplex.remote', label: 'Over Remote Desktop', kind: 'select', help: 'While Switchboard runs in a Remote Desktop session.', placeholder: 'auto', options: DUPLEX_MODES },
+        { path: 'voice.halfDuplexTailMs', label: 'Resume listening after', kind: 'integer', help: '0 to 5000, once a reply that paused listening ends.', placeholder: '800', unit: 'ms' },
       ],
     },
     {
       heading: 'Someone else speaking',
       needsVoice: true,
       fields: [
-        { path: 'voice.roomHold', label: 'Hold dictation when another person speaks', kind: 'boolean', help: 'When Switchboard detects another voice, it keeps dictated messages in the composer until you press Enter. Turn this off if other people often speak nearby.', fallback: true },
-        { path: 'voice.roomHoldSeconds', label: 'Dictation hold time (seconds)', kind: 'integer', help: 'Keep dictated messages in the composer for 1 to 3600 seconds after another voice was last detected.', placeholder: '60' },
+        { path: 'voice.roomHold', label: 'Hold dictation when another voice is heard', kind: 'boolean', help: 'Dictated messages wait in the composer until you press Enter. Turn it off if others often speak nearby.', fallback: true },
+        { path: 'voice.roomHoldSeconds', label: 'Hold for', kind: 'integer', help: '1 to 3600, after another voice was last heard.', placeholder: '60', unit: 's' },
       ],
     },
     {
       heading: 'Advanced',
       advanced: true,
       needsVoice: true,
-      fields: [{ path: 'voice.matchThreshold', label: 'Voice match', kind: 'number', help: '0 to 1. A dictated piece that matches your enrolled voice less than this is dropped as someone else’s; one or two words get 0.15 less.', placeholder: '0.6' }],
+      fields: [{ path: 'voice.matchThreshold', label: 'Voice match threshold', kind: 'number', help: '0 to 1. A dictated piece that matches your enrolled voice less than this is dropped as someone else’s; one or two words get 0.15 less.', placeholder: '0.6' }],
     },
   ];
 }
@@ -718,16 +723,21 @@ export function personaFields(state: EditorState, index: number): Section[] {
   const voice = stringSetting(state, 'voice.voice', 'marin');
   const style = stringSetting(state, 'voice.style', 'none');
 
+  const id = personaIdOf(getAt(value, path));
+  const map = getAt(value, 'voice.playbookPersonas');
+  const usedBy = id === null || !isObject(map) ? [] : Object.keys(map).filter((playbook) => map[playbook] === id);
+
   return [
     {
-      heading: 'Persona',
+      heading: '',
       fields: [
-        { path: `${path}.name`, label: 'Name', kind: 'text', help: '1 to 40 characters. The Persona row of the conversation’s View options menu shows it.' },
-        { path: `${path}.voice`, label: 'Voice', kind: 'select', help: '', options: withCurrent([{ value: '', label: `Voice setting (${capitalized(voice)})` }, ...choices(TTS_VOICES)], getAt(value, `${path}.voice`)) },
-        { path: `${path}.style`, label: 'Style', kind: 'select', help: '', options: withCurrent([{ value: '', label: `Voice setting (${capitalized(style)})` }, ...choices(SPEECH_STYLES)], getAt(value, `${path}.style`)) },
-        { path: `${path}.personality`, label: 'Personality', kind: 'prompt', help: 'At most 600 characters. How its spoken replies sound, and a tone section in its sessions’ prompts; it never changes how they work.' },
+        { path: `${path}.name`, label: 'Name', kind: 'text', help: '1 to 40 characters, shown in the conversation’s View options.' },
+        { path: `${path}.voice`, label: 'Voice', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Speaking: ${capitalized(voice)}` }, ...choices(TTS_VOICES)], getAt(value, `${path}.voice`)) },
+        { path: `${path}.style`, label: 'Style', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Speaking: ${capitalized(style)}` }, ...choices(SPEECH_STYLES)], getAt(value, `${path}.style`)) },
+        { path: `${path}.personality`, label: 'Personality', kind: 'prompt', help: 'At most 600 characters. How its spoken replies sound; it never changes how its sessions work.' },
       ],
     },
+    { heading: 'Used by', block: 'used-by', usedBy, fields: [] },
   ];
 }
 
@@ -1192,16 +1202,16 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
       label: 'Agent',
       kind: 'select',
       help: 'The agent this playbook’s sessions run in.',
-      options: withCurrent([{ value: '', label: `Sessions setting (${providerName(defaultProvider)})` }, ...state.config.providers.map((entry) => ({ value: entry, label: providerName(entry) }))], playbook.provider ?? undefined),
+      options: withCurrent([{ value: '', label: `From Sessions: ${providerName(defaultProvider)}` }, ...state.config.providers.map((entry) => ({ value: entry, label: providerName(entry) }))], playbook.provider ?? undefined),
     });
     fields.push({
       path: 'permissionMode',
       label: 'Permission mode',
       kind: 'select',
-      help: codex ? 'On Windows, commands in Codex’s sandbox can’t read your stored sign-ins: gh needs GH_TOKEN passed through your Codex shell environment, and git needs OpenSSL with gh as its credential helper. Skills that need more run in bypassPermissions.' : '',
-      options: withCurrent([{ value: '', label: `Sessions setting (${mode})` }, ...modes.map((entry) => ({ value: entry, label: entry }))], playbook.permissionMode ?? undefined),
+      help: codex ? CODEX_SANDBOX_HELP : '',
+      options: withCurrent([{ value: '', label: `From Sessions: ${mode}` }, ...modes.map((entry) => ({ value: entry, label: entry }))], playbook.permissionMode ?? undefined),
     });
-    fields.push({ path: 'model', label: 'Model', kind: 'text', help: '', placeholder: `Sessions setting (${model ?? (codex ? 'Codex’s default' : 'Claude’s default')})` });
+    fields.push({ path: 'model', label: 'Model', kind: 'text', help: '', hint: `From Sessions: ${model ?? (codex ? 'Codex’s default' : 'Claude’s default')}` });
     fields.push({ path: 'returnOf', label: 'Return of', kind: 'list', help: RETURN_OF_HELP });
     fields.push({
       path: 'focus',
@@ -1241,7 +1251,7 @@ function sessionChoices(state: EditorState): { modes: FieldOption[]; codexModes:
   };
 }
 
-const CODEX_SANDBOX_HELP = 'On Windows, commands in Codex’s sandbox can’t read your stored sign-ins: gh needs GH_TOKEN passed through your Codex shell environment, and git needs OpenSSL with gh as its credential helper. Skills that need more run in bypassPermissions.';
+const CODEX_SANDBOX_HELP = 'On Windows, Codex’s sandbox cannot read your stored sign-ins; architecture.md § Codex runner says what gh and git need.';
 
 /** The Sessions page: how playbook and ad-hoc sessions run, by default and for each agent. */
 export function sessionsFields(state: EditorState): Section[] {
@@ -1251,22 +1261,22 @@ export function sessionsFields(state: EditorState): Section[] {
     {
       heading: 'All agents',
       fields: [
-        { path: 'sessions.provider', label: 'Default agent', kind: 'select', help: 'The agent playbook and ad-hoc sessions run in. A playbook can name its own.', placeholder: 'claude', options: providers },
-        { path: 'sessions.concurrency', label: 'Concurrency', kind: 'integer', help: 'Sessions that run at once, 1 to 10. A start with no free slot waits as queued.', placeholder: '2' },
+        { path: 'sessions.provider', label: 'Default agent', kind: 'select', help: 'The agent playbook and ad-hoc sessions run in.', placeholder: 'claude', options: providers },
+        { path: 'sessions.concurrency', label: 'Sessions at once', kind: 'integer', help: '1 to 10. A start with no free slot waits as queued.', placeholder: '2' },
       ],
     },
     {
       heading: 'Claude',
       fields: [
-        { path: 'sessions.model', label: 'Model', kind: 'text', help: 'A playbook can set its own.', placeholder: "Claude's default" },
-        { path: 'sessions.permissionMode', label: 'Permission mode', kind: 'select', help: 'A playbook can set its own.', placeholder: 'auto', options: modes },
+        { path: 'sessions.model', label: 'Model', kind: 'text', help: '', hint: "Claude's default" },
+        { path: 'sessions.permissionMode', label: 'Permission mode', kind: 'select', help: '', placeholder: 'auto', options: modes },
       ],
     },
     {
       heading: 'Codex',
       fields: [
-        { path: 'sessions.codex.model', label: 'Model', kind: 'text', help: 'A playbook can set its own.', placeholder: "Codex's default" },
-        { path: 'sessions.codex.permissionMode', label: 'Permission mode', kind: 'select', help: `A playbook can set its own. ${CODEX_SANDBOX_HELP}`, placeholder: 'auto', options: codexModes },
+        { path: 'sessions.codex.model', label: 'Model', kind: 'text', help: '', hint: "Codex's default" },
+        { path: 'sessions.codex.permissionMode', label: 'Permission mode', kind: 'select', help: CODEX_SANDBOX_HELP, placeholder: 'auto', options: codexModes },
       ],
     },
   ];
@@ -1278,11 +1288,11 @@ export function triageFields(): Section[] {
     {
       heading: 'Classifier',
       fields: [
-        { path: 'triage.model', label: 'Model', kind: 'text', help: 'Triage uses the default agent. A model from the other agent falls back to its default.', placeholder: "Agent's default" },
-        { path: 'triage.concurrency', label: 'Concurrency', kind: 'integer', help: 'Triages that run at once.', placeholder: '2' },
+        { path: 'triage.model', label: 'Model', kind: 'text', help: 'Triage runs in the default agent; a model of the other agent falls back to its default.', hint: "Agent's default" },
+        { path: 'triage.concurrency', label: 'Triages at once', kind: 'integer', help: '', placeholder: '2' },
       ],
     },
-    { heading: 'Advanced', advanced: true, fields: [{ path: 'triage.timeoutSeconds', label: 'Timeout (seconds)', kind: 'integer', help: '', placeholder: '180' }] },
+    { heading: 'Advanced', advanced: true, fields: [{ path: 'triage.timeoutSeconds', label: 'Give up after', kind: 'integer', help: 'A triage that takes longer fails, and its ticket waits for the next poll.', placeholder: '180', unit: 's' }] },
   ];
 }
 
@@ -1295,23 +1305,23 @@ export function displayFields(): Section[] {
       fields: [
         {
           path: 'alerts.surface',
-          label: 'Needs-you alerts from',
+          label: 'Show alerts in',
           kind: 'select',
-          help: 'Where a work item that starts needing you is announced, so one event alerts once. Web app when open uses the installed Switchboard web app while it is open, else a system notification. Web page when open uses any open Switchboard web page, the installed app first, else a system notification. System notification always uses the notifications of this computer; a click on one opens the web page at its work item, except on macOS. A web page announces only once you allowed its notifications, which it asks for at your first click in it. A web page or system notification plays the needs-you sound when the voice does not.',
+          help: 'Where a work item that starts needing you is announced, once. A page announces only after you allow its notifications, which it asks at your first click in it.',
           placeholder: 'auto',
           options: [
-            { value: 'auto', label: 'Web app when open' },
-            { value: 'web', label: 'Web page when open' },
-            { value: 'system', label: 'System notification' },
+            { value: 'auto', label: 'Installed app, else a notification' },
+            { value: 'web', label: 'Any open page, else a notification' },
+            { value: 'system', label: 'Notifications only' },
           ],
         },
-        { path: 'voice.needsYouSound', label: 'Needs-you sound', kind: 'boolean', help: 'Play a short sound when another work item starts needing you: between spoken replies, or with a page or system notification when the voice does not play it.', fallback: true },
+        { path: 'voice.needsYouSound', label: 'Needs-you sound', kind: 'boolean', help: 'A short sound when another work item starts needing you, between spoken replies or with the alert.', fallback: true },
       ],
     },
     {
       heading: 'Replies',
       fields: [
-        { path: 'voice.briefReplies', label: 'Collapse details', kind: 'boolean', help: "Fold a reply's details, the part after its primary response, under a fade until the reply is opened. The newest reply shows in full until a newer one comes. Off, replies show in full. A paired device keeps its own choice.", fallback: false },
+        { path: 'voice.briefReplies', label: 'Collapse details', kind: 'boolean', help: "Fold a reply's details under a fade until you open it; the newest reply shows in full. A paired device keeps its own choice.", fallback: false },
       ],
     },
     {
@@ -1321,7 +1331,7 @@ export function displayFields(): Section[] {
           path: 'web.diffLayout',
           label: 'Layout',
           kind: 'select',
-          help: "How a changed file's diff shows its sides on every page: Auto shows them side by side in a pane at least 900 px wide and one above the other in a narrower one, as VS Code's diff editor does.",
+          help: 'Auto shows the sides side by side in a pane at least 900 px wide, else one above the other.',
           placeholder: 'auto',
           options: [
             { value: 'auto', label: 'Auto' },
@@ -1333,7 +1343,7 @@ export function displayFields(): Section[] {
           path: 'web.diffWrap',
           label: 'Wrap long lines',
           kind: 'select',
-          help: 'Whether a diff wraps lines longer than its pane. Auto wraps them only while Auto layout stacks the sides. A device where Wrap was toggled on the Changes tab keeps its own choice.',
+          help: 'Auto wraps while the sides are stacked. A device where Wrap was pressed on the Changes tab keeps its own choice.',
           placeholder: 'auto',
           options: [
             { value: 'auto', label: 'Auto' },
@@ -1353,15 +1363,15 @@ export function devicesFields(): Section[] {
     {
       heading: 'Remote access',
       fields: [
-        { path: 'web.tailscale', label: 'Tailscale', kind: 'boolean', help: "Let your devices open the web page through your tailnet. Switchboard adds this computer's Tailscale name and login to Allowed hosts and Allowed logins. Tailscale must be running here, and tailscale serve must point to the page's port, as in tailscale serve --bg 47616. Pair each device with Pair a device. Do not use Tailscale Funnel.", fallback: false },
+        { path: 'web.tailscale', label: 'Tailscale', kind: 'boolean', help: 'Let your devices open the page through your tailnet, with tailscale serve pointing to its port; never Tailscale Funnel. Read again on each change.', fallback: false },
       ],
     },
     {
       heading: 'Advanced',
       advanced: true,
       fields: [
-        { path: 'web.remoteHosts', label: 'Allowed hosts', kind: 'list', help: "One per line, such as pc.tailnet.ts.net, without https:// or a port: other names the page answers as through tailscale serve. With Tailscale on, this computer's own Tailscale name needs no line." },
-        { path: 'web.remoteLogins', label: 'Allowed logins', kind: 'list', help: "One per line, such as you@example.com: the Tailscale logins whose devices may pair and use the page; other people on your tailnet are refused. With Tailscale on, this computer's owner needs no line." },
+        { path: 'web.remoteHosts', label: 'Allowed hosts', kind: 'list', help: "One per line, such as pc.tailnet.ts.net: other names the page answers to. Without Tailscale they are needed; with it, this computer's name needs no line. A change that drops a device ends its streams." },
+        { path: 'web.remoteLogins', label: 'Allowed logins', kind: 'list', help: "One per line, such as you@example.com: the Tailscale logins whose devices may pair; others on your tailnet are refused. With Tailscale, this computer's owner needs no line." },
       ],
     },
   ];
@@ -1375,16 +1385,16 @@ export function advancedFields(): Section[] {
       fields: [
         {
           path: 'sessions.codeMode',
-          label: 'Code Mode (experimental)',
+          label: 'Code Mode',
           kind: 'boolean',
-          help: 'New Claude sessions use Claude Code’s Code Mode. With it on they use your Claude subscription sign-in, and the gateway in your Claude settings does not apply; with it off they run as your own claude does. Either way they run in Switchboard’s terminal holder and keep running between turns until you stop them or they sit idle for an hour. Sessions already started keep their mode.',
+          help: 'New Claude sessions use Claude Code’s Code Mode, with your subscription sign-in rather than your Claude settings’ gateway. Sessions already started keep their mode.',
           fallback: false,
         },
         {
           path: 'web.iframeBrowser',
           label: 'Embedded browser tabs',
           kind: 'boolean',
-          help: "Experimental web embedding on local and paired devices. Needs this branch's Chrome/Edge extension, access to HTTP and HTTPS sites, and Chromium 145+. Open with sign-in support keeps Switchboard and website frames inside an extension tab. Removes website framing headers and CSP only in verified experiment tabs, preserving Switchboard's CSP. Reload the page after changing this setting.",
+          help: 'Open links in tabs inside the page, in Chrome or Edge 145 or later with the browser extension from More actions. Reload the page after a change.',
           fallback: false,
         },
       ],
@@ -1392,16 +1402,16 @@ export function advancedFields(): Section[] {
     {
       heading: 'Programs',
       fields: [
-        { path: 'sessions.claudePath', label: 'Claude Code path', kind: 'text', help: 'The Claude Code CLI the hub and Open in terminal run. Set its full path when their PATH does not include it.', placeholder: 'claude' },
-        { path: 'sessions.codexPath', label: 'Codex path', kind: 'text', help: 'The Codex CLI the hub and Open in terminal run. Set its full path when their PATH does not include it, such as a Codex installed through nvm.', placeholder: 'codex' },
-        { path: 'sessions.nodePath', label: 'Node.js path', kind: 'text', help: 'The Node.js that Switchboard’s hooks and session reports run. Set its full path, with no spaces, when the agents’ PATH does not include it, such as a Node.js installed through nvm.', placeholder: 'node' },
-        { path: 'sessions.installHooks', label: 'Install hooks', kind: 'boolean', help: 'Add Switchboard’s hooks to your Claude and Codex settings, so the list shows when a session waits for you. Off, the session list and Codex’s run output alone decide state.', fallback: true },
+        { path: 'sessions.claudePath', label: 'Claude Code path', kind: 'text', help: 'Its full path, when the hub’s PATH does not include it.', placeholder: 'claude' },
+        { path: 'sessions.codexPath', label: 'Codex path', kind: 'text', help: 'Its full path, when the hub’s PATH does not include it, as for a Codex installed through nvm.', placeholder: 'codex' },
+        { path: 'sessions.nodePath', label: 'Node.js path', kind: 'text', help: 'The Node.js that hooks and session reports run: its full path, with no spaces, when the agents’ PATH does not include it.', placeholder: 'node' },
+        { path: 'sessions.installHooks', label: 'Install hooks', kind: 'boolean', help: 'Add Switchboard’s hooks to your Claude and Codex settings, so the list shows when a session waits for you.', fallback: true },
       ],
     },
     {
       heading: 'Developer',
       fields: [
-        { path: 'sessions.debriefs', label: 'Friction debriefs', kind: 'boolean', help: 'Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.', fallback: false },
+        { path: 'sessions.debriefs', label: 'Friction debriefs', kind: 'boolean', help: 'Ask each session what slowed it down, once its work is done; the answers go to ~/.claude/.wip/debrief.', fallback: false },
       ],
     },
     { heading: 'Settings file', block: 'file', fields: [] },
@@ -1433,7 +1443,7 @@ type OptionField = { key: string; field: Omit<Field, 'path'>; advanced: boolean 
 
 const OPTION_FIELDS: Readonly<Record<string, readonly OptionField[]>> = {
   github: [
-    { key: 'repo', field: { label: 'Repository', kind: 'text', help: '', placeholder: 'owner/name' }, advanced: false },
+    { key: 'repo', field: { label: 'Repository', kind: 'text', help: '', hint: 'e.g. owner/name' }, advanced: false },
     { key: 'logins', field: { label: 'Logins', kind: 'list', help: 'One per line. Your GitHub logins: comments and commits by them are yours, and with Require assignee on, an issue assigned to any of them is yours.' }, advanced: false },
     { key: 'requireAssignee', field: { label: 'Require assignee', kind: 'boolean', help: 'Off, an issue in an assigned status is yours whoever is assigned.', fallback: true }, advanced: false },
     { key: 'waitForBlockers', field: { label: 'Wait for blockers', kind: 'boolean', help: "On, an issue's work starts only once the issues blocking it close. Leave off to start stacked work from a blocker's branch.", fallback: false }, advanced: false },
@@ -1468,7 +1478,7 @@ export function sourceFields(state: EditorState, name: string): Section[] {
   const value = state.value ?? undefined;
   const triage = state.playbookNames.filter((entry) => state.playbookValue(entry)?.kind === 'triage').map((entry) => ({ value: entry, label: entry }));
   const common: Field[] = [
-    { path: `${path}.pollIntervalSeconds`, label: 'Poll interval (seconds)', kind: 'integer', help: 'At least 10.', placeholder: '300' },
+    { path: `${path}.pollIntervalSeconds`, label: 'Poll every', kind: 'integer', help: 'At least 10.', placeholder: '300', unit: 's' },
     { path: `${path}.repoRoot`, label: 'Repo root', kind: 'text', help: 'The repository sessions run in when the ticket has no worktree.' },
     {
       path: `${path}.namespace`,
@@ -1493,7 +1503,7 @@ export function sourceFields(state: EditorState, name: string): Section[] {
   }
 
   const kind = sourceKind(value, name);
-  const declared: OptionField[] = (state.config.sourceFields?.[kind] ?? []).map((entry) => ({ key: entry.key, field: { label: entry.label, kind: entry.type, help: typeof entry.help === 'string' ? entry.help : '', ...(entry.type === 'boolean' ? { fallback: entry.placeholder === 'true' } : typeof entry.placeholder === 'string' ? { placeholder: entry.placeholder } : {}) }, advanced: entry.advanced === true }));
+  const declared: OptionField[] = (state.config.sourceFields?.[kind] ?? []).map((entry) => ({ key: entry.key, field: { label: entry.label, kind: entry.type, help: typeof entry.help === 'string' ? entry.help : '', ...(entry.type === 'boolean' ? { fallback: entry.placeholder === 'true' } : typeof entry.placeholder === 'string' ? { placeholder: entry.placeholder, hint: entry.placeholder } : {}) }, advanced: entry.advanced === true }));
   const options = (OPTION_FIELDS[kind] ?? declared).map((entry) => ({ field: { ...entry.field, path: `${path}.${entry.key}` } as Field, advanced: entry.advanced }));
   const plain = options.filter((entry) => !entry.advanced).map((entry) => entry.field);
   // The kind is rarely changed once the source works, so it waits under Advanced with the plugin's own rare fields.
@@ -1520,8 +1530,8 @@ export function scheduleFields(state: EditorState, name: string): Section[] {
   const every = typeof period === 'string' ? period : '';
   const tasks = state.playbookNames.filter((entry) => state.playbookValue(entry)?.kind === 'task').map((entry) => ({ value: entry, label: entry }));
   const fields: Field[] = [
-    { path: `${path}.playbook`, label: 'Playbook', kind: 'select', help: 'The task playbook each run starts. It cannot need a worktree.', options: withCurrent([{ value: '', label: 'None' }, ...tasks], getAt(value, `${path}.playbook`)) },
-    { path: `${path}.repoRoot`, label: 'Repo root', kind: 'text', help: 'The directory its sessions run in.' },
+    { path: `${path}.playbook`, label: 'Playbook', kind: 'select', required: true, help: 'The task playbook each run starts. It cannot need a worktree.', options: withCurrent([{ value: '', label: 'None' }, ...tasks], getAt(value, `${path}.playbook`)) },
+    { path: `${path}.repoRoot`, label: 'Repo root', kind: 'text', required: true, help: 'The directory its sessions run in.', hint: 'e.g. D:\\git\\widgets' },
     {
       path: `${path}.every`,
       label: 'Runs',
@@ -1537,13 +1547,13 @@ export function scheduleFields(state: EditorState, name: string): Section[] {
   ];
 
   if (every === 'week') {
-    fields.push({ path: `${path}.day`, label: 'Day', kind: 'select', help: '', options: withCurrent(WEEKDAYS, getAt(value, `${path}.day`)) });
+    fields.push({ path: `${path}.day`, label: 'Day', kind: 'select', required: true, help: '', options: withCurrent(WEEKDAYS, getAt(value, `${path}.day`)) });
   } else if (every === 'month') {
-    fields.push({ path: `${path}.day`, label: 'Day of the month', kind: 'integer', help: '1 to 31. A month without that day runs on its last day.' });
+    fields.push({ path: `${path}.day`, label: 'Day of the month', kind: 'integer', required: true, help: '1 to 31. A month without that day runs on its last day.', hint: 'e.g. 1' });
   }
 
   if (every !== '') {
-    fields.push({ path: `${path}.at`, label: 'Time', kind: 'text', help: 'Local time, 24-hour. A run whose time passed while Switchboard was stopped starts once when it starts again.', placeholder: '09:00' });
+    fields.push({ path: `${path}.at`, label: 'Time', kind: 'text', required: true, help: 'Local time, 24-hour. A run missed while Switchboard was stopped starts once when it starts again.', hint: 'e.g. 09:00' });
   }
 
   return [{ heading: 'Schedule', fields }];
@@ -1780,6 +1790,35 @@ export function nav(state: EditorState): NavCategory[] {
   ];
 }
 
+/** The groups that hold `page`, outermost first, as a phone drills into them to reach it; a group with that page of its own included. */
+export function navPathTo(categories: readonly NavCategory[], page: string): string[] {
+  const find = (entries: readonly NavEntry[], path: string[]): string[] | null => {
+    for (const entry of entries) {
+      if (entry.kind !== 'group') {
+        if (entry.page === page) {
+          return path;
+        }
+
+        continue;
+      }
+
+      if (entry.page === page) {
+        return [...path, entry.key];
+      }
+
+      const found = find(entry.children ?? [], [...path, entry.key]);
+
+      if (found !== null) {
+        return found;
+      }
+    }
+
+    return null;
+  };
+
+  return find(categories.flatMap((category) => category.entries), []) ?? [];
+}
+
 /** The entry for `key` anywhere in the navigation, or null. */
 export function navEntry(categories: readonly NavCategory[], key: string): NavEntry | null {
   const find = (entries: readonly NavEntry[]): NavEntry | null => {
@@ -1843,7 +1882,8 @@ export interface FieldView {
 export interface SectionView {
   heading: string;
   advanced: boolean;
-  block?: 'devices' | 'file' | 'enroll';
+  block?: 'devices' | 'file' | 'enroll' | 'used-by';
+  usedBy?: string[];
   link?: { text: string; label: string; page: string };
   /** Dimmed, since the voice is off and its settings need it. */
   dimmed: boolean;
@@ -2048,12 +2088,14 @@ function personaPage(state: EditorState, at: string): PageView {
     tip: 'Removes the persona and its playbook assignments from the draft. Sessions that have it keep its ID and speak with the voice settings.',
   };
   const id = state.personaId(index);
-  const title = id === null ? `Persona ${index + 1}` : `Persona ${id}`;
+  // One name, as the navigation shows it; the ID, which cannot change, under it.
+  const title = state.personaLabel(index);
+  const lede = id === null ? null : `ID ${id}, by which sessions and playbooks name it.`;
   const named = getAt(state.value ?? undefined, `voice.personas[${index}].name`);
   const name = typeof named === 'string' ? named.trim() : '';
   // A persona named like a voice reads as a voice choice in the settings and in voice.playbookPersonas.
   const notes = TTS_VOICES.includes(name.toLowerCase()) ? [`${name} is also the name of an OpenAI voice, which makes the settings hard to read. Choose another name.`] : [];
-  const view = settingsPage(state, title, personaFields(state, index), [remove], notes);
+  const view = settingsPage(state, title, personaFields(state, index), [remove], notes, lede);
 
   return view.sections.length === 0 && view.message === null ? { ...view, message: 'Fix this entry in settings.json in an editor, or remove it.' } : view;
 }
@@ -2162,6 +2204,7 @@ export function settingsPage(state: EditorState, title: string, sections: readon
     summary: section.summary ?? section.fields.map((field) => field.label).join(', '),
     ...(section.block === undefined ? {} : { block: section.block }),
     ...(section.link === undefined ? {} : { link: section.link }),
+    ...(section.usedBy === undefined ? {} : { usedBy: section.usedBy }),
     dimmed: section.needsVoice === true && voiceOff(state),
     fields: section.fields.map((field) => fieldView(field, getAt(value, field.path), errors.filter((error) => fieldOfError(error, paths) === field.path))),
   }));

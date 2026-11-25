@@ -66,7 +66,8 @@
 .settings-switch input:focus-visible + .settings-switch-track { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .settings-text { box-sizing: border-box; width: 240px; max-width: 100%; min-height: 26px; padding: 3px 6px; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 2px; }
 .settings-text:focus, .settings-select:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-.settings-text.numeric { width: 80px; }
+/* A number field fits "Default: " and its value; its unit follows it. */
+.settings-text.numeric { width: calc(13ch + 14px); }
 textarea.settings-text { width: 100%; max-width: none; }
 textarea.settings-text { resize: vertical; }
 textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, monospace); }
@@ -91,6 +92,10 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
 .settings button.link { padding: 0; border: none; background: transparent; font: inherit; color: var(--vscode-textLink-foreground); cursor: pointer; }
 .settings button.link:hover { text-decoration: underline; }
 .settings-label { font-size: 13px; }
+.settings-required { margin-left: 6px; padding: 0 5px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 3px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+.settings-with-unit { display: inline-flex; align-items: center; gap: 6px; }
+.settings-unit { min-width: 2.2em; color: var(--vscode-descriptionForeground); }
+.settings-links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
 /* The Devices page's paired devices and Pair a device (architecture.md § Remote access); the list and the code are drawn as the Pair a device sheet's. */
 .settings-devices { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 9px 14px; }
 .settings-devices .device-list { align-self: stretch; margin-bottom: 4px; }
@@ -141,7 +146,7 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
   .settings-check { min-height: 44px; }
   .settings-toggle { min-height: 44px; }
   .settings-table button.link { min-width: 44px; min-height: 44px; text-align: left; }
-  .settings-voice-off button.link, .settings-link-row button.link { min-height: 44px; }
+  .settings-voice-off button.link, .settings-link-row button.link, .settings-links button.link { min-height: 44px; }
   .settings-table input[type="checkbox"] { width: 20px; height: 20px; margin: 0; }
   /* A checkbox's 20 px mark sits in a 44 px label, which takes the press. */
   .settings-box { min-width: 44px; min-height: 44px; }
