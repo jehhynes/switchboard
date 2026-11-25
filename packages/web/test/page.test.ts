@@ -1823,14 +1823,14 @@ it("makes a phone's conversation a history entry, which the browser's back leave
     expect(history.length).toBe(entries + 1);
     expect(location.hash).toBe('#w=1');
 
-    // Back, as Android's back button gives it: the list, on the selected row, and the list's entry keeps the work item's address.
+    // Back, as Android's back button gives it: the list, on the selected row, and the list's entry is the list's address, so a reload shows it.
     let pop = popped();
 
     history.back();
     await pop;
     expect(root.classList.contains('listing')).toBe(true);
     expect(document.activeElement).toBe(root.querySelector('[data-work-item="1"]'));
-    expect(location.hash).toBe('#w=1');
+    expect(location.hash).toBe('#list');
     // Forward opens the conversation again.
     pop = popped();
     history.forward();
@@ -1844,7 +1844,7 @@ it("makes a phone's conversation a history entry, which the browser's back leave
     await pop;
     expect(root.classList.contains('listing')).toBe(true);
     expect(history.state).toBeNull();
-    expect(location.hash).toBe('#w=1');
+    expect(location.hash).toBe('#list');
 
     // Another conversation chosen from the header's dropdown replaces the entry rather than adding one.
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
@@ -1867,8 +1867,12 @@ it("makes a phone's conversation a history entry, which the browser's back leave
     page.close();
   });
 
-it('steps back through history once for Back, select and Back in quick succession, and drops a refused row\'s entry or a reloaded mark', async () => {
-    history.replaceState({ switchboardConversation: true }, '', '#w=1');
+it('steps back through history once for Back, select and Back in quick succession, and drops a refused row\'s entry, and keeps a reloaded conversation\'s entry', async () => {
+    // The entries a phone's page made before the reload: the list's, and the conversation's over it.
+    history.replaceState(null, '', '#list');
+    history.pushState({ switchboardConversation: true }, '', '#w=1');
+
+    const entries = history.length;
 
     const fetch = vi.fn(async (url: string) => ({ status: url.endsWith('/select') && refuse ? 404 : 200, ok: true, json: async () => (refuse ? { error: 'That work item is gone.' } : {}), text: async () => '' }) as unknown as Response);
     let refuse = false;
@@ -1876,24 +1880,29 @@ it('steps back through history once for Back, select and Back in quick successio
     const source = FakeSource.last!;
     const groups = [listGroup('progress', [listRow(1), listRow(2)])];
 
-    // A reload drops the mark, whose list entry belonged to the page before.
-    expect(history.state).toBeNull();
+    // A reload keeps the conversation's entry over the list's, adding none, so Back steps back to the list's.
+    expect(history.state).toEqual({ switchboardConversation: true });
+    expect(history.length).toBe(entries);
     source.emit('hello', { key: 'pk', groups, scope, sessions: [session()], items: [], more: false, status: null, artifacts: [] });
 
     const back = vi.spyOn(history, 'back');
     const popped = () => new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
+    let pop = popped();
 
     root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
-    expect(back).not.toHaveBeenCalled();
+    expect(back).toHaveBeenCalledOnce();
+    await pop;
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(location.hash).toBe('#list');
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
     expect(history.state).toEqual({ switchboardConversation: true });
 
-    let pop = popped();
+    pop = popped();
 
     root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
-    expect(back).toHaveBeenCalledOnce();
+    expect(back).toHaveBeenCalledTimes(2);
     await pop;
     expect(root.classList.contains('listing')).toBe(true);
     expect(history.state).toBeNull();
@@ -1909,7 +1918,7 @@ it('steps back through history once for Back, select and Back in quick successio
     pop = popped();
     root.querySelector<HTMLElement>('[data-action="open-back"]')!.click();
     await pop;
-    expect(back).toHaveBeenCalledTimes(2);
+    expect(back).toHaveBeenCalledTimes(3);
     expect(root.classList.contains('listing')).toBe(true);
     expect(history.state).toBeNull();
     back.mockRestore();
@@ -4356,7 +4365,11 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     page.close();
 
     installed = false;
-    expect(start().source.url).toBe('/v1/conversation/events?page=1');
+
+    const again = start();
+
+    expect(again.source.url).toBe('/v1/conversation/events?page=1');
+    again.page.close();
   });
 
   it('raises a needs-you alert the hub sends as a silent notification per work item whose click shows it, with the chime only when asked', async () => {
@@ -6711,7 +6724,9 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(location.hash).toBe('#w=1&t=status');
     hello(source);
     expect(root.classList.contains('listing')).toBe(false);
-    expect(root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab']).toBe('status');
+    // Where the column folds into the conversation's strip, the opening shows the Conversation tab (PRD R109), and the address follows it.
+    expect(root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab']).toBe('conversation');
+    expect(location.hash).toBe('#w=1');
     if (root.querySelector('#head [data-action="artifact"][data-path="chat/plan.md"]') === null) {
       click('#head .tab-more-button');
     }
@@ -6746,7 +6761,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     panel.scrollTop = 40;
     panel.dispatchEvent(new Event('scroll'));
     window.dispatchEvent(new Event('pagehide'));
-    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)).toEqual({ '1 conversation': { id: 'r1', offset: -20, pinned: false, top: 40 } });
+    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)).toEqual({ '1 conversation s': { id: 'r1', offset: -20, pinned: false, top: 40 } });
     first.page.close();
     vi.restoreAllMocks();
 
@@ -6776,7 +6791,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
   });
 
   it('restores the Changes tab at its file, a local file tab at its line, and the History tab, from the route after a reload, and keeps them in it', async () => {
-    window.innerWidth = 375;
+    window.innerWidth = 1440;
     history.replaceState(null, '', '#w=1&t=changes&f=src%2Fa.ts');
     // The reads' answers do not matter here: only that the page asks for them.
     answers['/v1/conversation/changes'] = { status: 403, body: { error: 'Not in this window.' } };
@@ -6787,7 +6802,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     hello(first.source);
     await flush();
-    expect(root.querySelector('#panel')!.classList.contains('diff-pane')).toBe(true);
+    expect(root.querySelector('#detail .detail-body')!.classList.contains('diff-pane')).toBe(true);
     expect(posts.some((post) => post.url.startsWith('/v1/conversation/changes?'))).toBe(true);
     expect(location.hash).toBe('#w=1&t=changes&f=src%2Fa.ts');
     first.page.close();
@@ -6812,9 +6827,300 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     hello(third.source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 7, key: 'gh 7' } })])] });
     await flush();
-    expect(root.querySelector('#head [data-tab="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(posts.find((post) => post.url.endsWith('/page-history'))?.body).toMatchObject({ ticketId: 7 });
     expect(location.hash).toBe('#w=1&t=history');
+    third.page.close();
+    window.innerWidth = 1024;
+  });
+
+  it("shows the list after a phone's Back and a reload, keeps Back to the list over a reload with no new entries, and opens the kept route from an empty hash", async () => {
+    window.innerWidth = 375;
+    history.replaceState(null, '', '#w=1');
+
+    const entries = history.length;
+    const groups = [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])];
+    const listHello = (source: FakeSource) => source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    const popped = () => new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
+    const first = start();
+
+    // Started on a conversation, the page puts the list's entry under it.
+    expect(history.length).toBe(entries + 1);
+    expect(history.state).toEqual({ switchboardConversation: true });
+    expect(location.hash).toBe('#w=1');
+    hello(first.source);
+    expect(localStorage.getItem('switchboard.route')).toBe('#w=1');
+    first.page.close();
+
+    // A reload of that entry adds none, and the browser's back still goes to the list.
+    const second = start();
+
+    expect(history.length).toBe(entries + 1);
+    hello(second.source);
+    expect(root.classList.contains('listing')).toBe(false);
+
+    let pop = popped();
+
+    history.back();
+    await pop;
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(location.hash).toBe('#list');
+    second.page.close();
+
+    // A reload of the list shows the list, not the work item this device kept.
+    posts = [];
+
+    const third = start();
+
+    listHello(third.source);
+    await flush();
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(posts.some((post) => post.url.endsWith('/select'))).toBe(false);
+    expect(location.hash).toBe('#list');
+    expect(localStorage.getItem('switchboard.route')).toBe('#w=1');
+    third.page.close();
+
+    // An empty hash, as an installed app starts at its start URL, opens the route this device kept.
+    history.replaceState(null, '', '#');
+    posts = [];
+
+    const fourth = start();
+
+    listHello(fourth.source);
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/select'))?.body['workItemId']).toBe(1);
+    expect(location.hash).toBe('#w=1');
+    fourth.page.close();
+    pop = popped();
+    history.back();
+    await pop;
+    window.innerWidth = 1024;
+  });
+
+  it("puts #list in the address for a phone's Back from a conversation with no entry of its own, as after a wider page narrowed, and keeps the device's route", () => {
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+
+    hello(source);
+    expect(history.state).toBeNull();
+    resizeTo(375);
+    click('.header > button.back-toggle');
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(location.hash).toBe('#list');
+    expect(localStorage.getItem('switchboard.route')).toMatch(/^#w=1\b/);
+    page.close();
+    window.innerWidth = 1024;
+  });
+
+  it("applies a phone's conversation entry's route on the browser's forward, showing the Conversation tab with the route's tab kept for the column", async () => {
+    window.innerWidth = 375;
+    history.replaceState(null, '', '#list');
+    history.pushState({ switchboardConversation: true }, '', '#w=2&t=status');
+
+    const popped = () => new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }));
+    let pop = popped();
+
+    history.back();
+    await pop;
+
+    const { page, source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    await flush();
+    expect(root.classList.contains('listing')).toBe(true);
+    expect(posts.some((post) => post.url.endsWith('/select'))).toBe(false);
+    pop = popped();
+    history.forward();
+    await pop;
+    await flush();
+    expect(root.classList.contains('listing')).toBe(false);
+    expect(posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body['workItemId'])).toEqual([2]);
+    hello(source, { scope: { ...scope, workItemId: 2 } });
+    expect(root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab']).toBe('conversation');
+    expect(location.hash).toBe('#w=2');
+    // The route's tab is the column's choice: a wider page shows it.
+    resizeTo(1440);
+    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    page.close();
+    window.innerWidth = 1024;
+  });
+
+  it('applies an address edited by hand on a wide page, gives way to Status for an artifact closed on every device, and moves no tab on a tabs event', async () => {
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1&t=artifact%3Achat%2Fplan.md');
+
+    const entries = history.length;
+    const { page, source } = start();
+    const kept = () => posts.filter((post) => post.url.endsWith('/page-tabs'));
+    const selected = () => root.querySelector('#detail .artifact-tab.selected');
+
+    // Closed on every device: the route does not open it again.
+    hello(source, { tabs: { tab: null, closed: [{ path: 'chat/plan.md', updatedAt: 1_500 }] } });
+    await flush();
+    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(selected()).toBeNull();
+    expect(location.hash).toBe('#w=1&t=status');
+    expect(kept()).toEqual([]);
+    // A wide page adds no history entry.
+    expect(history.length).toBe(entries);
+
+    // The address edited by hand: its route, as no choice of the operator's.
+    history.pushState(null, '', '#w=1&t=artifact%3Achat%2Fp.html');
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+    expect(selected()?.getAttribute('data-path')).toBe('chat/p.html');
+    expect(location.hash).toBe('#w=1&t=artifact%3Achat%2Fp.html');
+    expect(kept()).toEqual([]);
+
+    // A tabs event, as another device's kept tab, only reconciles the closed artifacts.
+    source.emit('tabs', { workItemId: 1, tabs: { tab: 'artifact:chat/plan.md', closed: [] } });
+    expect(selected()?.getAttribute('data-path')).toBe('chat/p.html');
+    expect(location.hash).toBe('#w=1&t=artifact%3Achat%2Fp.html');
+    page.close();
+    window.innerWidth = 1024;
+  });
+
+  it("brings back a link tab added from the conversation and the link selected over a reload and another work item, with and without the extension", async () => {
+    window.innerWidth = 1920;
+
+    const issue = 'https://github.com/o/r/issues/1';
+    const pr = { label: 'PR #7', url: 'https://github.com/o/r/pull/7', kind: 'pr' as const, badge: '7', glyph: null, mentioned: false };
+    const docs = 'https://docs.example.com/guide';
+    const groups = [listGroup('progress', [listRow(1, { title: 'Fix it', url: issue, links: [pr] }), listRow(2, { title: 'Side', url: 'https://github.com/o/r/issues/2' })])];
+    const selected = (): string | null | undefined => root.querySelector('#detail [data-action="iframe-open"][aria-selected="true"]')?.getAttribute('data-url');
+    const links = (): Array<string | null> => [...root.querySelectorAll('#detail [data-action="iframe-open"]')].map((tab) => tab.getAttribute('data-url'));
+    const open = (extension: boolean) =>
+      startPage(root, {
+        fetch: (async (url: string, init?: { body?: string }) => {
+          posts.push({ url, body: init?.body ? JSON.parse(init.body) : {} });
+          return { status: 200, ok: true, json: async () => ({}) };
+        }) as unknown as typeof globalThis.fetch,
+        EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false, openUrl: () => undefined,
+        extensionInstallable: () => true, toExtension: async () => (extension ? { ok: true } : null),
+      });
+
+    history.replaceState(null, '', '#w=1');
+
+    const first = open(true);
+
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups });
+    await flush();
+    // A web link of the conversation opens a link tab of its own, named by its link.
+    root.querySelector('#panel .timeline')!.insertAdjacentHTML('beforeend', `<li><div class="body"><a href="${docs}" target="_blank">Guide</a></div></li>`);
+    root.querySelector<HTMLElement>(`#panel a[href="${docs}"]`)!.click();
+    await flush();
+    expect(selected()).toBe(docs);
+    // The ticket's link tab closed.
+    click(`#detail [data-action="iframe-close"][data-url="${issue}"]`);
+    click(`#detail [data-action="iframe-open"][data-url="${pr.url}"]`);
+    await flush();
+    expect(links()).toEqual([pr.url, docs]);
+    expect(location.hash).toBe(`#w=1&t=link&u=${encodeURIComponent(pr.url)}`);
+
+    // Another work item and back.
+    click('#list [data-work-item="2"]');
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups, scope: { ...scope, workItemId: 2, scopeGen: 4 } });
+    await flush();
+    expect(links()).toEqual(['https://github.com/o/r/issues/2']);
+    click('#list [data-work-item="1"]');
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups, scope: { ...scope, scopeGen: 5 } });
+    await flush();
+    expect(links()).toEqual([pr.url, docs]);
+    expect(selected()).toBe(pr.url);
+    window.dispatchEvent(new Event('pagehide'));
+    first.close();
+
+    // A reload, with the extension and without it: the same tabs, the ticket's still closed, and the link the route names selected.
+    for (const extension of [true, false]) {
+      history.replaceState(null, '', `#w=1&t=link&u=${encodeURIComponent(docs)}`);
+
+      const again = open(extension);
+
+      hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups });
+      await flush();
+      expect(links()).toEqual([pr.url, docs]);
+      expect(selected()).toBe(docs);
+      expect(root.querySelector('#detail .detail-body')!.textContent).toContain(extension ? 'Open with sign-in support' : 'Open in a browser tab');
+      again.close();
+    }
+  });
+
+  it("keeps New conversation…'s draft over a reload, with its provider and text, until it is cancelled", async () => {
+    answers['/providers'] = { status: 200, body: { defaultProvider: 'claude', installed: ['claude', 'codex'] } };
+    history.replaceState(null, '', '#w=1');
+
+    const first = start();
+    const input = () => root.querySelector('textarea')!;
+
+    hello(first.source);
+    click('[data-action="picker"]');
+    click('[data-action="new-conversation"]');
+    await flush();
+    click('[data-action="draft-provider"][data-provider="codex"]');
+    input().value = 'Start over';
+    input().dispatchEvent(new Event('input'));
+    first.page.close();
+
+    const second = start();
+
+    hello(second.source);
+    await flush();
+    expect(root.querySelector('#panel .new-draft')).not.toBeNull();
+    expect(input().value).toBe('Start over');
+    expect(root.querySelector('.draft-note [aria-pressed="true"]')!.textContent).toBe('Codex');
+    click('[data-action="draft-cancel"]');
+    expect(root.querySelector('.draft-note')).toBeNull();
+    second.page.close();
+
+    // Cancelled, it is gone after a reload too.
+    const third = start();
+
+    hello(third.source);
+    await flush();
+    expect(root.querySelector('.draft-note')).toBeNull();
+    expect(input().value).toBe('');
+    third.page.close();
+  });
+
+  it("gives a reload of the current session its own place, not an earlier session's, and brings History back to its place", async () => {
+    window.innerWidth = 375;
+    history.replaceState(null, '', '#w=1');
+    sessionStorage.clear();
+    // Only the earlier session's place.
+    sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 conversation old': { id: 'r1', offset: -20, pinned: false, top: 40 } }));
+
+    const first = start();
+    const panel = root.querySelector<HTMLElement>('#panel')!;
+
+    Object.defineProperty(panel, 'scrollHeight', { value: 2000, configurable: true });
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 600 } as DOMRect);
+    hello(first.source);
+    // At the end, as a conversation with no place of its own.
+    expect(panel.scrollTop).toBe(2000);
+    first.page.close();
+    vi.restoreAllMocks();
+
+    // History's body scrolls under its toolbar, and its place is the body's.
+    window.innerWidth = 1440;
+    answers['/page-history'] = { status: 200, body: { view: { key: 'gh 7', title: 'Fix it', url: '', facts: [], links: [], reconstructed: false, recordedSince: null, sections: [] }, categories: [] } };
+    history.replaceState(null, '', '#w=1&t=history');
+
+    const withHistory = { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 7, key: 'gh 7' } })])] };
+    const second = start();
+
+    hello(second.source, withHistory);
+    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-hero')).not.toBeNull());
+    root.querySelector<HTMLElement>('#detail .hist-body')!.scrollTop = 180;
+    window.dispatchEvent(new Event('pagehide'));
+    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 history']).toMatchObject({ top: 180 });
+    second.page.close();
+
+    const third = start();
+
+    hello(third.source, withHistory);
+    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-hero')).not.toBeNull());
+    expect(root.querySelector<HTMLElement>('#detail .hist-body')!.scrollTop).toBe(180);
     third.page.close();
     window.innerWidth = 1024;
   });
@@ -6936,16 +7242,11 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
   it("keeps a conversation's kept place through a reload onto another tab, gives it back on A to B to A, and reads the Changes tab again after a reconnect", async () => {
     window.innerWidth = 375;
-    sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 conversation': { id: 'm1', offset: -20, pinned: false, top: 0 } }));
     history.replaceState(null, '', '#w=1&t=status');
 
     const { page, source } = start();
 
     hello(source);
-    // Choosing another tab before the conversation was drawn leaves its kept place as it was.
-    click('#head [data-tab="artifacts"], #head [data-tab="status"]');
-    window.dispatchEvent(new Event('pagehide'));
-    expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 conversation']).toEqual({ id: 'm1', offset: -20, pinned: false, top: 0 });
 
     // A to B: A's place is kept; back to A, the conversation takes it again rather than its end.
     const panel = root.querySelector<HTMLElement>('#panel')!;
@@ -6954,7 +7255,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     root.querySelector<HTMLElement>('[data-work-item="2"]')!.click();
     hello(source, { scope: { ...scope, workItemId: 2, scopeGen: 4 } });
     // Where A was when it was left, as the operator had scrolled it.
-    sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 conversation': { id: 'r1', offset: 0, pinned: false, top: 0 } }));
+    sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 conversation s': { id: 'r1', offset: 0, pinned: false, top: 0 } }));
     vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 600 } as DOMRect);
     Object.defineProperty(panel, 'scrollHeight', { value: 2000, configurable: true });
     const realQuery = panel.querySelectorAll.bind(panel);
@@ -6991,7 +7292,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
   });
 
   it("keeps an artifact document's place over a reload", async () => {
-    window.innerWidth = 375;
+    window.innerWidth = 1440;
     history.replaceState(null, '', '#w=1&t=artifact%3Achat%2Fplan.md');
     sessionStorage.setItem('switchboard.scroll', JSON.stringify({ '1 artifact:chat/plan.md': { id: null, offset: 0, pinned: false, top: 240 } }));
     answers['/v1/conversation/artifact/'] = { status: 200, body: {}, text: '# Plan\n\nLong.' };
@@ -6999,9 +7300,9 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const { page, source } = start();
 
     hello(source);
-    await vi.waitFor(() => expect(root.querySelector<HTMLElement>('#panel .artifact-doc')?.textContent).toContain('Long.'));
-    expect(root.querySelector<HTMLElement>('#panel .artifact-doc')!.scrollTop).toBe(240);
-    root.querySelector<HTMLElement>('#panel .artifact-doc')!.scrollTop = 300;
+    await vi.waitFor(() => expect(root.querySelector<HTMLElement>('#detail .artifact-doc')?.textContent).toContain('Long.'));
+    expect(root.querySelector<HTMLElement>('#detail .artifact-doc')!.scrollTop).toBe(240);
+    root.querySelector<HTMLElement>('#detail .artifact-doc')!.scrollTop = 300;
     window.dispatchEvent(new Event('pagehide'));
     expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 artifact:chat/plan.md']).toMatchObject({ top: 300 });
     page.close();

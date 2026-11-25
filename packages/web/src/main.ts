@@ -43,7 +43,7 @@ import { renderOpening, renderOpeningHead, renderOpeningSide, renderOpeningTabs 
 import { closable, stripTabs } from './tabs.js';
 import type { DocTab, TabFit } from './tabs.js';
 import type { Opening } from './opening.js';
-import { parseScrolls, parseTabSets, ROUTE_KEY, routeHash, SCROLL_KEY, startRoute, tabSetKey, TABS_KEY, withScroll, withTabSet } from './route.js';
+import { LIST_HASH, parseRoute, parseScrolls, parseTabSets, ROUTE_KEY, routeHash, SCROLL_KEY, startRoute, tabSetKey, TABS_KEY, withScroll, withTabSet } from './route.js';
 import type { Route, ScrollPlace, TabSet } from './route.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
@@ -128,6 +128,8 @@ const SEND_OPS = 'switchboard.sendOps';
 const CONVERSATION_CHANGED = "The window's conversation changed.";
 /** Where the page keeps each work item's draft, over a reload. */
 const DRAFTS = 'switchboard.drafts';
+/** Where the page keeps New conversation…'s draft, by work item, with its provider and opId, over a reload. */
+const NEW_DRAFTS = 'switchboard.newDrafts';
 
 export interface PageDeps {
   fetch: typeof fetch;
@@ -661,10 +663,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let dragView: DragView | null = null;
   // The route the page starts on (route.ts): the address's, or the one this device kept for an installed app started again with no hash.
   const firstRoute = startRoute(location.hash, readStored(ROUTE_KEY));
-  let wanted: number | null = firstRoute.w;
-  /** The tab to show once the work item the page started on has come, then null. */
-  // History is a tab of the work item's (an address from before kept it as `h`), so a route that named it opens that tab.
-  let restoreTab: string | null = firstRoute.t ?? (firstRoute.w !== null && firstRoute.h != null ? 'history' : null);
+  let wanted: number | null = null;
+  /** The route whose tab to show once its work item has come (`applyRoute`), then null. */
+  let routing: Route | null = null;
   /** The scroll places this tab kept, by `<work item> <tab>` (route.ts). */
   const scrollPlaces = (): Record<string, ScrollPlace> => {
     try {
@@ -685,16 +686,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** While a work item's kept tabs or the route's tab are put back, before its panes are drawn: no scroll place or tab set is kept meanwhile. */
   let restoringTabs = false;
   /** The work items whose conversation took its kept place in this page's life; later the page's own memory of it (`left`) serves. */
-  const placedConversations = new Set<number>();
+  const placedConversations = new Set<string>();
 
-  if ((firstRoute.w !== null || firstRoute.h != null) && location.hash !== routeHash(firstRoute)) {
-    history.replaceState(history.state, '', routeHash(firstRoute));
-  }
+  if (firstRoute.w !== null && isPhone() && !conversationEntry(history.state)) {
+    // A phone that starts on a conversation puts the list's entry under it, so the browser's back goes to the list as after a row's click. A
+    // reload of that entry keeps both and adds none.
+    history.replaceState(null, '', LIST_HASH);
+    history.pushState({ [CONVERSATION_ENTRY]: true }, '', routeHash(firstRoute));
+  } else {
+    // Outside the phone's layout the mark means nothing, and Back would take an entry from before the page.
+    if (!isPhone() && conversationEntry(history.state)) {
+      history.replaceState(null, '');
+    }
 
-
-  // A reload keeps the entry's mark, but the list's entry before it belonged to the page before the reload; Back then stays in this page.
-  if (conversationEntry(history.state)) {
-    history.replaceState(null, '');
+    if ((firstRoute.w !== null || firstRoute.h != null) && location.hash !== routeHash(firstRoute)) {
+      history.replaceState(history.state, '', routeHash(firstRoute));
+    }
   }
   // The page's connection (architecture.md § Web page, Connection): it owns the stream and says whether the page is live, offline or signed out.
   const connection = new Connection({
@@ -986,9 +993,42 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return {};
     }
   };
+  /** New conversation…'s drafts kept, by work item; any malformed one is left out. */
+  const newDrafts = (): Record<string, { provider: string; text: string; opId: string }> => {
+    try {
+      const kept = JSON.parse(localStorage.getItem(NEW_DRAFTS) ?? '{}') as unknown;
+
+      return kept === null || typeof kept !== 'object' || Array.isArray(kept)
+        ? {}
+        : Object.fromEntries(Object.entries(kept as Record<string, Record<string, unknown>>).filter(([, one]) => one !== null && typeof one === 'object' && typeof one['provider'] === 'string' && typeof one['text'] === 'string' && typeof one['opId'] === 'string')) as Record<string, { provider: string; text: string; opId: string }>;
+    } catch {
+      return {};
+    }
+  };
+  /** Keeps New conversation…'s draft of a work item, its text the box's, or with null drops it. */
+  const keepNewDraft = (workItemId: number, draft: NewDraft | null): void => {
+    const all = newDrafts();
+
+    if (draft === null) {
+      delete all[workItemId];
+    } else {
+      all[workItemId] = { provider: draft.provider, text: input.value, opId: draft.opId };
+    }
+
+    try {
+      localStorage.setItem(NEW_DRAFTS, JSON.stringify(all));
+    } catch {
+      // Kept for this page only.
+    }
+  };
   const keepDraft = (): void => {
-    // New conversation…'s text is not the work item's draft, which waits for its session.
-    if (draftOf === null || sending || draftShown()) {
+    // New conversation…'s text is not the work item's draft, which waits for its session; it is kept apart.
+    if (draftShown()) {
+      keepNewDraft(view.newDraft!.workItemId, view.newDraft);
+      return;
+    }
+
+    if (draftOf === null || sending) {
       return;
     }
 
@@ -1103,6 +1143,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
+    keepNewDraft(view.newDraft.workItemId, null);
     view.newDraft = null;
     input.value = draftOf === null ? '' : (drafts()[draftOf] ?? '');
     chosen = null;
@@ -1728,6 +1769,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       liveWords.textContent = '';
       liveWords.hidden = true;
       input.value = id === null ? '' : (drafts()[id] ?? '');
+
+      // New conversation…'s draft left unsent, as before a reload, comes back with its text, provider and opId.
+      const keptNew = id === null || view.newDraft !== null ? undefined : newDrafts()[id];
+
+      if (id !== null && keptNew !== undefined) {
+        view.newDraft = { workItemId: id, provider: keptNew.provider, installed: null, opId: keptNew.opId, sending: false };
+        input.value = keptNew.text;
+        void askProviders(view.newDraft);
+      }
       chosen = null;
       walk = null;
       showError(id === null ? null : (errors.get(id) ?? null));
@@ -2494,6 +2544,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         filePlaced.delete(pane);
       }
 
+      if (tab !== 'history') {
+        historyPlaced.delete(pane);
+      }
+
       if (tab === 'browser') {
         takePane(pane);
         iframe.draw(pane, selectedRow(state), state.groups.some((group) => group.key === 'review' && group.rows.includes(selectedRow(state)!)));
@@ -2501,6 +2555,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         drawConsole(pane);
       } else if (tab === 'history') {
         drawPane(pane, shownHistory === null ? null : renderHistory(shownHistory));
+        placeHistory(pane);
       } else if (tab === 'diff') {
         changes.drawDiff(pane);
       } else if (tab === 'file') {
@@ -2578,10 +2633,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       // A conversation first shown in this page's life, as after a reload, comes back where it was, by the item that was first in view.
       const w = state.scope.workItemId;
-      const place = w == null || placedConversations.has(w) || mainTab() !== 'conversation' ? undefined : scrollPlaces()[`${w} conversation`];
+      const place = w == null || placedConversations.has(conversationPlace(w)) || mainTab() !== 'conversation' ? undefined : scrollPlaces()[conversationPlace(w)];
 
       if (w != null && mainTab() === 'conversation') {
-        placedConversations.add(w);
+        placedConversations.add(conversationPlace(w));
       }
 
       const anchor = place?.id == null ? null : ([...panel.querySelectorAll<HTMLElement>('.timeline > li[data-id]')].find((item) => item.dataset['id'] === place.id) ?? null);
@@ -2821,15 +2876,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const routeOf = (): Route => {
     const tab = wide() ? sideTab() : mainTab();
     const shownFile = tab === 'file' ? localFiles.shown() : null;
-    const t = tab === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : tab === 'status' || tab === 'console' || tab === 'browser' || tab === 'history' ? tab : tab === 'diff' ? 'changes' : shownFile !== null ? 'file' : null;
+    const t = tab === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : tab === 'status' || tab === 'console' || tab === 'history' ? tab : tab === 'browser' ? 'link' : tab === 'diff' ? 'changes' : shownFile !== null ? 'file' : null;
 
-    return { w: wanted, t, f: tab === 'diff' ? changes.focusPath : null, p: shownFile?.target ?? null, l: shownFile?.line ?? null, h: null };
+    return { w: wanted, t, f: tab === 'diff' ? changes.focusPath : null, p: shownFile?.target ?? null, l: shownFile?.line ?? null, u: tab === 'browser' ? iframe.selected || null : null, h: null };
   };
   /** Puts the route in the address and keeps it on this device, once the work item asked for shows (route.ts). */
   let keptRoute: string | null = null;
   const keepRoute = (): void => {
+    // Until Back's step back lands, the conversation's entry keeps its route, for the browser's forward.
+    if (backPending) {
+      return;
+    }
+
+    // The phone's list is `#list` in the address, so a reload shows the list; the device keeps the work item it showed, for an installed app.
+    if (isPhone() && (view.list || wanted === null)) {
+      if (parseRoute(location.hash).w !== null) {
+        history.replaceState(history.state, '', LIST_HASH);
+      }
+
+      keptRoute = null;
+      return;
+    }
+
     // No work item: none to come back to.
-    const waiting = restoreTab !== null || (wanted !== null && (openingShown() !== null || state.scope?.workItemId !== wanted));
+    const waiting = routing !== null || (wanted !== null && (openingShown() !== null || state.scope?.workItemId !== wanted));
     const hash = waiting ? null : routeHash(routeOf());
 
     if (hash === null || hash === keptRoute) {
@@ -2850,7 +2920,36 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   /** Tabs whose own viewers scroll inside them, so the pane's scroll means nothing; the Changes tab's place is its file in the route. */
   // An artifact's document scrolls inside its own view: its place is that view's (`artifactTop`).
-  const ownScroller = (tab: Tab): boolean => tab === 'diff' || tab === 'file' || tab === 'console' || tab === 'browser' || tab === 'artifacts';
+  // History scrolls its body under its sticky toolbar (`historyPlace`).
+  const ownScroller = (tab: Tab): boolean => tab === 'diff' || tab === 'file' || tab === 'console' || tab === 'browser' || tab === 'artifacts' || tab === 'history';
+  /** A conversation's place's key: by work item and session, so an earlier session shown keeps its own place and lends it to no other. */
+  const conversationPlace = (w: number): string => `${w} conversation ${state.session?.id ?? ''}`;
+  /** History's place: its body's scroll top in the pane that shows it. */
+  const historyPlace = (places: Record<string, ScrollPlace>, w: number, pane: HTMLElement): Record<string, ScrollPlace> => {
+    const body = pane.querySelector<HTMLElement>('.hist-body');
+
+    // Only a body brought back to its place: one still loading would keep the top in place of the operator's place.
+    return body === null || historyPlaced.get(pane) !== body ? places : withScroll(places, `${w} history`, { id: null, offset: 0, pinned: false, top: body.scrollTop });
+  };
+  /** The History body each pane last brought back to its kept place, so it is placed once each time it shows. */
+  const historyPlaced = new WeakMap<HTMLElement, HTMLElement>();
+  const placeHistory = (pane: HTMLElement): void => {
+    const body = pane.querySelector<HTMLElement>('.hist-body');
+    const w = state.scope?.workItemId;
+
+    // Not while it loads: a body too short for the place would lose it.
+    if (body === null || w == null || shownHistory?.view == null || historyPlaced.get(pane) === body) {
+      return;
+    }
+
+    historyPlaced.set(pane, body);
+
+    const top = scrollPlaces()[`${w} history`]?.top;
+
+    if (top !== undefined) {
+      body.scrollTop = top;
+    }
+  };
   /** The kept scroll top of an artifact's document for the work item shown; null for none. */
   const artifactTop = (path: string): number | null => {
     const w = state.scope?.workItemId;
@@ -2879,19 +2978,23 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const main = mainTab();
 
     // A conversation not yet drawn in this page's life keeps the place it had.
-    if (main === 'conversation' && placedConversations.has(w)) {
+    if (main === 'conversation' && placedConversations.has(conversationPlace(w))) {
       const top = panel.getBoundingClientRect().top;
       const first = [...panel.querySelectorAll<HTMLElement>('.timeline > li[data-id]')].find((item) => item.getBoundingClientRect().bottom > top);
 
-      places = withScroll(places, `${w} conversation`, { id: first?.dataset['id'] ?? null, offset: first === undefined ? 0 : first.getBoundingClientRect().top - top, pinned, top: panel.scrollTop });
+      places = withScroll(places, conversationPlace(w), { id: first?.dataset['id'] ?? null, offset: first === undefined ? 0 : first.getBoundingClientRect().top - top, pinned, top: panel.scrollTop });
     } else if (main === 'artifacts') {
       places = artifactPlace(places, w, panel);
+    } else if (main === 'history') {
+      places = historyPlace(places, w, panel);
     } else if (main !== 'conversation' && !ownScroller(main)) {
       places = withScroll(places, `${w} ${main}`, { id: null, offset: 0, pinned: false, top: panel.scrollTop });
     }
 
     if (wide() && sideTab() === 'artifacts') {
       places = artifactPlace(places, w, detailBody);
+    } else if (wide() && sideTab() === 'history') {
+      places = historyPlace(places, w, detailBody);
     } else if (wide() && !ownScroller(sideTab())) {
       places = withScroll(places, `${w} ${sideTab() === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : sideTab()}`, { id: null, offset: 0, pinned: false, top: detailBody.scrollTop });
     }
@@ -2979,7 +3082,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const files = localFiles.view.tabs;
     const shownFile = files.findIndex((one) => one.id === localFiles.view.open);
-    const set: TabSet = { side: view.side, tab: view.tab, artifact: view.artifact, changes: changes.view.tab, changesFile: changes.view.tab ? changes.focusPath : null, files: files.map((one) => ({ target: one.target, line: one.line })), file: shownFile === -1 ? null : shownFile, history: historyOpen === w };
+    const links = iframe.kept(w);
+    const set: TabSet = { side: view.side, tab: view.tab, artifact: view.artifact, changes: changes.view.tab, changesFile: changes.view.tab ? changes.focusPath : null, files: files.map((one) => ({ target: one.target, line: one.line })), file: shownFile === -1 ? null : shownFile, history: historyOpen === w, ...(links === null ? {} : { links }) };
     const key = tabSetKey(w);
 
     if (Object.keys(tabSets).at(-1) === key && JSON.stringify(tabSets[key]) === JSON.stringify(set)) {
@@ -2995,8 +3099,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // Kept for this page only.
     }
   };
-  /** Puts back a work item's kept tabs: its Changes tab and file tabs, in their order, then the tabs it showed. */
+  /** Puts back a work item's kept tabs: its link tabs, its Changes tab and file tabs, in their order, then the tabs it showed. */
   const restoreTabs = (set: TabSet): void => {
+    const w = state.scope?.workItemId ?? null;
+
+    if (w !== null && set.links !== undefined) {
+      iframe.restore(w, set.links);
+
+      // Links added from the conversation are tabs of the work item's even when its row has none.
+      if (set.links.open.length > 0) {
+        linkItem = w;
+      }
+    }
+
     // The Changes and file tabs follow the work item from now on, as the next draw would make them.
     changes.follow(followed(), false);
     localFiles.follow(followed());
@@ -3416,6 +3531,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.artifact = null;
     // On a phone, a conversation opened from the list is a history entry of its own, which the browser's back, as Android's back button, leaves.
     if (listing && isPhone() && !conversationEntry(history.state)) {
+      history.replaceState(history.state, '', LIST_HASH);
       history.pushState({ [CONVERSATION_ENTRY]: true }, '', `#w=${workItemId}`);
     } else {
       history.replaceState(history.state, '', `#w=${workItemId}`);
@@ -3457,8 +3573,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     draw();
   };
   /** The work item being opened, until its `hello` brings it, or why it could not be opened. */
-  // A work item the route asked for at the start opens as a row click does.
-  let opening: Opening | null = wanted === null ? null : { workItemId: wanted, title: '', error: null };
+  let opening: Opening | null = null;
   /**
    * The page's latest choice that opens under the shown head (a conversation of its host group, the shown one again or one of its sessions), until
    * a scope comes while no select is outstanding (its own, or one the hub showed itself), or a refusal; null with none.
@@ -3571,8 +3686,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   /** Whether Back's `history.back()` has not landed yet. */
   let backPending = false;
-  // The browser's back, as Android's back button, leaves a phone's conversation as Back does, and its forward opens it again; the list's entry
-  // keeps the open work item's address, as Back leaves it.
+  // The browser's back, as Android's back button, leaves a phone's conversation as Back does, and its forward opens it again at its route; the
+  // list's entry is `#list`. Outside the phone's layout opening a work item adds no entry (the operator's decision), so only an address edited
+  // by hand moves the page, to its route.
   window.addEventListener(
     'popstate',
     (event) => {
@@ -3580,34 +3696,37 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       backPending = false;
 
-      if (wanted === null || !isPhone()) {
-        return;
-      }
-
-      const listing = view.list;
-
-      // A row opened before Back's own step back landed gets its entry again.
-      if (left) {
-        if (listing) {
-          history.replaceState(history.state, '', `#w=${wanted}`);
-        } else {
-          history.pushState({ [CONVERSATION_ENTRY]: true }, '', `#w=${wanted}`);
+      if (!isPhone()) {
+        if (location.hash !== keptRoute) {
+          applyRoute(parseRoute(location.hash), 'popstate');
         }
 
         return;
       }
 
-      if (conversationEntry(event.state)) {
+      const listing = view.list || wanted === null;
+
+      // A row opened before Back's own step back landed gets its entry again.
+      if (left) {
+        keptRoute = null;
+
         if (listing) {
-          view.list = false;
-          view.tab = 'conversation';
+          history.replaceState(history.state, '', LIST_HASH);
+        } else {
+          history.pushState({ [CONVERSATION_ENTRY]: true }, '', `#w=${wanted}`);
           draw();
         }
 
         return;
       }
 
-      history.replaceState(history.state, '', `#w=${wanted}`);
+      if (conversationEntry(event.state)) {
+        view.list = false;
+        applyRoute(parseRoute(location.hash), 'popstate');
+        return;
+      }
+
+      history.replaceState(history.state, '', LIST_HASH);
 
       if (!listing) {
         back();
@@ -3615,6 +3734,86 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     },
     { signal: listening.signal },
   );
+  /**
+   * Shows what a route names (route.ts), at the start and on the browser's back and forward or an address edited by hand, never on a `tabs`
+   * event: its work item, opened as a row's click opens it, then, once that work item shows, its tab (`routeTab`). At the start the stream is
+   * not open yet, so the work item opens once it is.
+   */
+  const applyRoute = (route: Route, cause: 'start' | 'popstate'): void => {
+    if (route.w === null) {
+      return;
+    }
+
+    routing = route;
+
+    if (cause === 'start') {
+      wanted = route.w;
+      opening = { workItemId: route.w, title: '', error: null };
+    } else if (route.w === wanted && state.scope?.workItemId === route.w && openedItem === route.w && openingShown() === null) {
+      routeTab();
+      draw();
+    } else {
+      void select(route.w);
+    }
+  };
+  /**
+   * Shows the tab the route names for the work item shown, as no choice of the operator's (`openDoc` without `chosen`): an artifact gone or
+   * closed on every device gives way to Status. Where the column folds into the conversation's strip, the route's tab waits in the column's
+   * choice and the page shows the Conversation tab, as every opening does there (PRD R109).
+   */
+  const routeTab = (): void => {
+    const route = routing;
+
+    routing = null;
+
+    if (route === null || route.w !== state.scope?.workItemId) {
+      return;
+    }
+
+    // History is a tab of the work item's (an address from before kept it as `h`), so a route that named it opens that tab.
+    const tab = route.t ?? (route.h != null ? 'history' : null);
+    const path = tab?.startsWith('artifact:') === true ? tab.slice('artifact:'.length) : null;
+
+    restoringTabs = true;
+    // The Changes and file tabs follow the work item from now on, as the next draw would make them.
+    changes.follow(followed(), false);
+    localFiles.follow(followed());
+
+    try {
+      if (path !== null) {
+        if (state.artifacts.some((one) => one.path === path) && !closedNow().has(path)) {
+          openDoc(`artifact:${path}`, { chosen: false });
+        } else {
+          view.artifact = null;
+          chooseTab('status');
+        }
+      } else if (tab === 'link') {
+        if (route.u != null) {
+          openDoc(`link:${route.u}`, { chosen: false });
+        } else if (showBrowser()) {
+          chooseTab('browser');
+        }
+      } else if (tab === 'history') {
+        openDoc('history', { chosen: false });
+      } else if (tab === 'status' || (tab === 'console' && showConsole())) {
+        chooseTab(tab);
+      } else if (tab === 'changes') {
+        changes.openChanges(route.f ?? null);
+      } else if (tab === 'file' && route.p != null) {
+        openDoc(`file:${route.p}`, { line: route.l ?? null, chosen: false });
+      } else if (tab === null) {
+        chooseTab('conversation');
+      }
+    } finally {
+      restoringTabs = false;
+    }
+
+    if (!wide()) {
+      view.tab = 'conversation';
+    }
+  };
+
+  applyRoute(firstRoute, 'start');
   // A swipe right over a phone's conversation goes back, while no menu, sheet or Settings lies over it.
   const stopSwipe = swipeBack({
     root,
@@ -3896,9 +4095,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       localFiles.open(id.slice('file:'.length), line, chosen);
     } else if (id.startsWith('link:')) {
       const url = id.slice('link:'.length);
+      const w = state.scope?.workItemId ?? null;
 
-      // Without the extension a link tab selects all the same, and its pane offers the link in a browser tab.
-      if (!iframe.available && iframe.select(url)) {
+      if (!chosen) {
+        // A route's link tab: kept among the work item's link tabs and selected, with or without the extension, never opened in a browser tab.
+        if (w !== null && browserTab() && frameUrl(url)) {
+          const kept = iframe.kept(w) ?? { open: [], closed: [], selected: '' };
+
+          iframe.restore(w, { ...kept, open: kept.open.some((one) => one.url === url) ? kept.open : [...kept.open, { url, name: '' }], selected: url });
+          linkItem = w;
+          chooseTab('browser');
+        }
+
+        draw();
+      } else if (browserTab() && !iframe.available && iframe.select(url)) {
+        // Without the extension a link tab selects all the same, and its pane offers the link in a browser tab.
         leaving('browser');
         chooseTab('browser');
         draw();
@@ -3906,7 +4117,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         openWebLink(url, name);
       }
     } else if (id === 'history') {
-      openHistory();
+      if (chosen) {
+        openHistory();
+      } else if (offersHistory()) {
+        historyOpen = state.scope?.workItemId ?? null;
+        chooseTab('history');
+      }
     }
   };
   /** Shows a tab of the strip, Status on a wide page or the conversation on a narrow one for none, without keeping it as a choice (`closeDoc`). */
@@ -4171,6 +4387,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'draft-provider':
         if (view.newDraft !== null && !view.newDraft.sending) {
           view.newDraft.provider = button!.dataset['provider'] ?? view.newDraft.provider;
+          keepNewDraft(view.newDraft.workItemId, view.newDraft);
           draw();
           input.focus();
         }
@@ -4809,12 +5026,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.newDraft = draft;
     view.tab = 'conversation';
     input.value = '';
+    keepNewDraft(workItemId, draft);
     chosen = null;
     closeMenu();
     showError(null);
     draw();
     input.focus();
-
+    await askProviders(draft);
+  };
+  /** Asks which providers are installed for New conversation…'s draft, keeping its provider when installed, else the hub's default. */
+  const askProviders = async (draft: NewDraft): Promise<void> => {
     const answer = await post('providers', {});
 
     if (view.newDraft !== draft) {
@@ -4830,6 +5051,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       showError(answer.status === 200 ? 'Neither Claude nor Codex is installed.' : String(answer.body['error'] ?? 'Switchboard did not answer.'));
     } else if (!installed.includes(draft.provider)) {
       draft.provider = installed.includes(preferred) ? preferred : installed[0]!;
+      keepNewDraft(draft.workItemId, draft);
     }
 
     draw();
@@ -4864,6 +5086,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     composerHost.classList.remove('sending');
 
     if (answer.status === 200) {
+      keepNewDraft(draft.workItemId, null);
+
       if (view.newDraft === draft) {
         view.newDraft = null;
         input.value = draftOf === null ? '' : (drafts()[draftOf] ?? '');
@@ -5670,9 +5894,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       // The hub sends `scope` before the `hello` that carries the work item's tabs and artifacts, so a work item opens on its `hello`.
       if (type === 'hello' && opened !== openedItem) {
-        // The work item left takes its kept place when it is opened again.
+        // The work item left takes its kept places when it is opened again.
         if (openedItem !== null && openedItem !== opened) {
-          placedConversations.delete(openedItem);
+          for (const key of placedConversations) {
+            if (key.startsWith(`${openedItem} `)) {
+              placedConversations.delete(key);
+            }
+          }
         }
 
         openedItem = opened;
@@ -5696,32 +5924,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
       }
 
-      // The tab the route named for the work item the page started on, once it has come and still has that tab, with what it showed.
-      if (type === 'hello' && restoreTab !== null && opened === firstRoute.w) {
-        const tab = restoreTab;
-        const path = tab.startsWith('artifact:') ? tab.slice('artifact:'.length) : null;
-
-        restoreTab = null;
-        restoringTabs = true;
-        // The Changes and file tabs follow the work item from now on, as the next draw would make them.
-        changes.follow(followed(), false);
-        localFiles.follow(followed());
-
-        if (path !== null && state.artifacts.some((one) => one.path === path)) {
-          view.artifact = path;
-          chooseTab('artifacts');
-        } else if (tab === 'history' && offersHistory()) {
-          historyOpen = opened;
-          chooseTab(tab);
-        } else if (tab === 'status' || (tab === 'console' && showConsole()) || (tab === 'browser' && showBrowser())) {
-          chooseTab(tab);
-        } else if (tab === 'changes') {
-          changes.openChanges(firstRoute.f ?? null);
-        } else if (tab === 'file' && firstRoute.p != null) {
-          openDoc(`file:${firstRoute.p}`, { line: firstRoute.l ?? null, chosen: false });
+      // The route's tab, once its work item has come with its kept tabs (`applyRoute`); another work item that came first drops it.
+      if (type === 'hello' && routing !== null && opened !== null) {
+        if (opened === routing.w) {
+          routeTab();
+        } else {
+          routing = null;
         }
-
-        restoringTabs = false;
       }
 
       // History a row's menu chose for this work item before its `hello`, now that its kept tabs are back.
@@ -5733,11 +5942,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         if (asked === opened) {
           queueMicrotask(() => state.scope?.workItemId === asked && openHistory());
         }
-      }
-
-      if (type === 'hello' && opened !== null && opened !== firstRoute.w) {
-        // Another work item came first: the route's tab was for the one asked for.
-        restoreTab = null;
       }
 
       applyHostSelection();

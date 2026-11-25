@@ -60,6 +60,38 @@ describe('embedded browser tabs', () => {
     expect(r.browser.selected).toBe('https://github.com/o/r/issues/2');
     r.browser.dispose(); r.host.remove();
   });
+  it("keeps each work item's link tabs, the added, the closed and the one selected, through another work item, the host's reconnect and a restore", async () => {
+    const r = await rig(); r.browser.follow(row());
+    const issue = 'https://github.com/o/r/issues/1';
+    const pr = 'https://github.com/o/r/pull/3';
+    const docs = 'https://docs.example.com/a';
+    const urls = () => r.browser.tabs.map((link) => link.url);
+    expect(r.browser.open(docs, 1, 'Docs')).toBe(true);
+    r.browser.close(issue);
+    expect(r.browser.kept(1)).toEqual({ open: [{ url: pr, name: 'PR' }, { url: 'https://example.com/', name: 'Other' }, { url: docs, name: 'Docs' }], closed: [issue], selected: docs });
+    expect(r.browser.kept(2)).toBeNull();
+    // Another work item and back.
+    r.browser.follow(row(2)); expect(urls()).toEqual(['https://github.com/o/r/issues/2', pr, 'https://example.com/']);
+    r.browser.follow(row()); expect(urls()).toEqual([pr, 'https://example.com/', docs]);
+    expect(r.browser.selected).toBe(docs);
+    // The row's links come again: the closed ticket link stays closed.
+    r.browser.follow(row()); expect(urls()).not.toContain(issue);
+    // The host's reconnect discards the frame; the tabs come back with the work item.
+    r.browser.configure(false); r.browser.configure(true); await Promise.resolve(); await Promise.resolve();
+    r.browser.follow(row()); expect(urls()).toEqual([pr, 'https://example.com/', docs]);
+    expect(r.browser.selected).toBe(docs);
+    // A restore for a work item not followed waits for it; a selection no longer among its tabs gives way to its first.
+    r.browser.restore(2, { open: [{ url: 'https://docs.example.com/b', name: 'B' }], closed: [], selected: 'https://gone.example.com/' });
+    expect(r.browser.kept(1)?.selected).toBe(docs);
+    r.browser.follow(row(2)); expect(urls()).toEqual(['https://github.com/o/r/issues/2', pr, 'https://example.com/', 'https://docs.example.com/b']);
+    expect(r.browser.tabs.at(-1)?.label).toBe('B');
+    expect(r.browser.selected).toBe('https://github.com/o/r/issues/2');
+    // A restore of the work item followed applies at once, and an unsafe link stays out.
+    r.browser.restore(2, { open: [{ url: 'javascript:alert(1)', name: 'x' }], closed: [pr], selected: 'https://example.com/' });
+    expect(urls()).toEqual(['https://github.com/o/r/issues/2', 'https://example.com/', 'https://docs.example.com/b']);
+    expect(r.browser.selected).toBe('https://example.com/');
+    r.browser.dispose(); r.host.remove();
+  });
   it('holds a link focus through a work item change until its site rules are ready', async () => {
     const postMessage = vi.fn();
     const parent = vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window);

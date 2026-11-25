@@ -465,10 +465,12 @@ try {
       const hash = await evaluate('location.hash');
 
       if (hash !== '#w=2&t=status') found.push('the address names ' + hash);
+      // Where the column folds into the conversation's strip, every opening shows the Conversation tab (PRD R109), a reload's too, and the
+      // address follows it.
       await send('Page.reload');
-      if (!(await until('document.querySelector("#head .tab.selected")?.dataset.tab === "status"', 8_000))) found.push('the Status tab did not come back after a reload');
+      if (!(await until('document.querySelector("#head .tab.selected")?.dataset.tab === "conversation" && location.hash === "#w=2"', 8_000))) found.push('a reload did not come back to work item 2 on the Conversation tab: ' + (await evaluate('location.hash')));
       await send('Page.navigate', { url: base });
-      if (!(await until('document.querySelector("#head .tab.selected")?.dataset.tab === "status" && location.hash === "#w=2&t=status"', 8_000))) found.push('a start with no hash did not come back to work item 2 on Status: ' + (await evaluate('location.hash')));
+      if (!(await until('document.querySelector("#head .tab.selected")?.dataset.tab === "conversation" && location.hash === "#w=2"', 8_000))) found.push('a start with no hash did not come back to work item 2: ' + (await evaluate('location.hash')));
       await evaluate('document.querySelector("#head [data-tab=\\"conversation\\"]")?.click()');
       if ((await evaluate('document.querySelector("#composer textarea").value')) !== 'Half a thought') found.push('the draft was lost');
       await shot('restored');

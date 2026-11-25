@@ -155,6 +155,18 @@ export function frameCover(slot: DOMRect, layers: Iterable<Element>, backdrops: 
   return { holes: holes.slice(0, FRAME_HOLES_MAX), dim, modal, hide: dim > 0.9 || holes.length > FRAME_HOLES_MAX };
 }
 
+/**
+ * A work item's link tabs as the operator left them: those open, with the name each was opened by, the closed ones and the one selected, so
+ * another work item and back, a reload (`TabSet` in route.ts) or the host's reconnect brings them back.
+ */
+export interface LinkSet {
+  open: Array<{ url: string; name: string }>;
+  closed: string[];
+  selected: string;
+}
+/** How many work items' link tabs one page keeps. */
+const LINK_SETS_KEPT = 30;
+
 export interface IframeBrowserDeps {
   send(message: Record<string, unknown>): Promise<unknown>;
   changed(becameReady?: boolean): void;
@@ -183,6 +195,8 @@ export class IframeBrowser {
   }
   #pending: { item: number | null; url: string } | null = null;
   #closed = new Set<string>();
+  /** Each work item's link tabs as left, by work item, for when it is followed again; the latest {@link LINK_SETS_KEPT}. */
+  #kept = new Map<number, LinkSet>();
   #slot: HTMLElement | null = null;
   #seq = 0;
   readonly #epoch = crypto.randomUUID();
@@ -213,6 +227,8 @@ export class IframeBrowser {
       this.#links = frameLinks(row);
       this.#item = item;
       this.#url = (review ? row?.links.find((link) => link.kind === 'pr' && frameUrl(link.url))?.url : undefined) ?? this.#links[0]?.url ?? '';
+      const kept = item === null ? undefined : this.#kept.get(item);
+      if (kept !== undefined) this.#apply(kept);
     } else {
       for (const link of frameLinks(row)) if (!this.#links.some((one) => one.url === link.url)) this.#links.push(link);
     }
@@ -227,6 +243,39 @@ export class IframeBrowser {
     this.#closed.delete(url);
     this.#url = url;
     return true;
+  }
+  /** The link tabs of `item` as they are, or as left when it is not the one followed; null for one never followed. */
+  kept(item: number): LinkSet | null {
+    if (item === this.#item) return { open: this.tabs.map((link) => ({ url: link.url, name: link.name })), closed: [...this.#closed], selected: this.#url };
+    return this.#kept.get(item) ?? null;
+  }
+  /** Puts back a work item's link tabs, now for the one followed, else once it is followed. */
+  restore(item: number, set: LinkSet): void {
+    if (item === this.#item) {
+      this.#apply(set);
+      this.#sync();
+    } else {
+      this.#keep(item, set);
+    }
+  }
+  /**
+   * Adds the kept links the row does not have, by the name each was opened by, and closes the closed ones, which a row's links that come again
+   * do not open (`follow`); the kept selection holds only while its tab is open.
+   */
+  #apply(set: LinkSet): void {
+    for (const one of set.open) if (frameUrl(one.url) && !this.#links.some((link) => link.url === one.url)) this.#links.push(frameLink(one.url, one.name));
+    this.#closed = new Set(set.closed);
+    for (const one of set.open) this.#closed.delete(one.url);
+    if (this.tabs.some((link) => link.url === set.selected)) this.#url = set.selected;
+    else if (this.#closed.has(this.#url)) this.#url = this.tabs[0]?.url ?? '';
+  }
+  #keep(item: number, set: LinkSet): void {
+    this.#kept.delete(item);
+    this.#kept.set(item, set);
+    for (const old of this.#kept.keys()) {
+      if (this.#kept.size <= LINK_SETS_KEPT) break;
+      this.#kept.delete(old);
+    }
   }
   close(url: string): void {
     this.#closed.add(url);
@@ -274,6 +323,8 @@ export class IframeBrowser {
     this.deps.changed(this.#ready && !wasReady);
   }
   #discard(): void {
+    // Kept for when the work item is followed again, as after the host's reconnect, which discards the frame.
+    if (this.#item !== null) this.#keep(this.#item, this.kept(this.#item)!);
     if (this.#hosted) window.parent.postMessage({ type: 'switchboard-iframe', epoch: this.#epoch, seq: ++this.#seq, title: document.title, item: null, tabs: [] }, `chrome-extension://${IFRAME_EXTENSION_ID}`);
     this.#root?.remove();
     this.#root = null;

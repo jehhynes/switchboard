@@ -3,9 +3,10 @@
 // comes back to it.
 
 /**
- * The open work item and its tab: `status`, `console`, `browser`, `history`, `artifact:<path>`, `changes` with the file `f` its diff was at, or
- * `file` with the local file `p` at line `l`; null for its Conversation. `h` is the ticket whose History an address from before History was a
- * tab showed, with its key, which the page opens as the History tab.
+ * The open work item and its tab: `status`, `console`, `history`, `artifact:<path>`, `link` with the link tab's URL `u`, `changes` with the file
+ * `f` its diff was at, or `file` with the local file `p` at line `l`; null for its Conversation. An address from before link tabs had URLs names
+ * `browser`, read as `link` with no URL. `h` is the ticket whose History an address from before History was a tab showed, with its key, which
+ * the page opens as the History tab. `list` is the phone's list (`#list`), which names no work item.
  */
 export interface Route {
   w: number | null;
@@ -13,8 +14,13 @@ export interface Route {
   f?: string | null;
   p?: string | null;
   l?: number | null;
+  u?: string | null;
   h?: { ticketId: number; key: string } | null;
+  list?: boolean;
 }
+
+/** The phone's list, an address of its own, so a reload after Back to the list shows the list. */
+export const LIST_HASH = '#list';
 
 /** Where this device keeps the route for a start with no hash. */
 export const ROUTE_KEY = 'switchboard.route';
@@ -31,16 +37,25 @@ const whole = (value: string | null): number | null => {
 
 /** The route a hash names, as `#w=12&t=changes&f=src%2Fa.ts`; no work item for any other. */
 export function parseRoute(hash: string): Route {
+  if (hash === LIST_HASH) {
+    return { w: null, t: null, f: null, p: null, l: null, u: null, h: null, list: true };
+  }
+
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const w = whole(params.get('w'));
   const ticketId = whole(params.get('h'));
   const h = ticketId === null ? null : { ticketId, key: params.get('hk') ?? '' };
-  const t = w === null ? null : params.get('t') || null;
+  const named = w === null ? null : params.get('t') || null;
+  const t = named === 'browser' ? 'link' : named;
 
-  return { w, t, f: t === 'changes' ? params.get('f') || null : null, p: t === 'file' ? params.get('p') || null : null, l: t === 'file' ? whole(params.get('l')) : null, h };
+  return { w, t, f: t === 'changes' ? params.get('f') || null : null, p: t === 'file' ? params.get('p') || null : null, l: t === 'file' ? whole(params.get('l')) : null, u: t === 'link' ? params.get('u') || null : null, h };
 }
 
 export function routeHash(route: Route): string {
+  if (route.list === true) {
+    return LIST_HASH;
+  }
+
   const params: Array<[string, string]> = [];
 
   if (route.w !== null) {
@@ -52,6 +67,10 @@ export function routeHash(route: Route): string {
 
     if (route.t === 'changes' && route.f != null) {
       params.push(['f', route.f]);
+    }
+
+    if (route.t === 'link' && route.u != null) {
+      params.push(['u', route.u]);
     }
 
     if (route.t === 'file' && route.p != null) {
@@ -70,11 +89,11 @@ export function routeHash(route: Route): string {
   return params.length === 0 ? '#' : `#${params.map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join('&')}`;
 }
 
-/** The route to start on: the address's, or with none there, the one this device kept. */
+/** The route to start on: the address's, the list for `#list`, or with none there, the one this device kept. */
 export function startRoute(hash: string, kept: string | null): Route {
   const own = parseRoute(hash);
 
-  return own.w !== null || own.h != null || kept === null ? own : parseRoute(kept);
+  return own.w !== null || own.h != null || own.list === true || kept === null ? own : parseRoute(kept);
 }
 
 /**
@@ -130,6 +149,8 @@ export interface TabSet {
   file: number | null;
   /** Whether the History tab is open; absent in a set kept before it could close. */
   history?: boolean;
+  /** The link tabs (`LinkSet` in iframeBrowser.ts); absent in a set kept before they were kept. */
+  links?: { open: Array<{ url: string; name: string }>; closed: string[]; selected: string };
 }
 
 /** Where this device keeps each work item's tabs. */
@@ -140,6 +161,20 @@ export const TAB_SETS_KEPT = 30;
 const text = (value: unknown): value is string => typeof value === 'string';
 const textOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string';
 const lineOrNull = (value: unknown): value is number | null => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0);
+
+const linkSet = (value: unknown): boolean => {
+  const links = value as TabSet['links'];
+
+  return (
+    links !== null &&
+    typeof links === 'object' &&
+    Array.isArray(links.open) &&
+    links.open.every((one) => one !== null && typeof one === 'object' && text(one.url) && text(one.name)) &&
+    Array.isArray(links.closed) &&
+    links.closed.every(text) &&
+    text(links.selected)
+  );
+};
 
 /** A work item's key in the kept tab sets: not a bare number, so the sets keep their order, the latest last. */
 export const tabSetKey = (workItemId: number): string => `w${workItemId}`;
@@ -167,7 +202,8 @@ export function parseTabSets(raw: string | null): Record<string, TabSet> {
           Array.isArray(set.files) &&
           set.files.every((one) => one !== null && typeof one === 'object' && text(one.target) && lineOrNull(one.line)) &&
           (set.file === null || (typeof set.file === 'number' && Number.isSafeInteger(set.file) && set.file >= 0 && set.file < set.files.length)) &&
-          (set.history === undefined || typeof set.history === 'boolean'),
+          (set.history === undefined || typeof set.history === 'boolean') &&
+          (set.links === undefined || linkSet(set.links)),
       ),
     ) as Record<string, TabSet>;
   } catch {

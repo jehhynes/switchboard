@@ -18,7 +18,7 @@ describe('the route', () => {
     const local = routeHash({ w: 3, t: 'file', p: 'D:/w/README.md', l: 40, h: { ticketId: 9, key: 'gh 9' } });
 
     expect(local).toBe('#w=3&t=file&p=D%3A%2Fw%2FREADME.md&l=40&h=9&hk=gh%209');
-    expect(parseRoute(local)).toEqual({ w: 3, t: 'file', f: null, p: 'D:/w/README.md', l: 40, h: { ticketId: 9, key: 'gh 9' } });
+    expect(parseRoute(local)).toEqual({ w: 3, t: 'file', f: null, p: 'D:/w/README.md', l: 40, u: null, h: { ticketId: 9, key: 'gh 9' } });
     // What a tab shows belongs to that tab only.
     expect(routeHash({ w: 3, t: 'status', f: 'x', p: 'y', l: 2 })).toBe('#w=3&t=status');
     // History over the list, with no work item open.
@@ -27,6 +27,24 @@ describe('the route', () => {
     for (const hash of ['', '#', '#w=', '#w=0', '#w=-3', '#w=1.5', '#w=abc', '#t=status']) {
       expect(parseRoute(hash)).toMatchObject({ w: null, t: null, h: null });
     }
+  });
+
+  it("reads #list as the phone's list, kept over the device's route, and a link tab's URL, with an older address's t=browser read as a link tab", () => {
+    expect(parseRoute('#list')).toMatchObject({ w: null, t: null, list: true });
+    expect(routeHash({ w: 3, t: 'status', list: true })).toBe('#list');
+    expect(startRoute('#list', '#w=9&t=status')).toMatchObject({ w: null, list: true });
+    // Only the whole hash is the list.
+    expect(parseRoute('#w=3&list').list).toBeUndefined();
+    expect(parseRoute('#list=1').list).toBeUndefined();
+
+    const link = routeHash({ w: 3, t: 'link', u: 'https://github.com/o/r/pull/5?x=1#y' });
+
+    expect(link).toBe('#w=3&t=link&u=https%3A%2F%2Fgithub.com%2Fo%2Fr%2Fpull%2F5%3Fx%3D1%23y');
+    expect(parseRoute(link)).toMatchObject({ w: 3, t: 'link', u: 'https://github.com/o/r/pull/5?x=1#y' });
+    expect(parseRoute('#w=3&t=browser')).toMatchObject({ w: 3, t: 'link', u: null });
+    // The URL belongs to the link tab only.
+    expect(routeHash({ w: 3, t: 'status', u: 'https://example.com/' })).toBe('#w=3&t=status');
+    expect(parseRoute('#w=3&t=status&u=https%3A%2F%2Fexample.com%2F').u).toBeNull();
   });
 
   it("starts on the address's route, or with none in it on the one this device kept, as an installed app started again at its start URL", () => {
@@ -75,6 +93,12 @@ describe('the route', () => {
     expect(parseTabSets(JSON.stringify({ w1: set, w2: { ...set, file: 2 }, w3: { ...set, files: [{ target: 1, line: null }] }, w4: { ...set, changes: 'yes' }, '5': set, w6: null }))).toEqual({ w1: set });
     // Whether History is open: a boolean, or absent in a set kept before it could close.
     expect(parseTabSets(JSON.stringify({ w1: { ...set, history: true }, w2: { ...set, history: false }, w3: set, w4: { ...set, history: 'yes' } }))).toEqual({ w1: { ...set, history: true }, w2: { ...set, history: false }, w3: set });
+    // The link tabs: those open with their names, the closed ones and the one selected.
+    const links = { open: [{ url: 'https://github.com/o/r/pull/7', name: 'PR #7' }], closed: ['https://github.com/o/r/issues/1'], selected: 'https://github.com/o/r/pull/7' };
+
+    expect(
+      parseTabSets(JSON.stringify({ w1: { ...set, links }, w2: { ...set, links: { ...links, open: [{ url: 1, name: 'x' }] } }, w3: { ...set, links: { ...links, closed: 'x' } }, w4: { ...set, links: { ...links, selected: null } }, w5: { ...set, links: null } })),
+    ).toEqual({ w1: { ...set, links } });
     expect(parseTabSets('not json')).toEqual({});
     expect(parseTabSets('[]')).toEqual({});
     expect(parseTabSets(null)).toEqual({});
