@@ -4,7 +4,7 @@ import type { Socket } from 'node:net';
 import { request } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '@switchboard/core';
-import { listenHub, VOICE_NOT_ALLOWED, VOICE_OFF } from '../src/server.js';
+import { listenHub, VOICE_NOT_ALLOWED, VOICE_OFF, VOICE_TICKET_MS, VOICE_TICKETS_PER_PAGE } from '../src/server.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
 import { PageAccess } from '../src/page.js';
 import type { RemoteAccess } from '../src/page.js';
@@ -158,6 +158,7 @@ describe('the voice socket on the page origin', () => {
   let resumeRefused: string | null;
   const clients: Client[] = [];
   const streams: Array<ReturnType<typeof request>> = [];
+  let logs: string[];
 
   beforeEach(() => {
     store = Store.open(':memory:');
@@ -165,6 +166,7 @@ describe('the voice socket on the page origin', () => {
     enabled = true;
     now = 1_000;
     resumeRefused = 'Voice did not resume after Switchboard restarted.';
+    logs = [];
   });
 
   afterEach(async () => {
@@ -216,6 +218,7 @@ describe('the voice socket on the page origin', () => {
       onShutdown: () => {},
       page,
       now: () => now,
+      log: (line) => logs.push(line),
       conversation: (key, write) => {
         write(`event: hello\ndata: {"key":"${key}"}\n\n`);
         return { close: () => {} };
@@ -317,6 +320,116 @@ describe('the voice socket on the page origin', () => {
     const client = open(phonePage.key, good);
 
     expect(await client.status).toBe(101);
+  });
+
+  it('signs in a socket without its cookie by a one-use ticket for its own page key, origin and sign-in, and logs each refusal', async () => {
+    const { pair, openPage, open, allow, localCookie } = await serve();
+    const phone = await pair();
+    const other = await pair();
+    const phonePage = await openPage({ ...REMOTE, Cookie: phone });
+    const otherPage = await openPage({ ...REMOTE, Cookie: other });
+    const ticketFor = async (key: string, cookie = phone): Promise<{ status: number; ticket?: string; error?: string }> => {
+      const answer = await send(server.port, 'POST', '/v1/conversation/page-voice-ticket', { ...REMOTE, 'Content-Type': 'application/json', Cookie: cookie, Origin: PHONE_ORIGIN }, { window: key });
+
+      return { status: answer.status, ...(JSON.parse(answer.body) as { ticket?: string; error?: string }) };
+    };
+    // As the browser extension's frame opens it: the page's own origin, no cookie.
+    const withTicket = (key: string, ticket: string, headers: Record<string, string> = { ...REMOTE, Origin: PHONE_ORIGIN }): Client => {
+      const client = new Client(connect(server.port, '127.0.0.1'), `/v1/voice/socket?window=${encodeURIComponent(key)}&ticket=${encodeURIComponent(ticket)}`, {
+        Upgrade: 'websocket',
+        Connection: 'Upgrade',
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
+        ...headers,
+      });
+
+      clients.push(client);
+      return client;
+    };
+    const refused = async (client: Client): Promise<[number, string]> => [await client.status, client.body.trim()];
+
+    await allow(phone, true);
+
+    // A ticket only for a page key of the asking sign-in, and none from this computer's sign-in through the remote host.
+    expect(await ticketFor(otherPage.key)).toEqual({ status: 403, error: 'Not in this window.' });
+    expect(await ticketFor('page-99')).toEqual({ status: 403, error: 'Not in this window.' });
+    expect((await ticketFor(phonePage.key, localCookie)).status).toBe(401);
+
+    const first = await ticketFor(phonePage.key);
+
+    expect(first.status).toBe(200);
+    expect(first.ticket).toMatch(/^[0-9a-f]{64}$/);
+
+    const client = withTicket(phonePage.key, first.ticket!);
+
+    expect(await client.status).toBe(101);
+    client.socket.destroy();
+
+    // Used up, refused or not; an unknown one; one for another key; and one from another origin.
+    expect(await refused(withTicket(phonePage.key, first.ticket!))).toEqual([401, 'Not signed in.']);
+    expect(await refused(withTicket(phonePage.key, 'f'.repeat(64)))).toEqual([401, 'Not signed in.']);
+
+    const forOther = (await ticketFor(otherPage.key, other)).ticket!;
+
+    expect(await refused(withTicket(phonePage.key, forOther))).toEqual([401, 'Not signed in.']);
+
+    const elsewhere = (await ticketFor(phonePage.key)).ticket!;
+
+    expect(await refused(withTicket(phonePage.key, elsewhere, { ...REMOTE, Origin: 'https://evil.example' }))).toEqual([403, 'The page opens the voice only from its own origin.']);
+    expect(await refused(withTicket(phonePage.key, elsewhere))).toEqual([401, 'Not signed in.']);
+
+    // An upgrade refused before any sign-in check, here for another host, uses its ticket up too.
+    const early = (await ticketFor(phonePage.key)).ticket!;
+
+    expect((await refused(withTicket(phonePage.key, early, { ...REMOTE, Host: 'evil.example', Origin: PHONE_ORIGIN })))[0]).toBe(403);
+    expect(await refused(withTicket(phonePage.key, early))).toEqual([401, 'Not signed in.']);
+
+    // A page key holds VOICE_TICKETS_PER_PAGE tickets, each usable in any order, and one more drops the oldest; the page's stream ending drops its tickets.
+    const replaced = (await ticketFor(phonePage.key)).ticket!;
+    const kept: string[] = [];
+
+    for (let index = 1; index < VOICE_TICKETS_PER_PAGE; index++) {
+      kept.push((await ticketFor(phonePage.key)).ticket!);
+    }
+
+    const replacing = (await ticketFor(phonePage.key)).ticket!;
+
+    expect(await refused(withTicket(phonePage.key, replaced))).toEqual([401, 'Not signed in.']);
+    // An older ticket still opens the socket after a newer one was given, as when the hub answers overlapping taps out of order.
+    expect((await refused(withTicket(phonePage.key, kept[0]!)))[0]).toBe(101);
+
+    const ending = await openPage({ ...REMOTE, Cookie: phone });
+    const dropped = (await ticketFor(ending.key)).ticket!;
+
+    ending.end();
+    await until(async () => ((await ticketFor(ending.key)).status === 403 ? true : null));
+    expect(await refused(withTicket(ending.key, dropped))).toEqual([401, 'Not signed in.']);
+    expect((await refused(withTicket(phonePage.key, replacing)))[0]).toBe(101);
+
+    // A ticket lapses after VOICE_TICKET_MS.
+    const late = (await ticketFor(phonePage.key)).ticket!;
+
+    now += VOICE_TICKET_MS + 1;
+    expect(await refused(withTicket(phonePage.key, late))).toEqual([401, 'Not signed in.']);
+
+    // A ticket does not outlive its sign-in, nor pass a device voice is not allowed on.
+    const forbidden = (await ticketFor(phonePage.key)).ticket!;
+
+    await allow(phone, false);
+    expect(await refused(withTicket(phonePage.key, forbidden))).toEqual([403, VOICE_NOT_ALLOWED]);
+    expect(logs.filter((line) => line.startsWith('voice socket: refused'))).toEqual([
+      'voice socket: refused 401: Not signed in.',
+      'voice socket: refused 401: Not signed in.',
+      'voice socket: refused 401: Not signed in.',
+      'voice socket: refused 403: The page opens the voice only from its own origin.',
+      'voice socket: refused 401: Not signed in.',
+      'voice socket: refused 403: The page is not served as this name. Set web.tailscale or web.remoteHosts in settings.json.',
+      'voice socket: refused 401: Not signed in.',
+      'voice socket: refused 401: Not signed in.',
+      'voice socket: refused 401: Not signed in.',
+      'voice socket: refused 401: Not signed in.',
+      `voice socket: refused 403: ${VOICE_NOT_ALLOWED}`,
+    ]);
   });
 
   it('lets only this computer allow voice, per device, and says so in the devices list and to the page', async () => {

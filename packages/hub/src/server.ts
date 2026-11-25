@@ -134,7 +134,7 @@ const GZIP_MIN_BYTES = 1024;
  * `held-list`, `held-stop` and `held-open` share the holder routes after the page's origin and key checks.
  * The hub itself answers `page-pair`, `page-devices` and `page-device-revoke` (architecture.md § Remote access).
  */
-export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'page-new-session', 'page-voice-state', 'page-device-voice', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folders', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'page-new-session', 'page-voice-state', 'page-voice-ticket', 'page-device-voice', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'statuses', 'commands', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'personas', 'persona', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folders', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
 
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
@@ -153,9 +153,13 @@ const REMOTE_AWARE_COMMANDS = new Set(['page-new-session', 'page-folders']);
 const HUB_PAGE_ROUTES = new Set(['/page/link', '/page/revoke', '/page/pair', '/page/devices']);
 
 /** The page commands the hub answers itself: pairing a device, the device list and voice on a device (architecture.md § Remote access). */
-const DEVICE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'page-voice-state']);
+const DEVICE_COMMANDS = new Set(['page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'page-voice-state', 'page-voice-ticket']);
 
 /** Why a voice socket is refused while voice is off. */
+/** How long a voice ticket signs in a voice socket for. */
+export const VOICE_TICKET_MS = 30_000;
+/** How many voice tickets a page key holds at most. */
+export const VOICE_TICKETS_PER_PAGE = 4;
 export const VOICE_OFF = 'Voice is off. Turn it on in Settings on the computer that runs Switchboard.';
 /** Why a voice socket is refused from a device voice is not allowed on. */
 export const VOICE_NOT_ALLOWED = 'Voice is not allowed on this device. Allow it in Pair a device on the computer that runs Switchboard.';
@@ -340,6 +344,16 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
   // The sign-in each open page key's stream opened with, so a voice socket names a key of its own sign-in (architecture.md § Remote access).
   const pageKeySessions = new Map<string, string | null>();
+  // The voice tickets given out and not yet used: the sign-in, page key and origin each was given to, and when it lapses.
+  const voiceTickets = new Map<string, { hash: string; key: string; origin: string; until: number }>();
+  /** Forgets the voice tickets given for this page key, and every lapsed one. */
+  const dropVoiceTickets = (key: string): void => {
+    for (const [one, held] of voiceTickets) {
+      if (held.key === key || held.until < now()) {
+        voiceTickets.delete(one);
+      }
+    }
+  };
 
   /** Ends the open page streams and voice sockets of one sign-in, by its stored key, or of every sign-in. */
   const endPages = (session?: string): void => {
@@ -405,6 +419,39 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
     return { status: 200, body: { allowed: error === null, error } };
   };
+  /**
+   * A one-use ticket that signs in the voice socket of the page with this key, for a page whose socket goes without its cookie: a browser leaves
+   * a `SameSite=Strict` cookie off a WebSocket opened in a frame of the browser extension's tab, though it sends it on the frame's requests
+   * (mechanics.md M154).
+   */
+  const voiceTicket = (cookie: string | undefined, origin: PageOrigin, key: string): Reply => {
+    const hash = page?.access.sessionOf(cookie) ?? null;
+
+    if (hash === null || pageKeySessions.get(key) !== hash || pageKeyOrigins.get(key) !== originOf(origin)) {
+      return { status: 403, body: { error: 'Not in this window.' } };
+    }
+
+    // At most VOICE_TICKETS_PER_PAGE per page key, the oldest dropped first, so the map stays small while taps that overlap, as Voice off and
+    // on again while a ticket is asked for, each keep theirs whatever order the hub answers them in.
+    const held = [...voiceTickets].filter(([, one]) => one.key === key || one.until < now());
+
+    for (const [one, { until }] of held) {
+      if (until < now()) {
+        voiceTickets.delete(one);
+      }
+    }
+
+    const live = held.filter(([, { until }]) => until >= now());
+
+    for (const [one] of live.slice(0, Math.max(0, live.length - (VOICE_TICKETS_PER_PAGE - 1)))) {
+      voiceTickets.delete(one);
+    }
+
+    const ticket = randomBytes(32).toString('hex');
+
+    voiceTickets.set(ticket, { hash, key, origin: originOf(origin), until: now() + VOICE_TICKET_MS });
+    return { status: 200, body: { ticket } };
+  };
   /** A device command the page posts, which the hub answers itself; null for any other command. */
   const devicesRoute = (command: string, body: unknown, cookie: string | undefined, origin: PageOrigin): Reply | null =>
     command === 'page-pair'
@@ -417,7 +464,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
             ? deviceVoice(body)
             : command === 'page-voice-state'
               ? voiceState(cookie, origin)
-              : null;
+              : command === 'page-voice-ticket'
+                ? voiceTicket(cookie, origin, String((body as { window?: unknown } | null)?.window))
+                : null;
 
   /** The web page's routes (architecture.md § Web page); false for any other request. */
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
@@ -700,6 +749,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
 
           pageKeyOrigins.delete(key);
           pageKeySessions.delete(key);
+          dropVoiceTickets(key);
           // A stream that ends may be a dropped connection rather than the page leaving, so it closes as going away, not refused: the voice
           // counts the phone lost unless its page said it leaves or was hidden (architecture.md § Remote access).
           page.voice?.close((device) => device.key === ended, 'The page that opened the voice closed.', 1001);
@@ -953,10 +1003,19 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     const refuse = (status: number, reason: string): void => {
       const text = `${reason}\n`;
 
+      options.log?.(`voice socket: refused ${status}: ${reason}`);
       socket.on('error', () => undefined);
       socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status] ?? ''}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(text)}\r\n\r\n${text}`);
     };
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    const given = url.searchParams.get('ticket');
+    // A ticket signs in a socket whose cookie the browser left off, as in the browser extension's frame; the upgrade that names it uses it up,
+    // whatever it is refused for.
+    const ticket = given === null ? undefined : voiceTickets.get(given);
+
+    if (given !== null) {
+      voiceTickets.delete(given);
+    }
 
     if (page === undefined || url.pathname !== VOICE_SOCKET_PATH || !isWebSocketUpgrade(request)) {
       refuse(404, 'Not found.');
@@ -975,7 +1034,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return;
     }
 
-    if (!page.access.allows(request.headers.cookie, origin)) {
+    const key = url.searchParams.get('window') ?? '';
+
+    if (given !== null ? ticket === undefined || ticket.until < now() || ticket.key !== key || ticket.origin !== originOf(origin) || !page.access.signedIn(ticket.hash, origin) : !page.access.allows(request.headers.cookie, origin)) {
       refuse(401, 'Not signed in.');
       return;
     }
@@ -985,8 +1046,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return;
     }
 
-    const key = url.searchParams.get('window') ?? '';
-    const hash = page.access.sessionOf(request.headers.cookie);
+    const hash = ticket?.hash ?? page.access.sessionOf(request.headers.cookie);
 
     if (!page.isPage(key) || pageKeySessions.get(key) !== hash || pageKeyOrigins.get(key) !== originOf(origin) || hash === null) {
       refuse(403, 'Not in this window.');

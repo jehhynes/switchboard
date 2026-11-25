@@ -44,6 +44,21 @@ class FakeSocket {
 
 const flush = () => new Promise((done) => setTimeout(done, 0));
 
+/** A page's post with the hub's voice ticket given at once, in the same call, and every other command sent on to `post`. */
+function ticketing(post: (name: string, body: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>) {
+  let given = 0;
+
+  return (name: string, body: Record<string, unknown>) => {
+    if (name !== 'page-voice-ticket') {
+      return post(name, body);
+    }
+
+    const answer = { status: 200, body: { ticket: `ticket-${++given}` } };
+
+    return { then: (ok: (one: typeof answer) => unknown) => (ok(answer), undefined) } as unknown as Promise<typeof answer>;
+  };
+}
+
 /** An audio context the test reads: what was resumed, loaded and closed. */
 class FakeContext implements PhoneAudioContext {
   state = 'running';
@@ -130,6 +145,10 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
   function setup(key: string | null = 'page-7') {
     const sockets: FakeSocket[] = [];
     const posts: Array<{ name: string; body: Record<string, unknown> }> = [];
+    // The page-voice-ticket posts, apart from the others; while `holding`, each waits for the test to answer it.
+    const tickets: Array<Record<string, unknown>> = [];
+    let holding = false;
+    const held: Array<{ resolve(answer: { status: number; body: Record<string, unknown> }): void; reject(error: Error): void }> = [];
     let answer = { status: 200, body: { allowed: false, error: 'Voice is not allowed on this device.' } as Record<string, unknown> };
     let now = 1_000;
     let changes = 0;
@@ -184,9 +203,22 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       },
       clearTimer: (timer) => void ((timer as { cleared: boolean }).cleared = true),
       key: () => key,
-      post: async (name, body) => {
-        posts.push({ name, body });
-        return answer;
+      post: (name, body) => {
+        if (name !== 'page-voice-ticket') {
+          posts.push({ name, body });
+          return Promise.resolve(answer);
+        }
+
+        tickets.push(body);
+
+        if (holding) {
+          return new Promise((resolve, reject) => held.push({ resolve, reject }));
+        }
+
+        // A ticket the hub gives at once is handed over in the same call, so a test sees the socket as soon as the tap opened it.
+        const given = { status: 200, body: { ticket: `ticket-${tickets.length}` } };
+
+        return { then: (ok: (answer: typeof given) => unknown) => (ok(given), undefined) } as unknown as Promise<typeof given>;
       },
       changed: () => changes++,
       now: () => now,
@@ -216,6 +248,9 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       media: (next: () => Promise<PhoneMicStream>) => (media = next),
       sockets,
       posts,
+      tickets,
+      held,
+      holdTickets: () => (holding = true),
       contexts,
       nodes,
       timers,
@@ -239,7 +274,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     const { voice, sockets, advance } = setup();
 
     voice.start();
-    expect(sockets.map((one) => one.url)).toEqual(['wss://pc.tail.ts.net/v1/voice/socket?window=page-7']);
+    expect(sockets.map((one) => one.url)).toEqual(['wss://pc.tail.ts.net/v1/voice/socket?window=page-7&ticket=ticket-1']);
     expect(sockets[0]!.binaryType).toBe('arraybuffer');
     expect(voice.state).toBe('connecting');
     // A second tap while it opens opens nothing more.
@@ -273,6 +308,125 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
 
     vi.advanceTimersByTime(PING_MS * 2);
     expect(sockets[0]!.sent).toHaveLength(sent);
+  });
+
+  it('asks the hub for a ticket for its page key before it opens the socket, and opens nothing for a ticket that comes after Voice off or a newer tap', async () => {
+    const { voice, sockets, tickets, held, holdTickets } = setup();
+
+    holdTickets();
+    voice.start();
+    expect(tickets).toEqual([{ window: 'page-7' }]);
+    expect([voice.state, sockets.length]).toEqual(['connecting', 0]);
+    // A second tap while the ticket is asked for asks nothing more.
+    voice.start();
+    expect(tickets).toHaveLength(1);
+    held[0]!.resolve({ status: 200, body: { ticket: 'abc' } });
+    await flush();
+    expect(sockets.map((one) => one.url)).toEqual(['wss://pc.tail.ts.net/v1/voice/socket?window=page-7&ticket=abc']);
+    sockets[0]!.open();
+    sockets[0]!.message({ type: 'welcome', at: 0 });
+    expect(voice.state).toBe('on');
+    voice.stop();
+
+    // Voice off while the ticket is asked for: the late ticket opens nothing.
+    voice.start();
+    voice.stop();
+    expect([voice.state, voice.error]).toEqual(['off', null]);
+    held[1]!.resolve({ status: 200, body: { ticket: 'late' } });
+    await flush();
+    expect(sockets).toHaveLength(1);
+
+    // A tap after Voice off asks again, and the earlier tap's ticket, coming last, opens nothing.
+    voice.start();
+    voice.stop();
+    voice.start();
+    held[3]!.resolve({ status: 200, body: { ticket: 'new' } });
+    held[2]!.resolve({ status: 200, body: { ticket: 'old' } });
+    await flush();
+    expect(sockets.map((one) => one.url.split('ticket=')[1])).toEqual(['abc', 'new']);
+  });
+
+  it('says why when the hub refuses the ticket or does not answer, and tries a resume again', async () => {
+    const { voice, sockets, tickets, held, holdTickets, timers } = setup();
+
+    holdTickets();
+    voice.start();
+    held[0]!.resolve({ status: 403, body: { error: 'Not in this window.' } });
+    await flush();
+    expect([voice.state, voice.error, sockets.length]).toEqual(['off', 'Not in this window.', 0]);
+
+    voice.start();
+    held[1]!.reject(new Error('offline'));
+    await flush();
+    expect([voice.state, voice.error]).toEqual(['off', 'Switchboard did not answer.']);
+
+    // A ticket that never comes gives the tap up at the welcome's limit.
+    voice.start();
+    timers.filter((one) => one.ms === RESUME_WELCOME_MS).at(-1)!.run();
+    expect([voice.state, voice.error]).toEqual(['off', 'Voice did not start. Try again.']);
+    held[2]!.resolve({ status: 200, body: { ticket: 'late' } });
+    await flush();
+    expect(sockets).toHaveLength(0);
+
+    // A resume whose ticket is refused waits and asks again.
+    voice.start();
+    held[3]!.resolve({ status: 200, body: { ticket: 'one' } });
+    await flush();
+    sockets[0]!.open();
+    sockets[0]!.message({ type: 'welcome', at: 0 });
+    sockets[0]!.closeFromHub(1006);
+    expect(tickets).toHaveLength(4);
+    timers.filter((one) => one.ms === RECONNECT_RETRY_MS && !one.cleared).forEach((one) => (one.cleared = true, one.run()));
+    expect(tickets).toHaveLength(5);
+    held[4]!.resolve({ status: 503, body: { error: 'The hub is restarting onto a new build; try again in a few seconds.' } });
+    await flush();
+    expect([voice.state, voice.error, sockets.length]).toEqual(['connecting', null, 1]);
+    timers.filter((one) => one.ms === RECONNECT_RETRY_MS && !one.cleared).forEach((one) => (one.cleared = true, one.run()));
+    expect(tickets).toHaveLength(6);
+    held[5]!.resolve({ status: 200, body: { ticket: 'two' } });
+    await flush();
+    expect(sockets[1]!.url).toMatch(/ticket=two$/);
+    sockets[1]!.open();
+    expect(sockets[1]!.sent).toEqual([{ type: 'hello', resume: true }]);
+  });
+
+  it('drops an answer about an earlier refused socket that comes while the next tap waits for its ticket', async () => {
+    const { voice, sockets, held, holdTickets } = setup();
+    let late!: (answer: { status: number; body: Record<string, unknown> }) => void;
+    const slow = new PhoneVoice({
+      context: () => new FakeContext(),
+      node: () => new FakeNode(),
+      onVisibility: () => undefined,
+      onPageHide: () => undefined,
+      key: () => 'page-8',
+      post: (name) => (name === 'page-voice-ticket' ? new Promise((resolve) => held.push({ resolve, reject: () => undefined })) : new Promise((resolve) => (late = resolve))),
+      changed: () => undefined,
+      now: () => 0,
+      origin: () => 'https://pc.tail.ts.net',
+      socket: (url) => {
+        const made = new FakeSocket(url);
+
+        sockets.push(made);
+        return made as unknown as WebSocket;
+      },
+    });
+
+    void voice;
+    holdTickets();
+    slow.start();
+    held[0]!.resolve({ status: 200, body: { ticket: 'one' } });
+    await flush();
+    sockets[0]!.closeFromHub(1006);
+    // The next tap waits for its ticket when the hub's answer about the refused socket comes.
+    slow.start();
+    late({ status: 200, body: { allowed: false, error: 'Voice is off.' } });
+    await flush();
+    expect([slow.state, slow.error]).toEqual(['connecting', null]);
+    held[1]!.resolve({ status: 200, body: { ticket: 'two' } });
+    await flush();
+    sockets[1]!.open();
+    sockets[1]!.message({ type: 'welcome', at: 0 });
+    expect([slow.state, slow.error]).toEqual(['on', null]);
   });
 
   it('opens nothing before the page has a key', () => {
@@ -327,7 +481,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       node: () => new FakeNode(),
       onVisibility: () => undefined,
       key: () => 'page-8',
-      post: () => new Promise((resolve) => (late = resolve)),
+      post: ticketing(() => new Promise((resolve) => (late = resolve))),
       changed: () => undefined,
       now: () => 0,
       origin: () => 'https://pc.tail.ts.net',
@@ -548,7 +702,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       setTimer: (run, ms) => (ms === RESUME_WELCOME_MS ? 0 : refusals.push(run)),
       clearTimer: () => undefined,
       key: () => 'page-9',
-      post: async () => ({ status: 200, body: {} }),
+      post: ticketing(async () => ({ status: 200, body: {} })),
       changed: () => undefined,
       now: () => clock,
       origin: () => 'https://pc.tail.ts.net',
@@ -583,7 +737,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       setTimer: (run) => retries.push(run),
       clearTimer: () => undefined,
       key: () => 'page-9',
-      post: async () => ({ status: 200, body: {} }),
+      post: ticketing(async () => ({ status: 200, body: {} })),
       changed: () => undefined,
       now: () => 0,
       origin: () => 'https://pc.tail.ts.net',
@@ -618,7 +772,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
         setTimer: (run) => timers.push(run),
         clearTimer: () => undefined,
         key: () => 'page-9',
-        post: async () => ({ status: 200, body: {} }),
+        post: ticketing(async () => ({ status: 200, body: {} })),
         changed: () => undefined,
         now: () => 0,
         origin: () => 'https://pc.tail.ts.net',
@@ -661,7 +815,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       expect(sockets[0]!.binary).toEqual([]);
       setKey('page-8');
       voice.keyChanged();
-      expect(sockets.map((one) => one.url)).toEqual(['wss://pc.tail.ts.net/v1/voice/socket?window=page-7', 'wss://pc.tail.ts.net/v1/voice/socket?window=page-8']);
+      expect(sockets.map((one) => one.url)).toEqual(['wss://pc.tail.ts.net/v1/voice/socket?window=page-7&ticket=ticket-1', 'wss://pc.tail.ts.net/v1/voice/socket?window=page-8&ticket=ticket-2']);
       sockets[1]!.open();
       expect(sockets[1]!.sent).toEqual([{ type: 'hello', resume: true }]);
       sockets[1]!.message({ type: 'welcome', at: 0 });
@@ -705,7 +859,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       expect(voice.state).toBe('connecting');
       runRetry();
       sockets[2]!.open();
-      expect(sockets[2]!.url).toMatch(/window=page-7$/);
+      expect(sockets[2]!.url).toMatch(/window=page-7&ticket=ticket-\d+$/);
       expect(sockets[2]!.sent).toEqual([{ type: 'hello', resume: true }]);
       sockets[2]!.message({ type: 'welcome', at: 0 });
       expect([voice.state, voice.error, voice.micOpen]).toEqual(['on', null, true]);
@@ -739,7 +893,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
       setKey('page-8');
       voice.keyChanged();
       expect(sockets[2]!.closedWith).toBe(1000);
-      expect(sockets.at(-1)!.url).toMatch(/window=page-8$/);
+      expect(sockets.at(-1)!.url).toMatch(/window=page-8&ticket=ticket-\d+$/);
       sockets.at(-1)!.open();
       sockets.at(-1)!.message({ type: 'welcome', at: 0 });
       expect(voice.state).toBe('on');
@@ -1016,7 +1170,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
         onVisibility: () => undefined,
         hidden: () => false,
         key: () => 'page-10',
-        post: async () => ({ status: 200, body: {} }),
+        post: ticketing(async () => ({ status: 200, body: {} })),
         changed: () => undefined,
         now: () => 0,
         origin: () => 'https://pc.tail.ts.net',

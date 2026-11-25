@@ -1364,7 +1364,7 @@ describe('the page', () => {
         await holdMic;
       }
 
-      return { status: 200, ok: true, json: async () => ({}), text: async () => '' } as unknown as Response;
+      return { status: 200, ok: true, json: async () => (url.endsWith('/page-voice-ticket') ? { ticket: 't1' } : {}), text: async () => '' } as unknown as Response;
     });
     const paired = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false });
     const phone = FakeSource.last!;
@@ -1557,7 +1557,7 @@ describe('the page', () => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
 
-      return { status: 200, ok: true, json: async () => (url === '/page/ping' ? { build: 'b2' } : {}), text: async () => '' } as unknown as Response;
+      return { status: 200, ok: true, json: async () => (url === '/page/ping' ? { build: 'b2' } : url.endsWith('/page-voice-ticket') ? { ticket: 't1' } : {}), text: async () => '' } as unknown as Response;
     });
 
     window.innerWidth = 375;
@@ -1570,7 +1570,7 @@ describe('the page', () => {
     phone.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
     root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
     await tick();
-    expect(sockets.map((one) => one.url)).toEqual([expect.stringMatching(/\/v1\/voice\/socket\?window=pk$/)]);
+    expect(sockets.map((one) => one.url)).toEqual([expect.stringMatching(/\/v1\/voice\/socket\?window=pk&ticket=t1$/)]);
     sockets[0]!.onopen?.();
     sockets[0]!.onmessage?.({ data: JSON.stringify({ type: 'welcome', at: 0 }) });
     await tick();
@@ -1587,7 +1587,8 @@ describe('the page', () => {
 
     // The new stream has a new key: the voice socket opens with it and takes the voice back.
     hello('pk2');
-    expect(sockets.map((one) => one.url)).toEqual([expect.stringMatching(/window=pk$/), expect.stringMatching(/window=pk2$/)]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sockets.map((one) => one.url)).toEqual([expect.stringMatching(/window=pk&ticket=t1$/), expect.stringMatching(/window=pk2&ticket=t1$/)]);
     sockets[1]!.onopen?.();
     expect(sockets[1]!.sent).toEqual([{ type: 'hello', resume: true }]);
     sockets[1]!.onmessage?.({ data: JSON.stringify({ type: 'welcome', at: 0 }) });

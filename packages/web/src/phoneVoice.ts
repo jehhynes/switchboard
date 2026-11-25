@@ -167,6 +167,10 @@ export class PhoneVoice {
   #heardAt = 0;
   /** The page key the voice socket was opened with. */
   #socketKey: string | null = null;
+  /** Rises at each attempt to open the voice socket, so a late ticket for an earlier one opens nothing. */
+  #attempt = 0;
+  /** The page key whose ticket the latest attempt waits for, or null when it waits for none. */
+  #ticketKey: string | null = null;
 
   constructor(private readonly deps: PhoneVoiceDeps) {
     const onVisibility = deps.onVisibility ?? ((changed: () => void) => document.addEventListener('visibilitychange', changed));
@@ -423,6 +427,10 @@ export class PhoneVoice {
       return;
     }
 
+    if (this.#ticketKey === key) {
+      return;
+    }
+
     // A resume still opening on an older key, which may never connect, gives way to one on the new key.
     if (this.#socket !== null) {
       if (this.#socketKey === key) {
@@ -469,7 +477,7 @@ export class PhoneVoice {
     (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => {
       const key = this.deps.key();
 
-      if (this.#resuming !== null && this.#socket === null && key !== null) {
+      if (this.#resuming !== null && this.#socket === null && this.#ticketKey === null && key !== null) {
         this.#connect(this.deps.origin?.() ?? location.origin, key, true);
       }
     }, RECONNECT_RETRY_MS);
@@ -482,9 +490,76 @@ export class PhoneVoice {
     }
   }
 
-  /** Opens the voice socket with the page key; `resume` asks the hub to take the voice back after its restart rather than as a new tap. */
+  /**
+   * Opens the voice socket with the page key and a ticket the hub gives for it, because a browser leaves the sign-in cookie off a WebSocket
+   * opened in a frame of the browser extension's tab (mechanics.md M154); `resume` asks the hub to take the voice back after its restart
+   * rather than as a new tap.
+   */
   #connect(origin: string, key: string, resume: boolean): void {
-    const url = `${origin.replace(/^http/, 'ws')}/v1/voice/socket?window=${encodeURIComponent(key)}`;
+    const attempt = ++this.#attempt;
+
+    // An answer about an earlier socket's refusal that comes while this attempt waits for its ticket is dropped.
+    this.#run++;
+    // The attempt is still the latest and still waits for its ticket.
+    const current = (): boolean => attempt === this.#attempt && this.#ticketKey === key;
+    const failed = (why: string): void => {
+      if (!current()) {
+        return;
+      }
+
+      this.#ticketKey = null;
+
+      if (resume) {
+        this.deps.changed();
+        this.#retryResume();
+      } else {
+        this.#lose(why);
+      }
+    };
+
+    this.#socket = null;
+    this.#ticketKey = key;
+    this.state = 'connecting';
+    this.error = null;
+    this.#quiet = false;
+    // A ticket or socket that does not come, or a socket not welcomed, in time, as on a connection still down, is given up: a resume is tried
+    // again, a tap's start fails with why.
+    (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => {
+      if (attempt !== this.#attempt || this.state !== 'connecting') {
+        return;
+      }
+
+      if (resume) {
+        const socket = this.#socket;
+
+        this.#socket = null;
+        this.#ticketKey = null;
+        socket?.close(1000);
+        this.#retryResume();
+      } else {
+        this.#lose('Voice did not start. Try again.');
+      }
+    }, RESUME_WELCOME_MS);
+    this.deps.changed();
+    void this.deps.post('page-voice-ticket', { window: key }).then(
+      (answer) => {
+        const ticket = answer.status === 200 ? answer.body['ticket'] : null;
+        const said = answer.body['error'];
+
+        if (typeof ticket !== 'string') {
+          failed(typeof said === 'string' ? said : 'Voice did not start.');
+        } else if (current()) {
+          this.#ticketKey = null;
+          this.#open(origin, key, resume, ticket);
+        }
+      },
+      () => failed('Switchboard did not answer.'),
+    );
+  }
+
+  /** Opens the voice socket with the page key and the ticket the hub gave for it. */
+  #open(origin: string, key: string, resume: boolean, ticket: string): void {
+    const url = `${origin.replace(/^http/, 'ws')}/v1/voice/socket?window=${encodeURIComponent(key)}&ticket=${encodeURIComponent(ticket)}`;
     const socket = this.deps.socket?.(url) ?? new WebSocket(url);
     let welcomed = false;
 
@@ -492,22 +567,6 @@ export class PhoneVoice {
     this.#socket = socket;
     this.#socketKey = key;
     this.state = 'connecting';
-
-    // A socket that neither connects nor is welcomed in time, as on a connection still down, is given up: a resume is tried again, a tap's
-    // start fails with why.
-    (this.deps.setTimer ?? ((run, ms) => setTimeout(run, ms)))(() => {
-      if (this.#socket !== socket || this.state === 'on') {
-        return;
-      }
-
-      if (resume) {
-        this.#socket = null;
-        socket.close(1000);
-        this.#retryResume();
-      } else {
-        this.#lose('Voice did not start. Try again.');
-      }
-    }, RESUME_WELCOME_MS);
     this.error = null;
     this.#quiet = false;
     this.#best = Infinity;
@@ -618,7 +677,7 @@ export class PhoneVoice {
   stop(): void {
     const socket = this.#socket;
 
-    if (socket === null && this.#resuming === null) {
+    if (socket === null && this.#resuming === null && this.#ticketKey === null) {
       return;
     }
 
@@ -878,6 +937,8 @@ export class PhoneVoice {
 
   /** Ends the pings, the hidden wait and the audio: the microphone, the node, the context, and the audio session back to the browser's choice. */
   #stopped(): void {
+    this.#attempt++;
+    this.#ticketKey = null;
     this.#micRun++;
     this.#releaseMic();
     this.#capturing = false;
