@@ -185,3 +185,65 @@
   color: var(--fgColor-danger, #d1242f);
   font-size: 12px;
 }
+
+/* On issue and pull request pages, where layout.ts sets these attributes. GitHub's own class names end in a build hash, so they match by prefix. */
+html[data-switchboard-sidebar-hidden] [data-testid="issue-viewer-metadata-container"],
+html[data-switchboard-sidebar-hidden] [class*="prc-PageLayout-PaneWrapper-"]:has([data-testid="sticky-sidebar"]) {
+  display: none !important;
+}
+
+html[data-switchboard-full-width] :is(
+  [class^="contentContainer__"], [class*=" contentContainer__"],
+  [class^="constrainedContent__"], [class*=" constrainedContent__"],
+  [class^="constrainedHeader__"], [class*=" constrainedHeader__"],
+  [class*="prc-PageLayout-ContentWrapper-"],
+  [class*="prc-PageLayout-Content-"]
+) {
+  max-width: none !important;
+}
+
+/* At the right end of a pull request's tab row or an issue header's bottom row, above the sidebar, centred on the 40 px tabs or labels. */
+:has(> .switchboard-layout-buttons) {
+  position: relative;
+}
+
+.switchboard-layout-buttons {
+  position: absolute;
+  z-index: 12; /* Above the tab row, whose list spans the full width at z-index 11. */
+  right: 0;
+  bottom: 4px;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.switchboard-layout-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--button-default-borderColor-rest, var(--borderColor-default, #d1d9e0));
+  border-radius: var(--borderRadius-medium, 6px);
+  background: transparent;
+  color: var(--fgColor-muted, #59636e);
+  cursor: pointer;
+}
+
+.switchboard-layout-button[hidden] {
+  display: none;
+}
+
+.switchboard-layout-button:hover {
+  background: var(--control-transparent-bgColor-hover, rgba(129, 139, 152, 0.15));
+}
+
+.switchboard-layout-button[aria-pressed="true"] {
+  background: var(--control-transparent-bgColor-selected, rgba(129, 139, 152, 0.2));
+  color: var(--fgColor-default, #1f2328);
+}
+
+.switchboard-layout-glyph {
+  font: normal normal 16px/1 switchboard-codicon;
+  user-select: none;
+}

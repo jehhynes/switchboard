@@ -18,7 +18,7 @@ for (const size of [16, 32, 48, 128]) {
 }
 
 await build({
-  entryPoints: { content: 'src/main.ts', background: 'src/background.ts', iframeHost: 'src/iframeHost.ts' },
+  entryPoints: { content: 'src/main.ts', layoutStart: 'src/layoutStart.ts', background: 'src/background.ts', iframeHost: 'src/iframeHost.ts' },
   bundle: true,
   format: 'iife',
   platform: 'browser',

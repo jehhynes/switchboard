@@ -27,7 +27,7 @@ export function writeCopied() {
 
 /** @type {import('esbuild').BuildOptions} */
 export const bundle = {
-  entryPoints: { content: `${chrome}/src/main.ts`, background: `${chrome}/src/background.ts` },
+  entryPoints: { content: `${chrome}/src/main.ts`, layoutStart: `${chrome}/src/layoutStart.ts`, background: `${chrome}/src/background.ts` },
   bundle: true,
   format: 'iife',
   platform: 'browser',
