@@ -2935,16 +2935,15 @@ describe('the page in use', () => {
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[0]);
-    // The open artifact's close button is its own, and shows Status.
-    root.querySelector<HTMLElement>('#detail .artifact-tab.selected .tab-close')!.click();
-    expect(selected()!.getAttribute('data-side')).toBe('status');
-    // Closed, its tab is gone for the work item, kept in the hub for every device; More lists it after the tabs it holds.
-    expect(paths()).not.toContain('chat/a1.md');
-    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-2)?.body).toMatchObject({ workItemId: 1, close: { path: 'chat/a1.md', updatedAt: 10_001 } });
-    const cleared = posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)!.body;
+    // The open artifact's close button is its own, and shows the tab before it in the strip, from More.
+    const kept = () => posts.filter((post) => post.url.endsWith('/page-tabs')).map((post) => post.body);
+    const before = kept().length;
 
-    expect(cleared).toMatchObject({ workItemId: 1, tab: null });
-    expect(cleared).not.toHaveProperty('openOn');
+    root.querySelector<HTMLElement>('#detail .artifact-tab.selected .tab-close')!.click();
+    expect(selected()!.dataset['path']).toBe('chat/a2.md');
+    // Closed, its tab is gone for the work item, kept in the hub for every device; the tab shown in its place is no choice, so it is not kept.
+    expect(paths()).not.toContain('chat/a1.md');
+    expect(kept().slice(before)).toEqual([expect.objectContaining({ workItemId: 1, close: { path: 'chat/a1.md', updatedAt: 10_001 } })]);
     click('#detail [data-action="tab-menu"]');
     expect(root.querySelector('#detail .tab-menu .menu-separator + [data-path="chat/a1.md"]')).not.toBeNull();
     // Choosing it opens its tab again.
@@ -3052,9 +3051,9 @@ describe('the page in use', () => {
     expect(doc).toContain('src="/v1/conversation/artifact/pk/chat/plan/pic.png"');
     expect(doc).not.toContain('x.png');
     expect(root.querySelector('#head .tab.selected')!.getAttribute('data-path')).toBe('chat/plan.md');
-    // Closing its tab shows Status, and the closed tab goes.
+    // Closing its tab shows the tab after it, with none before it, and the closed tab goes.
     click('#head .artifact-tab.selected .tab-close');
-    expect(root.querySelector('#head .tab.selected')!.getAttribute('data-tab')).toBe('status');
+    expect(root.querySelector('#head .tab.selected')!.getAttribute('data-path')).toBe('chat/p.html');
     expect(root.querySelectorAll('#head .artifact-tab')).toHaveLength(1);
     click('#head .artifact-tab[data-path="chat/p.html"]');
     expect(root.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
@@ -3800,6 +3799,179 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("opens each document in one tab whatever opened it: a link or Open report to an artifact's file in the artifact's tab, and a file by two spellings in one tab", async () => {
+    window.innerWidth = 1440;
+    const { page, source } = start();
+    const draft = 'D:/w/.wip/artifacts/w1/chat/review.md';
+    const read = (path: string, name: string, artifact?: string) => ({ status: 200, body: { path, name, kind: 'markdown', contents: '# Doc', tooLarge: false, size: 5, entries: null, more: false, ...(artifact === undefined ? {} : { artifact }) } });
+
+    answers[`path=${encodeURIComponent(draft)}`] = read(draft, 'review.md', 'chat/review.md');
+    answers[`path=${encodeURIComponent('.wip/artifacts/w1/chat/plan.md')}`] = read('D:/w/.wip/artifacts/w1/chat/plan.md', 'plan.md', 'chat/plan.md');
+    answers['notes.md'] = read('D:/w/notes.md', 'notes.md');
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan' };
+    hello(source, {
+      groups: [listGroup('review', [listRow(1, { title: 'Fix it', opens: [{ label: 'Open report', icon: 'symbol-file', file: draft }] })])],
+      items: [reply('r1', 2, { opening: 'See [plan](.wip/artifacts/w1/chat/plan.md), [notes](notes.md) and [the same notes](D:/w/notes.md).' })],
+      artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/review.md', 'markdown', 'md')],
+    });
+
+    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/local-file?')).length;
+    const files = () => [...root.querySelectorAll('#detail .local-tab .tab-label')].map((label) => label.textContent);
+    const shownArtifact = () => root.querySelector<HTMLElement>('#detail .artifact-tab.selected')?.dataset['path'];
+
+    // A link to an artifact's file shows the artifact's tab once read, and no file tab; the link again reads it again, so the hub checks it.
+    click('#panel a.path-link[data-target=".wip/artifacts/w1/chat/plan.md"]');
+    await flush();
+    expect(files()).toEqual([]);
+    expect(shownArtifact()).toBe('chat/plan.md');
+    click('#detail [data-side="status"]');
+    const read1 = reads();
+
+    click('#panel a.path-link[data-target=".wip/artifacts/w1/chat/plan.md"]');
+    await flush();
+    expect(reads()).toBe(read1 + 1);
+    expect(shownArtifact()).toBe('chat/plan.md');
+
+    // Two spellings of one file give one tab, the first.
+    click('#panel a.path-link[data-target="notes.md"]');
+    await flush();
+    click('#panel a.path-link[data-target="D:/w/notes.md"]');
+    await flush();
+    expect(files()).toEqual(['notes.md']);
+    expect(root.querySelector('#detail .local-tab.selected .tab-label')?.textContent).toBe('notes.md');
+
+    // Open report on a draft that is an artifact selects that artifact.
+    click('button.actions');
+    click('.actions-menu [data-action="row-report"]');
+    await flush();
+    expect(shownArtifact()).toBe('chat/review.md');
+    expect(files()).toEqual(['notes.md']);
+    page.close();
+  });
+
+  it("opens an artifact's file link by a fresh read each time: a link retargeted since opens the file, and a refused read says why", async () => {
+    window.innerWidth = 1440;
+    const { page, source } = start();
+    const plan = '.wip/artifacts/w1/chat/plan.md';
+    const link = `#panel a.path-link[data-target="${plan}"]`;
+    const read = (path: string, artifact?: string) => ({ status: 200, body: { path, name: 'plan.md', kind: 'markdown', contents: '# Doc', tooLarge: false, size: 5, entries: null, more: false, ...(artifact === undefined ? {} : { artifact }) } });
+    const shown = () => root.querySelector('#detail .side-switch > .selected[data-id]')?.getAttribute('data-id');
+    const settle = async () => {
+      await flush();
+      await flush();
+    };
+
+    answers['local-file'] = read(`D:/w/${plan}`, 'chat/plan.md');
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan' };
+    hello(source, { items: [reply('r1', 2, { opening: `See [plan](${plan}).` })] });
+    click(link);
+    await settle();
+    expect(shown()).toBe('artifact:chat/plan.md');
+    click('#detail [data-side="status"]');
+
+    // The link now resolves to a file outside the artifact folder: it opens that file, not the artifact it named before.
+    answers['local-file'] = read('D:/elsewhere/plan.md');
+    click(link);
+    await settle();
+    expect(shown()).toBe('file:D:/elsewhere/plan.md');
+    click('#detail .local-tab.selected [data-action="local-close"]');
+    click('#detail [data-side="status"]');
+
+    // A read the hub refuses now, as on a paired device, says why and opens no artifact.
+    answers['local-file'] = { status: 403, body: { error: 'This device can only open files in the work item’s folders.' } };
+    click(link);
+    await settle();
+    expect(shown()).toBe(`file:${plan}`);
+    expect(root.querySelector('#detail .local-view .empty')?.textContent).toBe('This device can only open files in the work item’s folders.');
+    page.close();
+  });
+
+  it('leaves the tab the operator moved to when a file read answers late as an artifact, and keeps the artifact for the column of a narrow page', async () => {
+    window.innerWidth = 1440;
+    const plan = '.wip/artifacts/w1/chat/plan.md';
+    const artifactRead = { status: 200, body: { path: `D:/w/${plan}`, name: 'plan.md', kind: 'markdown', contents: '# Plan', tooLarge: false, size: 6, entries: null, more: false, artifact: 'chat/plan.md' } };
+    const kept = () => posts.filter((post) => post.url.endsWith('/page-tabs')).length;
+    let release = (): void => {};
+
+    answers['local-file'] = { ...artifactRead, wait: new Promise((resolve) => (release = resolve)) };
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan' };
+
+    const { page, source } = start();
+
+    hello(source, { items: [reply('r1', 2, { opening: `See [plan](${plan}).` })] });
+    click(`#panel a.path-link[data-target="${plan}"]`);
+    await flush();
+    click('#detail [data-side="status"]');
+
+    const before = kept();
+
+    release();
+    await flush();
+    await flush();
+    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail .local-tab')).toBeNull();
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).not.toBeNull();
+    expect(kept()).toBe(before);
+    page.close();
+
+    // A file tab restored on a narrow page waits for the column while the Conversation shows; read as an artifact, the artifact waits there instead.
+    window.innerWidth = 1000;
+    localStorage.setItem('switchboard.tabs', JSON.stringify({ w1: { side: 'file', tab: 'conversation', artifact: null, changes: false, changesFile: null, files: [{ target: plan, line: null }], file: 0, history: false } }));
+    answers['local-file'] = artifactRead;
+
+    const keptBefore = kept();
+    const narrow = start();
+
+    hello(narrow.source);
+    await flush();
+    await flush();
+    expect(root.querySelector('#head [data-tab="conversation"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.classList.contains('off-conversation')).toBe(false);
+    expect(root.querySelector('#head .local-tab')).toBeNull();
+    resizeTo(1920);
+    expect(root.querySelector('#detail .artifact-tab.selected')?.getAttribute('data-path')).toBe('chat/plan.md');
+    expect(kept()).toBe(keptBefore);
+    narrow.page.close();
+  });
+
+  it('closes the tab shown to its neighbour in the strip, the one before it else after it, keeps the selection when another tab closes, and keeps no choice for the tab shown next', async () => {
+    window.innerWidth = 1440;
+    const { page, source } = start();
+
+    answers['/local-file?'] = { status: 404, body: { error: 'Not found.' } };
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan' };
+    hello(source, { items: [reply('r1', 2, { opening: 'See [a](src/a.ts) and [b](src/b.ts).' })] });
+
+    const shown = () => root.querySelector('#detail .side-switch > .selected[data-id]')?.getAttribute('data-id');
+    const kept = () => posts.filter((post) => post.url.endsWith('/page-tabs')).map((post) => post.body);
+
+    click('#detail .artifact-tab[data-path="chat/p.html"] .tab-open');
+    click('#panel a.path-link[data-target="src/a.ts"]');
+    click('#panel a.path-link[data-target="src/b.ts"]');
+    await flush();
+    click('#detail .local-tab [data-action="local-tab"]');
+    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['status', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'changes', 'console']);
+    expect(shown()).toBe('file:src/a.ts');
+
+    // Closing a tab not shown changes nothing else, a file's or an artifact's.
+    const before = kept().length;
+
+    click('#detail .local-tab:not(.selected) [data-action="local-close"]');
+    expect(shown()).toBe('file:src/a.ts');
+    click('#detail .artifact-tab[data-path="chat/plan.md"] .tab-close');
+    expect(shown()).toBe('file:src/a.ts');
+    expect(kept().slice(before)).toEqual([expect.objectContaining({ close: { path: 'chat/plan.md', updatedAt: 1_500 } })]);
+
+    // Closing the tab shown shows the one before it, an artifact here, then with no document left Status; neither is kept as a choice.
+    click('#detail .local-tab.selected [data-action="local-close"]');
+    expect(shown()).toBe('artifact:chat/p.html');
+    expect(kept().slice(before)).toHaveLength(1);
+    click('#detail .artifact-tab.selected .tab-close');
+    expect(shown()).toBe('status');
+    expect(kept().slice(before)).toEqual([expect.objectContaining({ close: { path: 'chat/plan.md', updatedAt: 1_500 } }), expect.objectContaining({ close: { path: 'chat/p.html', updatedAt: 1_500 } })]);
+    page.close();
+  });
+
   it("lists a pool ticket with a menu under its row instead of a conversation, and runs its Start, Start with guidance and Snooze through pool-action", async () => {
     const { page, source, opened } = start();
     const actions = [
@@ -4500,6 +4672,13 @@ describe('the page in use', () => {
     expect(selected()).toBe(issue);
     button('Open in a browser tab')!.click();
     expect(opened.mock.calls.at(-1)).toEqual([issue]);
+    // Closing the link tab shown shows the one after it, with none before it; closing the last one, not shown, keeps the tab shown.
+    click(`#detail [data-action="iframe-close"][data-url="${issue}"]`);
+    expect(selected()).toBe(pr.url);
+    click('#detail .artifact-tab[data-path="chat/p.html"] .tab-open');
+    click(`#detail [data-action="iframe-close"][data-url="${pr.url}"]`);
+    expect(root.querySelector('#detail .artifact-tab.selected')?.getAttribute('data-path')).toBe('chat/p.html');
+    expect(root.querySelector('#detail .link-tab')).toBeNull();
     page.close();
   });
 

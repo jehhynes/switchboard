@@ -2,7 +2,7 @@ import { countsUnread, inTranscript, summarizeMessage } from '@switchboard/core'
 import type { ConversationMessage, ConversationReply, ConversationStatus, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
-import { ArtifactFolder, EXTERNAL_NAME, ExternalArtifacts, externalFile, inGit, joinMessages, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
+import { ArtifactFolder, realInside, EXTERNAL_NAME, ExternalArtifacts, externalFile, externalName, inGit, joinMessages, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setOther, SLUG } from '@switchboard/conversation';
 import type { CardDraft, CarriedQuestion, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
 import type { MessageAnswer } from '@switchboard/core';
 import { carriedCards, dismissedAt, questionIndex, questionsSince } from './questions.js';
@@ -13,7 +13,7 @@ import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { artifactFile, artifactMime, findFiles, MAX_INPUT_CHARS } from './page.js';
 import { LOCAL_RAW_MAX_BYTES, localTarget } from './localFiles.js';
 import { closeSync, fstatSync, lstatSync, openSync, realpathSync, statSync } from 'node:fs';
-import { isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { allowedFolder, folderPlaces, listFolder, rootList } from './folders.js';
 import type { FolderRoots } from './folders.js';
 import { writeUpload } from './uploads.js';
@@ -1667,6 +1667,42 @@ export class ConversationService {
     }
 
     return scope?.cwd == null || scope.workItemId === null ? null : artifactFile(artifactsDir(scope.cwd, scope.workItemId), name);
+  }
+
+  /**
+   * The name of the page's work item's artifact whose file is `real`, a real path (architecture.md § Web page): a file tagged as an artifact, or
+   * an artifact its artifact folder lists whose real path is `real`, as one that links to another file of the folder; null for any other file or
+   * a key that is no page's.
+   */
+  pageArtifactAt(key: string, real: string): string | null {
+    const scope = this.deps.windows.isPage(key) ? this.deps.windows.scope(key) : null;
+
+    if (scope?.workItemId == null) {
+      return null;
+    }
+
+    const tagged = this.deps.store.externalArtifacts(scope.workItemId).find((entry) => entry.path === real);
+
+    if (tagged !== undefined) {
+      return externalName(tagged);
+    }
+
+    const folder = scope.cwd == null ? null : this.#artifactFolder(scope, key);
+
+    if (folder === null) {
+      return null;
+    }
+
+    const named = folder.list().map((artifact) => artifact.path).filter((path) => realInside(folder.dir, path) === real);
+
+    if (named.length < 2) {
+      return named[0] ?? null;
+    }
+
+    // Of two artifacts with one file, a link and the file it links to, the file is the one whose name is where it is.
+    const top = realpathSync.native(folder.dir);
+
+    return named.find((path) => join(top, ...path.split('/')) === real) ?? named[0]!;
   }
 
   /**

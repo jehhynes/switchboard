@@ -18,6 +18,7 @@ import { questionIndex } from '../src/questions.js';
 import { questionCardOpen } from '../src/runtime.js';
 import type { PageHeader } from '../src/page.js';
 import { NOW, item, session, snapshot } from './views.js';
+import { openPageFile } from '../src/localFiles.js';
 
 let dir: string;
 
@@ -1845,6 +1846,71 @@ describe('ConversationService artifacts', () => {
     await vi.waitFor(() => expect(mine.frames.at(-1)).toMatchObject({ type: 'artifact', artifact: { path: '@1/summary.md' }, removed: true }), { timeout: 5_000 });
     expect(served('@1/summary.md')).toBeNull();
     service.stop();
+  });
+
+  it("names the artifact a local file is by real path, through another spelling, a junction or a symlink, and a tagged file, on its work item's pages only", async () => {
+    const { service, openPage, put, tag, w12 } = setup();
+    const plan = put(w12, 2, 'chat/plan.md', '# Plan', 1_000_000);
+    const summary = join(realpathSync.native(dir), 'research', 'summary.md');
+
+    mkdirSync(join(summary, '..'), { recursive: true });
+    writeFileSync(summary, '# Summary');
+    writeFileSync(join(w12, 'readme.md'), '');
+    symlinkSync(join(w12, '.wip', 'artifacts'), join(dir, 'alias'), 'junction');
+
+    const mine = openPage(2);
+    const others = openPage(3);
+    const roots = { cwd: w12, folders: [dir], sessionIds: [] };
+    const named = async (key: string, target: string) => (await openPageFile(roots, target, (real) => service.pageArtifactAt(key, real)))?.view.artifact ?? null;
+
+    tag('s2', [{ path: summary }]);
+    expect(await named(mine.key, plan)).toBe('chat/plan.md');
+    expect(await named(mine.key, '.wip/artifacts/w2/chat/../chat/plan.md')).toBe('chat/plan.md');
+    expect(await named(mine.key, join(dir, 'alias', 'w2', 'chat', 'plan.md'))).toBe('chat/plan.md');
+    expect(await named(mine.key, summary)).toBe('@1/summary.md');
+
+    if (process.platform === 'win32') {
+      expect(await named(mine.key, plan.toUpperCase())).toBe('chat/plan.md');
+    }
+
+    try {
+      symlinkSync(plan, join(w12, 'plan-link.md'), 'file');
+      expect(await named(mine.key, 'plan-link.md')).toBe('chat/plan.md');
+    } catch (error) {
+      // Windows makes a file symlink only with Developer Mode or as an administrator.
+      if (!(error instanceof Error && 'code' in error && error.code === 'EPERM')) throw error;
+    }
+
+    // Any other file is no artifact, and another work item's page names none of these.
+    expect(await named(mine.key, 'readme.md')).toBeNull();
+    expect(await named(others.key, plan)).toBeNull();
+    expect(await named(others.key, summary)).toBeNull();
+    expect(service.pageArtifactAt('k99', realpathSync.native(plan))).toBeNull();
+  });
+
+  it('names a listed artifact that links to a deeper file of its artifact folder, and a file another artifact links to by its own name', async () => {
+    const { service, openPage, put, w12 } = setup();
+    const plan = put(w12, 2, 'chat/plan.md', '# Plan', 1_000_000);
+    const deep = put(w12, 2, 'chat/notes/deep/real.md', '# Deep', 1_000_000);
+    const folder = join(w12, '.wip', 'artifacts', 'w2');
+
+    try {
+      symlinkSync(deep, join(folder, 'chat', 'linked.md'), 'file');
+      symlinkSync(plan, join(folder, 'chat', 'same.md'), 'file');
+    } catch (error) {
+      // Windows makes a file symlink only with Developer Mode or as an administrator.
+      if (error instanceof Error && 'code' in error && error.code === 'EPERM') return;
+      throw error;
+    }
+
+    const mine = openPage(2);
+    const roots = { cwd: w12, folders: [dir], sessionIds: [] };
+    const named = async (target: string) => (await openPageFile(roots, target, (real) => service.pageArtifactAt(mine.key, real)))?.view.artifact ?? null;
+
+    expect(await named(deep)).toBe('chat/linked.md');
+    expect(await named(join(folder, 'chat', 'linked.md'))).toBe('chat/linked.md');
+    expect(await named(plan)).toBe('chat/plan.md');
+    expect(await named(join(folder, 'chat', 'same.md'))).toBe('chat/plan.md');
   });
 
   it("lists the window's work item's artifacts in hello, sends its changes to its windows only, and stops watching when its last stream closes", async () => {

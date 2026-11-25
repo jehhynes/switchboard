@@ -45,7 +45,7 @@ import { systemNotifier } from './systemAlerts.js';
 import { installedProviders } from './installed.js';
 import { claudeModelChoices, CODEX_MODELS_MS, codexModelChoices, withConfigured } from './models.js';
 import type { ModelChoice } from './models.js';
-import { localRoots, mainCheckout, openLocalFile } from './localFiles.js';
+import { localRoots, mainCheckout, openPageFile } from './localFiles.js';
 import { spawnEnvironment } from './spawn.js';
 import { PageTargets } from './pageTargets.js';
 import { VOICE_CLOSE, VoiceSockets } from './voiceSocket.js';
@@ -1276,7 +1276,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         const row = dockRowOf(views().dock, scope.workItemId);
         const report = row === null ? null : pageReportOf(row);
 
-        return openLocalFile({ ...localRoots(scope, store.sessionsFor(scope.workItemId), scope.sessionId, paired, checkouts), files: report === null ? [] : [report], never: [home] }, target);
+        // A file that is one of the work item's artifacts opens as that artifact's tab on the page.
+        return openPageFile({ ...localRoots(scope, store.sessionsFor(scope.workItemId), scope.sessionId, paired, checkouts), files: report === null ? [] : [report], never: [home] }, target, (real) => conversation.pageArtifactAt(key, real));
       },
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),

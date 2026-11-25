@@ -14,6 +14,8 @@ export interface LocalFileData {
   more: boolean;
   /** A picture's or PDF's modification time, so a new version loads again; null or absent otherwise. */
   modified?: number | null;
+  /** The work item's artifact this file is, by real path: the page shows that artifact's tab in place of a file tab. */
+  artifact?: string;
 }
 
 /**

@@ -47,8 +47,8 @@ export type DocTab =
   | (TabBase & { kind: 'file'; file: LocalTab })
   | (TabBase & { kind: 'changes' });
 
-/** A file tab's path: the file's own once read, else the target its link named. */
-const filePath = (tab: LocalTab): string => (tab.entry.state === 'ok' ? tab.entry.data.path : tab.target);
+/** A file tab's path, as its id names it: the file's own once read, else the target its link named. */
+export const filePath = (tab: LocalTab): string => (tab.entry.state === 'ok' ? tab.entry.data.path : tab.target);
 
 /**
  * The strip's tabs in order, each only while it applies: Conversation (narrow strip only), Status, History while open, the links (or Browser),

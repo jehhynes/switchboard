@@ -12,6 +12,7 @@ import type { LocalFileData } from './localLinks.js';
 import { trusted } from './trusted.js';
 import { readVersion } from './readVersion.js';
 import type { DiffModule, FileMount } from './diff/types.js';
+import { filePath } from './tabs.js';
 
 type LocalEntry = { state: 'loading' } | { state: 'ok'; data: LocalFileData; version: string; etag: string | null } | { state: 'error'; error: string };
 
@@ -82,8 +83,14 @@ export interface LocalFilesDeps {
   draw(): void;
   /** Shows the file tab, in the side column on a wide screen and in the conversation's strip on a narrower one. */
   show(): void;
-  /** The last file tab closed while it showed: the strip shows another tab. */
-  closed(): void;
+  /** Opens a document's tab or shows the one it has (`openDoc` in main.ts): `file:<path>` at a line, or `artifact:<path>`. */
+  openDoc(id: string, line: number | null): void;
+  /** Whether the page shows the file tab now: the column's tab on a wide page, the conversation's on a narrower one. */
+  fileShown(): boolean;
+  /** Makes an artifact the column's choice in place of a file tab kept there but not shown, as on a narrow page, without changing what shows. */
+  keepArtifact(path: string): void;
+  /** Closes a tab and shows its neighbour when it showed (`closeDoc` in main.ts): `file:<path>`. */
+  closeDoc(id: string): void;
   loadDiff(): Promise<DiffModule | null>;
   /** Empties a pane Preact drew into, before the file view draws into it itself. */
   takePane(pane: HTMLElement): void;
@@ -131,7 +138,10 @@ export class LocalFilesController {
     return tab?.entry.state === 'ok' && tab.entry.data.kind === 'text' && tab.entry.data.contents !== null;
   }
 
-  /** Opens a link's target in its own tab, or shows the tab it has, at the line the link names. */
+  /**
+   * Opens a link's target in its own tab, or shows the tab it has, at the line the link names; a target the hub reads as an artifact opens that
+   * artifact. Every open reads the file, so the hub checks it each time.
+   */
   open(target: string, line: number | null): void {
     let tab = this.view.tabs.find((one) => one.target === target || (one.entry.state === 'ok' && one.entry.data.path === target));
 
@@ -156,29 +166,12 @@ export class LocalFilesController {
     this.deps.show();
   }
 
-  /** Closes a tab; closing the one shown shows its neighbour, or another tab of the strip when it was the last. */
-  close(id: number): void {
-    const at = this.view.tabs.findIndex((tab) => tab.id === id);
+  /** Removes the tab of a file, named by its path (`filePath`); `closeDoc` chooses what shows next. */
+  remove(path: string): void {
+    const at = this.view.tabs.findIndex((tab) => filePath(tab) === path);
 
-    if (at === -1) {
-      return;
-    }
-
-    this.view.tabs.splice(at, 1);
-
-    if (this.view.open !== id) {
-      this.deps.draw();
-      return;
-    }
-
-    const next = this.view.tabs[at] ?? this.view.tabs[at - 1];
-
-    this.view.open = next?.id ?? null;
-
-    if (next === undefined) {
-      this.deps.closed();
-    } else {
-      this.deps.draw();
+    if (at !== -1 && this.view.open === this.view.tabs.splice(at, 1)[0]!.id) {
+      this.view.open = null;
     }
   }
 
@@ -244,6 +237,45 @@ export class LocalFilesController {
       return;
     }
 
+    // A file that is an artifact, or that another tab shows by another spelling, has one tab: the artifact's, or the other one.
+    const data = entry.state === 'ok' ? entry.data : null;
+    const same = data === null ? undefined : this.view.tabs.find((one) => one !== tab && one.entry.state === 'ok' && one.entry.data.path === data.path);
+
+    if (data?.artifact !== undefined || same !== undefined) {
+      const artifact = data?.artifact;
+      const open = this.view.open === tab.id;
+      // Only a tab the page shows takes the page to the tab it gives way to; one the operator has left gives way unseen.
+      const seen = open && this.deps.fileShown();
+
+      this.view.tabs.splice(this.view.tabs.indexOf(tab), 1);
+
+      if (artifact === undefined && tab.line !== null) {
+        same!.line = tab.line;
+      }
+
+      if (!open) {
+        this.deps.draw();
+      } else if (artifact !== undefined) {
+        this.view.open = null;
+
+        if (seen) {
+          this.deps.openDoc(`artifact:${artifact}`, null);
+        } else {
+          this.deps.keepArtifact(artifact);
+        }
+      } else {
+        this.view.open = same!.id;
+
+        if (seen) {
+          this.deps.show();
+        } else {
+          this.deps.draw();
+        }
+      }
+
+      return;
+    }
+
     tab.entry = entry;
     this.deps.draw();
   }
@@ -260,30 +292,29 @@ export class LocalFilesController {
       const link = linkTarget(button!.dataset['target'] ?? '');
 
       if (link !== null) {
-        this.open(link.path, link.line);
+        this.deps.openDoc(`file:${link.path}`, link.line);
       }
 
       return true;
     }
 
-    const id = Number(button?.dataset['local']);
+    const tab = this.view.tabs.find((one) => one.id === Number(button?.dataset['local']));
 
-    const chosen = this.view.tabs.find((tab) => tab.id === id);
-
-    if (action === 'local-tab' && chosen !== undefined) {
-      this.view.open = id;
-      this.deps.show();
-      void this.#read(chosen, true);
+    if (action === 'local-tab' && tab !== undefined) {
+      this.deps.openDoc(`file:${filePath(tab)}`, null);
       return true;
     }
 
     if (action === 'local-close') {
-      this.close(id);
+      if (tab !== undefined) {
+        this.deps.closeDoc(`file:${filePath(tab)}`);
+      }
+
       return true;
     }
 
     if (action === 'local-entry') {
-      this.open(button!.dataset['path'] ?? '', null);
+      this.deps.openDoc(`file:${button!.dataset['path'] ?? ''}`, null);
       return true;
     }
 

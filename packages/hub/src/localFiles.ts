@@ -136,6 +136,8 @@ export interface LocalFileView {
   more: boolean;
   /** A picture's or PDF's modification time in epoch milliseconds, whose bytes the view does not carry, so a change to it changes the view; null otherwise. */
   modified: number | null;
+  /** The work item's artifact this file is, by real path (`openPageFile`), so the page shows that artifact's tab in place of a file tab. */
+  artifact?: string;
 }
 
 /**
@@ -297,6 +299,17 @@ async function readHandle(handle: FileHandle, cap: number): Promise<Buffer | 'la
   } catch {
     return null;
   }
+}
+
+/**
+ * {@link openLocalFile} for a page: a file read that is one of the work item's artifacts, as `artifactAt` names by its real path, carries that
+ * artifact's name (architecture.md § Web page). A refused read is never named, so naming one tells a page nothing it may not read.
+ */
+export async function openPageFile(roots: LocalRoots, target: string, artifactAt: (real: string) => string | null): Promise<LocalOpened | null> {
+  const opened = await openLocalFile(roots, target);
+  const artifact = opened === null || opened.view.kind === 'dir' ? null : artifactAt(opened.real);
+
+  return opened === null || artifact === null ? opened : { ...opened, view: { ...opened.view, artifact } };
 }
 
 /**

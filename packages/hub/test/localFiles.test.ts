@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renameSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
-import { allowedPath, LOCAL_DIR_MAX, LOCAL_TEXT_MAX_BYTES, localRoots, localTarget, mainCheckout, openLocalFile, rawMime } from '../src/localFiles.js';
+import { allowedPath, LOCAL_DIR_MAX, LOCAL_TEXT_MAX_BYTES, localRoots, localTarget, mainCheckout, openLocalFile, openPageFile, rawMime } from '../src/localFiles.js';
 import type { LocalRoots } from '../src/localFiles.js';
 
 let dir: string;
@@ -279,6 +279,44 @@ describe('openLocalFile', () => {
     };
 
     expect(await openLocalFile(roots, 'src', swap)).toBeNull();
+  });
+});
+
+describe('openPageFile', () => {
+  const plan = () => join(work, '.wip', 'artifacts', 'w1', 'chat', 'plan.md');
+
+  beforeEach(() => {
+    mkdirSync(join(plan(), '..'), { recursive: true });
+    writeFileSync(plan(), '# Plan\n');
+  });
+
+  it('names the artifact a file read is, by its real path, and nothing for any other file or a folder', async () => {
+    const asked: string[] = [];
+    const artifactAt = (real: string) => {
+      asked.push(real);
+      return real === realpathSync.native(plan()) ? 'chat/plan.md' : null;
+    };
+
+    expect((await openPageFile(roots, '.wip/artifacts/w1/chat/plan.md', artifactAt))?.view).toMatchObject({ kind: 'markdown', contents: '# Plan\n', artifact: 'chat/plan.md' });
+    expect((await openPageFile(roots, 'src/a.ts', artifactAt))?.view).not.toHaveProperty('artifact');
+    // A folder is never an artifact, so it is not asked about.
+    expect((await openPageFile(roots, '.wip/artifacts/w1/chat', artifactAt))?.view).toMatchObject({ kind: 'dir' });
+    expect(asked).toEqual([realpathSync.native(plan()), realpathSync.native(join(work, 'src', 'a.ts'))]);
+  });
+
+  it("never names a refused read, outside the roots or outside a paired device's working folder", async () => {
+    const asked: string[] = [];
+    const artifactAt = (real: string) => {
+      asked.push(real);
+      return 'chat/plan.md';
+    };
+    const paired = localRoots({ folder: dir, cwd: join(work, 'src') }, [{ id: 's', cwd: join(work, 'src'), nativeSessionId: SESSION, retiredIds: [] }], 's', true);
+
+    expect(await openPageFile(roots, '../outside/secret.txt', artifactAt)).toBeNull();
+    // The artifact is in the computer's roots, but not in the paired device's working folder.
+    expect(await openPageFile(paired, plan(), artifactAt)).toBeNull();
+    expect(asked).toEqual([]);
+    expect((await openPageFile(paired, 'a.ts', artifactAt))?.view).toMatchObject({ kind: 'text', artifact: 'chat/plan.md' });
   });
 });
 

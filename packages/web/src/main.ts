@@ -40,7 +40,8 @@ import type { Answer } from './request.js';
 import { dotView, renderBanner, renderScreen, renderUpdate } from './connectionView.js';
 import type { ConnectionView } from './connectionView.js';
 import { renderOpening, renderOpeningHead, renderOpeningSide, renderOpeningTabs } from './opening.js';
-import type { TabFit } from './tabs.js';
+import { closable, stripTabs } from './tabs.js';
+import type { DocTab, TabFit } from './tabs.js';
 import type { Opening } from './opening.js';
 import { parseScrolls, parseTabSets, ROUTE_KEY, routeHash, SCROLL_KEY, startRoute, tabSetKey, TABS_KEY, withScroll, withTabSet } from './route.js';
 import type { Route, ScrollPlace, TabSet } from './route.js';
@@ -594,10 +595,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       chooseTab('file');
       draw();
     },
-    closed: () => {
-      chooseTab(wide() ? 'status' : 'conversation');
+    openDoc: (id, line) => openDoc(id, { line }),
+    fileShown: () => (wide() ? sideTab() : mainTab()) === 'file',
+    keepArtifact: (path) => {
+      if (view.side === 'file' && state.artifacts.some((one) => one.path === path) && !closedNow().has(path)) {
+        view.side = 'artifacts';
+        view.artifact = path;
+      }
+
       draw();
     },
+    closeDoc: (id) => closeDoc(id),
     loadDiff: () => deps.loadDiff?.() ?? Promise.resolve(null),
     takePane: (pane) => takePane(pane),
     drawPane: (pane, tree) => drawPane(pane, tree),
@@ -3816,6 +3824,110 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
   };
+  /** The strip's tabs as drawn (tabs.ts), in its order at the page's width. */
+  const docTabs = (): DocTab[] =>
+    stripTabs({ shown: wide() ? sideTab() : mainTab(), statusUnread: false, browser: showBrowser(), ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), history: showHistory(), artifacts: state.artifacts, open: openArtifact(), closed: closedNow(), files: localFiles.view, changes: true, console: showConsole() }, wide() ? 'wide' : 'narrow');
+  /**
+   * Opens a document's tab, or selects the tab it has (architecture.md § Web page), whatever opened it: a conversation or History link, Open
+   * report, an artifact card, the More menu or a route. `id` is `artifact:<path>`, `file:<path>` at `line`, `link:<url>` named `name`, or
+   * `history`. A file the hub reads as an artifact gives way to that artifact's tab (localFiles.tsx).
+   */
+  const openDoc = (id: string, { line = null, name = '' }: { line?: number | null; name?: string } = {}): void => {
+    view.tabMenu = false;
+
+    if (id.startsWith('artifact:')) {
+      const path = id.slice('artifact:'.length);
+
+      leaving('artifacts');
+      chooseTab('artifacts');
+      view.artifact = path;
+
+      // Choosing a closed artifact opens its tab again.
+      if (closedNow().has(path)) {
+        setClosed(path, false);
+      }
+
+      draw();
+      saveTab();
+    } else if (id.startsWith('file:')) {
+      localFiles.open(id.slice('file:'.length), line);
+    } else if (id.startsWith('link:')) {
+      const url = id.slice('link:'.length);
+
+      // Without the extension a link tab selects all the same, and its pane offers the link in a browser tab.
+      if (!iframe.available && iframe.select(url)) {
+        leaving('browser');
+        chooseTab('browser');
+        draw();
+      } else {
+        openWebLink(url, name);
+      }
+    } else if (id === 'history') {
+      openHistory();
+    }
+  };
+  /** Shows a tab of the strip, Status on a wide page or the conversation on a narrow one for none, without keeping it as a choice (`closeDoc`). */
+  const showDoc = (tab: DocTab | undefined): void => {
+    if (tab?.kind === 'artifact') {
+      view.artifact = tab.artifact.path;
+      chooseTab('artifacts');
+    } else if (tab?.kind === 'file') {
+      localFiles.view.open = tab.file.id;
+      chooseTab('file');
+    } else if (tab?.kind === 'link') {
+      if (!iframe.open(tab.link.url)) {
+        iframe.select(tab.link.url);
+      }
+
+      chooseTab('browser');
+    } else {
+      chooseTab(tab?.kind === 'history' ? 'history' : wide() ? 'status' : 'conversation');
+    }
+  };
+  /**
+   * Closes a document's tab: History, a link, an artifact or a file (architecture.md § Web page). Closing the tab shown shows its neighbour in
+   * the strip, the one before it, else the one after it; closing another changes nothing else. What shows next is no choice of the operator's,
+   * so it posts no `page-tabs`; only an artifact's close is kept, for every device. The focus goes to the tab shown when the closed tab showed or
+   * had the focus (`focused`).
+   */
+  const closeDoc = (id: string, focused = false): void => {
+    const docs = docTabs().filter(closable);
+    const at = docs.findIndex((tab) => tab.id === id);
+    const shown = at !== -1 && docs[at]!.selected;
+
+    if (id.startsWith('artifact:')) {
+      const path = id.slice('artifact:'.length);
+
+      setClosed(path, true);
+
+      // Nor does the column show it later, on a wider page.
+      if (view.artifact === path) {
+        view.artifact = null;
+      }
+    } else if (id.startsWith('link:')) {
+      iframe.close(id.slice('link:'.length));
+    } else if (id.startsWith('file:')) {
+      localFiles.remove(id.slice('file:'.length));
+    } else if (id === 'history') {
+      historyOpen = null;
+
+      if (view.side === 'history') {
+        view.side = 'status';
+      }
+    }
+
+    view.tabMenu = false;
+
+    if (shown) {
+      showDoc(docs[at - 1] ?? docs[at + 1]);
+    }
+
+    draw();
+
+    if (shown || focused) {
+      (wide() ? detailHead : head).querySelector<HTMLElement>('.tabs [role="tab"][aria-selected="true"]')?.focus();
+    }
+  };
   const openRowMenu = (key: string, point?: { x: number; y: number }): void => {
     const row = rowByKey(key);
     if (row === null || menuRows(row, view).length === 0) return;
@@ -4077,30 +4189,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           }
         });
         break;
-      case 'close-history': {
-        // Hides the History tab until History is chosen again; closing the shown one shows Status in the column, or the conversation.
-        const shown = (wide() ? view.side : mainTab()) === 'history';
-        // The focus on the tab or its close mark goes to the tab shown, rather than to the page.
-        const focused = button!.closest('.history-tab')?.contains(document.activeElement) === true;
-
-        historyOpen = null;
-
-        if (view.side === 'history') {
-          view.side = 'status';
-        }
-
-        if (shown) {
-          chooseTab(wide() ? 'status' : 'conversation');
-        }
-
-        draw();
-
-        if (shown || focused) {
-          (wide() ? detailHead : head).querySelector<HTMLElement>('.tabs [role="tab"][aria-selected="true"]')?.focus();
-        }
-
+      case 'close-history':
+        // Hides the History tab until History is chosen again; the focus on the tab or its close mark goes to the tab shown, rather than to the page.
+        closeDoc('history', button!.closest('.history-tab')?.contains(document.activeElement) === true);
         break;
-      }
       case 'history-chip':
         if (shownHistory !== null) {
           const category = button!.dataset['category'] ?? '';
@@ -4124,13 +4216,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const target = tabUrl(button!.dataset['url'] ?? '');
 
         if (target !== null) {
-          openWebLink(target, button!.dataset['label'] ?? '');
+          openDoc(`link:${target}`, { name: button!.dataset['label'] ?? '' });
         }
 
         break;
       }
       case 'history-file':
-        localFiles.open(button!.dataset['path'] ?? '', null);
+        openDoc(`file:${button!.dataset['path'] ?? ''}`);
         break;
       case 'history-folder':
         void runCommand(OPEN_IN_VSCODE);
@@ -4149,7 +4241,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'row-report':
         forRow(button!.dataset['row'] ?? '', () => {
           closeMenus();
-          localFiles.open(button!.dataset['file'] ?? '', null);
+          openDoc(`file:${button!.dataset['file'] ?? ''}`);
         });
         break;
       case 'row-menu':
@@ -4215,48 +4307,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           event.preventDefault();
         }
 
-        leaving('artifacts');
-
-        chooseTab('artifacts');
-
-        view.artifact = button!.dataset['path'] ?? null;
-        view.tabMenu = false;
-
-        // Choosing a closed artifact opens its tab again.
-        if (view.artifact !== null && closedNow().has(view.artifact)) {
-          setClosed(view.artifact, false);
+        if (button!.dataset['path'] !== undefined) {
+          openDoc(`artifact:${button!.dataset['path']}`);
         }
 
-        draw();
-        saveTab();
         break;
       case 'tab-menu':
         view.tabMenu = !view.tabMenu;
         draw();
         break;
       case 'close-artifact': {
-        // Closing an artifact's tab hides it for the work item on every device, until a newer version; the menu still lists it. Closing the
-        // open one shows Status.
+        // Closing an artifact's tab hides it for the work item on every device, until a newer version; the More menu still lists it.
         const path = button!.dataset['path'] ?? openArtifact();
 
         if (path !== null) {
-          setClosed(path, true);
-        }
-
-        const wasOpen = path === openArtifact();
-
-        if (wasOpen) {
-          view.artifact = null;
-          chooseTab('status');
-        }
-
-        view.tabMenu = false;
-        draw();
-
-        // The work item's kept artifact goes; Status shows without becoming the choice for every work item.
-        if (wasOpen && state.scope?.workItemId != null) {
-          savedTabs = { workItemId: state.scope.workItemId, tab: null, closed: savedTabs?.closed ?? [] };
-          void post('page-tabs', { workItemId: state.scope.workItemId, tab: null });
+          closeDoc(`artifact:${path}`);
         }
 
         break;
@@ -4272,14 +4337,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         break;
       case 'iframe-open':
-        // Without the extension the tab selects all the same, and its pane offers the link in a browser tab.
-        if (!iframe.available) { iframe.select(button?.dataset['url'] ?? ''); chooseTab('browser'); draw(); }
-        else openBrowserLink(button?.dataset['url'] ?? '');
+        openDoc(`link:${button?.dataset['url'] ?? ''}`);
         break;
       case 'iframe-close':
-        iframe.close(button?.dataset['url'] ?? '');
-        if (iframe.tabs.length === 0) chooseTab('status');
-        draw();
+        closeDoc(`link:${button?.dataset['url'] ?? ''}`);
         break;
       case 'toggle-details':
         view.details = !view.details;
@@ -5605,7 +5666,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         } else if (tab === 'changes') {
           changes.openChanges(firstRoute.f ?? null);
         } else if (tab === 'file' && firstRoute.p != null) {
-          localFiles.open(firstRoute.p, firstRoute.l ?? null);
+          openDoc(`file:${firstRoute.p}`, { line: firstRoute.l ?? null });
         }
 
         restoringTabs = false;

@@ -1034,6 +1034,13 @@ describe('createHubApp', () => {
     expect((await app.page!.localFile!(page, report, false))?.view).toMatchObject({ kind: 'markdown', contents: '# Reply\n' });
     expect(await app.page!.localFile!(page, join(drafts, 'other.md'), false)).toBeNull();
     expect(await app.page!.localFile!(page, drafts, false)).toBeNull();
+    // A file that is one of the work item's artifacts says so, once its folder lists it, so the page shows its artifact's tab.
+    const plan = join(worktree, '.wip', 'artifacts', 'w1', 'chat', 'plan.md');
+
+    mkdirSync(join(plan, '..'), { recursive: true });
+    writeFileSync(plan, '# Plan\n');
+    await vi.waitFor(async () => expect((await app.page!.localFile!(page, plan, false))?.view).toMatchObject({ kind: 'markdown', artifact: 'chat/plan.md' }), { timeout: 5_000 });
+    expect((await app.page!.localFile!(page, report, false))?.view).not.toHaveProperty('artifact');
 
     // A draft a session names inside the Switchboard home, which holds the hub's keys, never opens.
     const keys = join(temp.home, '.switchboard', 'hub-keys.md');
