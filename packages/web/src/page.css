@@ -631,6 +631,10 @@ button.picker > .codicon-chevron-down { order: 2; }
 .body th, .body td { border: 1px solid var(--vscode-input-border); padding: 2px 6px; }
 .body blockquote { margin: 0 0 8px; padding: 2px 12px; border-left: 3px solid var(--vscode-textBlockQuote-border); background: var(--vscode-textBlockQuote-background); }
 .body img, .body video, .body svg, .body iframe { max-width: 100%; }
+/* A Markdown picture the page cannot show leaves a note naming it in its place (`picture` in markdown.ts). */
+.picture-missing { display: none; }
+.picture.broken > img { display: none; }
+.picture.broken > .picture-missing { display: inline-block; padding: 2px 8px; border: 1px dashed var(--vscode-panel-border); border-radius: 4px; color: var(--vscode-descriptionForeground); font-size: 13px; }
 .code-block { position: relative; }
 .copy { display: inline-flex; padding: 3px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; opacity: 0; }
 .code-block > .copy { position: absolute; top: 4px; right: 4px; background: var(--vscode-editor-background); }

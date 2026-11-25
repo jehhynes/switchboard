@@ -157,6 +157,50 @@ describe('GitHub-flavoured Markdown', () => {
     expect(renderInline('`<kbd>x</kbd>`')).toBe('<code>&lt;kbd&gt;x&lt;/kbd&gt;</code>');
   });
 
+  it('draws an <img> with only src, alt, title, width and height, rebuilt and escaped, and keeps any other as text', () => {
+    const base = (src: string): string => `/r/${src}`;
+    const img = (text: string): Element | null => {
+      const host = document.createElement('div');
+
+      host.innerHTML = renderMarkdown(text, base);
+      return host.querySelector('img');
+    };
+
+    const drawn = img('<img src="a b.png" alt=\'say "hi" &amp; bye\' title="t &amp; u" width="300" height="50%">')!;
+
+    expect(drawn.getAttribute('src')).toBe('/r/a%20b.png');
+    expect(drawn.getAttribute('alt')).toBe('say "hi" & bye');
+    expect(drawn.getAttribute('title')).toBe('t & u');
+    expect([drawn.getAttribute('width'), drawn.getAttribute('height')]).toEqual(['300', '50%']);
+    expect(img('<IMG SRC=x.png />')!.getAttribute('src')).toBe('/r/x.png');
+    // A size that is not a number is dropped; an event handler, srcset, style, a repeated attribute or no src leaves the tag as text.
+    expect(img('<img src="x.png" width="1;x">')!.hasAttribute('width')).toBe(false);
+
+    for (const text of ['<img src=x onerror=alert(1)>', '<img src="x.png" srcset="y.png 2x">', '<img src="x.png" style="x">', '<img src="x.png" src="y.png">', '<img alt="x">', '<img src="x.png" onload = "a()">']) {
+      expect(renderInline(text), text).not.toContain('<img');
+    }
+
+    // A source of another scheme, written plainly, in capitals or with character references, is refused.
+    for (const text of ['<img src="javascript:alert(1)">', '<img src="JaVaScRiPt:alert(1)">', '<img src="jav&#x61;script:alert(1)">', '<img src="data:image/svg+xml,<svg>">', '<img src="vbscript:x">']) {
+      expect(renderInline(text), text).not.toContain('<img');
+    }
+
+    // A quote in a value cannot leave the attribute.
+    expect(img('<img src=\'x.png" onerror="alert(1)\'>')!.getAttributeNames().sort()).toEqual(['alt', 'data-picture', 'src']);
+    // Only a <p> or <div> with no attributes but align is dropped; any other stays text.
+    expect(renderMarkdown('<p align="center">\n<img src="x.png">\n</p>', base)).not.toContain('&lt;p');
+    expect(renderInline('<div class="x">a')).toBe('&lt;div class=&quot;x&quot;&gt;a');
+  });
+
+  it('puts a note in the place of a picture with no source the page can read, naming it by its alt text or file name', () => {
+    expect(dom('![](shots/my%20shot.png)').querySelector('.picture.broken .picture-missing')!.textContent).toBe('Picture not shown: my shot.png');
+    expect(dom('![The list](shots/a.png)').querySelector('.picture.broken .picture-missing')!.getAttribute('title')).toBe('shots/a.png');
+    expect(dom('![x](shots/a.png)').querySelector('img')).toBeNull();
+    // Hidden until the picture fails.
+    expect(rule('.picture-missing')).toContain('display: none');
+    expect(rule('.picture.broken > .picture-missing')).toContain('display: inline-block');
+  });
+
   it('draws tables with their alignment, strikethrough, autolinks and line breaks as GitHub does', () => {
     const cells = [...dom('| L | C | R | N |\n|:--|:-:|--:|---|\n| a | b | c | d |').querySelectorAll<HTMLElement>('td')];
 

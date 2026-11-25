@@ -93,19 +93,102 @@ export function joinPath(dir: string, href: string): string {
 /** Whether a link names a place by itself: a scheme, a drive or an absolute path, not one relative to the file it is in. */
 const absolute = (href: string): boolean => /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('/') || href.startsWith('\\');
 
+/** A target as written, from markdown-it's attribute: its escaping undone and its percent-encoding decoded, or kept when malformed. */
+export function decodedTarget(text: string): string {
+  const plain = text.replace(/&(amp|quot|lt|gt|#39);/g, (_match, name: string) => ({ amp: '&', quot: '"', lt: '<', gt: '>', '#39': "'" })[name]!);
+
+  try {
+    return decodeURIComponent(plain);
+  } catch {
+    return plain;
+  }
+}
+
+/** A link's attributes that open its target, as `linkTarget` reads it, in a file tab of the page (`LocalFilesController`). */
+export function fileTabLink(target: string): string {
+  return `class="path-link" title="${escape(target)}" tabindex="0" role="link" data-action="local-file" data-target="${escape(target)}"`;
+}
+
+/** A segment of a name the artifact route serves, as `ARTIFACT_SEGMENT` in packages/hub/src/page.ts reads it. */
+const SERVED = /^(?!(?:con|prn|aux|nul|com\d|lpt\d|conin\$|conout\$)(?:\.|$))[^./\\:\x00-\x1f](?:[^/\\:\x00-\x1f]*[^/\\:\x00-\x1f. ])?$/i;
+
+/**
+ * Where a Markdown artifact's picture or link lies (architecture.md § Artifacts): `name`, for the artifact route, when it is in the artifact
+ * folder, or, for an external artifact (`@<id>/<file>`), its own file or one in the folder beside it named after its stem; otherwise `path`,
+ * its absolute path, read as a local file under that route's rules, resolved against the artifact's own folder (`artifactsDir`, or an external
+ * artifact's `file`). `target` is decoded once, a `file:` URI too, and has no fragment. Null when the folder is unknown or the target is another scheme.
+ */
+export function artifactTarget(artifact: { path: string; file?: string }, artifactsDir: string | null, target: string): { name: string } | { path: string } | null {
+  if (/^file:/i.test(target)) {
+    return { path: fileUriPath(target) };
+  }
+
+  if (/^[a-z]:[\\/]/i.test(target) || target.startsWith('/') || target.startsWith('\\')) {
+    return { path: target.replaceAll('\\', '/') };
+  }
+
+  if (absolute(target)) {
+    return null;
+  }
+
+  const relative = target.replaceAll('\\', '/');
+  const [first = '', ...rest] = artifact.path.split('/');
+  const external = first.startsWith('@');
+  const parts = external ? [] : artifact.path.split('/').slice(0, -1);
+  let outside = false;
+
+  for (const part of relative.split('/')) {
+    if (part === '..') {
+      outside ||= parts.length === 0;
+      parts.pop();
+    } else if (part !== '.' && part !== '') {
+      parts.push(part);
+    }
+  }
+
+  const fileName = rest.join('/');
+  const served = !outside && parts.every((part) => SERVED.test(part));
+
+  if (external) {
+    const stem = fileName.replace(/\.[^.]+$/, '');
+
+    if (served && ((parts.length === 1 && parts[0] === fileName) || (parts.length > 1 && parts[0] === stem))) {
+      return { name: `${first}/${parts.join('/')}` };
+    }
+
+    return artifact.file === undefined ? null : { path: joinPath(artifact.file.replaceAll('\\', '/').replace(/\/[^/]*$/, ''), relative) };
+  }
+
+  if (served && parts.length > 1) {
+    return { name: parts.join('/') };
+  }
+
+  return artifactsDir === null ? null : { path: joinPath(artifactsDir.replaceAll('\\', '/').replace(/\/$/, ''), `${artifact.path.split('/').slice(0, -1).join('/')}/${relative}`) };
+}
+
+/**
+ * Shows the note in place of a Markdown picture (`picture` in markdown.ts) that does not load, as when the hub refuses it or the page's CSP
+ * blocks it, and the picture again once a later source loads. It marks the frame by class, which Preact's redraws leave alone, as they only
+ * set what the drawn markup changes.
+ */
+export function watchPictures(root: HTMLElement, signal: AbortSignal): void {
+  const mark = (broken: boolean) => (event: Event): void => {
+    const target = event.target;
+
+    if (target instanceof HTMLImageElement && target.hasAttribute('data-picture')) {
+      target.parentElement?.classList.toggle('broken', broken);
+    }
+  };
+
+  // Neither event bubbles, so both are caught on the way down.
+  root.addEventListener('error', mark(true), { capture: true, signal });
+  root.addEventListener('load', mark(false), { capture: true, signal });
+}
+
 /** A Markdown file as the page draws an artifact: its relative pictures from its folder and its relative links opening in file tabs. */
 export function localMarkdown(key: string, data: LocalFileData): string {
   const dir = data.path.slice(0, data.path.lastIndexOf('/'));
-  // markdown-it gives a target percent-encoded inside an attribute's escaping.
-  const decoded = (text: string): string => {
-    const plain = text.replace(/&(amp|quot|lt|gt|#39);/g, (_match, name: string) => ({ amp: '&', quot: '"', lt: '<', gt: '>', '#39': "'" })[name]!);
-
-    try {
-      return decodeURIComponent(plain);
-    } catch {
-      return plain;
-    }
-  };
+  const decoded = decodedTarget;
   const base = (src: string): string | null => {
     const path = decoded(src.split(/[?#]/)[0]!);
 
@@ -119,7 +202,7 @@ export function localMarkdown(key: string, data: LocalFileData): string {
     const at = href.indexOf('#');
     const target = joinPath(dir, decoded(href.slice(0, at === -1 ? undefined : at))) + (at === -1 ? '' : href.slice(at));
 
-    return `class="path-link" title="${escape(target)}" tabindex="0" role="link" data-action="local-file" data-target="${escape(target)}"`;
+    return fileTabLink(target);
   };
 
   return renderMarkdown(data.contents ?? '', base, link);

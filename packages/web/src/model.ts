@@ -18,6 +18,8 @@ export interface PageState {
   /** The state History shows at its top (architecture.md § States). */
   state: StateView | null;
   artifacts: ArtifactView[];
+  /** The work item's artifact folder from `hello`, against which an artifact's pictures outside it are read; null or absent when it has none. */
+  artifactsDir?: string | null;
   unread: number;
   voice: VoiceView | null;
   /** The session's questions as the hub keeps them (PRD R103): the open count, the oldest open card and the card drafts; null before the hub sent them. */
@@ -82,6 +84,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
         more: event['more'] === true,
         state: event['state'] ?? null,
         artifacts: newestFirst(event['artifacts'] ?? []),
+        artifactsDir: event['artifactsDir'] ?? null,
         unread: event['unread'] ?? 0,
         voice: event['voice'] ?? null,
         questions: event['questions'] ?? null,

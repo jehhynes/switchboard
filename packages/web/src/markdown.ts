@@ -68,6 +68,24 @@ function inlineTag(state: StateInline, silent: boolean): boolean {
   }
 
   const rest = state.src.slice(state.pos);
+  const wrapper = /^<\/?(?:p|div)(?:\s+align\s*=\s*(?:"[a-z]*"|'[a-z]*'|[a-z]+))?\s*>/i.exec(rest);
+
+  if (wrapper !== null) {
+    // A `<p>` or `<div>`, as a README wraps centred pictures in, shows nothing, so the pictures inside it show.
+    state.pos += wrapper[0].length;
+    return true;
+  }
+
+  const picture = htmlPicture(rest);
+
+  if (picture !== null) {
+    if (!silent) {
+      state.push('html_inline', '', 0).content = picture.html;
+    }
+
+    state.pos += picture.length;
+    return true;
+  }
 
   const br = /^<br\s*\/?>/i.exec(rest);
   const tag = br === null ? /^<(\/?)([a-z]+)\s*>/i.exec(rest) : null;
@@ -88,6 +106,51 @@ function inlineTag(state: StateInline, silent: boolean): boolean {
 }
 
 markdown.inline.ruler.before('html_inline', 'gfm_tag', inlineTag);
+
+/** An `<img>` tag's attributes: names, then a value in double or single quotes, bare, or none. */
+const IMG_TAG = /^<img((?:\s+[a-z][a-z0-9-]*(?:\s*=\s*(?:"[^"<>]*"|'[^'<>]*'|[^\s"'=<>`]+))?)*)\s*\/?>/i;
+const IMG_ATTRIBUTE = /([a-z][a-z0-9-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
+
+/**
+ * An `<img>` tag as GitHub draws one in Markdown, rebuilt as markdown-it draws a picture, so `linkify` resolves its source as any other:
+ * only `src`, `alt`, `title`, `width` and `height` (a number, or a percentage), each once, with `src` a link `validateLink` takes. A
+ * tag with any other attribute, such as an event handler or `srcset`, stays text. Character references in a value are read as such.
+ */
+function htmlPicture(text: string): { html: string; length: number } | null {
+  const tag = IMG_TAG.exec(text);
+
+  if (tag === null) {
+    return null;
+  }
+
+  const values = new Map<string, string>();
+
+  for (const [, name, double, single, bare] of tag[1]!.matchAll(IMG_ATTRIBUTE)) {
+    const key = name!.toLowerCase();
+
+    if (!['src', 'alt', 'title', 'width', 'height'].includes(key) || values.has(key)) {
+      return null;
+    }
+
+    values.set(key, markdown.utils.unescapeAll(double ?? single ?? bare ?? ''));
+  }
+
+  const src = values.get('src')?.trim() ?? '';
+  const size = (key: string): string => {
+    const value = values.get(key);
+
+    return value === undefined || !/^\d{1,5}%?$/.test(value) ? '' : ` ${key}="${value}"`;
+  };
+
+  if (src === '' || !markdown.validateLink(src)) {
+    return null;
+  }
+
+  const title = values.get('title');
+  const html = `<img src="${markdown.utils.escapeHtml(markdown.normalizeLink(src))}" alt="${markdown.utils.escapeHtml(values.get('alt') ?? '')}"${title === undefined ? '' : ` title="${markdown.utils.escapeHtml(title)}"`}${size('width')}${size('height')}>`;
+
+  return { html, length: tag[0].length };
+}
 
 const DETAILS_OPEN = /^<details(\s+open)?\s*>/i;
 /** The most lines a `<summary>` may take. */
@@ -522,13 +585,25 @@ function linkify(html: string, base?: (path: string) => string | null, link?: (h
       // The page opens a path's file in a tab (`LocalFilesController`); a focusable link, though it has no href a browser could follow.
       return to === null ? `<a class="path-link" title="${href}" tabindex="0" role="link" data-action="local-file" data-target="${href}"` : `<a ${to}`;
     })
-    .replace(/<img src="([^"]*)"/g, (_match, src: string) => {
-      if (/^(?:https?:|data:)/i.test(src)) {
-        return `<img src="${src}"`;
-      }
+    .replace(/<img src="([^"]*)" alt="([^"]*)"([^>]*)>/g, (_match, src: string, alt: string, rest: string) => {
+      const web = /^(?:https?:|data:)/i.test(src);
+      const to = web ? src : (base?.(src) ?? null);
 
-      const to = base?.(src) ?? null;
-
-      return to === null ? '<img' : `<img src="${escape(to)}"`;
+      return picture(to === null ? null : web ? src : escape(to), src, alt, rest);
     });
+}
+
+/**
+ * A picture in its frame (`.picture`), with a note in its place, shown by the page when it cannot show the picture (`watchPictures`): when the
+ * source names no file the page may read (`to` null), the hub refuses or lacks it, or it is on the web, which the page's CSP blocks. The
+ * note names the picture by its alt text or file name, gives its source as a tooltip, and opens a web picture in a browser tab. `src`,
+ * `alt` and `rest` are markdown-it's escaped attributes; `to` is escaped.
+ */
+function picture(to: string | null, src: string, alt: string, rest: string): string {
+  // Without alt text, the file name, decoded as written (`anchorTarget` undoes markdown-it's escaping and encoding).
+  const named = alt !== '' ? alt : escape(anchorTarget(`#${src.split(/[?#]/)[0]!.split('/').pop() ?? ''}`));
+  const open = webLink(src) ? ` <a href="${src}" target="_blank" rel="noopener noreferrer">Open</a>` : '';
+  const note = `<span class="picture-missing" title="${src}">Picture not shown: ${named}${open}</span>`;
+
+  return to === null ? `<span class="picture broken">${note}</span>` : `<span class="picture"><img src="${to}" alt="${alt}"${rest} data-picture="">${note}</span>`;
 }

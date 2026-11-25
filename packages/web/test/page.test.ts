@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, inTurn, mentionOf, mentionQuery, commandQuery, timeline, withEarlier } from '../src/model.js';
 import { parseQuestions, resolveAnswers } from '@switchboard/conversation/questions';
+import { linkTarget } from '../src/localLinks.js';
 import { artifactUrl, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
 import { renderArtifactView, renderState } from '../src/side.js';
 import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
@@ -3155,7 +3156,9 @@ describe('the page in use', () => {
 
     expect(doc).toContain('<h1 data-anchor="plan">Plan</h1>');
     expect(doc).toContain('src="/v1/conversation/artifact/pk/chat/plan/pic.png"');
-    expect(doc).not.toContain('x.png');
+    // With no artifact folder known, a picture outside it has nothing to read from: a note names it in its place.
+    expect(root.querySelector('.artifact-doc .picture.broken .picture-missing')!.textContent).toBe('Picture not shown: up');
+    expect(root.querySelectorAll('.artifact-doc img')).toHaveLength(1);
     expect(root.querySelector('#head .tab.selected')!.getAttribute('data-path')).toBe('chat/plan.md');
     // Closing its tab shows the tab after it, with none before it, and the closed tab goes.
     click('#head .artifact-tab.selected .tab-close');
@@ -3165,6 +3168,74 @@ describe('the page in use', () => {
     expect(root.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
     click('[data-tab="conversation"]');
     expect(root.querySelector('#composer')!.hasAttribute('hidden')).toBe(false);
+    page.close();
+  });
+
+  it("draws a Markdown artifact's pictures from its folder by the artifact route and any other picture through the local file route, with a note for one that fails", async () => {
+    const { page, source } = start();
+
+    answers['/artifact/'] = {
+      status: 200,
+      body: {},
+      text: '# Plan\n\n![a](plan/a.png) ![b](plan/sub/my%20shot%20%231.png) ![c](../../shots/c.png) ![d](D:\\w\\d.png) ![e](file:///D:/w/e%20f.png) ![g](<plan/g h.png>) ![web](https://example.com/w.png)\n\n<p align="center">\n  <img src="plan/h.png" alt="H" width="300">\n</p>',
+    };
+    hello(source, { artifactsDir: 'D:\\w\\.wip\\artifacts\\w1' });
+    click('#head .artifact-tab[data-path="chat/plan.md"]');
+    await flush();
+    await flush();
+
+    const doc = root.querySelector<HTMLElement>('.artifact-doc')!;
+    const sources = [...doc.querySelectorAll('img')].map((img) => img.getAttribute('src'));
+    const local = (path: string): string => `/v1/conversation/local-file-raw?window=pk&path=${encodeURIComponent(path)}`;
+
+    expect(sources).toEqual([
+      '/v1/conversation/artifact/pk/chat/plan/a.png',
+      '/v1/conversation/artifact/pk/chat/plan/sub/my%20shot%20%231.png',
+      local('D:/w/.wip/artifacts/shots/c.png'),
+      local('D:/w/d.png'),
+      local('D:/w/e f.png'),
+      '/v1/conversation/artifact/pk/chat/plan/g%20h.png',
+      'https://example.com/w.png',
+      '/v1/conversation/artifact/pk/chat/plan/h.png',
+    ]);
+    // The README form's wrapper is not shown as text, and its picture keeps its width.
+    expect(doc.textContent).not.toContain('<p');
+    expect(doc.querySelector('img[alt="H"]')!.getAttribute('width')).toBe('300');
+    // A picture that fails shows its note, and the picture again once a later source loads.
+    const web = doc.querySelector<HTMLImageElement>('img[alt="web"]')!;
+
+    expect(web.parentElement!.classList.contains('broken')).toBe(false);
+    web.dispatchEvent(new Event('error'));
+    expect(web.parentElement!.classList.contains('broken')).toBe(true);
+    expect(web.parentElement!.querySelector('.picture-missing')!.textContent).toBe('Picture not shown: web Open');
+    expect(web.parentElement!.querySelector('.picture-missing a')!.getAttribute('href')).toBe('https://example.com/w.png');
+    web.dispatchEvent(new Event('load'));
+    expect(web.parentElement!.classList.contains('broken')).toBe(false);
+    page.close();
+  });
+
+  it("reads an external artifact's own pictures by the artifact route and a picture beside it, as a review's screenshots/, as a local file, and links to it in a file tab", async () => {
+    const { page, source } = start();
+    const review = { ...artifact('@7/review.md', 'markdown', 'md'), file: 'D:/wt/.wip/review-pr/round-1/review.md' };
+
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Review\n\n![own](review/a.png) ![shot](screenshots/uat-1.png) [shot](screenshots/my%20shot%20%231.png#L2) ![readme](../../../docs/images/x.png) ![uri](file:///D:/x/a%2520b.png)' };
+    hello(source, { artifacts: [review], artifactsDir: 'D:/wt/.wip/artifacts/w1' });
+    click('#head .artifact-tab[data-path="@7/review.md"]');
+    await flush();
+    await flush();
+
+    const doc = root.querySelector<HTMLElement>('.artifact-doc')!;
+
+    expect([...doc.querySelectorAll('img')].map((img) => img.getAttribute('src'))).toEqual([
+      '/v1/conversation/artifact/pk/%407/review/a.png',
+      `/v1/conversation/local-file-raw?window=pk&path=${encodeURIComponent('D:/wt/.wip/review-pr/round-1/screenshots/uat-1.png')}`,
+      `/v1/conversation/local-file-raw?window=pk&path=${encodeURIComponent('D:/wt/docs/images/x.png')}`,
+      `/v1/conversation/local-file-raw?window=pk&path=${encodeURIComponent('D:/x/a%20b.png')}`,
+    ]);
+    // The file tab reads the link as written: its name's # is not its fragment.
+    const target = doc.querySelector<HTMLElement>('a.path-link')!.dataset['target']!;
+
+    expect(linkTarget(target)).toEqual({ path: 'D:/wt/.wip/review-pr/round-1/screenshots/my shot #1.png', line: 2 });
     page.close();
   });
 
@@ -3480,7 +3551,7 @@ describe('the page in use', () => {
     expect(doc.querySelector('a[href$="plan/notes.txt"]')!.getAttribute('target')).toBe('_blank');
     expect(doc.querySelector('a.path-link')!.textContent).toBe('up');
     // A file: URI names no artifact: it opens in a file tab.
-    expect([...doc.querySelectorAll<HTMLElement>('a.path-link')].map((one) => one.dataset['target'])).toEqual(['../x.md', 'file:///D:/w/src/a.ts#L3']);
+    expect([...doc.querySelectorAll<HTMLElement>('a.path-link')].map((one) => one.dataset['target'])).toEqual(['../x.md', 'D:/w/src/a.ts#L3']);
     expect(doc.querySelector('a[href="https://example.com/a"]')!.getAttribute('target')).toBe('_blank');
 
     // A new version is fetched again and keeps the reader's place.

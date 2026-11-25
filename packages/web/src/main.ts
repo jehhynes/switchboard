@@ -54,6 +54,7 @@ import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
 import { ChangesController } from './changes.js';
 import { LocalFilesController } from './localFiles.js';
+import { artifactTarget, decodedTarget, fileTabLink, localFileUrl, watchPictures } from './localLinks.js';
 import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
 import type { NeedsItem } from './alerts.js';
@@ -747,6 +748,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The list's header: the source icons, search and More Actions (architecture.md § Web page).
   // The page's listeners on its root, the document and the window end with the page.
   const listening = new AbortController();
+
+  watchPictures(root, listening.signal);
   // Settings over the whole page (architecture.md § Web page); it reads settings.json again when the page comes back.
   const settingsHost = root.appendChild(document.createElement('div'));
   // The open dialogs: the page under the top one inert, the focus kept in it and given back to its opener (layers.ts).
@@ -2004,8 +2007,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const docKey = (path: string): string => `${state.key ?? ''} ${state.scope?.workItemId ?? ''} ${state.scope?.scopeGen ?? ''} ${path}`;
   /**
    * Draws an open Markdown artifact as claude-collab's viewer does: its text fetched by the page key, without its front matter, whose kind and
-   * title the head shows; its relative pictures from its folder; a relative link to another artifact opening that one in place, and to another
-   * file in the folder opening the file in a new tab; Mermaid included. Only an artifact's latest version is kept (`artifactDocs`), with `top`,
+   * title the head shows; its pictures from its folder, or from elsewhere through the local file route (`artifactTarget`); a relative link to
+   * another artifact opening that one in place, to another file in the folder in a new tab, and to a file elsewhere in a file tab; Mermaid included. Only an artifact's latest version is kept (`artifactDocs`), with `top`,
    * the scroll position to keep when it replaces the version shown, which the next draw restores; an answer for a version replaced since is dropped.
    */
   const fillArtifact = async (artifact: ArtifactView, top: number): Promise<void> => {
@@ -2021,50 +2024,29 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     artifactDocs.set(kept, entry);
     const response = await readFetch(artifactUrl(key, path), { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
     const text = response?.ok === true ? await response.text() : null;
-    const folder = path.split('/').slice(0, -1);
-    /** A relative target's path in the artifact folder, or null for one outside it. */
-    const inFolder = (target: string): string | null => {
-      const parts = [...folder];
-      let decoded: string;
-
-      // A scheme, a drive or a rooted path names no artifact: such a link opens in a file tab.
-      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('/') || target.startsWith('\\')) {
-        return null;
-      }
-
-      try {
-        decoded = decodeURIComponent(target.split(/[?#]/)[0]!);
-      } catch {
-        return null;
-      }
-
-      for (const part of decoded.split('/')) {
-        if (part === '..') {
-          return null;
-        }
-
-        if (part !== '.' && part !== '') {
-          parts.push(part);
-        }
-      }
-
-      return parts.length < 2 ? null : parts.join('/');
-    };
+    /** Where a relative target lies: in the artifact route, or a local file by its absolute path (`artifactTarget`). */
+    const place = (target: string): { name: string } | { path: string } | null => artifactTarget(artifact, state.artifactsDir ?? null, decodedTarget(target));
     const base = (src: string): string | null => {
-      const file = inFolder(src);
+      const to = place(src.split(/[?#]/)[0]!);
 
-      return file === null ? null : artifactUrl(key, file);
+      return to === null ? null : 'name' in to ? artifactUrl(key, to.name) : localFileUrl(key, to.path, true);
     };
     const link = (href: string): string | null => {
-      const file = href.startsWith('#') ? null : inFolder(href);
+      const at = href.indexOf('#');
+      const to = href.startsWith('#') ? null : place(href.slice(0, at === -1 ? undefined : at));
 
-      if (file === null) {
+      if (to === null) {
         return null;
       }
 
-      return state.artifacts.some((one) => one.path === file)
-        ? `href="${escape(artifactUrl(key, file))}" data-action="artifact" data-path="${escape(file)}"`
-        : `href="${escape(artifactUrl(key, file))}" target="_blank" rel="noopener noreferrer"`;
+      if ('path' in to) {
+        // `linkTarget` decodes the target and reads a `#` as its fragment, so a decoded name's `%` and `#` go back encoded.
+        return fileTabLink(to.path.replace(/[%#]/g, encodeURIComponent) + (at === -1 ? '' : decodedTarget(href.slice(at))));
+      }
+
+      return state.artifacts.some((one) => one.path === to.name)
+        ? `href="${escape(artifactUrl(key, to.name))}" data-action="artifact" data-path="${escape(to.name)}"`
+        : `href="${escape(artifactUrl(key, to.name))}" target="_blank" rel="noopener noreferrer"`;
     };
 
     if (artifactDocs.get(kept) !== entry) {

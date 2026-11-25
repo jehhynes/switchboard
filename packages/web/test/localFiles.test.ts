@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { joinPath, linkTarget, localFileUrl, localMarkdown } from '../src/localLinks.js';
+import { artifactTarget, joinPath, linkTarget, localFileUrl, localMarkdown } from '../src/localLinks.js';
 import type { LocalFileData } from '../src/localLinks.js';
 import { renderMarkdown } from '../src/markdown.js';
 import type { DiffModule } from '../src/diff/types.js';
@@ -28,6 +28,40 @@ class FakeSource {
 }
 
 const file = (patch: Partial<LocalFileData>): LocalFileData => ({ path: 'D:/w/x', name: 'x', kind: 'text', contents: null, tooLarge: false, size: 1, entries: null, more: false, ...patch });
+
+describe("an artifact's picture and link targets", () => {
+  const plan = { path: 'chat/plan.md' };
+  const review = { path: '@7/review.md', file: 'D:/wt/.wip/review-pr/review.md' };
+
+  it('keeps a target in the artifact folder on the artifact route and reads any other by its absolute path', () => {
+    expect(artifactTarget(plan, 'D:\\w\\a', 'plan/a.png')).toEqual({ name: 'chat/plan/a.png' });
+    expect(artifactTarget(plan, 'D:\\w\\a', './plan/x/../b c #1.png')).toEqual({ name: 'chat/plan/b c #1.png' });
+    expect(artifactTarget(plan, 'D:\\w\\a', 'plan\\a.png')).toEqual({ name: 'chat/plan/a.png' });
+    expect(artifactTarget(plan, 'D:\\w\\a', '../other/a.png')).toEqual({ name: 'other/a.png' });
+    expect(artifactTarget(plan, 'D:\\w\\a', '../../shots/a.png')).toEqual({ path: 'D:/w/shots/a.png' });
+    expect(artifactTarget(plan, 'D:/w/a', 'D:\\x\\a.png')).toEqual({ path: 'D:/x/a.png' });
+    // A file: URI comes decoded, as the page decodes every target once: a name that holds %20 keeps it.
+    expect(artifactTarget(plan, 'D:/w/a', 'file:///D:/x/a b%20c.png')).toEqual({ path: 'D:/x/a b%20c.png' });
+    expect(artifactTarget(plan, 'D:/w/a', '/home/a.png')).toEqual({ path: '/home/a.png' });
+    // A name the artifact route refuses is read as a local file: a dot segment, a stream, a trailing dot or a Windows device.
+    expect(artifactTarget(plan, 'D:/w/a', 'plan/.hidden.png')).toEqual({ path: 'D:/w/a/chat/plan/.hidden.png' });
+    expect(artifactTarget(plan, 'D:/w/a', 'plan/a.png:x')).toEqual({ path: 'D:/w/a/chat/plan/a.png:x' });
+    expect(artifactTarget(plan, 'D:/w/a', 'plan/a.')).toEqual({ path: 'D:/w/a/chat/plan/a.' });
+    expect(artifactTarget(plan, 'D:/w/a', 'plan/NUL.png')).toEqual({ path: 'D:/w/a/chat/plan/NUL.png' });
+    // With no folder known, only the artifact route can be used; another scheme is never a file.
+    expect(artifactTarget(plan, null, '../../a.png')).toBeNull();
+    expect(artifactTarget(plan, 'D:/w/a', 'mailto:a@b.c')).toBeNull();
+  });
+
+  it("serves an external artifact's own file and its stem folder by the route, and reads a file beside it by path", () => {
+    expect(artifactTarget(review, null, 'review/a.png')).toEqual({ name: '@7/review/a.png' });
+    expect(artifactTarget(review, null, 'review.md')).toEqual({ name: '@7/review.md' });
+    expect(artifactTarget(review, null, 'screenshots/a.png')).toEqual({ path: 'D:/wt/.wip/review-pr/screenshots/a.png' });
+    expect(artifactTarget(review, null, '../../docs/a.png')).toEqual({ path: 'D:/wt/docs/a.png' });
+    expect(artifactTarget(review, null, 'review/../../x.png')).toEqual({ path: 'D:/wt/.wip/x.png' });
+    expect(artifactTarget({ path: '@7/review.md' }, null, 'screenshots/a.png')).toBeNull();
+  });
+});
 
 describe('local file link targets', () => {
   it('reads the line a link names, by #L or after the name, and decodes what markdown-it encoded', () => {
