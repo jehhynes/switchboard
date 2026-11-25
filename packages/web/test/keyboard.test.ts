@@ -75,6 +75,7 @@ it('selects only when a scope-bound menu control is chosen, waits for its matchi
 it('keeps clipped link pills out of Tab order and restores them when they fit', () => {
   const links = [{ label: 'Notes', url: 'https://example.test/notes', kind: 'url' as const, badge: 'Notes', glyph: null, mentioned: false }];
   start([group('review', [row(1, { links })])]);
+  el('.row').focus();
   let top = 30;
   vi.spyOn(el('.row-links'), 'getBoundingClientRect').mockImplementation(() => ({ top: 10, bottom: 28, left: 0, right: 100, height: 18 }) as DOMRect);
   const pill = el('.pill.link');
@@ -84,6 +85,55 @@ it('keeps clipped link pills out of Tab order and restores them when they fit', 
   top = 10;
   window.dispatchEvent(new Event('resize'));
   expect(pill.tabIndex).toBe(0);
+});
+
+it('makes the list one Tab stop, the row or heading last focused, with only that row\'s pills as stops, kept over redraws', () => {
+  const links = [{ label: 'Notes', url: 'https://example.test/notes', kind: 'url' as const, badge: 'Notes', glyph: null, mentioned: false }];
+  const groups = [group('review', [row(1, { url: 'https://example.test/1', links }), row(2, { url: 'https://example.test/2', links })]), group('done', [row(3, { band: 'Today' })])];
+  const source = start(groups);
+  const stops = (): string[] => [...root.querySelectorAll<HTMLElement>('.row, .group-head, .band-head')].filter((one) => one.tabIndex === 0).map((one) => one.dataset['row'] ?? one.dataset['group'] ?? one.dataset['band'] ?? '');
+  const pills = (key: string): number[] => [...el(`.row[data-row="${key}"]`).querySelectorAll<HTMLElement>('.pill[data-action="open-link"]')].map((pill) => pill.tabIndex);
+  // Nothing focused or selected: the first heading.
+  expect(stops()).toEqual(['review']);
+  expect([...pills('item:1'), ...pills('item:2')]).toEqual([-1, -1, -1, -1]);
+  el('.row[data-row="item:2"]').focus();
+  expect(stops()).toEqual(['item:2']);
+  // The ticket key and the link pill of the stop's row only.
+  expect(pills('item:2')).toEqual([0, 0]);
+  expect(pills('item:1')).toEqual([-1, -1]);
+  source.emit('list', { groups });
+  expect(stops()).toEqual(['item:2']);
+  expect(document.activeElement).toBe(el('.row[data-row="item:2"]'));
+  key(el('.row[data-row="item:2"]'), 'ArrowUp');
+  expect(stops()).toEqual(['item:1']);
+  expect(pills('item:1')).toEqual([0, 0]);
+  expect(pills('item:2')).toEqual([-1, -1]);
+  el('.group-head[data-group="done"]').focus();
+  expect(stops()).toEqual(['done']);
+  source.emit('list', { groups });
+  expect(document.activeElement).toBe(el('.group-head[data-group="done"]'));
+  expect(stops()).toEqual(['done']);
+  // A redraw while focus is outside the list moves no focus into it.
+  const outside = document.createElement('input');
+  document.body.append(outside);
+  outside.focus();
+  source.emit('list', { groups });
+  expect(document.activeElement).toBe(outside);
+  expect(stops()).toEqual(['done']);
+});
+
+it('makes the selected row the list\'s Tab stop until the focus is on another, and keeps an open row menu focused over a redraw', async () => {
+  const groups = [group('review', [row(1), row(2, { url: 'https://example.test/2' })])];
+  const source = start(groups);
+  el('.row[data-row="item:2"]').click();
+  await flush();
+  expect([...root.querySelectorAll<HTMLElement>('.row, .group-head')].filter((one) => one.tabIndex === 0).map((one) => one.dataset['row'])).toEqual(['item:2']);
+  key(el('.row[data-row="item:2"]'), 'ContextMenu');
+  expect(document.activeElement).toBe(el('.row-menu'));
+  source.emit('list', { groups });
+  expect(document.activeElement).toBe(el('.row-menu'));
+  key(el('.row-menu'), 'Escape');
+  expect(document.activeElement).toBe(el('.row[data-row="item:2"]'));
 });
 
 it('does not cycle F8 behind a list-header sheet', () => {

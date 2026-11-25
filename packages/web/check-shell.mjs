@@ -4,7 +4,7 @@
 // a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, and the More menu lies above everything under it. Line 2's playbook or host is never cut; each of its pills is whole, its icon alone with no text
 // showing, or left out whole, never cut, at several list widths down to 200 px; a pill shows its text exactly where it and the texts before
 // it fit beside the icons; the ticket key always shows whole; a pill left out is no
-// keyboard stop; and line 2 paints the same while the same list is sent again.
+// keyboard stop, and a pill shown is one only in the list's Tab stop row; and line 2 paints the same while the same list is sent again.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -176,6 +176,11 @@ const measure = `(() => {
     line2: window.__line2 ? { samples: window.__line2.length, ways: new Set(window.__line2).size } : null,
     names: [...document.querySelectorAll('#list .row-line .playbook')].filter(shown).map((name) => { const box = name.getBoundingClientRect(); const edge = name.closest('.row-line').getBoundingClientRect(); const icon = name.previousElementSibling?.classList.contains('comment') ? name.previousElementSibling.getBoundingClientRect() : null; return { text: name.textContent, alone: icon !== null && icon.bottom <= box.top + 0.5, cut: name.scrollWidth > name.clientWidth + 0.5 || box.right > edge.right + 0.5 || box.bottom > edge.bottom + 0.5 }; }),
     pills: [...document.querySelectorAll('#list .row-line:not(.row-details)')].filter(shown).flatMap((line) => {
+      // The list has one Tab stop (main.ts, setListTabStop): focused, this row is it, and only its pills that show are keyboard stops.
+      line.closest('.row').focus({ preventScroll: true });
+      // A dialog over the list, as Settings, keeps the focus, so its rows' stops are not measured.
+      const focused = document.activeElement === line.closest('.row');
+      const others = focused ? [...document.querySelectorAll('#list .pill[data-action]')].filter((pill) => pill.tabIndex === 0 && pill.closest('.row') !== line.closest('.row')).length : 0;
       const edge = line.getBoundingClientRect();
       // The room each link pill's text needs, its own and the texts before it beside every pill as an icon, from the unseen boxes (page.css,
       // Line 2): what is left of the row's link box after them, negative where they do not fit.
@@ -202,7 +207,7 @@ const measure = `(() => {
 
         const index = all.filter((one) => one.closest('.row-links-shown') !== null).indexOf(pill);
 
-        return { text: pill.textContent, ticket: pill.classList.contains('ticket'), state, stop: pill.hasAttribute('data-action') ? pill.tabIndex : null, left: index < 0 ? null : left(index) };
+        return { text: pill.textContent, ticket: pill.classList.contains('ticket'), state, stop: focused && pill.hasAttribute('data-action') ? pill.tabIndex : null, others, left: index < 0 ? null : left(index) };
       });
     }),
     // Each shown tab strip: a label shown cut narrower than about five characters, or not at all, and any tab past the strip's edges.
@@ -317,6 +322,7 @@ function failures(view, size, m) {
     // A pill shows its text exactly where its text and those before it fit beside the icons, each pill on its own.
     if (pill.left !== null && pill.state === 'icon' && pill.left > 0.5) out.push('line 2\'s pill ' + pill.text + ' shows its icon alone with ' + pill.left.toFixed(1) + ' px to spare for its text');
     if (pill.left !== null && pill.state === 'whole' && pill.left < -0.5) out.push('line 2\'s pill ' + pill.text + ' shows its text ' + (-pill.left).toFixed(1) + ' px past the room for it');
+    if (pill.others > 0) out.push('line 2\'s pill ' + pill.text + ' is in the focused row while ' + pill.others + ' pills of other rows are keyboard stops');
     if (pill.stop !== null && (pill.state === 'out') !== (pill.stop === -1)) out.push('line 2\'s pill ' + pill.text + (pill.state === 'out' ? ', left out, is a keyboard stop' : ', shown, is no keyboard stop'));
   }
   // At 300 px line 2 has room for some pills whole and others as their icons alone.
@@ -454,6 +460,8 @@ try {
         if (size.views !== undefined && !size.views.includes(view)) continue;
         await send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, screenWidth: size.screen[0], screenHeight: size.screen[1], deviceScaleFactor: size.phone ? 3 : 2, mobile: size.mouse !== true });
         await send('Emulation.setTouchEmulationEnabled', { enabled: size.mouse !== true, maxTouchPoints: 5 });
+        // A headless page has no focus of its own, so focus() would fire no focus events, which move the list's Tab stop (main.ts).
+        await send('Emulation.setFocusEmulationEnabled', { enabled: true });
         await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }, { name: 'hover', value: size.mouse ? 'hover' : 'none' }, { name: 'pointer', value: size.mouse ? 'fine' : 'coarse' }] });
         await send('Emulation.setSafeAreaInsetsOverride', { insets: size.insets });
         await send('Page.navigate', { url: base + '?view=' + view });

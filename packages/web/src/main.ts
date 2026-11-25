@@ -2193,17 +2193,35 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let pendingRowControl: { key: string; run: () => void } | null = null;
   let rowMenuPoint: { x: number; y: number } | undefined;
   const listRowElement = (key: string): HTMLElement | undefined => [...list.querySelectorAll<HTMLElement>('.row')].find((one) => one.dataset['row'] === key);
-  /** Pills clipped onto line 2's hidden wrap are not keyboard stops. */
+  /** Pills clipped onto line 2's hidden wrap are not keyboard stops, nor are pills outside the list's Tab stop row (setListTabStop). */
   const fitListLinks = (): void => {
     for (const links of list.querySelectorAll<HTMLElement>('.row-links')) {
       const box = links.getBoundingClientRect();
       if (box.height === 0) continue;
+      const stop = links.closest<HTMLElement>('.row')?.tabIndex === 0;
       for (const pill of links.querySelectorAll<HTMLElement>('.pill[data-action="open-link"]')) {
         const rect = pill.getBoundingClientRect();
-        pill.tabIndex = rect.top >= box.top - 0.5 && rect.bottom <= box.bottom + 0.5 && rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5 ? 0 : -1;
+        const index = stop && rect.top >= box.top - 0.5 && rect.bottom <= box.bottom + 0.5 && rect.left >= box.left - 0.5 && rect.right <= box.right + 0.5 ? 0 : -1;
+        if (pill.tabIndex !== index) pill.tabIndex = index;
         if (pill.tabIndex === -1 && document.activeElement === pill) pill.closest<HTMLElement>('.row')?.focus({ preventScroll: true });
       }
     }
+  };
+  /** The list's one Tab stop, by `row:<key>`, `group:<key>` or `band:<key>`: the row or heading the focus was last on in the list. */
+  let listStop: string | null = null;
+  const stopId = (one: Element): string => (one.matches('.row') ? `row:${(one as HTMLElement).dataset['row']}` : one.matches('.group-head') ? `group:${(one as HTMLElement).dataset['group']}` : `band:${(one as HTMLElement).dataset['band']}`);
+  /**
+   * Makes one row or heading the list's Tab stop, so Tab passes the list in one press plus that row's pills (architecture.md § Web page,
+   * Keyboard): the one the focus was last on, else the selected row, else the first. Moves no focus.
+   */
+  const setListTabStop = (): void => {
+    const stops = [...list.querySelectorAll<HTMLElement>('.row, .group-head, .band-head')];
+    const stop = stops.find((one) => stopId(one) === listStop) ?? stops.find((one) => one.matches('.row.selected')) ?? stops[0];
+    // Set only where it changes, so a redraw that changes nothing writes nothing.
+    const set = (one: HTMLElement, index: number): void => { if (one.tabIndex !== index) one.tabIndex = index; };
+    for (const one of stops) set(one, one === stop ? 0 : -1);
+    for (const pill of list.querySelectorAll<HTMLElement>('.pill[data-action="open-link"]')) set(pill, pill.closest('.row') === stop ? 0 : -1);
+    fitListLinks();
   };
   window.addEventListener('resize', fitListLinks, { signal: listening.signal });
   // A web font that loads after a draw changes which pills fit, as icons or whole.
@@ -2505,6 +2523,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       target?.focus({ preventScroll: true });
       target?.scrollIntoView?.({ block: 'nearest' });
     }
+    setListTabStop();
 
     // An ended session's note sits just above the composer, with Resume, so it shows only where the composer does;
     // the page resumes it in the terminal holder, or a Codex thread in its daemon, without a terminal.
@@ -4252,6 +4271,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   }, { signal: listening.signal });
   list.addEventListener('focusin', (event) => {
     const target = event.target as HTMLElement;
+    const stop = target.closest('.row, .group-head, .band-head');
+    if (stop !== null && stopId(stop) !== listStop) {
+      listStop = stopId(stop);
+      setListTabStop();
+    }
     if (!target.matches('.row') || listFocus === target.dataset['row']) return;
     // The focus is not the selection: only the open work item's row is drawn selected (list.tsx), so a focus needs no redraw.
     listFocus = target.dataset['row']!;
