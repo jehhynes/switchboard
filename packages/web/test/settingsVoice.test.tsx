@@ -53,6 +53,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     return pane;
   };
   const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
+  const headings = () => [...host.querySelectorAll('.settings-section-heading')].map((node) => (node.querySelector('.settings-toggle-label') ?? node).textContent);
   const entry = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label)!;
   const control = <T extends HTMLElement>(path: string) => host.querySelector<T>(`[data-path="${path}"] input, [data-path="${path}"] select, [data-path="${path}"] textarea`)!;
   const checked = () => posts.filter((one) => one.name === 'page-settings-check').at(-1)!.body['settings'] as { voice?: Record<string, unknown> };
@@ -87,7 +88,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     await open();
     await go('Voice settings');
 
-    expect(texts('.settings-section-heading')).toEqual(['Speech', 'Spoken alerts', 'Dictation', 'Voice check', 'Playbook personas', 'Your voice']);
+    expect(headings()).toEqual(['Speech', 'Spoken alerts', 'Dictation', 'Voice check', 'Playbook personas', 'Your voice']);
     expect(control<HTMLSelectElement>('voice.voice').value).toBe('cedar');
     expect([...control<HTMLSelectElement>('voice.voice').options].map((one) => one.textContent).slice(0, 3)).toEqual(['Marin', 'Cedar', 'Alloy']);
     expect(texts('.settings-section:not(.advanced) .settings-caption label').filter((label) => label?.startsWith('dev:'))).toEqual(['dev:build', 'dev:gone (missing)']);
@@ -154,7 +155,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Voice');
     expect(checked().voice).toBeUndefined();
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    expect(host.querySelector('.settings-bar')).toBeNull();
   });
 
   it("shows a persona entry's error at the top of its page and a Voice error on its field", async () => {

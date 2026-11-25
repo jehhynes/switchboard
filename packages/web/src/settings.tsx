@@ -40,8 +40,6 @@ interface View {
   notice: string | null;
   /** The Advanced sections the operator opened, by page and heading, so a redraw keeps them open. */
   opened: Set<string>;
-  /** The fields whose help is shown, by path. */
-  help: Set<string>;
   /** The fields that had errors at the last draw, so a new error opens its Advanced section once. */
   erred: Set<string>;
   /** The text typed in each field since the page was drawn, so a field shows what was typed, not the value read from it. */
@@ -79,7 +77,7 @@ export interface Settings {
 
 /** Settings drawn into `host`: the navigation, the page and the bar, and a phone's list that drills into each page. */
 export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
-  const view: View = { open: false, drill: 'nav', error: null, notice: null, opened: new Set(), help: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE() };
+  const view: View = { open: false, drill: 'nav', error: null, notice: null, opened: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE() };
   let state: EditorState | null = null;
   let loads = 0;
   let seq = 0;
@@ -796,15 +794,6 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
       draw();
     },
-    toggleHelp: (path) => {
-      if (view.help.has(path)) {
-        view.help.delete(path);
-      } else {
-        view.help.add(path);
-      }
-
-      draw();
-    },
     button,
     addSource,
     editName,
@@ -925,7 +914,6 @@ interface Handlers {
   close(): void;
   edit(field: Field, input: string, checked?: boolean): void;
   toggleSection(key: string): void;
-  toggleHelp(path: string): void;
   button(button: PageButton): void;
   addSource(kind: string): void;
   editName(part: 'name' | 'kind' | 'namespace', text: string): void;
@@ -971,7 +959,7 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
             {page === null ? <p class="settings-message">{view.error ?? 'Reading the settings…'}</p> : <Page key={state!.page} state={state!} page={page} view={view} on={on} />}
           </div>
         </div>
-        {state === null ? null : (
+        {state === null || !shown.shown ? null : (
           <div class="settings-bar">
             <div class="settings-bar-text">
               <span class="settings-status">{shown.status}</span>
@@ -983,14 +971,16 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
                 <span class="settings-error">{error}</span>
               ))}
             </div>
-            <div class="settings-bar-buttons">
-              <button type="button" class="sheet-button secondary" title="Drop every unsaved change and close settings" disabled={!shown.canDiscard} onClick={on.discard}>
-                Discard
-              </button>
-              <button type="button" class="sheet-button primary" title="Save settings and close (Ctrl+S saves and stays open)" disabled={!shown.canSave} onClick={on.save}>
-                Save
-              </button>
-            </div>
+            {shown.buttons ? (
+              <div class="settings-bar-buttons">
+                <button type="button" class="sheet-button secondary" title="Drop every unsaved change and close settings" disabled={!shown.canDiscard} onClick={on.discard}>
+                  Discard
+                </button>
+                <button type="button" class="sheet-button primary" title="Save settings and close (Ctrl+S saves and stays open)" disabled={!shown.canSave} onClick={on.save}>
+                  Save
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
         {view.ask === null ? null : <AskSheet ask={view.ask} on={on} />}
@@ -1052,12 +1042,12 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
         </p>
       ))}
       {page.message === null ? null : <p class="settings-message">{page.message}</p>}
-      {page.newName === undefined ? null : <NameFields names={page.newName} view={view} on={on} />}
+      {page.newName === undefined ? null : <NameFields names={page.newName} on={on} />}
       {page.table === undefined ? null : <Table table={page.table} on={on} />}
       {page.sections.map((section) => (
         <SectionBlock state={state} section={section} view={view} on={on} />
       ))}
-      {page.assign === undefined ? null : <AssignRow assign={page.assign} view={view} on={on} />}
+      {page.assign === undefined ? null : <AssignRow assign={page.assign} on={on} />}
       {state.page === 'voice' && page.message === null ? <EnrollRow view={view} on={on} /> : null}
     </>
   );
@@ -1070,8 +1060,10 @@ function SectionBlock({ state, section, view, on }: { state: EditorState; sectio
     return (
       <section class="settings-section">
         {section.heading === '' ? null : <h3 class="settings-section-heading">{section.heading}</h3>}
-        {rows}
-        {state.page === 'general' && section.heading === 'Remote access' ? <DevicesBlock remote={view.remote} on={on} /> : null}
+        <div class="settings-card">
+          {rows}
+          {state.page === 'general' && section.heading === 'Remote access' ? <DevicesBlock remote={view.remote} on={on} /> : null}
+        </div>
       </section>
     );
   }
@@ -1097,11 +1089,14 @@ function SectionBlock({ state, section, view, on }: { state: EditorState; sectio
 
   return (
     <section class="settings-section advanced">
-      <button type="button" class="settings-section-heading settings-toggle" aria-expanded={open} onClick={() => on.toggleSection(key)}>
-        <span class={`codicon codicon-chevron-${open ? 'down' : 'right'}`} aria-hidden="true"></span>
-        {section.heading}
-      </button>
-      {open ? rows : null}
+      <h3 class="settings-section-heading">
+        <button type="button" class="settings-toggle" aria-expanded={open} onClick={() => on.toggleSection(key)}>
+          <span class={`codicon codicon-chevron-${open ? 'down' : 'right'}`} aria-hidden="true"></span>
+          <span class="settings-toggle-label">{section.heading}</span>
+          {open ? null : <span class="settings-toggle-summary">{section.summary}</span>}
+        </button>
+      </h3>
+      {open ? <div class="settings-card">{rows}</div> : null}
     </section>
   );
 }
@@ -1185,7 +1180,7 @@ function Table({ table, on }: { table: PlaybookTable; on: Handlers }) {
 }
 
 /** The Voice page's row that gives a task playbook a persona, or a line saying why it cannot. */
-function AssignRow({ assign, view, on }: { assign: { playbooks: string[]; personas: FieldOption[] }; view: View; on: Handlers }) {
+function AssignRow({ assign, on }: { assign: { playbooks: string[]; personas: FieldOption[] }; on: Handlers }) {
   if (assign.personas.length === 0 || assign.playbooks.length === 0) {
     return <p class="settings-assign-note">{assign.personas.length === 0 ? 'Add a persona under Personas to give a playbook its own.' : 'Every task playbook has a persona.'}</p>;
   }
@@ -1196,7 +1191,7 @@ function AssignRow({ assign, view, on }: { assign: { playbooks: string[]; person
     <div class="settings-row" data-path="assign">
       <div class="settings-caption">
         <label for="settings-assign-playbook">Assign</label>
-        <Info field={field} on={on} />
+        <p class="settings-help">{field.help}</p>
       </div>
       <div class="settings-input settings-assign">
         <select id="settings-assign-playbook" class="sheet-select settings-select" aria-label="Playbook">
@@ -1220,7 +1215,6 @@ function AssignRow({ assign, view, on }: { assign: { playbooks: string[]; person
         >
           Assign
         </button>
-        {view.help.has(field.path) ? <p class="settings-help settings-assign-help">{field.help}</p> : null}
       </div>
     </div>
   );
@@ -1296,17 +1290,25 @@ function EnrollRow({ view, on }: { view: View; on: Handlers }) {
   return (
     <section class="settings-section settings-enroll">
       <h3 class="settings-section-heading">Your voice</h3>
-      <p class="settings-enroll-status">{row.status}</p>
-      <button type="button" class="sheet-button secondary" title="Records a minute of your speech through the voice process; nothing of it reaches a session." onClick={() => on.enroll(row.command)}>
-        {row.button}
-      </button>
-      {row.sentences.length === 0 ? null : (
-        <div class="settings-enroll-sentences">
-          {row.sentences.map((sentence) => (
-            <p>{sentence}</p>
-          ))}
+      <div class="settings-card">
+        <div class="settings-row action">
+          <div class="settings-caption">
+            <p class="settings-enroll-status">{row.status}</p>
+          </div>
+          <div class="settings-input">
+            <button type="button" class="sheet-button secondary" title="Records a minute of your speech through the voice process; nothing of it reaches a session." onClick={() => on.enroll(row.command)}>
+              {row.button}
+            </button>
+          </div>
+          {row.sentences.length === 0 ? null : (
+            <div class="settings-enroll-sentences">
+              {row.sentences.map((sentence) => (
+                <p>{sentence}</p>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -1360,15 +1362,6 @@ function runs(fields: readonly FieldView[]): FieldView[][] {
 
 const inputId = (path: string): string => `settings-field-${path.replace(/[^A-Za-z0-9_-]/g, '_')}`;
 
-/** A field's info icon, which shows its help in its tooltip and, tapped, under the field, so a phone can read it too. */
-function Info({ field, on }: { field: Field; on: Handlers }) {
-  return field.help === '' ? null : (
-    <button type="button" class="icon settings-info" title={field.help} aria-label={`About ${field.label}`} onClick={() => on.toggleHelp(field.path)}>
-      <span class="codicon codicon-info" aria-hidden="true"></span>
-    </button>
-  );
-}
-
 function Errors({ errors }: { errors: readonly string[] }) {
   return (
     <>
@@ -1381,31 +1374,44 @@ function Errors({ errors }: { errors: readonly string[] }) {
   );
 }
 
+/** A setting's row: its label and help on the left, its control on the right, and its errors under both. */
 function FieldRow({ field: shown, view, on }: { field: FieldView; view: View; on: Handlers }) {
   const { field } = shown;
   const id = inputId(field.path);
-  const help = view.help.has(field.path) && field.help !== '' ? <p class="settings-help">{field.help}</p> : null;
 
   return (
     <div class={`settings-row ${field.kind}`} data-path={field.path}>
       <div class="settings-caption">
         <label for={id}>{field.label}</label>
-        <Info field={field} on={on} />
+        {field.help === '' ? null : (
+          <p class="settings-help" id={`${id}-help`}>
+            {field.help}
+          </p>
+        )}
       </div>
       <div class="settings-input">
         <Input shown={shown} id={id} typed={view.typing.get(field.path)} on={on} />
-        {help}
-        <Errors errors={shown.errors} />
       </div>
+      {shown.errors.length === 0 ? null : (
+        <div class="settings-row-errors">
+          <Errors errors={shown.errors} />
+        </div>
+      )}
     </div>
   );
 }
 
 function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: string | undefined; on: Handlers }) {
   const { field } = shown;
+  const described = field.help === '' ? undefined : `${id}-help`;
 
   if (field.kind === 'boolean') {
-    return <label class="settings-box"><input type="checkbox" id={id} checked={shown.checked} onChange={(event) => on.edit(field, '', (event.currentTarget as HTMLInputElement).checked)} /></label>;
+    return (
+      <label class="settings-box settings-switch">
+        <input type="checkbox" role="switch" id={id} checked={shown.checked} aria-describedby={described} onChange={(event) => on.edit(field, '', (event.currentTarget as HTMLInputElement).checked)} />
+        <span class="settings-switch-track" aria-hidden="true"></span>
+      </label>
+    );
   }
 
   if (field.kind === 'select') {
@@ -1413,7 +1419,7 @@ function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: 
     const chosen = typed ?? shown.selected;
 
     return (
-      <select id={id} class="sheet-select settings-select" onChange={(event) => on.edit(field, (event.currentTarget as HTMLSelectElement).value)}>
+      <select id={id} class="sheet-select settings-select" aria-describedby={described} onChange={(event) => on.edit(field, (event.currentTarget as HTMLSelectElement).value)}>
         {options.some((option) => option.value === chosen) ? null : <option value={chosen} selected hidden></option>}
         {options.map((option) => (
           <option value={option.value} selected={option.value === chosen}>
@@ -1430,7 +1436,7 @@ function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: 
     // A multiline box grows with its text up to 20 lines for a prompt and 8 for a list, then scrolls.
     const rows = Math.max(field.kind === 'prompt' ? 4 : 2, Math.min(field.kind === 'prompt' ? 20 : 8, value.split('\n').length + 1));
 
-    return <textarea id={id} class={`settings-text ${field.kind}`} rows={rows} placeholder={field.placeholder} value={value} onInput={(event) => on.edit(field, (event.currentTarget as HTMLTextAreaElement).value)}></textarea>;
+    return <textarea id={id} class={`settings-text ${field.kind}`} aria-describedby={described} rows={rows} placeholder={field.placeholder} value={value} onInput={(event) => on.edit(field, (event.currentTarget as HTMLTextAreaElement).value)}></textarea>;
   }
 
   const numeric = field.kind === 'integer' || field.kind === 'number';
@@ -1440,6 +1446,7 @@ function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: 
       type="text"
       id={id}
       class={`settings-text${numeric ? ' numeric' : ''}`}
+      aria-describedby={described}
       inputMode={field.kind === 'integer' ? 'numeric' : field.kind === 'number' ? 'decimal' : undefined}
       placeholder={field.placeholder}
       value={value}
@@ -1474,7 +1481,7 @@ function GroupRow({ views, on }: { views: FieldView[]; on: Handlers }) {
 const KIND_FIELD: Field = { path: 'new-kind', label: 'Kind', kind: 'select', help: 'The plugin that reads the source. A second source of one kind, such as another GitHub repository, needs a name of its own.' };
 
 /** A New page's name, with a source's kind or a playbook's namespace, and the name's error. */
-function NameFields({ names, view, on }: { names: NewNameView; view: View; on: Handlers }) {
+function NameFields({ names, on }: { names: NewNameView; on: Handlers }) {
   const nameField: Field = { path: 'new-name', label: names.label, kind: 'text', help: names.help };
   const name = (
     <div class="settings-input">
@@ -1492,18 +1499,18 @@ function NameFields({ names, view, on }: { names: NewNameView; view: View; on: H
         )}
         <input type="text" id="settings-new-name" class="settings-text" placeholder={names.placeholder} value={names.name} spellcheck={false} onInput={(event) => on.editName('name', (event.currentTarget as HTMLInputElement).value)} />
       </span>
-      {view.help.has(nameField.path) ? <p class="settings-help">{names.help}</p> : null}
       <Errors errors={names.error === null ? [] : [names.error]} />
     </div>
   );
 
   return (
     <section class="settings-section">
+      <div class="settings-card">
       {names.kinds === undefined ? null : (
-        <div class="settings-row" data-path="new-kind">
+        <div class="settings-row select" data-path="new-kind">
           <div class="settings-caption">
             <label for="settings-new-kind">Kind</label>
-            <Info field={KIND_FIELD} on={on} />
+            <p class="settings-help">{KIND_FIELD.help}</p>
           </div>
           <div class="settings-input">
             <select id="settings-new-kind" class="sheet-select settings-select" onChange={(event) => on.editName('kind', (event.currentTarget as HTMLSelectElement).value)}>
@@ -1513,16 +1520,16 @@ function NameFields({ names, view, on }: { names: NewNameView; view: View; on: H
                 </option>
               ))}
             </select>
-            {view.help.has(KIND_FIELD.path) ? <p class="settings-help">{KIND_FIELD.help}</p> : null}
           </div>
         </div>
       )}
-      <div class="settings-row" data-path="new-name">
+      <div class="settings-row text" data-path="new-name">
         <div class="settings-caption">
           <label for="settings-new-name">{names.label}</label>
-          <Info field={nameField} on={on} />
+          <p class="settings-help">{nameField.help}</p>
         </div>
         {name}
+      </div>
       </div>
     </section>
   );

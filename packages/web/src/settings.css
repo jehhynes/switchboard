@@ -1,6 +1,6 @@
 /* Settings as a dialog over the dimmed page (architecture.md § Web page): the navigation beside the page, and the
    bar under both; on a phone it takes the whole screen, and the navigation is a list that drills into each page, with Back to it. */
-/* A checkbox in its label (settings.tsx), the label as wide and tall as the mark on a desktop and a 44 px target on a touch screen. */
+/* A checkbox or a switch in its label (settings.tsx), the label as wide and tall as the mark on a desktop and a 44 px target on a touch screen. */
 .settings-box { display: inline-flex; align-items: center; justify-content: center; }
 .settings-backdrop { position: fixed; inset: 0; z-index: var(--sb-z-settings); display: flex; align-items: center; justify-content: center; padding: max(24px, var(--sb-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); background: rgba(0, 0, 0, 0.45); }
 .settings { box-sizing: border-box; display: flex; flex-direction: column; width: min(960px, 100%); height: min(80vh, 100%); overflow: hidden; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 8px; box-shadow: 0 8px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5)); background: var(--vscode-editor-background); color: var(--vscode-foreground); }
@@ -21,10 +21,11 @@
 .settings-dirty { color: var(--vscode-foreground); }
 .settings-errors { color: var(--vscode-errorForeground); }
 .settings-nav-entry .settings-drill { display: none; margin-left: auto; color: var(--vscode-descriptionForeground); }
-.settings-page { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 16px 24px; }
+.settings-page { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 32px; }
 .settings-page-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 4px; }
 .settings-page-title { flex: 1; min-width: 0; }
-.settings-page-title h2 { margin: 0; font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+.settings-page-title h2 { margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.settings-lede { margin: 4px 0 0; color: var(--vscode-descriptionForeground); }
 .settings-file { display: block; font-size: 12px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-buttons { flex: none; display: flex; gap: 6px; }
 .settings-note { margin: 4px 0; color: var(--vscode-editorWarning-foreground); }
@@ -33,25 +34,41 @@
 .settings-message, .settings-notice { margin: 8px 0; }
 .settings-nav-message { display: none; }
 .settings-page-title h2:focus { outline: none; }
-.settings-section { margin-top: 8px; }
-.settings-section-heading { margin: 8px 0 2px; font-size: 15px; font-weight: 600; }
-.settings-toggle { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: none; background: transparent; color: inherit; cursor: pointer; }
-.settings-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 4px 12px; margin: 6px 0; }
-.settings-caption { display: flex; align-items: flex-start; gap: 5px; padding-top: 4px; overflow-wrap: anywhere; }
-.settings-info { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px; padding: 0; border: none; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; }
-.settings-input { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+/* Three levels: the page's title, a section's heading over its card, and a setting's label with its help under it (architecture.md § Settings). */
+.settings-section { margin-top: 22px; }
+.settings-section-heading { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--vscode-foreground); }
+.settings-card { border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-editorWidget-background, transparent); }
+.settings-card > * + * { border-top: 1px solid var(--vscode-panel-border); }
+.settings-toggle { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.settings-toggle-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: normal; color: var(--vscode-descriptionForeground); }
+.settings-toggle-summary::before { content: "· "; }
+/* A row: the label and help on the left, the control on the right; a list or a prompt takes the row's width under its label. */
+.settings-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 16px; padding: 9px 14px; }
+.settings-row.list, .settings-row.prompt, .settings-row.group { grid-template-columns: minmax(0, 1fr); }
+.settings-row-errors, .settings-enroll-sentences { grid-column: 1 / -1; }
+.settings-caption { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.settings-input { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; }
+.settings-row.list .settings-input, .settings-row.prompt .settings-input, .settings-row.group .settings-input { align-items: stretch; }
 .settings-help { margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.settings-text { box-sizing: border-box; width: 100%; max-width: 640px; min-height: 26px; padding: 3px 6px; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 2px; }
+/* An on/off setting's switch: a checkbox drawn as a track and a knob, in a label as large as a touch target needs. */
+.settings-switch { position: relative; flex: none; }
+.settings-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.settings-switch-track { position: relative; box-sizing: border-box; width: 34px; height: 18px; border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, var(--vscode-panel-border))); border-radius: 9px; background: var(--vscode-input-background); pointer-events: none; transition: background-color 0.12s; }
+.settings-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--vscode-descriptionForeground); transition: transform 0.12s; }
+.settings-switch input:checked + .settings-switch-track { border-color: var(--vscode-button-background); background: var(--vscode-button-background); }
+.settings-switch input:checked + .settings-switch-track::after { transform: translateX(16px); background: var(--vscode-button-foreground); }
+.settings-switch input:focus-visible + .settings-switch-track { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.settings-text { box-sizing: border-box; width: 240px; max-width: 100%; min-height: 26px; padding: 3px 6px; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 2px; }
 .settings-text:focus, .settings-select:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-.settings-text.numeric { width: 120px; }
+.settings-text.numeric { width: 80px; }
+textarea.settings-text { width: 100%; max-width: none; }
 textarea.settings-text { resize: vertical; }
 textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, monospace); }
-.settings-select { width: auto; min-width: 260px; max-width: 100%; }
-.settings-name { display: flex; align-items: center; gap: 4px; width: 100%; max-width: 640px; }
+.settings-select { width: 240px; max-width: 100%; }
+.settings-name { display: flex; align-items: center; gap: 4px; width: 100%; max-width: 400px; }
 .settings-name .settings-namespace { flex: none; width: 160px; }
-.settings-group { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
+.settings-row.group .settings-group { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; gap: 4px 16px; }
 .settings-check { display: inline-flex; align-items: center; gap: 4px; }
-.settings-row input[type="checkbox"] { margin: 6px 0 0; }
 .settings-check input[type="checkbox"] { margin: 0; }
 .settings-table-scroll { overflow-x: auto; max-width: 100%; }
 .settings-table { border-collapse: collapse; }
@@ -63,20 +80,18 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
 .settings-table td.settings-table-name { display: flex; align-items: center; gap: 6px; }
 .settings-table button.link { padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground); cursor: pointer; }
 .settings-table button.link:hover { text-decoration: underline; }
-.settings-assign { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; }
-.settings-assign .settings-select { min-width: 200px; }
-.settings-assign-help { flex-basis: 100%; }
+.settings-input.settings-assign { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.settings-assign .settings-select { width: 180px; }
 .settings-assign-note { color: var(--vscode-descriptionForeground); }
 /* General's paired devices and Pair a device under Remote access (architecture.md § Remote access); the list and the code are drawn as the Pair a device sheet's. */
-.settings-devices { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 8px; }
-.settings-devices-heading { margin: 4px 0 0; font-size: 13px; font-weight: 600; }
+.settings-devices { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 9px 14px; }
+.settings-devices-heading { margin: 0; font-size: 13px; font-weight: 600; }
 .settings-devices .device-list { align-self: stretch; margin-bottom: 4px; }
 .settings-devices .pair { align-self: stretch; margin-top: 8px; }
-.settings-enroll { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 16px; }
 .settings-enroll-status { margin: 0; }
 .settings-enroll-sentences { margin-left: 12px; font-size: 14px; }
 .settings-enroll-sentences p { margin: 4px 0; }
-.settings-bar { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
+.settings-bar { flex: none; display: flex; align-items: center; gap: 12px; min-height: 52px; box-sizing: border-box; padding: 8px 16px; border-top: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
 .settings-bar-text { flex: 1; min-width: 0; max-height: 25vh; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 4px; }
 .settings-status { color: var(--vscode-descriptionForeground); }
 .settings-warning { color: var(--vscode-editorWarning-foreground); }
@@ -93,15 +108,19 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
 :where(html.phone) .settings-nav-entry .settings-drill { display: inline-block; }
 :where(html.phone) .settings-nav-message { display: block; }
 :where(html.phone) .settings-nav-entry { min-height: 44px; }
-:where(html.phone) .settings-row { grid-template-columns: minmax(0, 1fr); }
-:where(html.phone) .settings-select { min-width: 0; width: 100%; }
-:where(html.phone) .settings-page { padding: 12px; }
-:where(html.phone) .settings-bar { flex-wrap: wrap; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+/* On a phone a switch or a number stays on its label's row, and a select or a text field goes under it at the row's width. */
+:where(html.phone) .settings-row.text, :where(html.phone) .settings-row.select { grid-template-columns: minmax(0, 1fr); }
+:where(html.phone) .settings-row.text .settings-input, :where(html.phone) .settings-row.select .settings-input { align-items: stretch; }
+:where(html.phone) .settings-row.text .settings-text, :where(html.phone) .settings-select { width: 100%; }
+:where(html.phone) .settings-page { padding: 12px 12px 24px; }
+/* Without the bar, the page and the navigation run to the bottom edge and end their content above the home indicator's inset. */
+:where(html.phone) .settings:not(:has(> .settings-bar)) :is(.settings-page, .settings-nav) { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+:where(html.phone) .settings-bar { min-height: calc(52px + env(safe-area-inset-bottom)); padding: 3px 12px calc(3px + env(safe-area-inset-bottom)); }
 @media (hover: none), (pointer: coarse) {
   .settings-nav-entry { min-height: 44px; }
-  .settings-head button.icon, .settings-info { min-width: 44px; min-height: 44px; }
+  .settings-head button.icon { min-width: 44px; min-height: 44px; }
   .settings-text, .settings-select { min-height: 44px; }
-  .settings-row input[type="checkbox"], .settings-check input[type="checkbox"] { width: 20px; height: 20px; }
+  .settings-check input[type="checkbox"] { width: 20px; height: 20px; }
   .settings-check { min-height: 44px; }
   .settings-toggle { min-height: 44px; }
   .settings-table button.link { min-width: 44px; min-height: 44px; text-align: left; }

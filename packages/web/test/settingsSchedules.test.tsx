@@ -131,7 +131,7 @@ describe('Settings schedules (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
     expect('nightly' in checked().schedules).toBe(false);
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    expect(host.querySelector('.settings-bar')).toBeNull();
   });
 
   it("places the hub's errors for an incomplete schedule on its fields and its page, and Save refuses while they stand", async () => {

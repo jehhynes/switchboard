@@ -26,12 +26,13 @@ const SIZES = [
   { device: 'iphone', orientation: 'portrait', width: 393, height: 793, screen: [393, 852], insets: { top: 0, bottom: 34, left: 0, right: 0 }, phone: true },
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
-  // A desktop with a mouse, for the tabs view only: its close marks are the small ones, not touch targets.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs'] },
+  // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings', 'settings-table'] },
 ];
 const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings', 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
-/** --shots <dir> saves a screenshot of each view there. */
+/** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
+const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
 
 const browsers = [
@@ -325,6 +326,48 @@ const measure = `(() => {
   };
 })()`;
 
+/**
+ * Settings' page as drawn (architecture.md § Settings): the font of its title, of its first section heading and of its first setting's label;
+ * whether it scrolls sideways or anything in it passes its right edge, a wide table's own scroller aside; and the bar's height, or null when it
+ * does not show.
+ */
+const SETTINGS = `(() => {
+  const page = document.querySelector('.settings-page');
+  if (!page || getComputedStyle(page).display === 'none') return null;
+  const name = (node) => node.tagName.toLowerCase() + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/ +/).join('.') : '');
+  const font = (node) => (node === null ? null : { size: parseFloat(getComputedStyle(node).fontSize), weight: Number(getComputedStyle(node).fontWeight) });
+  const box = page.getBoundingClientRect();
+  const inside = box.right - parseFloat(getComputedStyle(page).paddingRight) + 0.5;
+  const past = [...page.querySelectorAll('*')].filter((node) => { const one = node.getBoundingClientRect(); return one.width > 0 && one.height > 0 && one.right > inside && !node.closest('.settings-table-scroll'); }).map(name);
+  const bar = document.querySelector('.settings-bar');
+  return { title: font(page.querySelector('.settings-page-title h2')), heading: font(page.querySelector('.settings-section-heading')), label: font(page.querySelector('.settings-caption label')), wide: page.scrollWidth > page.clientWidth + 1, past: past.slice(0, 5), bar: bar === null ? null : Math.round(bar.getBoundingClientRect().height) };
+})()`;
+
+/** Types into the page's first text field, so the draft differs from the file, and answers the bar's height and whether it offers Save. */
+const DIRTY = `(async () => {
+  const box = document.querySelector('.settings-page input.settings-text');
+  if (!box) return null;
+  box.value = box.value + '1';
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  await new Promise((done) => setTimeout(done, 100));
+  const bar = document.querySelector('.settings-bar');
+  return bar === null ? { bar: null } : { bar: Math.round(bar.getBoundingClientRect().height), save: [...bar.querySelectorAll('button')].some((one) => one.textContent.trim() === 'Save') };
+})()`;
+
+/** Checks Settings' page: three distinct levels of text, nothing past its right edge, and the bar only when it has something to say. */
+function settingsFailures(view, size, s) {
+  const out = [];
+
+  if (s === null) return ['Settings showed no page'];
+  if (s.title === null || s.title.size < 19.5 || s.title.weight < 600) out.push("the page's title is " + JSON.stringify(s.title) + ', not 20 px semibold');
+  if (s.heading !== null && s.label !== null && !(s.heading.weight >= 600 && s.label.weight < 600 && s.heading.size > s.label.size && s.title.size > s.heading.size + 3)) out.push('a section heading ' + JSON.stringify(s.heading) + ' is not set apart from a label ' + JSON.stringify(s.label) + ' and the title ' + JSON.stringify(s.title));
+  if (view !== 'settings-table' && s.heading === null) out.push('the page shows no section heading');
+  if (s.wide) out.push('the page scrolls sideways');
+  if (s.past.length > 0) out.push('passes the page\'s right edge: ' + s.past.join(', '));
+  if (s.bar !== null) out.push('the bar shows ' + s.bar + ' px tall with nothing to say');
+  return out;
+}
+
 /** What each view opens with, clicked in order. */
 /**
  * The touch targets under 44 px in the open view (architecture.md § Web page, Phones first), each as its name and size; `checks` counts the checkboxes
@@ -609,6 +652,7 @@ try {
         // A phone shows the list or the conversation, never a drawer, in either orientation.
         if (view === 'drawer' && size.phone) continue;
         if (size.views !== undefined && !size.views.includes(view)) continue;
+        if (only !== null && !only.includes(view)) continue;
         // A list wider than the screen is not a width this screen has.
         if (view.startsWith('narrow-') && Number(view.slice(7)) > size.width) continue;
         await send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, screenWidth: size.screen[0], screenHeight: size.screen[1], deviceScaleFactor: size.phone ? 3 : 2, mobile: size.mouse !== true });
@@ -641,6 +685,8 @@ try {
           m.header.main.name = nodes.find((node) => !node.ignored)?.name?.value ?? null;
         }
         const found = missing.length > 0 ? ['could not open the view: no ' + missing.join(', ')] : failures(view, size, m);
+
+        if (view.startsWith('settings') && missing.length === 0) found.push(...settingsFailures(view, size, await evaluate(SETTINGS)));
 
         if (view === 'tabs' && missing.length === 0) {
           const more = await evaluate(moreOnTop);
@@ -774,6 +820,15 @@ try {
           // Back to the view's own width, for its screenshot.
           await resize(330);
           await evaluate('window.__paused = false');
+        }
+
+        // An edit shows the bar with Save, one 52 px row on a phone above the home indicator's inset.
+        if (view === 'settings' && missing.length === 0) {
+          const dirty = await evaluate(DIRTY);
+
+          if (dirty === null) found.push('Settings showed no text field to edit');
+          else if (dirty.bar === null || !dirty.save) found.push('an edit did not show the bar with Save');
+          else if (size.phone && dirty.bar > 52 + size.insets.bottom + 0.5) found.push('the bar is ' + dirty.bar + ' px tall on a phone, more than one 52 px row');
         }
 
         results.push({ name, ...m });

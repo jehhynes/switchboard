@@ -29,11 +29,12 @@ export interface Field {
   group?: string;
 }
 
-/** A page section; an `advanced` one starts collapsed. */
+/** A page section; an `advanced` one starts collapsed, showing `summary`, or else its fields' labels, beside its heading. */
 export interface Section {
   heading: string;
   fields: readonly Field[];
   advanced?: boolean;
+  summary?: string;
 }
 
 /** settings.json as the hub read it: its value, or null and the error when it is not valid JSON. */
@@ -1623,9 +1624,11 @@ function item(state: EditorState, page: string, label: string, note?: string): N
 
 /**
  * The bar: the file's status, a warning that settings.json changed on disk, the retired settings it holds, the errors of a refused or blocked
- * save, and whether Save and Discard are enabled.
+ * save, whether Save and Discard show and are enabled, and whether the bar shows at all: only when it has one of these to say.
  */
 export interface BarView {
+  shown: boolean;
+  buttons: boolean;
   status: string;
   warning: string | null;
   warnings: readonly string[];
@@ -1643,7 +1646,10 @@ export function bar(state: EditorState): BarView {
       : [...(state.dirty ? ['Unsaved changes'] : state.saved ? ['Saved'] : []), ...(count === 0 ? [] : [count === 1 ? '1 error' : `${count} errors`])].join(' · ');
   const warning = state.changedOnDisk ? 'settings.json changed on disk, so your changes cannot be saved. Discard them and open Settings again to load it.' : null;
 
-  return { status, warning, warnings: state.warnings, errors: state.barErrors, canSave: state.dirty && !state.changedOnDisk && !state.saving, canDiscard: (state.dirty || state.changedOnDisk) && !state.saving };
+  const buttons = state.dirty || state.changedOnDisk || state.saving;
+  const shown = buttons || status !== '' || warning !== null || state.warnings.length > 0 || state.barErrors.length > 0;
+
+  return { shown, buttons, status, warning, warnings: state.warnings, errors: state.barErrors, canSave: state.dirty && !state.changedOnDisk && !state.saving, canDiscard: (state.dirty || state.changedOnDisk) && !state.saving };
 }
 
 /** A field with what it shows: its text or checked state, the option chosen, and the errors that name it. */
@@ -1658,6 +1664,8 @@ export interface FieldView {
 export interface SectionView {
   heading: string;
   advanced: boolean;
+  /** What a collapsed Advanced section holds, beside its heading. */
+  summary: string;
   fields: FieldView[];
 }
 
@@ -1877,7 +1885,7 @@ function playbookSections(state: EditorState, playbook: PlaybookFields, errors: 
   const loose = errors.filter((error) => playbookFieldOfError(error, paths) === null);
   const views = fields.map((field) => fieldView(field, playbookFieldValue(playbook, field.path), errors.filter((error) => playbookFieldOfError(error, paths) === field.path)));
 
-  return { loose, sections: [{ heading: '', advanced: false, fields: views }] };
+  return { loose, sections: [{ heading: '', advanced: false, summary: '', fields: views }] };
 }
 
 /** A namespace's playbooks as a table of their checkboxes, each row with its own errors. */
@@ -1932,6 +1940,7 @@ export function settingsPage(state: EditorState, title: string, sections: readon
   const views = sections.map((section) => ({
     heading: section.heading,
     advanced: section.advanced === true,
+    summary: section.summary ?? section.fields.map((field) => field.label).join(', '),
     fields: section.fields.map((field) => fieldView(field, getAt(value, field.path), errors.filter((error) => fieldOfError(error, paths) === field.path))),
   }));
 
