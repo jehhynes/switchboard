@@ -1,0 +1,113 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { EMPTY, sessionEnd, timeline } from '../src/model.js';
+import { cardNote } from '../src/timeline.js';
+import type { PageState } from '../src/model.js';
+import type { ArtifactView, MessageView, SessionView } from '@switchboard/protocol';
+
+const css = readFileSync(join(import.meta.dirname, '../src/page.css'), 'utf8');
+const message = (id: string, at: number): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at, ord: at, provisional: false, withdrawn: false, origin: 'typed', text: id, delivery: 'sent', error: null });
+const artifact = (path: string, updatedAt: number): ArtifactView => ({ path, owner: 'chat', kind: 'page', title: path, ext: 'md', type: 'markdown', updatedAt });
+const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, ...patch });
+/** A page showing work item 1, whose current session started at 300 after earlier sessions e2 (200) and e1 (100), shown as `shown`. */
+const showing = (shown: string | null, current: { sessionStartedAt?: number } = { sessionStartedAt: 300 }): PageState => ({
+  ...EMPTY,
+  connected: true,
+  session: session(),
+  scope: {
+    kind: 'page',
+    key: 'k',
+    folder: 'D:/w',
+    title: 'Fix it',
+    scopeGen: 1,
+    workItemId: 1,
+    cwd: 'D:/w',
+    sessionId: shown ?? 's',
+    ...(shown === null ? {} : { earlier: true }),
+    conversations: [
+      {
+        workItemId: 1,
+        title: 'Fix it',
+        primary: true,
+        sessionId: 's',
+        state: 'idle',
+        conversation: 'full',
+        unread: 0,
+        ...current,
+        sessions: [
+          { sessionId: 'e2', title: 'Task session e2', state: 'ended', startedAt: 200 },
+          { sessionId: 'e1', title: 'Setup session', state: 'ended', startedAt: 100 },
+        ],
+      },
+    ],
+  },
+});
+
+describe('a session that takes no answers', () => {
+  it('CardNote_EarlierSession_SaysItIsReadOnly', () => {
+    expect(cardNote({ ...showing('e1'), session: session({ state: 'ended', conversation: 'read-only' }) })).toBe('An earlier session, shown read-only.');
+  });
+
+  it('CardNote_EndedSessionThePageResumes_PointsToResume', () => {
+    expect(cardNote({ ...showing(null), session: session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Resume continues it.' }) })).toBe('Resume the session to answer.');
+  });
+
+  it('CardNote_EndedCodexThreadThatTakesAnswers_SaysNothing', () => {
+    expect(cardNote({ ...showing(null), session: session({ state: 'ended', conversation: 'full' }) })).toBeNull();
+    expect(cardNote({ ...showing(null), session: session() })).toBeNull();
+  });
+
+  it('CardNote_SessionThePageCannotTalkTo_SaysItsReasonAndNoTerminal', () => {
+    const reason = 'This session runs in your own Claude window; talk to it there.';
+
+    expect(cardNote({ ...showing(null), session: session({ state: 'ended', conversation: 'none', reason }) })).toBe(reason);
+    expect(cardNote({ ...showing(null), session: session({ conversation: 'read-only', reason: 'Switchboard cannot track this session while Install hooks is off.' }) })).toBe('Switchboard cannot track this session while Install hooks is off.');
+    expect(cardNote({ ...showing(null), session: session({ state: 'ended', conversation: 'none' }) })).toBe('The session has ended.');
+  });
+});
+
+describe("an earlier session's artifacts", () => {
+  it('SessionEnd_EarlierSession_EndsWhereTheNextSessionStarted', () => {
+    expect(sessionEnd(showing('e1'))).toBe(200);
+    expect(sessionEnd(showing('e2'))).toBe(300);
+  });
+
+  it('SessionEnd_CurrentSessionOrNoStart_HasNoEnd', () => {
+    expect(sessionEnd(showing(null))).toBe(Infinity);
+    expect(sessionEnd(showing('e2', {}))).toBe(Infinity);
+    expect(sessionEnd(showing('gone'))).toBe(Infinity);
+  });
+
+  it('Timeline_ArtifactLastWrittenInALaterSession_ShowsOnlyThere', () => {
+    const items = [message('m1', 110), message('m2', 150)];
+    const artifacts = [artifact('chat/setup.md', 180), artifact('chat/review.md', 320), artifact('chat/edge.md', 200)];
+    const paths = (until: number) => timeline(items, artifacts, until).flatMap((entry) => (entry.type === 'artifact' ? [entry.artifact.path] : []));
+
+    // Written after the earlier session's last message but before the next session started: still the earlier session's.
+    expect(paths(200)).toEqual(['chat/setup.md']);
+    expect(paths(Infinity)).toEqual(['chat/setup.md', 'chat/edge.md', 'chat/review.md']);
+  });
+});
+
+describe('the marks and buttons that compete', () => {
+  it('GroupCount_Drawn_UsesTheNeutralBadgeNotTheUnreadColour', () => {
+    const rule = /^\.group-count \{[^}]*\}/m.exec(css)![0];
+
+    expect(rule).toContain('background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);');
+    expect(rule).not.toContain('focusBorder');
+    expect(rule).not.toContain('activityBarBadge');
+  });
+
+  it('ReplyDot_Unread_StaysTheMutedBullet', () => {
+    expect(css).toContain('.reply .dot {');
+    expect(css).not.toMatch(/\.reply\.unread \.dot/);
+  });
+
+  it('SessionNoteButton_Drawn_IsSecondarySoTheHeaderControlIsTheOnePrimary', () => {
+    const rule = /^\.session-resume \{[^}]*\}/m.exec(css)![0];
+
+    expect(rule).toContain('background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);');
+    expect(css).toMatch(/^\.header > button\.row-main \{[^}]*background: var\(--vscode-button-background\)/m);
+  });
+});

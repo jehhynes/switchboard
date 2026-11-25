@@ -65,7 +65,7 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
    0.06 em above its capitals, so text drew about 1 px low beside every icon. Padding above and below makes the box its line's height again,
    so descenders and accents stay inside a text that clips its overflow and the row lays out as before, at the same pixel positions, which
    keeps Chrome's text snapping at 125% scale from undoing the shift. A browser without text-box draws the texts as before. */
-@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .tab-menu .title, .provider-option, .opening-note, .status-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
+@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, button.picker > .picker-text, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .tab-menu .title, .provider-option, .opening-note, .status-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .picker-text, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
 /* A spinner (a codicon-modifier-spin codicon or the mic's starting ring): its box stands still and clips its paint, and only its ::before turns,
    smoothly, on its own compositor layer. Chrome takes a turning layer to overlap everything painted after it up to its nearest clip, and moves
    that content onto layers of its own, where text loses its subpixel antialiasing and may shift as the layers change (mechanics.md M141);
@@ -191,15 +191,15 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .work-list ul { list-style: none; margin: 0; padding: 0; }
 /* The gap after a group is inside its section, so its pinned header stays until the next group's header reaches it. */
 .group::after { content: ''; display: block; height: 8px; }
-/* A group's header is a tinted bar of the focus blue: chevron, the group's codicon, its title and its count. It stays pinned at the
+/* A group's header is a light tint of the focus blue: chevron, the group's codicon, its title and its count. It stays pinned at the
    top of the list while the group's rows scroll under it, until the next group's header pushes it up; mixed with the list's background, so the
    bar is opaque and rows do not show through it. Rows and their menus scroll to below it. */
-.group-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--group-head-height); padding: 4px 8px 4px 6px; border: none; background: color-mix(in srgb, var(--vscode-focusBorder) 25%, var(--vscode-sideBar-background)); color: var(--vscode-foreground); text-align: left; cursor: pointer; }
-.group-head:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 35%, var(--vscode-sideBar-background)); }
+.group-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--group-head-height); padding: 4px 8px 4px 6px; border: none; background: color-mix(in srgb, var(--vscode-focusBorder) 10%, var(--vscode-sideBar-background)); color: var(--vscode-foreground); text-align: left; cursor: pointer; }
+.group-head:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 16%, var(--vscode-sideBar-background)); }
 .work-list .row, .work-list .row-menu { scroll-margin-top: var(--group-head-height); }
 .group-head .group-icon { font-size: 16px; }
 .group-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.group-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center; font-size: 11px; font-weight: 600; line-height: 18px; background: var(--vscode-focusBorder); color: #fff; }
+.group-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center; font-size: 11px; font-weight: 600; line-height: 18px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 .group-count.zero { background: color-mix(in srgb, var(--vscode-descriptionForeground) 18%, transparent); color: var(--vscode-descriptionForeground); }
 /* Done's date bands: a muted label with its count and a rule, no tint or stripe, which opens or closes its rows. */
 .band-head { display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; margin-top: 6px; padding: 3px 8px; border: none; background: transparent; color: var(--vscode-descriptionForeground); font-size: 12px; text-align: left; cursor: pointer; }
@@ -392,9 +392,14 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .picker-anchor { flex: 1 1 0; min-width: 6em; }
 /* A whole number of pixels tall, which its label's text-box alone does not make it, so the dropdown under it and each of its rows start on a whole
    pixel and Chrome does not snap their icons half a pixel off their centre. */
-button.picker { flex: 1 1 auto; min-width: 0; min-height: 32px; box-sizing: border-box; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; color: inherit; padding: 6px 6px; cursor: pointer; text-align: left; font-weight: 500; }
+button.picker { flex: 1 1 auto; min-width: 0; min-height: 32px; box-sizing: border-box; overflow: hidden; display: flex; align-items: center; gap: 6px; border: none; color: inherit; padding: 2px 6px; cursor: pointer; text-align: left; font-weight: 500; }
 button.icon:hover, a.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 button.picker .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The button's text: the work item's title, then the session's name on a smaller muted line, each cut with an ellipsis; both lines fit the
+   button's 32 px, so the header keeps its height. */
+button.picker > .picker-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 15px; }
+button.picker .picker-text > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.picker .picker-session { font-size: 11px; line-height: 13px; font-weight: normal; color: var(--vscode-descriptionForeground); }
 button.picker > .codicon, button.picker > .provider, button.picker > .count, .header > button.icon { flex: none; }
 .provider { flex: none; display: inline-flex; align-items: center; color: var(--vscode-foreground); font-size: 16px; }
 /* Claude's mark in its brand colour, #D97757, on no background of its own: 5.7:1 on Dark Modern's side bar (#181818) and 5.3:1 on its menus (#1F1F1F). Where it would be under
@@ -576,7 +581,6 @@ button.picker > .codicon-chevron-down { order: 2; }
 .message.provisional .box { opacity: 0.7; }
 .reply { padding-left: 30px; }
 .reply .dot { position: absolute; left: 9px; top: calc(var(--pad-top) + 7px + var(--dot-shift, 0px)); width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); }
-.reply.unread .dot { background: var(--vscode-activityBarBadge-background); }
 .reply.aside { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
 .note { text-align: center; color: var(--vscode-descriptionForeground); font-size: 0.92em; }
 .working { display: flex; align-items: center; gap: 6px; padding-left: 3px; font-weight: 500; }
@@ -771,8 +775,9 @@ body.artifact-window > .artifact-view { height: 100%; }
 #note { box-sizing: border-box; width: 100%; max-width: var(--chat-width, 940px); margin: 0 auto; padding: 0 20px; }
 .session-note { display: flex; align-items: center; gap: 6px; box-sizing: border-box; margin: 0 0 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--vscode-input-border); border-radius: 8px; background: var(--vscode-input-background); }
 .session-note-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.session-resume { flex: none; min-height: 26px; padding: 0 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
-.session-resume:hover { background: var(--vscode-button-hoverBackground); }
+/* A secondary button, so the header's main control stays the page's one primary button. */
+.session-resume { flex: none; min-height: 26px; padding: 0 10px; border: 1px solid var(--vscode-button-border, var(--vscode-input-border)); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
+.session-resume:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .session-resume:disabled { opacity: 0.6; cursor: default; }
 @media (hover: none), (pointer: coarse) { .session-resume { min-height: 44px; } }
 .composer-sent { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }

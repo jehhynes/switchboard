@@ -894,7 +894,7 @@ function Browser({ browser, places, local }: { browser: FolderBrowser; places: F
               ...browser.folders.map((one) => row(one.path, one.name)),
               browser.folders.length === 0 && !browser.busy ? (
                 <li class="folder-empty" role="presentation">
-                  No folders here.
+                  No folders here. Use this folder, or go up a level.
                 </li>
               ) : null,
             ]}

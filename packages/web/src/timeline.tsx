@@ -6,7 +6,7 @@ import { hasUnspokenText, replyBody, spokenParts } from '@switchboard/conversati
 import { answerBrief, plain, questionBrief, questionLedger, stripQuestionMarkup, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { LedgerItem, LedgerQuestion, QuestionLedger } from '@switchboard/conversation/questions';
 import { isAnswerMessage, renderAnswersBubble, renderQuestionCard } from '@switchboard/conversation/questionCard';
-import { artifactIcon, awaitingReply, inTurn, timeline } from './model.js';
+import { artifactIcon, awaitingReply, inTurn, sessionEnd, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, renderInline, renderMarkdown } from './markdown.js';
 import { dayLabel, deliveryMark, replyRender, withoutQuestions } from './render.js';
@@ -100,7 +100,7 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies, latest
 
   return (
     <li class={`reply ${item.kind}${item.unread ? ' unread' : ''}${expanded ? '' : ' folded'}`} data-unread={item.unread ? item.id : undefined} data-id={item.id} data-speak={item.speak === null ? undefined : '1'} tabIndex={-1}>
-      <span class="dot" title={item.unread ? 'Unread' : undefined}></span>
+      <span class="dot"></span>
       <div class="body">
         {trusted(body)}
         {more === '' ? null : expanded ? (
@@ -271,6 +271,24 @@ function StillOpen({ keys, ledger, view, state, canAnswer }: { keys: string[]; l
   );
 }
 
+/**
+ * Why a card takes no answer, pointing to what the page offers: Show current session for an earlier session, Resume for an ended session the
+ * page resumes, else the session's reason; null while the card takes answers, as an ended Codex thread's does, since sending resumes it.
+ */
+export function cardNote(state: PageState): string | null {
+  if (state.scope?.earlier === true) {
+    return 'An earlier session, shown read-only.';
+  }
+
+  const session = state.session;
+
+  if (session?.conversation === 'full') {
+    return null;
+  }
+
+  return session?.state === 'ended' && session.conversation === 'read-only' ? 'Resume the session to answer.' : (session?.reason ?? 'The session has ended.');
+}
+
 /** The card with this key, drawn by the renderer in packages/conversation; null for a reply that asks no questions. */
 export function cardOf(key: string, ledger: QuestionLedger, view: View, state: PageState, canAnswer: boolean): VNode | null {
   const card = ledger.cards.get(key);
@@ -281,12 +299,10 @@ export function cardOf(key: string, ledger: QuestionLedger, view: View, state: P
 
   const ui = view.cards.get(key);
   const draft = ui?.local ?? state.questions?.drafts[key];
-  const ended = state.session?.state === 'ended' || state.session?.conversation !== 'full';
-
   return <>{trusted(
     renderQuestionCard(card, draft, {
       canAnswer,
-      note: ended && card.questions.some((one) => one.state === 'open') ? 'Session ended — open in terminal to continue.' : null,
+      note: card.questions.some((one) => one.state === 'open') ? cardNote(state) : null,
       sending: ui?.sending === true,
       error: ui?.error ?? null,
       menuOpen: ui?.menuOpen === true,
@@ -313,7 +329,7 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
     return <p class="empty">No session yet. Messages appear here once the work item's session starts.</p>;
   }
 
-  const entries = timeline(state.items, state.artifacts);
+  const entries = timeline(state.items, state.artifacts, sessionEnd(state));
   const canAnswer = state.connected && state.session.conversation === 'full';
   const links = pageLedger(state);
   // After the newest item, so replies written mid-turn show above it.

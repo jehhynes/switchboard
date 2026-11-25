@@ -645,7 +645,7 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
     on('exited', (data) => {
       term.write(colours?.flush() ?? '');
       term.write(`\r\n\u001b[2m[The session exited with code ${String(data['exitCode'])}.]\u001b[0m\r\n`);
-      end('The session exited. Resume continues it.');
+      end('The session exited.');
     });
     on('closed', (data) => end(typeof data['error'] === 'string' ? data['error'] : 'The console closed.'));
     on('unavailable', (data) => end(String(data['reason'] ?? 'The session has no console.')));

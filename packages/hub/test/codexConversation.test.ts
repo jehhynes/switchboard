@@ -64,7 +64,7 @@ describe('Codex conversation adapter and shared service',()=>{
     expect(p.frames.some(f=>f['type']==='message'&&(f['message'] as Json)['id']===gone&&(f['message'] as Json)['delivery']==='not-sent'&&(f['message'] as Json)['error']===refuse)).toBe(true);
     expect(p.runner.send).toHaveBeenCalledTimes(1);
     // A session that never got a thread ID has nothing to resume.
-    expect(sessionView({...p.store.session('s1')!,nativeSessionId:null},true,false)).toMatchObject({conversation:'read-only',reason:expect.stringContaining('Open it in the terminal')});
+    expect(sessionView({...p.store.session('s1')!,nativeSessionId:null},true,false)).toMatchObject({conversation:'read-only',reason:'The session has ended.'});
   });
   it('resumes an ended thread whose last follow failed, rather than refusing with that failure',async()=>{
     const resume=vi.fn(async(sessionId:string)=>{p.store.updateSession(sessionId,{state:'idle',endedAt:null,released:false,launchId:'launch-2'});return null;});

@@ -683,8 +683,8 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(held.reservations).toEqual([{ sessionId: 's2', launch: 'launch-1' }]);
 
     store.updateSession('s2', { state: 'ended' });
-    expect(service.continueAfterLimit('s2', 'Continue.')).toBe('The session has ended. Open it in the terminal to resume it.');
-    expect(service.continueAfterLimit('nope', 'Continue.')).toBe('The session has ended. Open it in the terminal to resume it.');
+    expect(service.continueAfterLimit('s2', 'Continue.')).toBe('The session has ended. Resume continues it.');
+    expect(service.continueAfterLimit('nope', 'Continue.')).toBe('The session has ended.');
     expect(held.writes).toHaveLength(2);
   });
 
@@ -1043,7 +1043,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(refused({})).toEqual({ status: 409, body: { error: 'Switchboard cannot track this session while Install hooks is off.' } });
     setHooks(true);
     store.updateSession('s2', { state: 'ended' });
-    expect(refused({})).toEqual({ status: 409, body: { error: 'The session has ended. Open it in the terminal to resume it.' } });
+    expect(refused({})).toEqual({ status: 409, body: { error: 'The session has ended. Resume continues it.' } });
 
     expect(store.conversation('s2', null, 10).items).toEqual([]);
     expect(held.writes).toEqual([]);
@@ -1077,14 +1077,14 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     await settled(() => expect(store.message('m-1')).toBeNull());
 
     // It leaves the conversation; its last event tells the window why, with its text, so the composer can take it back.
-    expect(frames.at(-1)).toMatchObject({ type: 'message', message: { id: 'm-1', text: 'Fix the build', delivery: 'not-sent', error: 'The session has ended. Open it in the terminal to resume it.' } });
+    expect(frames.at(-1)).toMatchObject({ type: 'message', message: { id: 'm-1', text: 'Fix the build', delivery: 'not-sent', error: 'The session has ended.' } });
     expect(store.conversation('s2', null, 10).items).toEqual([]);
     // The same command again is refused with why, and types nothing.
     store.updateSession('s2', { state: 'idle' });
-    expect(service.send(body(key))).toEqual({ status: 409, body: { error: 'The session has ended. Open it in the terminal to resume it.' } });
+    expect(service.send(body(key))).toEqual({ status: 409, body: { error: 'The session has ended.' } });
     expect(held.writes).toEqual([]);
     expect(held.reservations).toEqual([]);
-    expect(logs).toContain('session s2: message m-1 not-sent: The session has ended. Open it in the terminal to resume it.');
+    expect(logs).toContain('session s2: message m-1 not-sent: The session has ended.');
   });
 
   it('types nothing into a session a newer one replaced, or one the reservation refuses', async () => {
@@ -1679,12 +1679,12 @@ describe('sessionView', () => {
   });
 
   it('names what the view can do with each kind of session', () => {
-    expect(sessionView(session({ codeMode: true, state: 'ended' }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' });
+    expect(sessionView(session({ codeMode: true, state: 'ended' }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Resume continues it.' });
     expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot track this session while Install hooks is off.' });
     expect(sessionView(session({ state: 'waiting', stateDetail: null }), false, true)).toMatchObject({ waitingFor: 'question', conversation: 'none', current: false });
     expect(sessionView(session({ codeMode: true, state: 'failed' }), true, true)).toMatchObject({ state: 'idle', conversation: 'full' });
     // An ended registered session resumes in the holder, so the page offers Resume; while it runs in the operator's window it has no conversation (PRD R81).
-    expect(sessionView(session({ registered: true, state: 'ended' }), true, true)).toMatchObject({ conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' });
+    expect(sessionView(session({ registered: true, state: 'ended' }), true, true)).toMatchObject({ conversation: 'read-only', reason: 'The session has ended. Resume continues it.' });
     expect(sessionView(session({ registered: true, state: 'idle' }), true, true)).toMatchObject({ conversation: 'none' });
   });
 
@@ -2558,6 +2558,8 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     ]);
     // The current session is named as the earlier ones are, by its CLI's name for it.
     expect(entry().sessionTitle).toBe('Badge fix');
+    // Its start, where the earlier sessions' timelines end on the page.
+    expect(entry().sessionStartedAt).toBe(NOW - 1_000);
 
     // A Codex thread by its latest name in Codex's session index, once it has one; a rename reaches the page's dropdown on the next poll.
     const codexIndex = join(dir, 'codex', 'session_index.jsonl');

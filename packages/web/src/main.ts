@@ -1800,8 +1800,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       ? 'First message of the new conversation…'
       : full
       ? 'Message…'
-      : state.session?.state === 'ended' && state.session.conversation !== 'none'
-        ? 'Resume the session to send a message.'
+      : state.scope?.earlier === true
+        ? 'Show the current session to send a message.'
+        : state.session?.state === 'ended' && state.session.conversation !== 'none'
+          ? 'Resume the session to send a message.'
         : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : connection.state === 'offline' ? "Can't send while offline." : connection.state === 'signedOut' ? 'Signed out.' : 'Connecting to Switchboard…'));
     // The voice controls from packages/conversation, acting on this computer's voice process (architecture.md § Web page).
     mount(voiceControls, renderShared(renderVoice(state.voice, live)));
@@ -2501,7 +2503,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       followHistory(false);
       mount(head, pending === null ? null : [renderOpeningHead(pending, view.connection), side ? null : renderOpeningTabs(false)]);
       plainPane(panel);
-      drawPane(panel, pending === null ? renderEmpty(state.connected ? 'Choose a work item on the left.' : 'Connecting to Switchboard…') : renderOpening(pending));
+      drawPane(panel, pending === null ? renderEmpty(state.connected ? 'No work item open. Choose one in the list to see its conversation.' : 'Connecting to Switchboard…') : renderOpening(pending));
 
       if (side && pending !== null) {
         mount(detailHead, renderOpeningTabs(true));

@@ -146,7 +146,10 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
         ? 'This session ran as a codex exec run, which Switchboard no longer runs; Open in terminal resumes it with codex resume.'
         : 'This session runs in your own Claude window; talk to it there.'
       : session.state === 'ended' && !resumable
-        ? 'The session has ended. Open it in the terminal to resume it.'
+        ? // The page's Resume resumes a held session (PRD R109); an app-server session without a thread has nothing to resume.
+          held
+          ? 'The session has ended. Resume continues it.'
+          : SESSION_ENDED
         : conversation === 'read-only'
           ? 'Switchboard cannot track this session while Install hooks is off.'
           : null;
@@ -243,6 +246,8 @@ export interface ConversationEntry {
   provider?: 'claude' | 'codex';
   /** On the web page, the current session's name as its CLI gives it, else its first message, else Setup or Task session; left out with no session. */
   sessionTitle?: string;
+  /** On the web page, when the current session started, which ends the earlier sessions' artifacts; left out with no session. */
+  sessionStartedAt?: number;
   /** On the web page, the work item's earlier sessions, newest first; left out when it has none. */
   sessions?: SessionEntry[];
 }
@@ -1095,7 +1100,7 @@ export class ConversationService {
           conversation: view?.conversation ?? null,
           unread: session === null ? 0 : this.deps.store.unreadCount(session.id),
           ...(view?.provider === undefined ? {} : { provider: view.provider }),
-          ...(session === null ? {} : { sessionTitle: this.#sessionName(session) }),
+          ...(session === null ? {} : { sessionTitle: this.#sessionName(session), sessionStartedAt: session.startedAt }),
           ...(earlier.length === 0 ? {} : { sessions: earlier }),
         },
       ];

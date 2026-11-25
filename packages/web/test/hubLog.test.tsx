@@ -74,7 +74,7 @@ describe('the hub log sheet', () => {
     const read = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: '', more: false, limited: false, missing: true }) });
     await act(() => render(<HubLog fetch={read} />, host));
     await flush();
-    expect(host.textContent).toContain('has not been created yet');
+    expect(host.textContent).toContain('No hub log yet. It appears when the hub writes its first line.');
     read.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Access to the hub log ended.' }) });
     await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS); });
     expect(host.textContent).toContain('Access to the hub log ended.');
@@ -86,7 +86,7 @@ describe('the hub log sheet', () => {
     expect([...host.querySelectorAll('button')].find((node) => node.textContent === 'Load 500 more lines')!.disabled).toBe(true);
     const filter = host.querySelector<HTMLInputElement>('input[type=search]')!;
     await act(() => { filter.value = 'absent'; filter.dispatchEvent(new Event('input', { bubbles: true })); });
-    expect(host.textContent).toContain('No matching lines.');
+    expect(host.textContent).toContain('No matching lines. Change or clear the filter.');
   });
 
   it('does not overlap a slow read or apply its answer after the sheet closes', async () => {

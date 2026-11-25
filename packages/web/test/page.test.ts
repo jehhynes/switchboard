@@ -726,10 +726,10 @@ describe('drawing', () => {
     const root = document.createElement('div');
 
     root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope, session: session({ state: 'running' }) }, newView()));
-    expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin state-icon tone-muted', 'provider', 'title', 'codicon codicon-chevron-down']);
+    expect([...root.querySelector('button.picker')!.children].map((child) => child.className)).toEqual(['codicon codicon-loading codicon-modifier-spin state-icon tone-muted', 'provider', 'picker-text', 'codicon codicon-chevron-down']);
     expect(root.querySelector('.header > .codicon')).toBeNull();
     // The provider's mark after the state codicon on the button and every row, the current session's and the earlier ones', each named as its CLI
-    // names it; the button is drawn as its row is, with the work item's title in its tooltip.
+    // names it; the button shows the work item's title over the session's name, both in its tooltip.
     const conversations = [{ ...scope.conversations[0]!, provider: 'codex', sessionTitle: 'Review PR 21576', sessions: [{ sessionId: 'e1', title: 'Fix the badge', state: 'ended' as const, startedAt: 0, provider: 'claude' }, { sessionId: 'e0', title: 'Setup session', state: 'ended' as const, startedAt: 0 }] }];
     root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations }, session: session({ provider: 'codex' }) }, { ...newView(), picker: true }));
     expect([...root.querySelectorAll('.conversation-menu .conversation-row')].map((row) => [[...row.children].map((child) => child.classList[0]).slice(0, 3), row.querySelector('.provider')!.getAttribute('aria-label'), row.querySelector('.title')!.textContent])).toEqual([
@@ -739,12 +739,17 @@ describe('drawing', () => {
     ]);
     // A provider's mark is never on a background of its own, and an unknown provider's empty mark is hidden from a reader.
     expect(root.querySelector('.session-row[data-session="e0"] .provider')!.getAttribute('aria-hidden')).toBe('true');
-    expect(root.querySelector('button.picker')!.innerHTML).toBe(`${root.querySelector('.conversation-menu [aria-checked="true"]')!.innerHTML}<span class="codicon codicon-chevron-down" aria-hidden="true"></span>`);
+    expect(root.querySelector('button.picker .title')!.textContent).toBe('Fix it');
+    expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('Review PR 21576');
+    expect(root.querySelector('button.picker .provider')!.getAttribute('aria-label')).toBe('Codex');
     expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('Review PR 21576 · Fix it');
-    // From a hub that sends no session name, the work item's title.
+    // From a hub that sends no session name, or a session named as its work item, the title alone, said once.
     root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope, session: session() }, newView()));
     expect(root.querySelector('button.picker .title')!.textContent).toBe('Fix it');
+    expect(root.querySelector('button.picker .picker-session')).toBeNull();
     expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('Fix it');
+    root.innerHTML = html(renderHeader({ ...EMPTY, connected: true, scope: { ...scope, conversations: [{ ...scope.conversations[0]!, sessionTitle: 'Fix it' }] }, session: session() }, newView()));
+    expect(root.querySelector('button.picker .picker-session')).toBeNull();
   });
 
   it("shows only the page's own voice state, with Talk here when the voice is elsewhere", () => {
@@ -1302,6 +1307,8 @@ describe('the page', () => {
 
     source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1), listRow(2)])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
     expect(root.classList.contains('listing')).toBe(true);
+    // With no work item open, the pane says so in words that hold on a phone, where the list is its own view.
+    expect(root.querySelector('#panel .empty')?.textContent).toBe('No work item open. Choose one in the list to see its conversation.');
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
     expect(root.classList.contains('listing')).toBe(false);
@@ -4650,8 +4657,9 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     // An empty draft in the same work item, its composer focused, its provider the shown conversation's; nothing is made.
     expect(root.querySelector('.conversation-menu')).toBeNull();
     expect(root.querySelector('#panel .new-draft')!.textContent).toContain('It starts when you send its first message');
-    expect(root.querySelector('button.picker .title')!.textContent).toBe('New conversation');
-    expect(root.querySelector('button.picker')!.textContent).not.toContain('Fix it');
+    expect(root.querySelector('button.picker .title')!.textContent).toBe('Fix it');
+    expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('New conversation');
+    expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('New conversation · Fix it');
     expect(input.value).toBe('');
     expect(document.activeElement).toBe(input);
     expect([...root.querySelectorAll('.draft-note [data-action="draft-provider"]')].map((one) => [one.textContent, one.getAttribute('aria-pressed')])).toEqual([['Claude', 'true'], ['Codex', 'false']]);
@@ -6765,6 +6773,8 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => now });
 
     hello(FakeSource.last!);
+    // The unread reply's dot is its plain bullet: unread replies are marked only on conversations not selected (PRD R100).
+    expect(root.querySelector('.reply[data-unread="r1"] .dot')!.getAttribute('title')).toBeNull();
     now += 1_100;
     await vi.advanceTimersByTimeAsync(300);
     expect(posts.find((post) => post.url.endsWith('/seen'))?.body).toMatchObject({ sessionId: 's', ids: ['r1'], scopeGen: 3 });
@@ -7230,7 +7240,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       { sessionId: 's1', title: 'Task session s1', state: 'ended' as const, startedAt: 10_000 - 3 * 3_600_000, provider: 'claude' },
       { sessionId: 's0', title: 'Setup session s0', state: 'ended' as const, startedAt: 10_000 - 2 * 86_400_000, provider: 'claude' },
     ];
-    const listed = { ...scope, sessionId: 's2', conversations: [{ ...scope.conversations[0]!, sessionId: 's2', sessionTitle: 'Fix the badge count', sessions: earlier }] };
+    const listed = { ...scope, sessionId: 's2', conversations: [{ ...scope.conversations[0]!, sessionId: 's2', sessionTitle: 'Fix the badge count', sessionStartedAt: 1_200, sessions: earlier }] };
     const { page, source } = start();
     const selects = () => posts.filter((post) => post.url.endsWith('/select')).map((post) => ({ workItemId: post.body['workItemId'], sessionId: post.body['sessionId'] }));
 
@@ -7272,10 +7282,18 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.querySelector('.session-note-text')!.textContent).toBe('An earlier session of this work item, shown read-only.');
     expect(root.querySelector('[data-action="resume"]')).toBeNull();
     expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.disabled).toBe(true);
-    // The button is drawn as the earlier session's row: its provider's mark and name, the work item's title in its tooltip.
-    expect(root.querySelector('button.picker .title')!.textContent).toBe('Task session s1');
+    expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.placeholder).toBe('Show the current session to send a message.');
+    // The button shows the work item's title over the earlier session's name, with its provider's mark, both in its tooltip.
+    expect(root.querySelector('button.picker .title')!.textContent).toBe('Fix it');
+    expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('Task session s1');
     expect(root.querySelector('button.picker .provider')!.getAttribute('aria-label')).toBe('Claude');
     expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('Task session s1 · Fix it');
+    // Its timeline ends where the current session started: an artifact written before then shows in it, one written after only in the current one.
+    for (const [path, updatedAt] of [['chat/early.md', 1_100], ['chat/late.md', 1_300]] as const) {
+      source.emit('artifact', { artifact: { path, owner: 'chat', kind: 'note', title: path, ext: 'md', type: 'markdown', updatedAt } });
+    }
+    expect(root.querySelector('#panel .artifact-open[data-path="chat/early.md"]')).not.toBeNull();
+    expect(root.querySelector('#panel .artifact-open[data-path="chat/late.md"]')).toBeNull();
     openPicker();
     expect([...root.querySelectorAll('.conversation-menu .conversation-row')].map((row) => row.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false']);
 

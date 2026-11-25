@@ -67,6 +67,8 @@ export interface ConversationEntry {
   provider?: string;
   /** On the web page, the current session's name as its CLI gives it, else its first message, else Setup or Task session; left out with no session. */
   sessionTitle?: string;
+  /** On the web page, when the current session started, which ends the earlier sessions' artifacts; left out with no session. */
+  sessionStartedAt?: number;
   /** On the web page, the work item's earlier sessions, newest first; left out with none. */
   sessions?: SessionEntry[];
 }

@@ -193,7 +193,8 @@ describe('the label beside an icon', () => {
       draw(renderHeader(state, { ...newView(), viewMenu: true })),
     ];
     const rows = hosts.flatMap((host) => [...host.querySelectorAll<HTMLElement>('.menu-row, .tab, .tab-open, button.picker')].filter((row) => row.querySelector(':scope > .codicon, :scope > .file-icon, :scope > .menu-gutter')));
-    const texts = rows.flatMap((row) => [...row.children].filter((child) => !child.matches('.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .tab-open, .tab-close, .provider, svg') && (child.textContent ?? '').trim() !== ''));
+    // The picker's title and session name stand in one column beside its icons, each a text of its own.
+    const texts = rows.flatMap((row) => [...row.children].flatMap((child) => (child.matches('.picker-text') ? [...child.children] : [child])).filter((child) => !child.matches('.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .tab-open, .tab-close, .provider, svg') && (child.textContent ?? '').trim() !== ''));
 
     expect(rows.length).toBeGreaterThan(10);
     expect(texts.length).toBeGreaterThan(10);

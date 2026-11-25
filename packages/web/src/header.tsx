@@ -176,19 +176,42 @@ function SessionLabel({ icon, provider, title }: { icon: { icon: string; text: s
   );
 }
 
+/** Whether the page's session is this entry's: only while it shows the current one, not an earlier one. */
+const showsCurrent = (entry: Entry, state: PageState): boolean => entry.workItemId === state.scope?.workItemId && state.scope.earlier !== true;
+
+/** A conversation's state codicon: the page's session's while it shows it, else the entry's. */
+const conversationIcon = (entry: Entry, state: PageState) => (showsCurrent(entry, state) ? stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit) : stateIcon(entry.state));
+
+/** A conversation's provider: the page's session's while it shows it, else the entry's. */
+const conversationProvider = (entry: Entry, state: PageState): string | undefined => (showsCurrent(entry, state) ? (state.session?.provider ?? entry.provider) : entry.provider);
+
 /**
- * A conversation as the dropdown's button and each of its rows draw it, from this one renderer so they never differ: its current session's state
+ * The dropdown's button: the state codicon, the work item's title over the session's name, muted and left out when it is the title, the
+ * provider's mark, and the unread dot while another conversation has unread items.
+ */
+function PickerLabel({ icon, provider, title, session, unread = false }: { icon: VNode; provider?: string | undefined; title: string; session?: string | undefined; unread?: boolean }) {
+  return (
+    <>
+      {icon}
+      <ProviderMark provider={provider} />
+      <span class="picker-text">
+        <span class="title">{title}</span>
+        {session === undefined || session === title ? null : <span class="picker-session">{session}</span>}
+      </span>
+      {unread ? <UnreadDot label="Unread replies or status" /> : null}
+    </>
+  );
+}
+
+/**
+ * A conversation as each of the dropdown's rows draws it: its current session's state
  * codicon, provider's mark and name as its CLI gives it (`sessionTitle`, the work item's title from a hub that sends none), and the unread dot when
  * `unread` (architecture.md § Unread).
  */
 function ConversationLabel({ entry, state, unread = false }: { entry: Entry; state: PageState; unread?: boolean }) {
-  // The page's session is this entry's only while it shows the current one, not an earlier one.
-  const selected = entry.workItemId === state.scope?.workItemId && state.scope.earlier !== true;
-  const icon = selected ? stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit) : stateIcon(entry.state);
-
   return (
     <>
-      <SessionLabel icon={icon} provider={selected ? (state.session?.provider ?? entry.provider) : entry.provider} title={entry.sessionTitle ?? entry.title} />
+      <SessionLabel icon={conversationIcon(entry, state)} provider={conversationProvider(entry, state)} title={entry.sessionTitle ?? entry.title} />
       {unread ? <UnreadDot label="Unread replies or status" /> : null}
     </>
   );
@@ -252,7 +275,7 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
   const scope = state.scope!;
   const earlier = scope.earlier === true ? (selectedEntry(state)?.sessions?.find((one) => one.sessionId === scope.sessionId) ?? null) : null;
   const selected = selectedEntry(state);
-  // The button shows the session its row names; its tooltip adds the work item's title, which the session's name may not carry.
+  // The button shows the work item's title over the session its row names; its tooltip names both.
   const shownName = earlier?.title ?? selected?.sessionTitle;
   const title = selected?.title ?? scope.title;
   const tooltip = shownName === undefined || shownName === title ? title : `${shownName} · ${title}`;
@@ -292,21 +315,15 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
         <span class="codicon codicon-layout-sidebar-left" aria-hidden="true"></span>
       </button>
       <div class="menu-anchor picker-anchor">
-        <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker} title={tooltip}>
+        <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker} title={drafting ? `New conversation · ${title}` : tooltip}>
           {drafting ? (
-            <>
-              <span class="codicon codicon-add state-icon tone-muted" aria-hidden="true"></span>
-              <span class="title">New conversation</span>
-            </>
+            <PickerLabel icon={<span class="codicon codicon-add state-icon tone-muted" aria-hidden="true"></span>} title={title} session="New conversation" />
           ) : earlier !== null ? (
-            <SessionLabel icon={stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} provider={state.session?.provider ?? earlier.provider} title={earlier.title} />
+            <PickerLabel icon={<Codicon {...stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} />} provider={state.session?.provider ?? earlier.provider} title={title} session={earlier.title} />
           ) : selected === null ? (
-            <>
-              <Codicon {...stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} />
-              <span class="title">{title}</span>
-            </>
+            <PickerLabel icon={<Codicon {...stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} />} title={title} />
           ) : (
-            <ConversationLabel entry={selected} state={state} unread={othersUnread} />
+            <PickerLabel icon={<Codicon {...conversationIcon(selected, state)} />} provider={conversationProvider(selected, state)} title={title} session={selected.sessionTitle} unread={othersUnread} />
           )}
           <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
         </button>

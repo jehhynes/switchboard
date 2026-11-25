@@ -219,15 +219,14 @@ function Row({ row }: { row: ChangeRow }): VNode {
   );
 }
 
-/** What the Changes tab's bar says: how many files, uncommitted ones when the list has those alone, the lines added and deleted, how many are viewed, and a first cut when the worktree has more than the hub lists. */
+/** What the Changes tab's bar says: how many files, uncommitted ones when the list has those alone, the lines added and deleted, and a first cut when the worktree has more than the hub lists; the tab's badge counts the viewed ones. */
 export function listNote(list: ChangesList): string {
   const kind = scopeKind(rangeOf(list), list.commits, list.base) === 'uncommitted' ? ' uncommitted' : '';
   const files = list.total === 1 ? `1${kind} file` : `${list.total}${kind} files`;
-  const { viewed, additions, deletions } = totals(list);
-  const ticked = viewed === 0 ? '' : ` · ${viewed} viewed`;
+  const { additions, deletions } = totals(list);
   const lines = ` · +${additions} −${deletions}`;
 
-  return list.shown < list.total ? `Showing ${list.shown} of ${files}${lines}${ticked}` : `${files}${lines}${ticked}`;
+  return list.shown < list.total ? `Showing ${list.shown} of ${files}${lines}` : `${files}${lines}`;
 }
 
 /** The bar note's tooltip: what the list compares. */
@@ -240,14 +239,14 @@ export function emptyNote(list: ChangesList): string {
   const kind = scopeKind(rangeOf(list), list.commits, list.base);
 
   return kind === 'uncommitted'
-    ? 'No uncommitted changes.'
+    ? 'No uncommitted changes. They appear here when the session edits a file.'
     : kind === 'commit'
-      ? 'This commit changes no files.'
+      ? 'This commit changes no files. Choose another scope in the scope menu.'
       : kind === 'compare'
-        ? 'No changes between these points.'
+        ? 'No changes between these points. Choose another scope in the scope menu.'
         : list.base === null
-          ? 'No uncommitted changes, and no merge base was found.'
-          : 'No changes since the merge base.';
+          ? 'No uncommitted changes, and no merge base was found. Changes appear here when the session edits a file.'
+          : 'No changes since the merge base. They appear here when the session edits a file.';
 }
 
 /** Wrap, pressed while long lines wrap: on the Changes tab's bar, and at the end of the file view's header, which covers the bar. */

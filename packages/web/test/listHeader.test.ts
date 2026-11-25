@@ -962,6 +962,23 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
   });
 
+  it('FolderBrowser_FolderWithoutSubfolders_SaysWhatToDoInTwoSentences', async () => {
+    const { page, source } = start(false);
+
+    answers['/providers'] = { status: 200, body: PROVIDERS_ANSWER };
+    answers['/page-folders'] = { status: 200, body: { ...PLACES, computer: [] } };
+    await openForm(source);
+    change('[data-field="folder"]', '');
+    click('[data-action="list-folder-browse"]');
+    answers['/page-folders'] = { status: 200, body: { path: 'D:/git/widgets', parent: 'D:/git', folders: [], more: false } };
+    click('[data-action="list-browse-open"][data-path="D:/git/widgets"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('.folder-empty')?.textContent?.trim()).toBe('No folders here. Use this folder, or go up a level.');
+    expect(root.querySelector<HTMLButtonElement>('[data-action="list-browse-use"]')!.disabled).toBe(false);
+    page.close();
+  });
+
   it("browses the hub's folders from Browse… and uses the chosen one, saying a paired device is limited", async () => {
     const { page, source } = start(false);
 

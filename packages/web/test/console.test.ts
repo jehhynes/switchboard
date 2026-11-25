@@ -435,7 +435,7 @@ describe('the console', () => {
     source().emit('exited', { exitCode: 0 });
     expect(source().closed).toBe(true);
     expect(term.written.at(-1)).toContain('The session exited with code 0.');
-    expect(host.querySelector('.console-note')!.textContent).toBe('The session exited. Resume continues it.');
+    expect(host.querySelector('.console-note')!.textContent).toBe('The session exited.');
     expect(reconnect.hidden).toBe(false);
     reconnect.click();
     expect(FakeSource.all).toHaveLength(2);

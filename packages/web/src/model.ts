@@ -176,14 +176,33 @@ export function withEarlier(state: PageState, items: ItemView[], more: boolean):
   return { ...state, items: [...items.filter((item) => !known.has(item.id) && !notSent(item)), ...state.items], more };
 }
 
+/**
+ * When the shown session's part of the work item ends: for an earlier session, when the next session of the work item started; Infinity for the
+ * current one, or when the hub sends no start.
+ */
+export function sessionEnd(state: PageState): number {
+  const scope = state.scope;
+  const entry = scope?.earlier === true ? selectedEntry(state) : null;
+  const shown = entry?.sessions?.find((one) => one.sessionId === scope?.sessionId);
+
+  if (entry == null || shown === undefined) {
+    return Infinity;
+  }
+
+  const starts = [...(entry.sessions ?? []).map((one) => one.startedAt), ...(entry.sessionStartedAt === undefined ? [] : [entry.sessionStartedAt])];
+
+  return Math.min(Infinity, ...starts.filter((at) => at > shown.startedAt));
+}
+
 /** A row of the timeline: a message, a reply with the reply it rewrote, or an artifact where it was last written. */
 export type Entry = { type: 'message'; item: Extract<ItemView, { type: 'message' }> } | { type: 'reply'; item: ReplyView; earlier: ReplyView | null } | { type: 'artifact'; artifact: ArtifactView };
 
 /**
  * The timeline: withdrawn items and replies that are only a status left out, a rewrite in the place of the reply it rewrote, and each artifact
- * written since the oldest item shown after the last item from no later than its write.
+ * written since the oldest item shown, and before `until`, after the last item from no later than its write. An earlier session's timeline ends
+ * where the next session starts (`sessionEnd`), so an artifact last written in a later session shows only there.
  */
-export function timeline(items: ItemView[], artifacts: readonly ArtifactView[]): Entry[] {
+export function timeline(items: ItemView[], artifacts: readonly ArtifactView[], until = Infinity): Entry[] {
   const replies = new Map(items.filter((item): item is ReplyView => item.type === 'reply' && !item.withdrawn).map((reply) => [reply.id, reply]));
   const placed = new Set<string>();
   const entries: Entry[] = [];
@@ -217,7 +236,7 @@ export function timeline(items: ItemView[], artifacts: readonly ArtifactView[]):
   const oldest = entries[0] === undefined ? null : atOf(entries[0]);
 
   if (oldest !== null) {
-    for (const artifact of [...artifacts].filter((one) => one.updatedAt >= oldest).sort((a, b) => a.updatedAt - b.updatedAt)) {
+    for (const artifact of [...artifacts].filter((one) => one.updatedAt >= oldest && one.updatedAt < until).sort((a, b) => a.updatedAt - b.updatedAt)) {
       let at = entries.length;
 
       while (at > 0 && atOf(entries[at - 1]!) > artifact.updatedAt) {

@@ -280,7 +280,7 @@ describe('the Changes list', () => {
       ['logo.png', '', 'binary', 'U'],
     ]);
     expect(rows[1]!.title).toBe('src/old.ts → src/new.ts\nRenamed · staged');
-    expect(root.querySelector('.changes-note')!.textContent).toBe('3 files · +3 −1 · 1 viewed');
+    expect(root.querySelector('.changes-note')!.textContent).toBe('3 files · +3 −1');
     expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('All changes since the base, 0123456');
     expect([...root.querySelectorAll<HTMLInputElement>('.change-viewed input')].map((box) => box.checked)).toEqual([false, true, false]);
     expect(button().querySelector('.tab-badge')!.textContent).toBe('1/3');
@@ -380,7 +380,7 @@ describe('the Changes list', () => {
 
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
-    expect(root.querySelector('.changes-empty')!.textContent).toBe('No uncommitted changes.');
+    expect(root.querySelector('.changes-empty')!.textContent).toBe('No uncommitted changes. They appear here when the session edits a file.');
     expect(scopeButton().disabled).toBe(false);
     // Nothing of the scope is kept on the device.
     expect(Object.keys(localStorage).filter((name) => /changes|scope/i.test(name) || /HEAD|worktree/.test(localStorage.getItem(name) ?? ''))).toEqual([]);
@@ -413,7 +413,7 @@ describe('the Changes list', () => {
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
     filesButton().click();
-    expect(root.querySelector('.changes-empty')!.textContent).toBe('This commit changes no files.');
+    expect(root.querySelector('.changes-empty')!.textContent).toBe('This commit changes no files. Choose another scope in the scope menu.');
   });
 
   it('ScopeMenu_CommitGoneAfterARebase_FallsBackToEveryChangeSinceTheBase', async () => {
@@ -507,7 +507,7 @@ describe('the Changes list', () => {
 
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
-    expect(root.querySelector('.changes-empty')!.textContent).toBe('No changes since the merge base.');
+    expect(root.querySelector('.changes-empty')!.textContent).toBe('No changes since the merge base. They appear here when the session edits a file.');
   });
 
   it("drops the list when the page moves to another conversation, and an answer read for the one it left", async () => {
@@ -571,7 +571,7 @@ describe('the Changes list', () => {
     expect(changesMounts[0]).toMatchObject({ layout: 'stacked', wrap: true });
     // The bar, then the diffs; each file's own header carries only its Viewed tick from the page.
     expect([...root.querySelector('.diff-view')!.children].map((one) => one.className)).toEqual(['changes-bar', 'diff-host']);
-    expect(root.querySelector('.changes-bar .changes-note')!.textContent).toBe('3 files · +3 −1 · 1 viewed');
+    expect(root.querySelector('.changes-bar .changes-note')!.textContent).toBe('3 files · +3 −1');
     expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['changes-menu', 'changes-scope', 'changes-hide-viewed', 'changes-collapse-all', 'changes-expand-all', 'changes-wrap', 'changes-refresh']);
     expect(root.querySelector('.diff-head')).toBeNull();
     expect([...root.querySelectorAll<HTMLInputElement>('.diff-host .diff-viewed input')].map((box) => [box.dataset['path'], box.checked])).toEqual([
@@ -1167,7 +1167,7 @@ describe('the Changes list', () => {
     await flush();
 
     expect(changesMounts).toHaveLength(0);
-    expect(root.querySelector('.diff-host')!.textContent).toBe('No uncommitted changes.');
+    expect(root.querySelector('.diff-host')!.textContent).toBe('No uncommitted changes. They appear here when the session edits a file.');
   });
 
   it('ViewedTick_QueuedBeforeAnotherScopeIsPicked_PostsForTheListItWasShownIn', async () => {
@@ -1473,22 +1473,22 @@ describe('the Changes list text', () => {
     expect(diffNote({ state: 'ok', version: '1', data: { ...data, tooLarge: 'sides' } })).toBeNull();
   });
 
-  it('says the file count, the lines changed, the viewed count and a cut list, and the base in its tooltip', () => {
-    expect(listNote(LIST)).toBe('3 files · +3 −1 · 1 viewed');
-    expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('Showing 400 of 512 files · +3 −1 · 1 viewed');
-    expect(listNote({ ...LIST, total: 1 })).toBe('1 file · +3 −1 · 1 viewed');
-    expect(listNote({ ...LIST, from: 'HEAD' })).toBe('3 uncommitted files · +3 −1 · 1 viewed');
-    expect(listNote({ ...LIST, from: 'HEAD', total: 1 })).toBe('1 uncommitted file · +3 −1 · 1 viewed');
-    expect(listNote({ ...LIST, from: FIRST, to: HEAD })).toBe('3 files · +3 −1 · 1 viewed');
+  it('says the file count, the lines changed and a cut list, leaving the viewed count to the tab, and the base in its tooltip', () => {
+    expect(listNote(LIST)).toBe('3 files · +3 −1');
+    expect(listNote({ ...LIST, shown: 400, total: 512 })).toBe('Showing 400 of 512 files · +3 −1');
+    expect(listNote({ ...LIST, total: 1 })).toBe('1 file · +3 −1');
+    expect(listNote({ ...LIST, from: 'HEAD' })).toBe('3 uncommitted files · +3 −1');
+    expect(listNote({ ...LIST, from: 'HEAD', total: 1 })).toBe('1 uncommitted file · +3 −1');
+    expect(listNote({ ...LIST, from: FIRST, to: HEAD })).toBe('3 files · +3 −1');
     expect(listBase(LIST)).toBe('All changes since the base, 0123456');
     expect(listBase({ ...LIST, base: null, commits: [] })).toBe('Uncommitted changes only, no merge base');
     expect(listBase({ ...LIST, from: 'HEAD' })).toBe('Uncommitted changes, against HEAD');
     expect(listBase({ ...LIST, from: BASE, to: FIRST })).toBe('Commit 1111111: First change');
     expect(listBase({ ...LIST, from: 'base', to: HEAD })).toBe('From Base to fedcba9');
-    expect(emptyNote({ ...LIST, from: 'HEAD' })).toBe('No uncommitted changes.');
-    expect(emptyNote({ ...LIST, from: BASE, to: HEAD })).toBe('No changes between these points.');
-    expect(emptyNote({ ...LIST, base: null })).toBe('No uncommitted changes, and no merge base was found.');
-    expect(emptyNote(LIST)).toBe('No changes since the merge base.');
+    expect(emptyNote({ ...LIST, from: 'HEAD' })).toBe('No uncommitted changes. They appear here when the session edits a file.');
+    expect(emptyNote({ ...LIST, from: BASE, to: HEAD })).toBe('No changes between these points. Choose another scope in the scope menu.');
+    expect(emptyNote({ ...LIST, base: null })).toBe('No uncommitted changes, and no merge base was found. Changes appear here when the session edits a file.');
+    expect(emptyNote(LIST)).toBe('No changes since the merge base. They appear here when the session edits a file.');
     // A held diff against HEAD is read again after a commit.
     expect(listRef(LIST)).toBe(LIST.base);
     expect(listRef({ ...LIST, base: null })).toBe(`HEAD ${LIST.head}`);

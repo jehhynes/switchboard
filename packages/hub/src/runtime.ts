@@ -55,7 +55,7 @@ export const INPUT_SETTLE_MS = 60_000;
 /** How long after a turn end the hub keeps reading the transcript for a limit line written after the turn's marker (mechanics M100). */
 export const LIMIT_READ_MS = 120_000;
 /** Why a message cannot be typed into a session (architecture.md § Typing a message). */
-export const SESSION_ENDED = 'The session has ended. Open it in the terminal to resume it.';
+export const SESSION_ENDED = 'The session has ended.';
 export const SESSION_RELAUNCHED = 'The session was resumed since the view showed it; send the message again.';
 /** Why a held session cannot be typed into: its holder is from an older build; `stopAll` is the command that replaces it (`hub.js holder stop --all`). */
 export function holderCannotType(stopAll: string): string {

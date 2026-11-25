@@ -96,7 +96,7 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
         <label><input type="checkbox" checked={live} onChange={(event) => { follow.current = true; setLive(event.currentTarget.checked); }} /> Live follow</label>
         <button type="button" class="sheet-button secondary" onClick={() => void copy()} disabled={tail === null}>Copy filtered log</button>
       </div>
-      <p class="hub-log-note" role="status">{error ?? (tail === null ? 'Loading…' : tail.missing ? 'The hub log has not been created yet.' : tail.text === '' ? tail.limited ? 'No complete lines fit in the tail.' : 'The hub log is empty.' : shown === '' ? 'No matching lines.' : `${(shown.match(/\n/g)?.length ?? 0) + (shown.endsWith('\n') ? 0 : 1)} lines shown`)}{copied === '' ? '' : ` · ${copied}`}</p>
+      <p class="hub-log-note" role="status">{error ?? (tail === null ? 'Loading…' : tail.missing ? 'No hub log yet. It appears when the hub writes its first line.' : tail.text === '' ? tail.limited ? 'No complete lines fit in the tail.' : 'The hub log is empty. Lines appear here as the hub writes them.' : shown === '' ? 'No matching lines. Change or clear the filter.' : `${(shown.match(/\n/g)?.length ?? 0) + (shown.endsWith('\n') ? 0 : 1)} lines shown`)}{copied === '' ? '' : ` · ${copied}`}</p>
       {tail?.limited ? <p class="sheet-detail">The tail reached the 4 MiB read limit. Earlier or oversized lines are omitted.</p> : null}
       <pre class={`hub-log-output${wrap ? ' wrap' : ''}`} ref={output} tabIndex={0} aria-label="Hub log text" onScroll={(event) => {
         const node = event.currentTarget;
