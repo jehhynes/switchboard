@@ -8505,9 +8505,9 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '.header > .back-toggle' || selector === '.side-sash')).toEqual([]);
   });
 
-  it('stacks the page\'s layers by one scale: the sashes over the top bars, a bar\'s open menu over the sashes, the drawer and its backdrop over all of them, and the toast over every sheet', () => {
+  it('stacks the page\'s layers by one scale: the sashes over the top bars, a bar\'s open menu over the sashes, the drawer and its backdrop over all of them, and Update ready and the toast over every sheet and dialog', () => {
     const scale = Object.fromEntries([...css.matchAll(/--sb-z-([a-z-]+): (\d+);/g)].map(([, name, value]) => [name, Number(value)]));
-    const order = ['bar', 'sash', 'bar-menu', 'sliver', 'drawer-backdrop', 'drawer', 'maximized', 'sheet', 'persona', 'settings', 'settings-sheet', 'toast', 'top-line', 'top-band'];
+    const order = ['bar', 'sash', 'bar-menu', 'sliver', 'drawer-backdrop', 'drawer', 'maximized', 'sheet', 'persona', 'settings', 'settings-sheet', 'update', 'toast', 'top-line', 'top-band'];
 
     expect(Object.keys(scale).sort()).toEqual([...order].sort());
     expect(order.map((name) => scale[name])).toEqual(order.map((name) => scale[name]).sort((a, b) => a! - b!));
@@ -8519,8 +8519,10 @@ describe("the list's CSS", () => {
     expect(declarationsOf((selector) => selector === '.drawer-backdrop')).toEqual([expect.stringContaining('z-index: var(--sb-z-drawer-backdrop)')]);
     // The backdrop shows only under a drawer opened by its button, a key or a swipe, not one a resting pointer showed.
     expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.drawers.drawer-held:not(.listing) > .drawer-backdrop')).toEqual(['display: block;']);
+    // Update ready stays clickable while Settings, the persona dialog or a sheet is open, as #connection stays live over them (layers.ts).
+    expect(declarationsOf((selector) => selector === '.conn-update')).toEqual([expect.stringContaining('z-index: var(--sb-z-update)')]);
     // No page-level layer keeps a number of its own outside the scale.
-    expect(css).not.toMatch(/\.(sash|sliver|sheet-backdrop|persona-backdrop|composer-menu)\b[^{]*\{[^}]*z-index: \d/);
+    expect(css).not.toMatch(/\.(sash|sliver|sheet-backdrop|persona-backdrop|composer-menu|conn-update)\b[^{]*\{[^}]*z-index: \d/);
   });
 
   it('makes every box in a scrolling pane a touch target, so a drag starting just under a tab strip scrolls the pane, not the strip', () => {

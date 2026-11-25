@@ -41,9 +41,10 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
  *   bar, sash and menu of the page; its own sash and menus stack inside it.
  * - maximized: the Status and Artifacts column maximized over the whole page, its menus inside it.
  * - sheet, persona, settings, settings-sheet: the dialogs over the dimmed page, each over the ones it can open from.
+ * - update, toast: Update ready and the toast, over every sheet and dialog, so their buttons still take a press while one is open.
  * - top-line, top-band: the installed app's title bar line and the status bar's band, over everything.
  */
-:root { --sb-z-bar: 10; --sb-z-sash: 15; --sb-z-bar-menu: 20; --sb-z-sliver: 30; --sb-z-drawer-backdrop: 35; --sb-z-drawer: 40; --sb-z-maximized: 45; --sb-z-sheet: 50; --sb-z-persona: 55; --sb-z-settings: 60; --sb-z-settings-sheet: 70; --sb-z-toast: 75; --sb-z-top-line: 1000; --sb-z-top-band: 1001; }
+:root { --sb-z-bar: 10; --sb-z-sash: 15; --sb-z-bar-menu: 20; --sb-z-sliver: 30; --sb-z-drawer-backdrop: 35; --sb-z-drawer: 40; --sb-z-maximized: 45; --sb-z-sheet: 50; --sb-z-persona: 55; --sb-z-settings: 60; --sb-z-settings-sheet: 70; --sb-z-update: 72; --sb-z-toast: 75; --sb-z-top-line: 1000; --sb-z-top-band: 1001; }
 :is(.header, .list-header, .tabs):has([role="menu"]) { z-index: var(--sb-z-bar-menu); }
 /* The installed app's title bar takes the page's colour, so a line along the band's bottom edge marks where the title bar ends. */
 @media (display-mode: standalone) { body::before { content: ''; position: fixed; inset: var(--sb-top) 0 auto 0; z-index: var(--sb-z-top-line); height: 1px; background: var(--vscode-titleBar-border, var(--vscode-widget-border)); pointer-events: none; } }
@@ -1237,7 +1238,7 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 .conn-screen-start a { color: var(--vscode-textLink-foreground); }
 /* Update ready: a card above the composer with an icon, a line saying what Reload does and Reload as the primary button, in the accent
    colour so it is noticed on a wide desktop page; within the viewport on a phone. */
-.conn-update { box-sizing: border-box; position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: var(--sb-z-sheet); transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: max-content; max-width: calc(100vw - 24px); padding: 10px 10px 10px 14px; border: 1px solid var(--vscode-focusBorder, var(--vscode-widget-border)); border-left-width: 4px; border-radius: 8px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); color: var(--vscode-foreground); font-size: 14px; line-height: 1.4; box-shadow: 0 6px 20px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.45)); }
+.conn-update { box-sizing: border-box; position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: var(--sb-z-update); transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: max-content; max-width: calc(100vw - 24px); padding: 10px 10px 10px 14px; border: 1px solid var(--vscode-focusBorder, var(--vscode-widget-border)); border-left-width: 4px; border-radius: 8px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); color: var(--vscode-foreground); font-size: 14px; line-height: 1.4; box-shadow: 0 6px 20px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.45)); }
 .conn-update .codicon.conn-update-icon { flex: none; font-size: 20px; color: var(--vscode-focusBorder, var(--vscode-textLink-foreground)); }
 .conn-update-text { display: flex; flex-direction: column; min-width: 0; }
 .conn-update-text strong { font-weight: 600; }

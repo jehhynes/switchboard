@@ -451,6 +451,33 @@ try {
       await wait(2_000);
       if (!(await marked())) found.push('another build reloaded the page by itself');
       await shot('update-ready');
+      // Update ready lies over every dialog, so Reload still takes a press while Settings or the persona dialog is open.
+      for (const [name, dialog, steps] of [['Settings', '.settings[role=dialog]', ['[data-action=list-more]', '[data-action=list-settings]']], ['the persona dialog', '.persona-dialog[role=dialog]', ['[data-action=view-menu]', '[data-action=persona]']]]) {
+        for (const step of steps) {
+          await evaluate('document.querySelector(' + JSON.stringify(step) + ')?.click()');
+          await wait(200);
+        }
+
+        if (!(await until('document.querySelector(' + JSON.stringify(dialog) + ')', 5_000))) {
+          found.push(name + ' did not open');
+          continue;
+        }
+
+        const top = await evaluate(`(() => {
+          const reload = document.querySelector('.conn-update .conn-reload');
+          if (reload === null) return 'no Reload';
+          const box = reload.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return reload.contains(hit) ? null : hit === null ? 'nothing' : hit.tagName.toLowerCase() + '.' + [...hit.classList].join('.');
+        })()`);
+
+        if (top !== null) found.push('Update ready is under ' + name + ': ' + top + ' is topmost at Reload');
+        await shot('update-ready-' + (name === 'Settings' ? 'settings' : 'persona'));
+        await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+        await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+        if (!(await until('document.querySelector("[role=dialog][aria-modal=true]") === null', 5_000))) found.push(name + ' did not close on Escape');
+      }
+
       setMode({ build: 'b1' });
       return found;
     },
