@@ -442,9 +442,9 @@ describe('dockView', () => {
 
     expect(shown.links).toEqual([
       { label: 'PR #19002', url: 'https://github.com/o/r/pull/19002', kind: 'pr', badge: '19002', glyph: '\u{ea64}', mentioned: false },
-      { label: 'gh 18941', url: 'https://github.com/o/r/issues/18941', kind: 'issue', badge: 'gh 18941', glyph: null, mentioned: false },
+      { label: 'gh 18941', url: 'https://github.com/o/r/issues/18941', kind: 'issue', badge: 'gh 18941', glyph: '\u{ea84}', mentioned: false },
       { label: 'Design doc', url: 'https://example.test/doc', kind: 'url', badge: 'Design doc', glyph: '\u{eb15}', mentioned: false },
-      { label: 'gh 20087', url: 'https://github.com/o/r/issues/20087', kind: 'issue', badge: 'gh 20087', glyph: null, mentioned: true },
+      { label: 'gh 20087', url: 'https://github.com/o/r/issues/20087', kind: 'issue', badge: 'gh 20087', glyph: '\u{ea84}', mentioned: true },
     ]);
     expect(shown.returned).toBe(3);
   });

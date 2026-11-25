@@ -1,8 +1,10 @@
 // Checks the page's shell at iPhone sizes and an iPad's in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
 // app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer, a sheet,
-// the persona dialog, a work item with more tabs than fit, and the list at 200 px. Every tab shown keeps its label, no tab passes its strip, and
-// the More menu lies above everything under it. Line 2's playbook or host is never cut, its pills are whole or left out whole, the ticket
-// key always shows, and line 2 paints the same while the same list is sent again.
+// the persona dialog, a work item with more tabs than fit, and the list at 200 and 300 px. Every tab shown keeps its label, no tab passes its strip, and
+// the More menu lies above everything under it. Line 2's playbook or host is never cut; each of its pills is whole, its icon alone with no text
+// showing, or left out whole, never cut, at several list widths down to 200 px; a pill shows its text exactly where it and the texts before
+// it fit beside the icons; the ticket key always shows whole; a pill left out is no
+// keyboard stop; and line 2 paints the same while the same list is sent again.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -23,7 +25,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
 ];
-const VIEWS = ['list', 'narrow', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet', 'persona', 'tabs'];
+const VIEWS = ['list', 'narrow', 'narrow-300', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
 /** --shots <dir> saves a screenshot of each view there. */
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
@@ -58,11 +60,18 @@ const remove = { label: 'Delete', action: 'delete', icon: 'trash', group: 'state
 // The second row's line 2 holds more pills than fit beside its long playbook, so some drop out.
 const pr = (n) => ({ label: 'PR #' + n, url: 'https://github.com/o/r/pull/' + n, kind: 'pr', badge: String(n), glyph: '\u{ea64}', mentioned: false });
 const crowded = { ticket: 'gh 21509', playbook: 'dev:address-pr-review', comment: { glyph: '\u{ea6b}', title: 'A comment' }, links: [pr(21512), pr(21513), pr(21514), pr(21515), { label: 'Design notes', url: 'https://example.com/notes', kind: 'url', badge: 'Design notes', glyph: '\u{eb15}', mentioned: false }], returned: 2 };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [remove] }), row(2, 'Another thing', crowded), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'gh 21510', comment: { glyph: '\u{ea6b}', title: 'A comment' } })] }];
-const listing = view === 'list' || view === 'narrow';
+// The fourth row's short playbook leaves room for its pills as icons and some of their texts at 300 px.
+const short = { ticket: 'gh 7', playbook: 'dev:plan', links: [pr(21516), { label: 'gh 21517', url: 'https://github.com/o/r/issues/21517', kind: 'issue', badge: 'gh 21517', glyph: '\u{ea84}', mentioned: true }, { label: 'Spec', url: 'https://example.com/spec', kind: 'url', badge: 'Spec', glyph: '\u{eb15}', mentioned: false }], returned: 3 };
+// The fifth row's seven pills, outside the narrow views: six short texts that fit beside the icons at the phone's width, then a long one that
+// does not, so the sixth shows its text and the seventh its icon alone.
+const link = (badge) => ({ label: badge, url: 'https://example.com/' + badge, kind: 'url', badge, glyph: '\u{eb15}', mentioned: false });
+const many = { ticket: 'gh 9', playbook: 'dev:x', links: ['1', '2', '3', '4', '5', '6', 'A long seventh label'].map(link) };
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [remove] }), row(2, 'Another thing', crowded), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'gh 21510', comment: { glyph: '\u{ea6b}', title: 'A comment' } }), row(4, 'Short playbook', short), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)])] }];
+// The list at its narrowest, 200 px, where line 2 wraps, and at 300 px, where line 2's pills shrink to their icons.
+const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
+const listing = view === 'list' || narrow !== null;
 const open = !listing && view !== 'settings';
-// The list at its narrowest, 200 px, where line 2 wraps.
-if (view === 'narrow') document.head.insertAdjacentHTML('beforeend', '<style>#list { width: 200px !important; min-width: 0 !important; max-width: none !important; flex: none !important; }</style>');
+if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list { width: ' + narrow + 'px !important; min-width: 0 !important; max-width: none !important; flex: none !important; }</style>');
 const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
 const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: view === 'persona' ? { id: 'nova', name: 'Nova', pinned: true, tonePending: false } : null, canPin: true };
 const personas = [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm and brief, with a dry joke now and then.' }, { id: 'iris', name: 'Iris', voice: 'marin', style: 'none', personality: '' }];
@@ -87,11 +96,13 @@ class FakeSource {
 }
 window.EventSource = FakeSource;
 // On the list, the same list again every 120 ms, as a busy hub sends it, and line 2 as each frame starts, that is as the last frame painted it.
+// Frames while a web font loads are skipped: a frame can lay out the loaded font before the set's loadingdone, which refits the pills' tab
+// stops (main.ts, fitListLinks), and a font load is not a list sent again.
 if (listing) {
   window.__line2 = [];
   const sample = () => {
     const lines = [...document.querySelectorAll('#list .row-line:not(.row-details)')];
-    if (lines.length > 0) window.__line2.push(lines.map((line) => line.innerHTML + [...line.querySelectorAll('.pill')].map((pill) => pill.getBoundingClientRect().width).join()).join('|'));
+    if (lines.length > 0 && document.fonts.status === 'loaded') window.__line2.push(lines.map((line) => line.innerHTML + [...line.querySelectorAll('.pill')].map((pill) => pill.getBoundingClientRect().width).join()).join('|'));
     requestAnimationFrame(sample);
   };
   requestAnimationFrame(sample);
@@ -148,21 +159,38 @@ const measure = `(() => {
     })(),
     bar: (() => { const probe = document.createElement('div'); probe.style.background = 'var(--sb-bar-background)'; document.body.append(probe); const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour; })(),
     band: document.getElementById('safe-top').getBoundingClientRect().height,
-    // Line 2 of each shown row: a pill is whole inside its line and its box, or wholly outside them, left out; the ticket key always whole.
+    // Line 2 of each shown row: a pill is whole inside its line and its box, its text shown whole; its icon alone, its text not shown; or wholly
+    // outside them, left out. The unseen boxes that decide which texts fit (page.css, Line 2) are not pills shown.
     line2: window.__line2 ? { samples: window.__line2.length, ways: new Set(window.__line2).size } : null,
     names: [...document.querySelectorAll('#list .row-line .playbook')].filter(shown).map((name) => { const box = name.getBoundingClientRect(); const edge = name.closest('.row-line').getBoundingClientRect(); const icon = name.previousElementSibling?.classList.contains('comment') ? name.previousElementSibling.getBoundingClientRect() : null; return { text: name.textContent, alone: icon !== null && icon.bottom <= box.top + 0.5, cut: name.scrollWidth > name.clientWidth + 0.5 || box.right > edge.right + 0.5 || box.bottom > edge.bottom + 0.5 }; }),
     pills: [...document.querySelectorAll('#list .row-line:not(.row-details)')].filter(shown).flatMap((line) => {
       const edge = line.getBoundingClientRect();
+      // The room each link pill's text needs, its own and the texts before it beside every pill as an icon, from the unseen boxes (page.css,
+      // Line 2): what is left of the row's link box after them, negative where they do not fit.
+      const links = line.querySelector('.row-links');
+      const width = (node) => node?.getBoundingClientRect().width ?? 0;
+      const texts = links === null ? [] : [...links.querySelectorAll('.row-links-fit-text .pill-text')].map(width);
+      const left = (index) => width(links) - width(links.querySelector('.row-links-fit')) - texts.slice(0, index + 1).reduce((sum, one) => sum + one, 0);
 
-      return [...line.querySelectorAll('.pill')].map((pill) => {
+      return [...line.querySelectorAll(':scope > .pill, .row-links-shown > .pill')].map((pill, _, all) => {
         const box = pill.getBoundingClientRect();
-        const holder = pill.parentElement.getBoundingClientRect();
+        const holder = (pill.closest('.row-links') ?? line).getBoundingClientRect();
         const right = Math.min(edge.right, holder.right);
         const bottom = Math.min(edge.bottom, holder.bottom);
         const inside = box.left >= edge.left - 0.5 && box.right <= right + 0.5 && box.top >= edge.top - 0.5 && box.bottom <= bottom + 0.5;
         const outside = box.left >= right - 0.5 || box.top >= bottom - 0.5;
 
-        return { text: pill.textContent, ticket: pill.classList.contains('ticket'), state: inside ? 'whole' : outside ? 'out' : 'cut' };
+        const text = pill.querySelector('.pill-text');
+        const icon = pill.querySelector('.codicon');
+        const shown = getComputedStyle(text).display !== 'none';
+        const textBox = text.getBoundingClientRect();
+        // A text shown must lie whole inside the pill's border; an icon alone must be there to show.
+        const whole = shown ? textBox.width > 0 && textBox.left >= box.left - 0.5 && textBox.right <= box.right - 0.5 : icon !== null && icon.getBoundingClientRect().width > 0;
+        const state = inside ? (whole ? (shown ? 'whole' : 'icon') : 'cut') : outside ? 'out' : 'cut';
+
+        const index = all.filter((one) => one.closest('.row-links-shown') !== null).indexOf(pill);
+
+        return { text: pill.textContent, ticket: pill.classList.contains('ticket'), state, stop: pill.hasAttribute('data-action') ? pill.tabIndex : null, left: index < 0 ? null : left(index) };
       });
     }),
     // Each shown tab strip: a label shown cut narrower than about five characters, or not at all, and any tab past the strip's edges.
@@ -222,15 +250,24 @@ function failures(view, size, m) {
   if (m.line2 !== null) {
     if (m.line2.samples < 3) out.push('line 2 was sampled in ' + m.line2.samples + ' frames, too few to check');
     if (m.line2.ways > 1) out.push('line 2 painted ' + m.line2.ways + ' different ways while the same list was sent again');
-    if (m.pills.filter((pill) => pill.ticket).length !== 3) out.push('line 2 shows ' + m.pills.filter((pill) => pill.ticket).length + ' ticket keys, not 3');
+    const keys = view.startsWith('narrow') ? 4 : 5;
+
+    if (m.pills.filter((pill) => pill.ticket).length !== keys) out.push('line 2 shows ' + m.pills.filter((pill) => pill.ticket).length + ' ticket keys, not ' + keys);
   }
   for (const name of m.names) {
     if (name.cut) out.push('line 2\'s playbook or host ' + name.text + ' is cut');
     if (name.alone) out.push('line 2\'s comment icon is alone on a line above ' + name.text);
   }
   for (const pill of m.pills) {
-    if (pill.state === 'cut' || (pill.ticket && pill.state !== 'whole')) out.push('line 2\'s pill ' + pill.text + ' is ' + (pill.state === 'cut' ? 'cut' : 'left out'));
+    if (pill.state === 'cut' || (pill.ticket && pill.state !== 'whole')) out.push('line 2\'s pill ' + pill.text + ' is ' + (pill.state === 'cut' ? 'cut' : pill.state === 'icon' ? 'its icon alone' : 'left out'));
+    // A pill shows its text exactly where its text and those before it fit beside the icons, each pill on its own.
+    if (pill.left !== null && pill.state === 'icon' && pill.left > 0.5) out.push('line 2\'s pill ' + pill.text + ' shows its icon alone with ' + pill.left.toFixed(1) + ' px to spare for its text');
+    if (pill.left !== null && pill.state === 'whole' && pill.left < -0.5) out.push('line 2\'s pill ' + pill.text + ' shows its text ' + (-pill.left).toFixed(1) + ' px past the room for it');
+    if (pill.stop !== null && (pill.state === 'out') !== (pill.stop === -1)) out.push('line 2\'s pill ' + pill.text + (pill.state === 'out' ? ', left out, is a keyboard stop' : ', shown, is no keyboard stop'));
   }
+  // At 300 px line 2 has room for some pills whole and others as their icons alone.
+  if (view === 'narrow-300' && !m.pills.some((pill) => pill.state === 'icon')) out.push('no pill on line 2 shows its icon alone at 300 px');
+  if (view === 'narrow-300' && !m.pills.some((pill) => !pill.ticket && pill.state === 'whole')) out.push('no link pill on line 2 shows whole at 300 px');
   for (const strip of m.strips) {
     if (strip.cut.length > 0) out.push('a tab strip hides or cuts below five characters the labels ' + strip.cut.slice(0, 4).join(', '));
     if (strip.past.length > 0) out.push('a tab passes its strip: ' + strip.past.slice(0, 4).join(', '));

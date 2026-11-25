@@ -231,7 +231,7 @@ export interface DockRow {
   search: string;
   /**
    * The ticket's links (PRD R52), a link to the ticket itself left out: `label` names it in the right-click menu (`PR #19002`, `gh 18941` or its
-   * label); `badge` and `glyph` draw it as a badge on line 2, a pull request as its number after the pull request icon. A `mentioned` link,
+   * label); `badge` and `glyph` draw it as a badge on line 2, a pull request as its number after the pull request icon, an issue as its key after GitHub's mark. A `mentioned` link,
    * found in the ticket's text (PRD R61), follows the others and is drawn muted. A pull request its source has read carries `pr`, its state,
    * review decision and checks (PRD R92).
    */
@@ -544,7 +544,7 @@ function linksOf(entry: WorkItemView | PoolView, keys: RepoKeys | undefined, pul
 
     return kind === 'pr'
       ? [{ label: `PR #${number}`, url: link.target, kind, badge: number, glyph: PULL_REQUEST_GLYPH, mentioned, ...(pullRequests[link.target] === undefined ? {} : { pr: pullRequests[link.target] }) }]
-      : [{ label: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), url: link.target, kind, badge: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), glyph: null, mentioned }];
+      : [{ label: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), url: link.target, kind, badge: issueKey(entry.ticket.source, issueOfUrl(link.target)?.repo ?? '', number, keys, true), glyph: GITHUB_GLYPH, mentioned }];
   });
 }
 
@@ -742,9 +742,10 @@ function hubControls(controls: Control[]): DockRow['controls'] {
   );
 }
 
-/** The codicons of a pull request badge (git-pull-request) and of another link's badge (link). */
+/** The codicons of a pull request badge (git-pull-request), an issue's (github) and another link's (link). */
 const PULL_REQUEST_GLYPH = '\u{ea64}';
 const LINK_GLYPH = '\u{eb15}';
+const GITHUB_GLYPH = '\u{ea84}';
 
 /** Each group's glyph: bell, eye, play-circle, inbox, pass and clockface. */
 const GROUP_GLYPHS: Record<RowGroup, string> = { blocked: '\u{eaa2}', review: '\u{ea70}', progress: '\u{eba6}', unstarted: '\u{eb09}', done: '\u{eba4}', snoozed: '\u{ec75}' };

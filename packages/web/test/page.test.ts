@@ -625,15 +625,26 @@ describe('drawing', () => {
     expect(head!.querySelector('.row-time')!.getAttribute('title')).toBe('In queue since 11:40');
     // Line 2 in the row's order, each pill's whole name and URL in its tooltip.
     expect([...line2!.children].map((child) => child.className)).toEqual(['codicon comment', 'playbook', 'pill ticket source-github', 'row-links']);
-    expect([...line2!.querySelectorAll('.row-links > .pill')].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned', 'pill returned']);
+    expect([...line2!.querySelectorAll('.row-links-shown > .pill')].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned', 'pill returned']);
     expect(line2!.querySelector('.comment')!.getAttribute('title')).toBe('Nov 20\nWaits on Sam');
     expect(line2!.querySelector('.ticket')!.getAttribute('title')).toBe('gh 1\nhttps://github.com/o/r/issues/1');
     expect(line2!.querySelector('.pr')!.textContent).toBe('\u{ea64}19002');
     expect(line2!.querySelector('.pr')!.getAttribute('title')).toBe('PR #19002\nhttps://github.com/o/r/pull/19002');
-    // An issue's pill is its key alone, with no icon.
-    expect(line2!.querySelectorAll('.issue .codicon')).toHaveLength(0);
+    // Every link pill has an icon to shrink to: an issue the hub sends no glyph for shows GitHub's mark.
+    expect([...line2!.querySelectorAll('.row-links-shown .pill')].map((pill) => pill.querySelector('.codicon')?.textContent)).toEqual(['\u{ea64}', '\u{ea84}', '\u{eae2}']);
     expect(line2!.querySelector('.issue')!.getAttribute('title')).toBe('gh 18800, named in the ticket\nhttps://github.com/o/r/issues/18800');
     expect(line2!.querySelector('.returned .pill-text')!.textContent).toBe('2');
+    // The unseen boxes that decide which texts fit (page.css, Line 2): the pills as icons, then each pill's text; hidden from screen readers
+    // and holding nothing to focus or click.
+    const links2 = line2!.querySelector('.row-links')!;
+    expect([...links2.children].map((child) => [child.className, child.getAttribute('aria-hidden'), child.textContent])).toEqual([
+      ['row-links-box', null, '\u{ea64}19002\u{ea84}gh 18800\u{eae2}2'],
+      ['row-links-fit', 'true', '\u{ea64}\u{ea84}\u{eae2}'],
+      ['row-links-fit-text', 'true', '19002'],
+      ['row-links-fit-text', 'true', 'gh 18800'],
+      ['row-links-fit-text', 'true', '2'],
+    ]);
+    expect(links2.querySelectorAll('.row-links-fit [title], .row-links-fit [tabindex], .row-links-fit [data-action]')).toHaveLength(0);
     // Line 3: the mark, then each detail in its tone with a muted separator between them, never before the first.
     expect(line3!.className).toBe('row-line row-details');
     expect(line3!.firstElementChild!.className).toBe('codicon codicon-watch mark');
@@ -3087,6 +3098,29 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("gives each of line 2's first fifteen link pills a text box of its own and the rest one box, each a pixel taller, so each text fits on its own (page.css, Line 2)", () => {
+    const root = document.createElement('div');
+    const links = Array.from({ length: 18 }, (_, i) => ({ label: `L${i}`, url: `https://x/${i}`, kind: 'url' as const, badge: `L${i}`, glyph: null, mentioned: false }));
+
+    root.innerHTML = html(renderList([listGroup('progress', [listRow(1, { links })])], null, new Set()));
+
+    // The sixth pill's text has a box of its own, so it shows where it fits though the seventh's does not (check-shell.mjs measures that).
+    const boxes = [...root.querySelectorAll<HTMLElement>('.row-links-fit-text')];
+
+    expect(boxes.map((box) => box.textContent)).toEqual([...Array.from({ length: 15 }, (_, i) => `L${i}`), 'L15L16L17']);
+    expect(boxes.map((box) => box.style.height)).toEqual(Array.from({ length: 16 }, (_, i) => `${20 + i}px`));
+    // A container query for each box's height shows the text of its pill, the last box's for every pill from the sixteenth.
+    const css = readFileSync(join(__dirname, '../src/page.css'), 'utf8');
+
+    for (let index = 1; index < 16; index++) {
+      expect(css).toContain(`@container row-links (min-height: ${18 + index}.5px) { .row-line .row-links-shown > .pill:nth-child(${index}) .pill-text { display: inline; } }`);
+    }
+
+    expect(css).toContain('@container row-links (min-height: 34.5px) { .row-line .row-links-shown > .pill:nth-child(n + 16) .pill-text { display: inline; } }');
+    // A link the hub sends no glyph for shrinks to the link icon.
+    expect([...root.querySelectorAll('.row-links-shown .pill .codicon')].map((icon) => icon.textContent)).toEqual(Array(18).fill('\u{eb15}'));
+  });
+
   it("draws line 2's pills the same on every redraw, however narrow the row, without measuring them (page.css, Line 2)", async () => {
     const { page, source } = start();
     // Widths that would not fit: a 150 px line, 80 px pills and a 100 px playbook.
@@ -3120,7 +3154,7 @@ describe('the page in use', () => {
     expect(changes).toEqual([]);
     expect(line()).toBe(first);
     // Every pill whole, its text shown: the key's number, the PR's number, the link's label and Returned's count.
-    expect([...root.querySelectorAll('[data-work-item="1"] .pill')].map((pill) => [pill.className, pill.querySelector('.pill-text')!.textContent])).toEqual([
+    expect([...root.querySelectorAll('[data-work-item="1"] .row-line > .pill, [data-work-item="1"] .row-links-shown > .pill')].map((pill) => [pill.className, pill.querySelector('.pill-text')!.textContent])).toEqual([
       ['pill ticket source-github', 'gh 1'],
       ['pill link pr', '21510'],
       ['pill link url', 'Design notes'],
@@ -7135,7 +7169,13 @@ describe("the list's CSS", () => {
     // Where the playbook and the key do not fit on one line, the key wraps under the playbook rather than being cut.
     expect(one('.row-line:not(.row-details)')).toBe('flex-wrap: wrap; row-gap: 3px; height: auto; min-height: 18px;');
     // An empty first item, so even the first pill wraps away rather than being cut.
-    expect(one('.row-line .row-links::before')).toBe("content: ''; height: 18px;");
+    expect(one('.row-line .row-links-shown::before')).toBe("content: ''; height: 18px;");
+    // A pill shows its text whole or not at all: hidden by default, shown by the container query for its place, never cut with an ellipsis.
+    expect(one('.row-line .row-links-shown .pill-text')).toBe('display: none;');
+    expect(one('.row-line .row-links-box')).toContain('container: row-links / size;');
+    expect(css).toContain('@container row-links (min-height: 19.5px) { .row-line .row-links-shown > .pill:nth-child(1) .pill-text { display: inline; } }');
+    expect(css).toContain('@container row-links (max-height: 18.5px) { .row-line .row-links-shown { width: auto; } }');
+    expect(declarationsOf((each) => each.startsWith('.row-line .row-links')).join(' ')).not.toMatch(/ellipsis/);
     expect(declarationsOf((each) => each === '.row-line .pill.ticket.source-github')).toEqual(['border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent);']);
     // Marks in the foreground, Failed in the error colour; the muted texts in the list's grey, #717171 in Light Modern.
     expect(one('.row-details .mark')).toBe('font-size: 14px;');

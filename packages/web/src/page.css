@@ -258,17 +258,49 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row-line .pill { flex: none; display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; height: 18px; overflow: hidden; white-space: nowrap; border: 1px solid var(--sb-row-muted); border-radius: 9px; padding: 0 6px; font-size: 12px; line-height: 16px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--vscode-foreground); }
 .row-line .pill .codicon { flex: none; font-size: 14px; }
 /* Line 2 by CSS alone, no measuring, so a redraw never changes it: the comment icon, the playbook and the ticket key keep their width and are
-   never cut; only the link pills and Returned give way. They sit in a one-line box that takes the room left on the line, and a pill that does
-   not fit whole wraps onto the box's second line, which is clipped, so pills drop out whole, Returned first, then the links from the last, and
-   come back when the line widens. The box asks for no width, so it never moves to a line of its own; where the playbook and key do not fit on
-   one line, the key wraps under the playbook and the row grows. A pill's label is never cut, and its tooltip keeps its name and URL. */
+   never cut; only the link pills and Returned give way. They sit in a one-line box (.row-links) that takes the room left on the line. Each
+   shows its icon and its text where all the pills before it show theirs and the rest fit as icons; otherwise its icon alone, from the last
+   pill; and where even the icons do not fit, the pills drop out whole, Returned first, then the links from the last. They come back when the
+   line widens. A pill's text is whole or not shown, never cut, and its tooltip keeps its name and URL. The box asks for no width, so it never
+   moves to a line of its own; where the playbook and key do not fit on one line, the key wraps under the playbook and the row grows. */
 .row-line:not(.row-details) { flex-wrap: wrap; row-gap: 3px; height: auto; min-height: 18px; }
 .row-line .pill-text { white-space: nowrap; }
 /* The box's -6 px margin cancels the line's gap before it, so it takes no room at all; each pill keeps its 6 px space inside the box. */
 .row-line .row-links { flex: 1 1 0; min-width: 0; margin-left: -6px; display: flex; flex-wrap: wrap; height: 18px; overflow: hidden; }
-/* A box's first item stays on its first line however wide, so an empty item goes first and every pill can wrap away. */
-.row-line .row-links::before { content: ''; height: 18px; }
-.row-line .row-links > .pill { margin-left: 6px; }
+/* How the box decides, unseen: after .row-links-box come the pills as icons (.row-links-fit, 19 px tall), then each pill's text with its 3 px
+   gap in a box of its own (.row-links-fit-text, 20 px tall for the first pill, 21 px for the second, and so on, set where list.tsx draws it;
+   the sixteenth holds the texts of the pills from there on, FIT_STEPS). They wrap onto the box's clipped second line from the first that does
+   not fit, so the first line is as tall as the last that fits, and .row-links-box, stretched to that line, is a container whose height tells
+   the pills how many texts fit, one container query a pill: 18 px when not even the icons do. */
+.row-line .row-links-box { flex: 1 1 0; min-width: 0; min-height: 18px; container: row-links / size; }
+.row-line .row-links-fit, .row-line .row-links-fit-text { flex: none; display: flex; visibility: hidden; }
+.row-line .row-links-fit { height: 19px; }
+.row-line .row-links-fit-text { font-size: 12px; line-height: 16px; }
+.row-line .row-links-fit-text .pill-text { padding-left: 3px; }
+/* The pills shown: whole where their texts fit, past .row-links-box into the room the unseen boxes take; where not even the icons fit, the
+   box's width, where a pill that does not fit wraps onto the clipped second line. A box's first item stays on its first line however wide, so
+   an empty item goes first and every pill can wrap away. */
+.row-line .row-links-shown { display: flex; flex-wrap: wrap; width: max-content; height: 18px; overflow: hidden; }
+.row-line .row-links-shown::before { content: ''; height: 18px; }
+.row-line .row-links-shown > .pill, .row-line .row-links-fit > .pill { margin-left: 6px; }
+.row-line .row-links-shown .pill-text { display: none; }
+@container row-links (max-height: 18.5px) { .row-line .row-links-shown { width: auto; } }
+@container row-links (min-height: 19.5px) { .row-line .row-links-shown > .pill:nth-child(1) .pill-text { display: inline; } }
+@container row-links (min-height: 20.5px) { .row-line .row-links-shown > .pill:nth-child(2) .pill-text { display: inline; } }
+@container row-links (min-height: 21.5px) { .row-line .row-links-shown > .pill:nth-child(3) .pill-text { display: inline; } }
+@container row-links (min-height: 22.5px) { .row-line .row-links-shown > .pill:nth-child(4) .pill-text { display: inline; } }
+@container row-links (min-height: 23.5px) { .row-line .row-links-shown > .pill:nth-child(5) .pill-text { display: inline; } }
+@container row-links (min-height: 24.5px) { .row-line .row-links-shown > .pill:nth-child(6) .pill-text { display: inline; } }
+@container row-links (min-height: 25.5px) { .row-line .row-links-shown > .pill:nth-child(7) .pill-text { display: inline; } }
+@container row-links (min-height: 26.5px) { .row-line .row-links-shown > .pill:nth-child(8) .pill-text { display: inline; } }
+@container row-links (min-height: 27.5px) { .row-line .row-links-shown > .pill:nth-child(9) .pill-text { display: inline; } }
+@container row-links (min-height: 28.5px) { .row-line .row-links-shown > .pill:nth-child(10) .pill-text { display: inline; } }
+@container row-links (min-height: 29.5px) { .row-line .row-links-shown > .pill:nth-child(11) .pill-text { display: inline; } }
+@container row-links (min-height: 30.5px) { .row-line .row-links-shown > .pill:nth-child(12) .pill-text { display: inline; } }
+@container row-links (min-height: 31.5px) { .row-line .row-links-shown > .pill:nth-child(13) .pill-text { display: inline; } }
+@container row-links (min-height: 32.5px) { .row-line .row-links-shown > .pill:nth-child(14) .pill-text { display: inline; } }
+@container row-links (min-height: 33.5px) { .row-line .row-links-shown > .pill:nth-child(15) .pill-text { display: inline; } }
+@container row-links (min-height: 34.5px) { .row-line .row-links-shown > .pill:nth-child(n + 16) .pill-text { display: inline; } }
 .row-line .pill[data-action] { cursor: pointer; }
 .row-line .pill[data-action]:hover { background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
 .row-line .pill.ticket.source-github, .row-line .pill.link.issue { border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent); }

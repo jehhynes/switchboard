@@ -8,6 +8,13 @@ import { WindowRows } from './windowRows.js';
 
 /** The codicon Returned's pill shows. */
 const RETURNED_GLYPH = '\u{eae2}';
+/** A link pill's codicon when the hub sends none: git-pull-request, github or link. */
+const LINK_GLYPHS: Record<PageRow['links'][number]['kind'], string> = { pr: '\u{ea64}', issue: '\u{ea84}', url: '\u{eb15}' };
+/**
+ * Line 2's fit boxes that show the pills' texts one by one (page.css, Line 2), one a pill, so each pill shows its text where it fits; the last
+ * holds the texts of the pills from this one on. page.css has a container query for each.
+ */
+const FIT_STEPS = 16;
 
 /**
  * A pill on line 2: its codicon glyph, if any, then its text, the full name in its tooltip. `opens` makes a pill with a link open it; without
@@ -25,7 +32,8 @@ function Pill({ classes, glyph, text, title, opens }: { classes: string; glyph: 
 /**
  * A row of the list, drawn in three lines from the hub's dock row: line 1 the priority dot, the title and the time; line 2 the
  * comment icon, the playbook with its namespace muted (or a hosted conversation's host), the ticket key as a pill in its source's colour, the
- * link pills and Returned, those that do not fit left out whole by the page's CSS (page.css, Line 2); line 3 the mark and the
+ * link pills and Returned, which the page's CSS shrinks to their icons, from the last, or leaves out whole where they do not fit (page.css,
+ * Line 2); line 3 the mark and the
  * details, a muted " · " between them, in their tones. The row's stripe is on its left edge.
  */
 function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, position }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; menuPoint: { x: number; y: number } | undefined; pillsOpen: boolean; movable: boolean; drag: DragView | null; position?: { index: number; total: number } }) {
@@ -52,6 +60,11 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
   const hasMenu = row.actions.length + row.pastes.length + row.opens.length + row.links.length > 0 || row.url !== '' || row.history !== null;
   // Without the browser pane a pill with a link opens it instead of the row's click (PRD R52).
   const opens = (which: string): Record<string, string> => (pillsOpen ? { 'data-action': 'open-link', 'data-row': key, 'data-link': which } : {});
+  // The link pills and Returned, each with an icon it shrinks to where its text does not fit.
+  const pills: { classes: string; glyph: string; text: string; title: string; opens?: Record<string, string> }[] = [
+    ...row.links.map((link, index) => ({ classes: `link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, glyph: link.glyph ?? LINK_GLYPHS[link.kind], text: link.badge, title: `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`, opens: opens(String(index)) })),
+    ...(row.returned > 0 ? [{ classes: 'returned', glyph: RETURNED_GLYPH, text: String(row.returned), title: `Returned ${row.returned}: earlier work items with this playbook, or one it is a return of, were done for this ticket` }] : []),
+  ];
   const details = row.details.map((detail, index) => [
     index > 0 ? <span class="row-detail-separator" aria-hidden="true">·</span> : null,
     <span class={`row-detail${detail.tone === null ? '' : ` ${detail.tone}`}`} title={detail.title ?? undefined}>{detail.text}</span>,
@@ -79,12 +92,30 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
           {row.comment === null ? null : <span class="codicon comment" role="img" title={row.comment.title} aria-label="Comments">{row.comment.glyph}</span>}
           {playbook}
           <Pill classes={`ticket source-${row.sourceKind}`} glyph={null} text={row.ticket} title={row.url === '' ? row.ticket : `${row.ticket}\n${row.url}`} opens={row.url === '' ? {} : opens('ticket')} />
-          {row.links.length === 0 && row.returned === 0 ? null : (
+          {pills.length === 0 ? null : (
             <span class="row-links">
-              {row.links.map((link, index) => (
-                <Pill classes={`link ${link.kind}${link.mentioned ? ' mentioned' : ''}`} glyph={link.glyph} text={link.badge} title={`${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`} opens={opens(String(index))} />
+              <span class="row-links-box">
+                <span class="row-links-shown">
+                  {pills.map((pill) => (
+                    <Pill {...pill} />
+                  ))}
+                </span>
+              </span>
+              {/* Never shown: the pills as icons, then each pill's text, whose fit decides which texts show (page.css, Line 2). */}
+              <span class="row-links-fit" aria-hidden="true">
+                {pills.map((pill) => (
+                  <span class={`pill ${pill.classes}`}>
+                    <span class="codicon">{pill.glyph}</span>
+                  </span>
+                ))}
+              </span>
+              {pills.slice(0, FIT_STEPS).map((_, step) => (
+                <span class="row-links-fit-text" aria-hidden="true" style={`height: ${20 + step}px`}>
+                  {(step === FIT_STEPS - 1 ? pills.slice(step) : [pills[step]!]).map((pill) => (
+                    <span class="pill-text">{pill.text}</span>
+                  ))}
+                </span>
               ))}
-              {row.returned > 0 ? <Pill classes="returned" glyph={RETURNED_GLYPH} text={String(row.returned)} title={`Returned ${row.returned}: earlier work items with this playbook, or one it is a return of, were done for this ticket`} /> : null}
             </span>
           )}
         </span>

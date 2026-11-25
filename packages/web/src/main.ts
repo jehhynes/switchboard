@@ -2061,6 +2061,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   window.addEventListener('resize', fitListLinks, { signal: listening.signal });
+  // A web font that loads after a draw changes which pills fit, as icons or whole.
+  document.fonts?.addEventListener('loadingdone', fitListLinks, { signal: listening.signal });
   const listResized = typeof ResizeObserver === 'function' ? new ResizeObserver(fitListLinks) : null;
   listResized?.observe(list);
   listening.signal.addEventListener('abort', () => listResized?.disconnect());
