@@ -1,22 +1,36 @@
 import { describe, expect, it, vi } from 'vitest';
-import { IframeBrowser, canInstallExtension, colorAlpha, frameCover, frameUrl, frameLinks, FRAME_HOLES_MAX } from '../src/iframeBrowser.js';
+import { IframeBrowser, canInstallExtension, colorAlpha, frameCover, frameLink, frameUrl, frameLinks, githubItem, FRAME_HOLES_MAX } from '../src/iframeBrowser.js';
 import type { PageRow } from '@switchboard/protocol';
-const row = (id = 1): PageRow => ({ workItemId: id, url: `https://github.com/o/r/issues/${id}`, links: [{ label: 'PR', url: 'https://github.com/o/r/pull/3', kind: 'pr' }, { label: 'Duplicate', url: `https://github.com/o/r/issues/${id}` }, { label: 'Other', url: 'https://example.com/' }] }) as PageRow;
+const row = (id = 1): PageRow => ({ workItemId: id, ticket: `gh ${id}`, sourceKind: 'github', url: `https://github.com/o/r/issues/${id}`, links: [{ label: 'PR', url: 'https://github.com/o/r/pull/3', kind: 'pr' }, { label: 'Duplicate', url: `https://github.com/o/r/issues/${id}` }, { label: 'Other', url: 'https://example.com/' }] }) as PageRow;
 async function rig(answer: unknown = { ok: true }) {
   const send = vi.fn(async (_message: Record<string, unknown>) => answer);
-  const browser = new IframeBrowser({ send, changed: vi.fn(), external: vi.fn() });
+  const external = vi.fn();
+  const extension = vi.fn();
+  const browser = new IframeBrowser({ send, changed: vi.fn(), external, extension });
   const host = document.createElement('div');
   document.body.append(host);
   browser.configure(true);
   await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-  return { browser, host, send };
+  return { browser, host, send, external, extension };
 }
 describe('embedded browser tabs', () => {
   it('rejects unsafe sites and deduplicates row links', () => {
     for (const url of ['https://github.com/o/r', 'https://desk.zoho.com/agent/ticket/1', 'https://forum.example.com/t/2', 'http://localhost:5000/']) expect(frameUrl(url)).toBe(true);
     for (const url of ['bad', 'javascript:alert(1)', 'https://u:p@github.com/', 'file:///secret', 'data:text/html,no', 'http://localhost:47615/', 'http://127.0.0.1:47615/', `${location.origin}/page/`, `https://github.com/${'x'.repeat(2048)}`]) expect(frameUrl(url)).toBe(false);
     expect(frameLinks(null)).toEqual([]);
-    expect(frameLinks(row()).map((link) => link.label)).toEqual(['Ticket', 'PR', 'Other']);
+    expect(frameLinks(row()).map((link) => [link.label, link.name, link.icon])).toEqual([['#1', 'gh 1', 'issue'], ['#3', 'PR', 'pr'], ['Other', 'Other', 'web']]);
+  });
+  it('names a link tab by its item: #n for GitHub, the ticket number for another source, else its own name or host', () => {
+    expect(githubItem('https://github.com/o/r/pull/22234/files')).toEqual({ kind: 'pr', number: '22234' });
+    expect(githubItem('https://github.com/o/r/issues/21602#issuecomment-1')).toEqual({ kind: 'issue', number: '21602' });
+    for (const url of ['https://github.com/o/r', 'https://github.com/o/r/issues', 'https://gitlab.com/o/r/issues/1', 'https://github.com/o/r/issues/1x', 'bad']) expect(githubItem(url)).toBeNull();
+    // A GitHub link is #n whatever named it, a ticket of its source too.
+    expect(frameLink('https://github.com/o/r/issues/5', 'gh 5', { kind: 'github', ticket: 'gh 5' })).toEqual({ url: 'https://github.com/o/r/issues/5', label: '#5', name: 'gh 5', icon: 'issue' });
+    expect(frameLink('https://desk.zoho.com/agent/ticket/4521', 'zoho 4521', { kind: 'zoho', ticket: 'zoho 4521' })).toEqual({ url: 'https://desk.zoho.com/agent/ticket/4521', label: '4521', name: 'zoho 4521', icon: 'source', source: 'zoho' });
+    expect(frameLink('https://example.com/a', 'Docs')).toMatchObject({ label: 'Docs', icon: 'web' });
+    // A link without a name of its own, or named by its URL, as a bare link in the conversation is, takes its host.
+    expect(frameLink('https://example.com/a', ' ')).toMatchObject({ label: 'example.com', name: 'example.com' });
+    expect(frameLink('https://example.com/a', 'https://example.com/a')).toMatchObject({ label: 'example.com' });
   });
   it('launches the selected work item from an ordinary page without creating signed-out frames', async () => {
     const r = await rig();
@@ -95,13 +109,26 @@ describe('embedded browser tabs', () => {
   });
   it('ignores enable answers after disable and offers recovery for missing extensions', async () => {
     let resolve!: (value: unknown) => void;
-    const browser = new IframeBrowser({ send: (message) => message['type'] === 'iframe-check' ? new Promise((done) => { resolve = done; }) : Promise.resolve(null), changed: vi.fn(), external: vi.fn() });
+    const browser = new IframeBrowser({ send: (message) => message['type'] === 'iframe-check' ? new Promise((done) => { resolve = done; }) : Promise.resolve(null), changed: vi.fn(), external: vi.fn(), extension: vi.fn() });
     browser.configure(true); browser.configure(false); resolve({ ok: true });
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); expect(browser.ready).toBe(false);
-    const r = await rig(null); r.browser.draw(r.host, row(), false);
+    const r = await rig(null); r.browser.follow(row());
+    // Without the extension a link tab still selects, and its pane offers its link in a browser tab and the extension's download.
+    expect(r.browser.select('https://example.com/')).toBe(true);
+    expect(r.browser.select('https://not-a-tab.example.com/')).toBe(false);
+    expect(r.browser.selected).toBe('https://example.com/');
+    r.browser.draw(r.host, row(), false);
     expect(r.host.textContent).toContain('Load the experimental');
+    const buttons = (): HTMLButtonElement[] => [...r.host.querySelectorAll('button')];
+    expect(buttons().map((button) => button.textContent)).toEqual(['Open in a browser tab', 'Get the browser extension', 'Retry']);
+    buttons()[0]!.click(); buttons()[1]!.click();
+    expect(r.external.mock.calls).toEqual([['https://example.com/']]);
+    expect(r.extension).toHaveBeenCalledTimes(1);
+    // A closed tab selected again comes back.
+    r.browser.close('https://github.com/o/r/pull/3'); r.browser.select('https://github.com/o/r/pull/3');
+    expect(r.browser.tabs.map((link) => link.url)).toContain('https://github.com/o/r/pull/3');
     r.browser.requireReload(); r.browser.draw(r.host, row(), false);
-    expect(r.host.textContent).toContain('Reload Switchboard');
+    expect(buttons().map((button) => button.textContent)).toEqual(['Reload Switchboard']);
     r.browser.dispose(); r.host.remove();
   });
 });

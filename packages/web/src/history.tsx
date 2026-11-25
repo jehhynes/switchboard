@@ -87,7 +87,7 @@ export function historyAction(link: HistoryLink): Record<string, string> | null 
   const { open } = link;
 
   if (url !== null) {
-    return { 'data-action': 'history-open', 'data-url': url };
+    return { 'data-action': 'history-open', 'data-url': url, 'data-label': link.label };
   }
 
   if (open.type === 'openUrl' && typeof open.url === 'string' && open.url !== '') {

@@ -54,6 +54,17 @@ describe('the artifact tabs', () => {
   const state = { ...EMPTY, connected: true, artifacts: eight };
   const parse = (markup: string): Document => new DOMParser().parseFromString(markup, 'text/html');
 
+  it('puts only the chosen tab and its close mark in the tab order, a link tab, an artifact tab or History alike', () => {
+    const links = [1, 2].map((n) => ({ url: `https://x/${n}`, label: `Link ${n}`, name: `Link ${n}`, icon: 'web' as const }));
+    const stops = (markup: string) => [...parse(markup).querySelectorAll<HTMLElement>('button:not([tabindex="-1"])')].map((button) => button.getAttribute('aria-label') ?? button.dataset['url'] ?? button.textContent);
+    const strip = (side: 'browser' | 'artifacts' | 'history', link?: string, open: string | null = null) => html(renderSideSwitch(side, { ...state, artifacts: eight.slice(0, 2) }, true, { links, ...(link === undefined ? {} : { link }), open, menu: false, now: 2_000 }, false, true));
+
+    // The chosen link's tab and close mark, the other link's neither; the artifacts' and History's close marks are out of the order too.
+    expect(stops(strip('browser', 'https://x/2'))).toEqual(['https://x/2', 'Close Link 2']);
+    expect(stops(strip('artifacts', undefined, 'chat/a1.md'))).toEqual(['Note 1', 'Close Note 1']);
+    expect(stops(strip('history'))).toEqual(['History', 'Close History']);
+  });
+
   it('follow Status and Browser in the column, the open one chosen with a close mark, and More with the rest, Console among them', () => {
     // Room for four: the open one, Status, then Browser and the newest artifact in strip order.
     const markup = html(renderSideSwitch('artifacts', state, true, { open: 'chat/a2.md', fit: room(4), menu: false, now: 2_000 }));

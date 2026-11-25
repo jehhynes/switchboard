@@ -1239,6 +1239,12 @@ button.picker.opening-title { background: transparent; cursor: default; font-wei
 .iframe-warning { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .iframe-browser iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--vscode-editor-background); }
 .iframe-browser .iframe-slot { flex: 1; min-height: 0; width: 100%; }
+.iframe-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.iframe-actions button { min-height: 30px; }
+/* A link tab's icon: GitHub's mark and the pull request icon in the list's pill colours, a source's mark at a tab icon's size. */
+.link-icon.issue { color: var(--sb-github); }
+.link-icon.pr { color: var(--sb-pull-request); }
+:is(.tab, .tab-menu) .source-logo.link-icon { flex: none; width: 14px; height: 14px; }
 
 
 /* Its tabs, dimmed and inert, and the composer and the note above it kept in their places but hidden, so nothing moves when the work item comes. */

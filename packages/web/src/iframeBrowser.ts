@@ -48,10 +48,59 @@ export function canInstallExtension(browser: BrowserIdentity): boolean {
   return /\bChrom(?:e|ium)\/\d/.test(browser.userAgent) && !/Android|Mobile|iPhone|iPad|iPod|CriOS|EdgiOS|FxiOS/.test(browser.userAgent);
 }
 
-export function frameLinks(row: PageRow | null): Array<{ url: string; label: string }> {
+/**
+ * A link tab: its URL; its label, which names the item rather than its kind; its full name, for its tooltip; and what its icon shows (`LinkIcon`
+ * in header.tsx): GitHub's mark for a GitHub issue, the pull request icon for a pull request, the ticket's source's mark (`source`), else the
+ * globe for any other web page.
+ */
+export interface FrameLink {
+  url: string;
+  label: string;
+  name: string;
+  icon: 'issue' | 'pr' | 'source' | 'web';
+  source?: string;
+}
+
+/** A GitHub issue's or pull request's number, from its URL as `https://github.com/<owner>/<repo>/issues/<n>`; null for any other URL. */
+export function githubItem(url: string): { kind: 'issue' | 'pr'; number: string } | null {
+  try {
+    const value = new URL(url);
+    const match = /^\/[^/]+\/[^/]+\/(issues|pull)\/(\d+)(?:\/|$)/.exec(value.pathname);
+    return value.hostname === 'github.com' && match !== null ? { kind: match[1] === 'pull' ? 'pr' : 'issue', number: match[2]! } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A link's tab from its URL and its own name, the site's host without one: a GitHub issue or pull request is labelled `#<n>`, as its icon says
+ * which; a ticket of another `source` its key without the source's prefix, `4521` for `zoho 4521`; any other link its name.
+ */
+export function frameLink(url: string, name: string, source?: { kind: string; ticket: string }): FrameLink {
+  let named = name.trim();
+
+  if (named === '' || named === url) {
+    try {
+      named = new URL(url).host;
+    } catch {
+      named = url;
+    }
+  }
+
+  const item = githubItem(url);
+
+  if (item !== null) {
+    return { url, label: `#${item.number}`, name: named, icon: item.kind };
+  }
+
+  return source === undefined ? { url, label: named, name: named, icon: 'web' } : { url, label: source.ticket.replace(/^\S+ (?=\S)/, ''), name: named, icon: 'source', source: source.kind };
+}
+
+/** The work item's link tabs: its ticket's, then each attached web link's, once each. */
+export function frameLinks(row: PageRow | null): FrameLink[] {
   if (row === null) return [];
-  const links = [{ url: row.url, label: 'Ticket' }, ...row.links];
-  return links.filter((link, i) => frameUrl(link.url) && links.findIndex((one) => one.url === link.url) === i).map(({ url, label }) => ({ url, label }));
+  const links = [frameLink(row.url, row.ticket, { kind: row.sourceKind, ticket: row.ticket }), ...row.links.map((link) => frameLink(link.url, link.label))];
+  return links.filter((link, i) => frameUrl(link.url) && links.findIndex((one) => one.url === link.url) === i);
 }
 
 /** A page layer over the website frame, in viewport pixels, that the extension host cuts out of the frame (extensions/chrome/src/iframeFrames.ts). */
@@ -110,6 +159,8 @@ export interface IframeBrowserDeps {
   send(message: Record<string, unknown>): Promise<unknown>;
   changed(becameReady?: boolean): void;
   external(url: string): void;
+  /** Offers the browser extension's download (Get the browser extension). */
+  extension(): void;
 }
 
 /** Keeps one frame across redraws; switching work items discards the earlier document. */
@@ -122,7 +173,7 @@ export class IframeBrowser {
   #root: HTMLElement | null = null;
   #item: number | null = null;
   #url = '';
-  #links: Array<{ url: string; label: string }> = [];
+  #links: FrameLink[] = [];
   #checking = false;
   #requestedSites = '';
   #sites(): string { return JSON.stringify([...new Set(this.tabs.map((link) => new URL(link.url).host))].sort()); }
@@ -144,7 +195,7 @@ export class IframeBrowser {
     return this.#ready;
   }
   get available(): boolean { return this.#available; }
-  get tabs(): Array<{ url: string; label: string }> { return this.#links.filter((link) => !this.#closed.has(link.url)); }
+  get tabs(): FrameLink[] { return this.#links.filter((link) => !this.#closed.has(link.url)); }
   get selected(): string { return this.#url; }
   /** Whether the extension host cuts the page's layers out of the website frame; an older host does not, so the page hides the frame under them. */
   get holes(): boolean { return this.#holes; }
@@ -166,6 +217,16 @@ export class IframeBrowser {
       for (const link of frameLinks(row)) if (!this.#links.some((one) => one.url === link.url)) this.#links.push(link);
     }
     this.#sync();
+  }
+  /**
+   * Selects a link tab of the work item's without the extension, which cannot show it: its pane offers it in a browser tab (`draw`). False for a
+   * link the work item has no tab for.
+   */
+  select(url: string): boolean {
+    if (!this.#links.some((link) => link.url === url)) return false;
+    this.#closed.delete(url);
+    this.#url = url;
+    return true;
   }
   close(url: string): void {
     this.#closed.add(url);
@@ -233,9 +294,10 @@ export class IframeBrowser {
     } catch { this.#launchError = 'Could not reach the extension. Use Open outside or retry.'; }
     if (this.#launchError !== null) this.deps.changed();
   }
-  open(url: string, item: number | null = this.#item): boolean {
+  /** Opens a link in its tab, adding one named `name` (`frameLink`) for a link the work item has none for; false without the extension. */
+  open(url: string, item: number | null = this.#item, name = ''): boolean {
     if (!this.#available || !frameUrl(url)) return false;
-    if (!this.#links.some((link) => link.url === url)) this.#links.push({ url, label: 'Link' });
+    if (!this.#links.some((link) => link.url === url)) this.#links.push(frameLink(url, name));
     this.#closed.delete(url);
     this.#sync();
     this.#url = url;
@@ -244,16 +306,26 @@ export class IframeBrowser {
     return true;
   }
   draw(host: HTMLElement, row: PageRow | null, review: boolean): void {
+    // Without the extension the tab still selects, and its pane offers its link in a browser tab and the extension's download.
     if (!this.#ready) {
       host.replaceChildren();
       const note = document.createElement('p');
       note.className = 'empty';
       note.textContent = this.#note;
-      const retry = document.createElement('button');
-      retry.type = 'button';
-      retry.textContent = this.#reloadPage ? 'Reload Switchboard' : 'Retry';
-      retry.onclick = () => (this.#reloadPage ? location.reload() : void this.renew());
-      host.append(note, retry);
+      const button = (label: string, action: () => void): HTMLButtonElement => {
+        const one = document.createElement('button');
+        one.type = 'button';
+        one.textContent = label;
+        one.onclick = action;
+        return one;
+      };
+      const url = this.#url;
+      const actions = document.createElement('div');
+      actions.className = 'iframe-actions';
+      if (!this.#reloadPage && frameUrl(url)) actions.append(button('Open in a browser tab', () => this.deps.external(url)));
+      if (!this.#reloadPage) actions.append(button('Get the browser extension', () => this.deps.extension()));
+      actions.append(button(this.#reloadPage ? 'Reload Switchboard' : 'Retry', () => (this.#reloadPage ? location.reload() : void this.renew())));
+      host.append(note, actions);
       return;
     }
     this.follow(row, review);
@@ -266,7 +338,7 @@ export class IframeBrowser {
     }
     if (this.#pending?.item === this.#item) {
       const url = this.#pending!.url;
-      if (!this.#links.some((link) => link.url === url)) this.#links.push({ url, label: 'Link' });
+      if (!this.#links.some((link) => link.url === url)) this.#links.push(frameLink(url, ''));
       this.#url = url;
     }
     this.#pending = null;

@@ -16,6 +16,8 @@ import { fitTabs, stripTabs, UNMEASURED } from './tabs.js';
 import type { DocTab, StripLayout, TabFit } from './tabs.js';
 import { ConnectionDot } from './connectionView.js';
 import { trusted } from './trusted.js';
+import { hasSourceLogo, SourceLogo } from './listHeader.js';
+import type { FrameLink } from './iframeBrowser.js';
 import type { ArtifactView, PageAction, PageRow } from '@switchboard/protocol';
 
 /** The most links the menu lists by themselves; more go in its Open link submenu. */
@@ -341,7 +343,7 @@ export function UnreadDot({ label = 'Unread' }: { label?: string }) {
  * the More menu is open and the time for its ages, the file tabs, and the Changes tab while it applies.
  */
 export interface ArtifactStrip {
-  links?: Array<{ url: string; label: string }>;
+  links?: FrameLink[];
   link?: string;
   open: string | null;
   /** The strip's room (`fitTabs`), unmeasured by default, which shows every tab. */
@@ -410,7 +412,7 @@ function MoreMenu({ hidden, closed, strip, attr }: { hidden: DocTab[]; closed: A
       case 'history':
         return <MenuRow attrs={{ [attr]: 'history' }} icon={<span class="codicon codicon-history" />} label="History" />;
       case 'link':
-        return <MenuRow attrs={{ 'data-action': 'iframe-open', 'data-url': tab.url }} icon={<span class="codicon codicon-globe" />} label={tab.label} kind="link" title={tab.url} />;
+        return <MenuRow attrs={{ 'data-action': 'iframe-open', 'data-url': tab.link.url }} icon={<LinkIcon link={tab.link} />} label={tab.link.label} kind="link" title={`${tab.link.name} · ${tab.link.url}`} />;
       case 'artifact':
         return artifactRow(tab.artifact);
       case 'file': {
@@ -446,12 +448,24 @@ function MoreMenu({ hidden, closed, strip, attr }: { hidden: DocTab[]; closed: A
   );
 }
 
-/** An embedded link's tab, a tab of the strip itself, so the strip counts and sizes it as any other (page.css). */
-function LinkTab({ url, label, selected }: { url: string; label: string; selected: boolean }) {
+/**
+ * A link tab's icon: GitHub's mark for an issue and the pull request icon for a pull request, in the colours of the list's pills (page.css), the
+ * ticket's source's mark where the list has one, else the globe.
+ */
+function LinkIcon({ link }: { link: FrameLink }) {
+  if (link.icon === 'issue' || link.icon === 'pr') {
+    return <span class={`codicon codicon-${link.icon === 'pr' ? 'git-pull-request' : 'github'} link-icon ${link.icon}`} aria-hidden="true" />;
+  }
+
+  return link.icon === 'source' && link.source !== undefined && hasSourceLogo(link.source) ? <SourceLogo kind={link.source} enabled extra="link-icon" /> : <span class="codicon codicon-globe" aria-hidden="true" />;
+}
+
+/** An embedded link's tab, a tab of the strip itself, so the strip counts and sizes it as any other (page.css); its tooltip is its full name and URL. */
+function LinkTab({ link, selected }: { link: FrameLink; selected: boolean }) {
   return (
     <span class={`tab artifact-tab link-tab${selected ? ' selected' : ''}`} role="presentation">
-      <button class="tab-open" type="button" role="tab" data-action="iframe-open" data-url={url} title={`${label} · ${url}`} aria-selected={selected} tabindex={selected ? 0 : -1}><span class="codicon codicon-globe" aria-hidden="true" /><span class="tab-label">{label}</span></button>
-      <button class="tab-close" type="button" data-action="iframe-close" data-url={url} aria-label={`Close ${label}`} title="Close"><span class="codicon codicon-close" aria-hidden="true" /></button>
+      <button class="tab-open" type="button" role="tab" data-action="iframe-open" data-url={link.url} title={`${link.name} · ${link.url}`} aria-selected={selected} tabindex={selected ? 0 : -1}><LinkIcon link={link} /><span class="tab-label">{link.label}</span></button>
+      <button class="tab-close" type="button" data-action="iframe-close" data-url={link.url} aria-label={`Close ${link.name}`} title="Close" tabindex={selected ? 0 : -1}><span class="codicon codicon-close" aria-hidden="true" /></button>
     </span>
   );
 }
@@ -498,7 +512,7 @@ function stripContent(layout: StripLayout, shown: Tab, state: PageState, browser
       case 'history':
         return HistoryTab({ selected: tab.selected, attr });
       case 'link':
-        return LinkTab({ url: tab.url, label: tab.label, selected: tab.selected });
+        return LinkTab({ link: tab.link, selected: tab.selected });
       case 'artifact':
         return ArtifactTab({ artifact: tab.artifact, selected: tab.selected });
       case 'file':

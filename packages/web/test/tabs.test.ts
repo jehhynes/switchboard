@@ -8,13 +8,14 @@ import { EMPTY } from '../src/model.js';
 import type { PageState } from '../src/model.js';
 import { newView } from '../src/render.js';
 import { mount } from '../src/island.js';
+import { frameLink } from '../src/iframeBrowser.js';
 import type { ArtifactView } from '@switchboard/protocol';
 
 const artifact = (n: number): ArtifactView => ({ path: `chat/a${n}.md`, owner: 'o', kind: 'notes', title: `A ${n}`, ext: 'md', type: 'markdown', updatedAt: n });
 // Opened first, read: its tab is named by the file's path. Opened second, still loading: by the target its link named.
 const read: LocalTab = { id: 7, target: 'src/b.ts', line: 3, entry: { state: 'ok', data: { path: 'D:/w/src/b.ts', name: 'b.ts', kind: 'text' } as never, version: 'v', etag: null } };
 const loading: LocalTab = { id: 4, target: 'docs/a.md', line: null, entry: { state: 'loading' } };
-const links = [{ url: 'https://github.com/o/r/issues/1', label: 'Issue 1' }, { url: 'https://github.com/o/r/pull/2', label: 'PR #2' }];
+const links = [frameLink('https://github.com/o/r/issues/1', 'Issue 1'), frameLink('https://github.com/o/r/pull/2', 'PR #2')];
 
 /** Every tab applying: History, two links, three artifacts out of order, two file tabs, Changes and Console. */
 const full: StripState = {
@@ -129,10 +130,11 @@ describe('the strips drawn from stripTabs', () => {
     expect([...host.querySelectorAll<HTMLElement>('nav > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(ORDER.slice(0, 3));
   });
 
-  it('LinkTab_Tooltip_IsItsLabelAndUrl', () => {
+  it('LinkTab_Tooltip_IsItsFullNameAndUrl', () => {
     const host = document.createElement('div');
 
     mount(host, renderSideSwitch('browser', state, true, strip, true, true));
+    expect(host.querySelector<HTMLElement>(`[data-url="${links[0]!.url}"].tab-open`)!.textContent).toBe('#1');
     expect(host.querySelector<HTMLElement>(`[data-url="${links[0]!.url}"].tab-open`)!.title).toBe(`Issue 1 · ${links[0]!.url}`);
   });
 });

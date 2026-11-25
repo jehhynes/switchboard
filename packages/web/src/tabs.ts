@@ -1,6 +1,7 @@
 // The tabs of a strip as one ordered list (architecture.md § Web page), which the conversation's strip and the side column's switch both draw, so
 // both show the same tabs in the same order at every width.
 import type { ArtifactView } from '@switchboard/protocol';
+import type { FrameLink } from './iframeBrowser.js';
 import type { LocalFilesView, LocalTab } from './localFiles.js';
 import type { Tab } from './render.js';
 
@@ -16,7 +17,7 @@ export interface StripState {
   /** Whether the Browser tab shows, which it does only while the strip has no link tabs (`links`). */
   browser: boolean;
   /** The embedded link tabs, while the page has them (architecture.md § Embedded link tabs). */
-  links?: ReadonlyArray<{ url: string; label: string }> | undefined;
+  links?: ReadonlyArray<FrameLink> | undefined;
   /** The link the Browser pane shows. */
   link?: string | null | undefined;
   /** Whether History is open. */
@@ -41,7 +42,7 @@ interface TabBase {
 export type DocTab =
   | (TabBase & { kind: 'fixed'; tab: 'conversation' | 'status' | 'browser' | 'console'; unread: boolean })
   | (TabBase & { kind: 'history' })
-  | (TabBase & { kind: 'link'; url: string; label: string })
+  | (TabBase & { kind: 'link'; link: FrameLink })
   | (TabBase & { kind: 'artifact'; artifact: ArtifactView })
   | (TabBase & { kind: 'file'; file: LocalTab })
   | (TabBase & { kind: 'changes' });
@@ -64,7 +65,7 @@ export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
     ...(layout === 'narrow' ? [fixed('conversation')] : []),
     fixed('status'),
     ...(state.history ? [{ id: 'history', kind: 'history' as const, selected: shown === 'history' }] : []),
-    ...(state.links === undefined ? (state.browser ? [fixed('browser')] : []) : state.links.map((link): DocTab => ({ id: `link:${link.url}`, kind: 'link', url: link.url, label: link.label, selected: shown === 'browser' && state.link === link.url }))),
+    ...(state.links === undefined ? (state.browser ? [fixed('browser')] : []) : state.links.map((link): DocTab => ({ id: `link:${link.url}`, kind: 'link', link, selected: shown === 'browser' && state.link === link.url }))),
     ...artifacts.map((artifact): DocTab => ({ id: `artifact:${artifact.path}`, kind: 'artifact', artifact, selected: shown === 'artifacts' && artifact.path === state.open })),
     ...state.files.tabs.map((file): DocTab => ({ id: `file:${filePath(file)}`, kind: 'file', file, selected: shown === 'file' && file.id === state.files.open })),
     ...(state.changes ? [{ id: 'changes', kind: 'changes' as const, selected: shown === 'diff' }] : []),

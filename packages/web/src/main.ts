@@ -545,12 +545,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
     const browserReady = (): boolean => iframe.available && state.scope !== null;
-  const openBrowserLink = (url: string): void => {
+  /** Opens a web link in its link tab, one named `name` when the work item has none for it (`frameLink`), else as `openTab` does. */
+  const openBrowserLink = (url: string, name = ''): void => {
     iframe.follow(selectedRow(state));
-    if (iframe.open(url, state.scope?.workItemId ?? null)) {
+    if (iframe.open(url, state.scope?.workItemId ?? null, name)) {
       linkItem = state.scope?.workItemId ?? null;
       leaving('browser'); chooseTab('browser'); draw(); saveTab();
     } else openTab(url, () => openNewTab(url));
+  };
+  /** Opens a web link of the conversation or History: in a link tab while the extension shows them, else as `openTab` does. */
+  const openWebLink = (url: string, name: string): void => {
+    if (browserReady()) openBrowserLink(url, name);
+    else openTab(url, () => openNewTab(url));
   };
   /** Reports the Browser tab's area to the hub after each draw, once the pane's report is set up below; sent again after a tab change. */
   let reportBrowser = (): void => {};
@@ -3910,19 +3916,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    // Supported conversation links open in their own embedded tab.
+    // Supported conversation links open in their own embedded tab, else in the extension's tab group when it answers, else as links do.
     const web = target.closest<HTMLAnchorElement>('.body a[href][target="_blank"]');
 
-    if (web !== null && webLink(web.getAttribute('href') ?? '') && browserReady()) {
+    if (web !== null && webLink(web.getAttribute('href') ?? '') && (browserReady() || extensionLinks)) {
       event.preventDefault();
-      openBrowserLink(web.href);
-      return;
-    }
-
-    // Without the pane, the extension's tab group takes it when the extension answers.
-    if (web !== null && webLink(web.getAttribute('href') ?? '') && extensionLinks) {
-      event.preventDefault();
-      openTab(web.href, () => openNewTab(web.href));
+      openWebLink(web.href, web.textContent ?? '');
       return;
     }
     const sideTab = target.closest<HTMLElement>('[data-side]')?.dataset['side'];
@@ -4125,7 +4124,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const target = tabUrl(button!.dataset['url'] ?? '');
 
         if (target !== null) {
-          openTab(target, () => openNewTab(target));
+          openWebLink(target, button!.dataset['label'] ?? '');
         }
 
         break;
@@ -4273,7 +4272,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         break;
       case 'iframe-open':
-        if (!iframe.available) { chooseTab('browser'); draw(); }
+        // Without the extension the tab selects all the same, and its pane offers the link in a browser tab.
+        if (!iframe.available) { iframe.select(button?.dataset['url'] ?? ''); chooseTab('browser'); draw(); }
         else openBrowserLink(button?.dataset['url'] ?? '');
         break;
       case 'iframe-close':
@@ -5184,6 +5184,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     send: (message) => toExtension(IFRAME_EXTENSION_ID, message),
     changed: (becameReady) => { embedReady = iframe.ready; if (becameReady && !tabChosen) openTabs(); applyHostSelection(); draw(); },
     external: (url) => { if (frameUrl(url)) (deps.openUrl ?? ((one: string) => void window.open(one, '_blank', 'noopener,noreferrer')))(url); },
+    extension: () => header.openExtension(),
   });
   const iframeRenew = setInterval(() => void iframe.renew(), IFRAME_RENEW_MS);
   const resumeIframe = (): void => {

@@ -4471,17 +4471,35 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('EmbeddedTabs_DesktopChromiumWithoutTheExtension_KeepsTheLinkTabsAndTheInstallNote', async () => {
+  it('EmbeddedTabs_DesktopChromiumWithoutTheExtension_SelectsTheLinkTabAndOffersABrowserTabAndTheExtension', async () => {
     window.innerWidth = 1920;
+    const opened = vi.fn();
     const page = startPage(root, {
       fetch: (async () => ({ status: 200, ok: true, json: async () => ({}) })) as unknown as typeof globalThis.fetch,
-      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false,
+      EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: false, standalone: () => false, openUrl: opened,
       extensionInstallable: () => true, toExtension: async () => null,
     });
+    const issue = 'https://github.com/o/r/issues/1';
+    const pr = { label: 'PR #7', url: 'https://github.com/o/r/pull/7', kind: 'pr' as const, badge: '7', glyph: null, mentioned: false };
+    const selected = (): string | null | undefined => root.querySelector('#detail [data-action="iframe-open"][aria-selected="true"]')?.getAttribute('data-url');
+    const button = (label: string): HTMLButtonElement | undefined => [...root.querySelectorAll<HTMLButtonElement>('#detail .detail-body button')].find((one) => one.textContent === label);
 
-    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: 'https://github.com/o/r/issues/1' })])] }); await flush();
-    click('#detail [data-action="iframe-open"]'); await flush();
+    hello(FakeSource.last!, { settings: { iframeBrowser: true }, groups: [listGroup('progress', [listRow(1, { url: issue, links: [pr] })])] }); await flush();
+    // The tab chosen selects, not the first one.
+    click(`#detail [data-action="iframe-open"][data-url="${pr.url}"]`); await flush();
+    expect(selected()).toBe(pr.url);
     expect(root.querySelector('#detail')!.textContent).toContain('Load the experimental Switchboard Chrome/Edge extension in this browser, then select Retry.');
+    expect(button('Retry')).not.toBeUndefined();
+    button('Open in a browser tab')!.click();
+    expect(opened.mock.calls).toEqual([[pr.url]]);
+    button('Get the browser extension')!.click(); await flush();
+    expect(root.querySelector('#list-sheet .sheet')?.textContent).toContain('Get the browser extension');
+    expect(root.querySelector('#list-sheet a[download]')?.getAttribute('href')).toBe('/page/switchboard-extension.zip');
+    click('#list-sheet [data-action="list-sheet-cancel"]'); await flush();
+    click(`#detail [data-action="iframe-open"][data-url="${issue}"]`); await flush();
+    expect(selected()).toBe(issue);
+    button('Open in a browser tab')!.click();
+    expect(opened.mock.calls.at(-1)).toEqual([issue]);
     page.close();
   });
 
@@ -4515,6 +4533,9 @@ describe('the page in use', () => {
     resolve({ ok: true }); await flush();
     const frame = root.querySelector<HTMLIFrameElement>('iframe[title="GitHub browser experiment"]')!;
     expect(root.textContent).toContain('Open with sign-in support');
+    // With the extension, the pane offers neither a browser tab nor the extension.
+    expect(root.textContent).not.toContain('Open in a browser tab');
+    expect(root.textContent).not.toContain('Get the browser extension');
     source.emit('reply', { reply: reply('r9', 9) }); expect(root.querySelector('iframe[title="GitHub browser experiment"]')).toBe(frame);
     click('[data-action="artifact"][data-path="chat/p.html"]');
     expect(root.querySelector('#detail .detail-body')!.classList.contains('framed')).toBe(true);

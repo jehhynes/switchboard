@@ -172,6 +172,9 @@ const LOGOS: Record<string, { viewBox: string; path: string; stroke: boolean; ev
   },
 };
 
+/** Whether a source kind has a logo of its own. */
+export const hasSourceLogo = (kind: string): boolean => Object.hasOwn(LOGOS, kind);
+
 /** A source kind's logo, grey while off, with `extra` classes; a kind without one shows a plug, so its button is never blank. */
 export function SourceLogo({ kind, enabled, icon, extra = '' }: { kind: string; enabled: boolean; icon?: SourceIcon | undefined; extra?: string }) {
   const logo = icon === undefined ? LOGOS[kind] : { ...icon, stroke: false, evenOdd: icon.fillRule === 'evenodd' };
@@ -1086,6 +1089,8 @@ export interface ListHeader {
   draw(header: PageHeader | null, groups: readonly PageGroup[]): void;
   /** The list to draw: filtered while a search applies, with the rows the hub found before the Done list. */
   list(groups: readonly PageGroup[]): { groups: PageGroup[]; filtering: boolean };
+  /** Opens Get the browser extension, as More Actions does. */
+  openExtension(): void;
   /** The end of the search's results, drawn after the list; nothing without a search. */
   end(shown: readonly PageGroup[]): VNode | null;
   close(): void;
@@ -1704,6 +1709,12 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     }
   });
 
+  const openExtension = (): void => {
+    view.menu = null;
+    view.sheet = { kind: 'extension', remote: view.local !== true };
+    redraw();
+    sheetHost.querySelector<HTMLElement>('.sheet-button.primary')?.focus();
+  };
   const clicked = (event: Event): void => {
     const button = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
 
@@ -1788,10 +1799,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         void openDevices();
         break;
       case 'list-extension':
-        view.menu = null;
-        view.sheet = { kind: 'extension', remote: view.local !== true };
-        redraw();
-        sheetHost.querySelector<HTMLElement>('.sheet-button.primary')?.focus();
+        openExtension();
         break;
       case 'list-shortcut':
         view.menu = null;
@@ -1881,6 +1889,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
   document.addEventListener('pointerdown', outside);
 
   return {
+    openExtension,
     clearSearch: () => { search.range = 0; setFilter(''); },
     draw: (header, listed) => {
       shown = header;

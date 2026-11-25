@@ -125,6 +125,8 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(historyUrl({ label: 'f', icon: 'file', title: '', open: { type: 'openUrl', url: 'D:/report.md' } })).toBeNull();
     // A file opens in a file tab, a session in the conversation by its work item and Switchboard ID; a session without them opens nowhere.
     expect(historyAction({ label: 'f', icon: 'file', title: '', open: { type: 'openUrl', url: 'D:/report.md' } })).toEqual({ 'data-action': 'history-file', 'data-path': 'D:/report.md' });
+    // A web link carries its label, which names its link tab.
+    expect(historyAction({ label: 'PR #9', icon: 'git-pull-request', title: '', open: { type: 'openUrl', url: 'https://x.test/9' } })).toEqual({ 'data-action': 'history-open', 'data-url': 'https://x.test/9', 'data-label': 'PR #9' });
     expect(historyAction({ label: 's', icon: 'terminal', title: '', open: { type: 'open', sessionId: 'native-1', session: 's1', workItemId: 4 } })).toEqual({ 'data-action': 'history-session', 'data-work-item': '4', 'data-session': 's1' });
     expect(historyAction({ label: 's', icon: 'terminal', title: '', open: { type: 'open', sessionId: 'native-1' } })).toBeNull();
     expect(historyAction({ label: 'x', icon: 'x', title: '', open: { type: 'javascript' } })).toBeNull();
@@ -153,7 +155,7 @@ describe("the page's History tab in use", () => {
     vi.unstubAllGlobals();
   });
 
-  const start = () => {
+  const start = (deps: Partial<Parameters<typeof startPage>[1]> = {}) => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
 
@@ -161,7 +163,7 @@ describe("the page's History tab in use", () => {
 
       return { status: answer.status, ok: answer.status === 200, json: async () => answer.body, text: async () => '' } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => T0, openUrl: (url) => opened.push(url) });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => T0, openUrl: (url) => opened.push(url), ...deps });
 
     return { page, source: FakeSource.last! };
   };
@@ -457,6 +459,42 @@ describe("the page's History tab in use", () => {
     await flush();
     expect(posts.filter((one) => one.url === '/v1/conversation/row-command').at(-1)?.body).toMatchObject({ workItemId: 1, label: 'Open in VS Code' });
     page.close();
+  });
+
+  it('opens a History web link as a conversation link opens: in a link tab where the page shows them, else in a browser tab', async () => {
+    vi.useFakeTimers();
+    const url = 'https://forum.example.com/t/5';
+    const web = { label: 'Forum thread', icon: 'link-external', title: url, open: { type: 'openUrl', url } };
+
+    answers['/page-history'] = { status: 200, body: { view: view({ links: [web] }), categories: CATEGORIES } };
+
+    for (const embedded of [true, false]) {
+      opened = [];
+      root = document.createElement('div');
+      document.body.replaceChildren(root);
+      // The extension embeds links, but does not open them in its tab group.
+      const { page, source } = start({ extensionInstallable: () => true, toExtension: async (_id, message) => (message['type'] === 'links' ? null : { ok: true }) });
+
+      source.emit('hello', { key: 'pk', groups: groups(rows), scope: scopeOf(1), sessions: [], items: [], more: false, status: null, artifacts: [], settings: { iframeBrowser: embedded } });
+      await flush();
+      openFromMenu();
+      await flush();
+      root.querySelector<HTMLElement>('.hist-hero-links [data-action="history-open"]')!.click();
+      await flush();
+      const tab = root.querySelector<HTMLElement>('[data-action="iframe-open"][aria-selected="true"]');
+
+      if (embedded) {
+        // Its tab is named by the History link's label.
+        expect(tab?.dataset['url']).toBe(url);
+        expect(tab?.textContent).toBe('Forum thread');
+        expect(opened).toEqual([]);
+      } else {
+        expect(tab).toBeNull();
+        expect(opened).toEqual([url]);
+      }
+
+      page.close();
+    }
   });
 
   it("puts History in a phone's one tab strip once the menu opens it, after the conversation's fixed tabs, and Console after Changes", async () => {

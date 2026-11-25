@@ -7,6 +7,7 @@ import type { PageState } from '../src/model.js';
 import { newView, TABS } from '../src/render.js';
 import { PAGE_ASSETS } from '../dist/index.js';
 import type { TabFit } from '../src/tabs.js';
+import { frameLink } from '../src/iframeBrowser.js';
 import type { ComponentChild } from 'preact';
 import type { ArtifactView, SessionView } from '@switchboard/protocol';
 
@@ -72,8 +73,14 @@ describe('the tab strips', () => {
     expect(TABS.every((one) => one.icon !== '')).toBe(true);
   });
 
-  it('LinkTabs_Drawn_ShowTheBrowserIconBeforeTheirLabel', () => {
-    const links = [{ url: 'https://github.com/o/r/issues/1', label: 'Issue 1' }, { url: 'https://example.com/', label: 'example.com' }];
+  it('LinkTabs_Drawn_ShowAnIconForWhatTheyOpenBeforeALabelNamingTheItem', () => {
+    const links = [
+      frameLink('https://github.com/o/r/issues/21602', 'gh 21602', { kind: 'github', ticket: 'gh 21602' }),
+      frameLink('https://github.com/o/r/pull/22234', 'PR #22234'),
+      frameLink('https://desk.zoho.com/agent/ticket/4521', 'zoho 4521', { kind: 'zoho', ticket: 'zoho 4521' }),
+      frameLink('https://forum.example.com/t/9', 'plug 9', { kind: 'plug', ticket: 'plug 9' }),
+      frameLink('https://example.com/', 'Docs'),
+    ];
 
     for (const strip of [
       draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { links, link: links[0]!.url, open: null, menu: false, now: 0, changes }, true, true)),
@@ -81,12 +88,21 @@ describe('the tab strips', () => {
     ]) {
       const tabs = [...strip.querySelectorAll<HTMLElement>('.link-tab .tab-open')];
 
-      expect(tabs.map((tab) => [tab.querySelector('.codicon')?.className, tab.querySelector('.tab-label')!.textContent])).toEqual([
-        ['codicon codicon-globe', 'Issue 1'],
-        ['codicon codicon-globe', 'example.com'],
+      // A source without a logo of its own in the list, as a plugin's, shows the globe.
+      expect(tabs.map((tab) => [tab.querySelector('.codicon, .source-logo')?.getAttribute('class'), tab.querySelector('.tab-label')!.textContent])).toEqual([
+        ['codicon codicon-github link-icon issue', '#21602'],
+        ['codicon codicon-git-pull-request link-icon pr', '#22234'],
+        ['source-logo zoho link-icon', '4521'],
+        ['codicon codicon-globe', '9'],
+        ['codicon codicon-globe', 'Docs'],
       ]);
+      expect(tabs.map((tab) => tab.title)).toEqual(['gh 21602', 'PR #22234', 'zoho 4521', 'plug 9', 'Docs'].map((name, index) => `${name} · ${links[index]!.url}`));
       expect(tabs[0]!.querySelector('.tab-label')!.matches(labelSelector())).toBe(true);
     }
+    // In the colours of the list's issue and pull request pills.
+    expect(css).toContain('.link-icon.issue { color: var(--sb-github); }');
+    expect(css).toContain('.link-icon.pr { color: var(--sb-pull-request); }');
+    expect(css).toContain('.row-line .pill.link.pr { border-color: var(--sb-pull-request);');
   });
 
   it('ConversationDropdown_EarlierSessions_ShareTheRowEdgeAndTheMenuWidens', () => {
@@ -162,9 +178,9 @@ describe('the tab strips', () => {
   });
 
   it('LinkTabs_InTheStrip_AreItsOwnChildrenSoTheyAreCounted', () => {
-    const strip = draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { open: null, menu: false, now: 0, links: [{ url: 'https://github.com/o/r/issues/1', label: 'Ticket' }, { url: 'https://github.com/o/r/pull/2', label: 'PR #2' }], link: 'https://github.com/o/r/pull/2' }));
+    const strip = draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { open: null, menu: false, now: 0, links: [frameLink('https://github.com/o/r/issues/1', 'Ticket'), frameLink('https://github.com/o/r/pull/2', 'PR #2')], link: 'https://github.com/o/r/pull/2' }));
 
-    expect([...strip.querySelectorAll(':scope .tabs > .link-tab')].map((tab) => tab.textContent)).toEqual(['Ticket', 'PR #2']);
+    expect([...strip.querySelectorAll(':scope .tabs > .link-tab')].map((tab) => tab.textContent)).toEqual(['#1', '#2']);
   });
 });
 
