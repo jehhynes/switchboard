@@ -4878,7 +4878,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const open = view.picker || view.actions || view.viewMenu || view.rowMenu !== null || view.tabMenu;
     const closed = [changes.pointerDown(null), closeCardMenus(null)].includes(true);
 
-    // The composer's own lists draw themselves.
+    // Drop a list still on its way, and close one already drawn.
+    box.cancel();
     if (menuOpen !== null) {
       closeMenu();
     }

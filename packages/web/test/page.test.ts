@@ -8235,6 +8235,13 @@ describe('the page against late answers', () => {
     await flush();
     expect(menu.hidden).toBe(true);
 
+    // A window blur also drops an answer still on its way.
+    typeIn('/co');
+    window.dispatchEvent(new Event('blur'));
+    pending.shift()!.resolve(commands);
+    await flush();
+    expect(menu.hidden).toBe(true);
+
     // A piece dictation joins changes the text the answer was for.
     typeIn('/co');
     source.emit('draft', { text: 'now', sessionId: 's1', added: 'now' });
