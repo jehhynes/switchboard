@@ -1,18 +1,19 @@
 // The conversation's header (architecture.md § Web page): the dropdown of the selected work item's conversations, the row's actions, the
 // view options with the persona, and the tabs under it or the switch atop the side column.
+import { cloneElement } from 'preact';
 import type { ComponentChildren, VNode } from 'preact';
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { FileIcon } from './fileIcons.js';
 import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
-import { ago, artifactBar, LINK_LABEL_MAX, rowKey, TABS } from './render.js';
+import { ago, LINK_LABEL_MAX, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { changesTab } from './changes.js';
 import type { ChangesView } from './changes.js';
-import { LocalTabButton } from './localFiles.js';
+import { LocalTabButton, localTabName } from './localFiles.js';
 import type { LocalFilesView } from './localFiles.js';
-import { stripTabs } from './tabs.js';
-import type { DocTab, StripLayout } from './tabs.js';
+import { fitTabs, stripTabs, UNMEASURED } from './tabs.js';
+import type { DocTab, StripLayout, TabFit } from './tabs.js';
 import { ConnectionDot } from './connectionView.js';
 import { trusted } from './trusted.js';
 import type { ArtifactView, PageAction, PageRow } from '@switchboard/protocol';
@@ -317,8 +318,8 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
 }
 
 /**
- * A tab, drawn alike in the strip and in the side column's switch: its codicon and its label, which a narrow strip hides (page.css), so the
- * tab keeps its name as its tooltip and accessible name; with the unread dot ([Unread](architecture.md § Unread)) while `unread`.
+ * A tab, drawn alike in the strip and in the side column's switch: its codicon and its label, cut but never hidden (page.css), its name also its
+ * tooltip and accessible name; with the unread dot ([Unread](architecture.md § Unread)) while `unread`.
  */
 function TabButton({ selected, label, icon, unread = false, attrs }: { selected: boolean; label: string; icon: string; unread?: boolean; attrs: Record<string, string> }) {
   return (
@@ -336,19 +337,20 @@ export function UnreadDot({ label = 'Unread' }: { label?: string }) {
 }
 
 /**
- * What a strip shows beside the fixed tabs: the link tabs and the link shown, the open artifact while one shows, how many artifact tabs fit,
- * whether the Artifacts menu is open and the time for its ages, the file tabs, and the Changes tab while it applies.
+ * What a strip shows beside the fixed tabs: the link tabs and the link shown, the open artifact while one shows, the room its tabs have, whether
+ * the More menu is open and the time for its ages, the file tabs, and the Changes tab while it applies.
  */
 export interface ArtifactStrip {
   links?: Array<{ url: string; label: string }>;
   link?: string;
   open: string | null;
-  fit: number;
+  /** The strip's room (`fitTabs`), unmeasured by default, which shows every tab. */
+  fit?: TabFit;
   menu: boolean;
   now: number;
   /** The artifacts whose tabs the operator closed (`closedArtifacts`). */
   closed?: ReadonlySet<string>;
-  /** The artifacts this device has not opened (`unreadArtifacts`), which the menu marks with the unread dot. */
+  /** The artifacts this device has not opened (`unreadArtifacts`), which the More menu marks with the unread dot. */
   unread?: ReadonlySet<string>;
   /** The file tabs (localFiles.tsx). */
   files?: LocalFilesView;
@@ -371,44 +373,73 @@ function ArtifactTab({ artifact, selected }: { artifact: ArtifactView; selected:
   );
 }
 
-/**
- * Artifacts with their count, while some artifacts have no tab, at the strip's end: it opens a menu of every artifact, newest first with its title,
- * kind and age in columns, those with a tab dimmed and those this device has not opened marked with the unread dot.
- */
-function ArtifactMenu({ ordered, tabs, strip }: { ordered: ArtifactView[]; tabs: ArtifactView[]; strip: ArtifactStrip }) {
-  const unread = strip.unread ?? new Set<string>();
-  const unreadCount = ordered.filter((artifact) => unread.has(artifact.path)).length;
+/** A row of the More menu: its icon, its label, with the unread dot while `unread`, and its kind and age in columns. */
+function MenuRow({ attrs, icon, label, kind = '', note = '', unread = false, title }: { attrs: Record<string, string>; icon: ComponentChildren; label: string; kind?: string; note?: string; unread?: boolean; title?: string | undefined }) {
+  const named = [label, ...(unread ? ['unread'] : []), ...(kind === '' ? [] : [kind]), ...(note === '' ? [] : [note])].join(', ');
 
   return (
-    <span class="artifact-more">
-      <button class={`tab artifact-menu-button${strip.menu ? ' open' : ''}`} type="button" data-action="artifact-menu" aria-haspopup="menu" aria-expanded={strip.menu} aria-label={`Artifacts, ${ordered.length}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`} title="Every artifact, newest first, in a menu">
-        <span class="codicon codicon-files" aria-hidden="true"></span>
-        <span class="tab-label">Artifacts</span>
+    <button class="menu-row" type="button" role="menuitem" {...attrs} title={title} aria-label={named}>
+      <span class="menu-gutter">{icon}</span>
+      <span class="title">
+        <span class="title-text">{label}</span>
+        {unread ? <UnreadDot /> : null}
+      </span>
+      <span class="menu-kind">{kind}</span>
+      <span class="menu-note">{note}</span>
+    </button>
+  );
+}
+
+/**
+ * More, at the strip's end while some tabs do not fit or some artifacts are closed: its count, with the unread dot on the count's corner while a
+ * row is unread. Its menu lists each tab the strip does not show, in strip order, then the closed artifacts newest first; a row does what its
+ * tab does, and choosing a closed artifact opens its tab again.
+ */
+function MoreMenu({ hidden, closed, strip, attr }: { hidden: DocTab[]; closed: ArtifactView[]; strip: ArtifactStrip; attr: 'data-side' | 'data-tab' }) {
+  const unread = strip.unread ?? new Set<string>();
+  const artifactRow = (artifact: ArtifactView): VNode => (
+    <MenuRow attrs={{ 'data-action': 'artifact', 'data-path': artifact.path }} icon={<FileIcon path={artifact.path} />} label={artifact.title} kind={artifact.kind} note={ago(artifact.updatedAt, strip.now)} unread={unread.has(artifact.path)} title={artifact.file ?? artifact.path} />
+  );
+  const row = (tab: DocTab): VNode => {
+    switch (tab.kind) {
+      case 'fixed': {
+        const { label, icon } = TABS.find((one) => one.tab === tab.tab)!;
+
+        return <MenuRow attrs={{ [attr]: tab.tab }} icon={<span class={`codicon codicon-${icon}`} />} label={label} unread={tab.unread} />;
+      }
+      case 'history':
+        return <MenuRow attrs={{ [attr]: 'history' }} icon={<span class="codicon codicon-history" />} label="History" />;
+      case 'link':
+        return <MenuRow attrs={{ 'data-action': 'iframe-open', 'data-url': tab.url }} icon={<span class="codicon codicon-globe" />} label={tab.label} kind="link" title={tab.url} />;
+      case 'artifact':
+        return artifactRow(tab.artifact);
+      case 'file': {
+        const name = localTabName(tab.file);
+        const dir = tab.file.entry.state === 'ok' && tab.file.entry.data.kind === 'dir';
+
+        return <MenuRow attrs={{ 'data-action': 'local-tab', 'data-local': String(tab.file.id) }} icon={dir ? <span class="codicon codicon-folder" /> : <FileIcon path={name} />} label={name} kind={dir ? 'folder' : 'file'} title={tab.id.slice('file:'.length)} />;
+      }
+      case 'changes':
+        return <MenuRow attrs={{ 'data-action': 'diff-tab' }} icon={<span class="codicon codicon-diff-multiple" />} label="Changes" />;
+    }
+  };
+  const count = hidden.length + closed.length;
+  const unreadCount = hidden.filter((tab) => (tab.kind === 'fixed' && tab.unread) || (tab.kind === 'artifact' && unread.has(tab.artifact.path))).length + closed.filter((artifact) => unread.has(artifact.path)).length;
+
+  return (
+    <span class="tab-more">
+      <button class={`tab tab-more-button${strip.menu ? ' open' : ''}`} type="button" data-action="tab-menu" aria-haspopup="menu" aria-expanded={strip.menu} aria-label={`More tabs, ${count}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`} title="More tabs">
+        <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
         <span class="tab-badge muted">
-          {ordered.length}
+          {count}
           {unreadCount > 0 ? <span class="unread-dot" aria-hidden="true"></span> : null}
         </span>
       </button>
       {strip.menu ? (
-        <div class="menu glass artifact-menu" role="menu" aria-label="Artifacts">
-          {ordered.map((artifact) => {
-            const note = ago(artifact.updatedAt, strip.now);
-            const fresh = unread.has(artifact.path);
-
-            return (
-              <button class={`menu-row${tabs.includes(artifact) ? ' in-bar' : ''}`} type="button" role="menuitem" data-action="artifact" data-path={artifact.path} title={artifact.file ?? artifact.path} aria-label={`${artifact.title}, ${fresh ? 'unread, ' : ''}${artifact.kind}, ${note}`}>
-                <span class="menu-gutter">
-                  <FileIcon path={artifact.path} />
-                </span>
-                <span class="title">
-                  <span class="title-text">{artifact.title}</span>
-                  {fresh ? <UnreadDot /> : null}
-                </span>
-                <span class="menu-kind">{artifact.kind}</span>
-                <span class="menu-note">{note}</span>
-              </button>
-            );
-          })}
+        <div class="menu glass tab-menu" role="menu" aria-label="More tabs">
+          {hidden.map(row)}
+          {hidden.length > 0 && closed.length > 0 ? <div class="menu-separator" role="separator"></div> : null}
+          {closed.map(artifactRow)}
         </div>
       ) : null}
     </span>
@@ -419,7 +450,7 @@ function ArtifactMenu({ ordered, tabs, strip }: { ordered: ArtifactView[]; tabs:
 function LinkTab({ url, label, selected }: { url: string; label: string; selected: boolean }) {
   return (
     <span class={`tab artifact-tab link-tab${selected ? ' selected' : ''}`} role="presentation">
-      <button class="tab-open" type="button" role="tab" data-action="iframe-open" data-url={url} title={url} aria-selected={selected} tabindex={selected ? 0 : -1}><span class="codicon codicon-globe" aria-hidden="true" /><span class="tab-label">{label}</span></button>
+      <button class="tab-open" type="button" role="tab" data-action="iframe-open" data-url={url} title={`${label} · ${url}`} aria-selected={selected} tabindex={selected ? 0 : -1}><span class="codicon codicon-globe" aria-hidden="true" /><span class="tab-label">{label}</span></button>
       <button class="tab-close" type="button" data-action="iframe-close" data-url={url} aria-label={`Close ${label}`} title="Close"><span class="codicon codicon-close" aria-hidden="true" /></button>
     </span>
   );
@@ -427,7 +458,7 @@ function LinkTab({ url, label, selected }: { url: string; label: string; selecte
 
 /**
  * The History tab, shown only once the operator chose History from an actions menu, with a close mark that hides it again, as a file tab's
- * does; its codicon and label, which a narrow strip hides as the fixed tabs' (page.css).
+ * does; its codicon and label.
  */
 function HistoryTab({ selected, attr }: { selected: boolean; attr: 'data-side' | 'data-tab' }) {
   return (
@@ -445,36 +476,39 @@ function HistoryTab({ selected, attr }: { selected: boolean; attr: 'data-side' |
 
 /**
  * A strip's tabs, in `stripTabs`' order for its layout, `attr` naming each fixed tab (`data-tab` in the conversation's strip, `data-side` in
- * the column's): as many artifact tabs as fit (`artifactBar`), and the Artifacts menu at the end while some artifacts have no tab.
+ * the column's): those that fit (`fitTabs`), and More at the end with the rest and the closed artifacts.
  */
 function stripContent(layout: StripLayout, shown: Tab, state: PageState, browser: boolean, strip: ArtifactStrip, console: boolean, history: boolean): ComponentChildren {
   const attr = layout === 'wide' ? 'data-side' : 'data-tab';
   const closed = strip.closed ?? new Set<string>();
   const files = strip.files ?? { tabs: [], open: null };
   const tabs = stripTabs({ shown, statusUnread: state.status?.unread === true, browser, links: strip.links, link: strip.link, history, artifacts: state.artifacts, open: strip.open, closed, files, changes: strip.changes !== undefined, console }, layout);
-  const { ordered, tabs: fitted } = artifactBar(state.artifacts, shown === 'artifacts' ? strip.open : null, strip.fit, closed);
-  const draw = (tab: DocTab): ComponentChildren => {
+  // The closed artifacts, newest first, but the one shown, which keeps its tab.
+  const shut = [...state.artifacts].sort((a, b) => b.updatedAt - a.updatedAt).filter((artifact) => closed.has(artifact.path) && !tabs.some((tab) => tab.id === `artifact:${artifact.path}`));
+  const { shown: fitted, hidden } = fitTabs(tabs, strip.fit ?? UNMEASURED, shut.length > 0);
+  // Each drawn tab names its id (`data-id`), by which main.ts measures it (`fitStripTabs`).
+  const draw = (tab: DocTab): VNode => {
     switch (tab.kind) {
       case 'fixed': {
         const { label, icon } = TABS.find((one) => one.tab === tab.tab)!;
 
         // Status has the unread dot while its status is unread; the page shows no unread counts.
-        return <TabButton selected={tab.selected} label={label} icon={icon} unread={tab.unread} attrs={{ [attr]: tab.tab }} />;
+        return TabButton({ selected: tab.selected, label, icon, unread: tab.unread, attrs: { [attr]: tab.tab } });
       }
       case 'history':
-        return <HistoryTab selected={tab.selected} attr={attr} />;
+        return HistoryTab({ selected: tab.selected, attr });
       case 'link':
-        return <LinkTab url={tab.url} label={tab.label} selected={tab.selected} />;
+        return LinkTab({ url: tab.url, label: tab.label, selected: tab.selected });
       case 'artifact':
-        return fitted.includes(tab.artifact) ? <ArtifactTab artifact={tab.artifact} selected={tab.selected} /> : null;
+        return ArtifactTab({ artifact: tab.artifact, selected: tab.selected });
       case 'file':
-        return <LocalTabButton tab={tab.file} selected={tab.selected} />;
+        return LocalTabButton({ tab: tab.file, selected: tab.selected });
       case 'changes':
         return changesTab(strip.changes!, tab.selected);
     }
   };
 
-  return [...tabs.map(draw), ordered.length > fitted.length ? <ArtifactMenu ordered={ordered} tabs={fitted} strip={strip} /> : null];
+  return [...fitted.map((tab) => cloneElement(draw(tab), { key: tab.id, 'data-id': tab.id })), hidden.length + shut.length > 0 ? <MoreMenu hidden={hidden} closed={shut} strip={strip} attr={attr} /> : null];
 }
 
 /** The column's tab strip named by its tabs, in their order: "Status, browser and artifacts". */
@@ -484,7 +518,7 @@ const stripLabel = (names: string[]): string => `${names.slice(0, -1).join(', ')
  * The tab strip atop the column right of the conversation on a wide screen, in `stripTabs`' order (`stripContent`); the conversation keeps its own
  * pane beside it. `end`, as the maximize button, closes the strip.
  */
-export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, console = true, history = false, end: ComponentChildren = null): VNode {
+export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, menu: false, now: 0 }, console = true, history = false, end: ComponentChildren = null): VNode {
   return (
     <nav class="tabs side-switch" role="tablist" aria-label={stripLabel(['Status', ...(history ? ['history'] : []), ...(browser || strip.links !== undefined ? ['browser'] : []), 'artifacts', ...(console ? ['console'] : [])])}>
       {stripContent('wide', side, state, browser, strip, console, history)}
@@ -505,7 +539,7 @@ export function renderMaximize(maximized: boolean): VNode {
 }
 
 /** The conversation's tab strip on a narrower screen: Conversation, then the column's tabs in the same order (`stripContent`). */
-export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, fit: 0, menu: false, now: 0 }, console = true, history = false): VNode {
+export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, menu: false, now: 0 }, console = true, history = false): VNode {
   return (
     <nav class="tabs" role="tablist">
       {stripContent('narrow', view.tab, state, browser, strip, console, history)}

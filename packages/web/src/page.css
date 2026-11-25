@@ -65,7 +65,7 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
    0.06 em above its capitals, so text drew about 1 px low beside every icon. Padding above and below makes the box its line's height again,
    so descenders and accents stay inside a text that clips its overflow and the row lays out as before, at the same pixel positions, which
    keeps Chrome's text snapping at 125% scale from undoing the shift. A browser without text-box draws the texts as before. */
-@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .artifact-menu .title, .provider-option, .opening-note, .status-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
+@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .tab-menu .title, .provider-option, .opening-note, .status-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
 /* A spinner (a codicon-modifier-spin codicon or the mic's starting ring): its box stands still and clips its paint, and only its ::before turns,
    smoothly, on its own compositor layer. Chrome takes a turning layer to overlap everything painted after it up to its nearest clip, and moves
    that content onto layers of its own, where text loses its subpixel antialiasing and may shift as the layers change (mechanics.md M141);
@@ -437,26 +437,27 @@ button.picker > .codicon-chevron-down { order: 2; }
 /* The tabs drawn as VS Code's editor tabs (style A): a cell each on a strip one shade darker than the surface under it, the chosen one filled with
    that surface, its top edge in the accent colour and no bottom border, so it joins the content below. Every other tab draws the strip's bottom
    border under itself, over the strip's own, so the line runs the whole strip and only the chosen tab breaks it. 13 px sentence-case labels, 35 px tall. */
-/* A size container is a stacking context, so the strip stands above the pane after it, and the Artifacts menu inside it with it. */
+/* A size container is a stacking context, so the strip stands above the pane after it, and the More menu inside it with it. */
 .tabs { position: relative; z-index: 3; display: flex; flex-wrap: nowrap; container-type: inline-size; align-items: stretch; gap: 0; padding: 0; border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-strip); user-select: none; }
-/* One sizing rule for every tab, fixed, link, History, artifact and file tabs and Artifacts alike: each starts from nothing and grows evenly, up to
-   its own content (max-content), so a strip with room draws each tab whole, and a crowded one takes room from the widest tabs first until all are
-   as wide, then shrinks them all alike, cutting their labels with an ellipsis. No tab keeps a minimum of its own, so none pushes the others out.
+/* One sizing rule for every tab, fixed, link, History, artifact and file tabs alike: each starts from nothing and grows evenly, up to its own
+   content (max-content), so a strip with room draws each tab whole, and a crowded one takes room from the widest tabs first until all are as
+   wide, then shrinks them all alike, cutting their labels with an ellipsis, but never below its least width (min-width): its padding, icon,
+   border, close mark (--sb-tab-close-room) or the Changes count, and a label of --sb-tab-label-least, about five characters and the ellipsis. The strip shows only the tabs whose least widths fit it
+   (fitTabs in tabs.ts, measured by main.ts from these numbers), and More lists the rest, so no label is ever hidden and no tab passes the strip.
    Every tab has the same padding, --sb-tab-pad, at its sides, and a tab of two buttons (an artifact's, a link's, History, a file's) reaches its
-   open button and close mark into it, so the tabs grow from the same width. A label is cut at --sb-tab-label-max, which keeps an artifact's tab
-   at most ARTIFACT_TAB_WIDTH (render.ts) wide. */
-.tabs { --sb-tab-label-max: 100px; --sb-tab-least: 116px; }
-.tab, .artifact-more { --sb-tab-pad: 14px; flex: 1 1 0; min-width: 0; max-width: max-content; }
-.tab { position: relative; display: flex; align-items: center; gap: 6px; overflow: hidden; height: 35px; margin-bottom: -1px; padding: 0 var(--sb-tab-pad); border: none; border-top: 1px solid transparent; border-right: 1px solid var(--vscode-panel-border); border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-strip); color: var(--vscode-panelTitle-inactiveForeground); font-size: 13px; cursor: pointer; white-space: nowrap; }
+   open button and close mark into it, so the tabs grow from the same width. A label is cut at --sb-tab-label-max. */
+.tabs { --sb-tab-label-max: 100px; --sb-tab-label-least: 44px; }
+.tab { --sb-tab-pad: 14px; --sb-tab-close-room: 32px; box-sizing: border-box; flex: 1 1 0; min-width: calc(2 * var(--sb-tab-pad) + 23px + var(--sb-tab-label-least)); max-width: max-content; position: relative; display: flex; align-items: center; gap: 6px; overflow: hidden; height: 35px; margin-bottom: -1px; padding: 0 var(--sb-tab-pad); border: none; border-top: 1px solid transparent; border-right: 1px solid var(--vscode-panel-border); border-bottom: 1px solid var(--vscode-panel-border); background: var(--sb-tab-strip); color: var(--vscode-panelTitle-inactiveForeground); font-size: 13px; cursor: pointer; white-space: nowrap; }
 .tab:hover { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
 .tab.selected { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); border-top-color: var(--vscode-panelTitle-activeBorder); border-bottom-color: var(--sb-tab-surface); }
 .main { --sb-tab-surface: var(--sb-chat-background); }
 .detail { --sb-tab-surface: var(--vscode-sideBar-background); }
 .main, .detail { --sb-tab-strip: color-mix(in srgb, var(--sb-tab-surface), #000 var(--sb-tab-shade)); }
 /* An artifact's tab has its kind's icon, its title cut with an ellipsis, and a close mark. */
-.tab.artifact-tab { box-sizing: border-box; }
+.tab:has(> .tab-close) { min-width: calc(var(--sb-tab-pad) + 23px + var(--sb-tab-label-least) + var(--sb-tab-close-room)); }
+.tab.changes-tab { min-width: calc(2 * var(--sb-tab-pad) + 67px + var(--sb-tab-label-least)); }
 .tab-open { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; height: 100%; margin-left: calc(-1 * var(--sb-tab-pad)); padding: 0 0 0 var(--sb-tab-pad); border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.tab .tab-label { min-width: 0; max-width: var(--sb-tab-label-max); overflow: hidden; text-overflow: ellipsis; }
+.tab .tab-label { min-width: var(--sb-tab-label-least); max-width: var(--sb-tab-label-max); overflow: hidden; text-overflow: ellipsis; }
 .tab-open .tab-label { flex: 1 1 auto; }
 .tab .codicon { flex: none; font-size: 14px; }
 /* A tab's unread dot sits in its end padding, level with the label's top, so it changes neither the tab's width nor where its label sits. */
@@ -466,64 +467,41 @@ button.picker > .codicon-chevron-down { order: 2; }
 .file-icon::before { font-family: seti; font-size: 150%; font-style: normal; font-weight: normal; line-height: 1; -webkit-font-smoothing: antialiased; }
 .tab-close { display: flex; flex: none; align-items: center; margin-right: calc(6px - var(--sb-tab-pad)); justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
 .tab-close:hover { background: color-mix(in srgb, var(--vscode-foreground) 15%, transparent); }
-/* History, once opened from an actions menu, has a close mark as a file tab has. */
-.tab.history-tab { box-sizing: border-box; }
-/* Artifacts and its count, at the strip's end after its tabs, while some artifacts have no tab, opening a menu of every artifact. */
-.artifact-more { position: relative; display: flex; margin-left: auto; }
-.artifact-more { padding-inline: var(--sb-tab-pad); }
-.artifact-more > .tab { flex: 1 1 auto; max-width: none; margin-inline: calc(-1 * var(--sb-tab-pad)); }
-.tab.artifact-menu-button { border-right: none; border-left: 1px solid var(--vscode-panel-border); }
-/* Its count carries the unread dot on its top-right corner, as a notification badge; the button has no caret, its menu named by aria-haspopup. */
-.tab.artifact-menu-button .tab-badge { position: relative; }
-.tab.artifact-menu-button .tab-badge > .unread-dot { position: absolute; top: -3px; right: -3px; box-shadow: 0 0 0 1.5px var(--sb-tab-strip); }
-.tab.artifact-menu-button.open .tab-badge > .unread-dot { box-shadow: 0 0 0 1.5px var(--sb-tab-surface); }
-.tab.artifact-menu-button.open { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
-.tab-badge.muted { color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
-/* The strip never wraps, and its labels are whole or readable, cut to no fewer than five characters and the ellipsis, about 44 px, or gone. A
-   labelled tab needs 116 px for that (--sb-tab-least: its padding, icon, those 44 px, its close mark and border, with a little to spare), so the
-   strip shows every tab's icon alone, named by its tooltip and accessible name, while it is narrower than 116 px for each of its tabs (counted by
-   :nth-child of the tabs, the Artifacts button and the maximize button among them), and always under 600 px, as on a phone or a narrow column:
-   all labels or none. Icons alone, Artifacts and Changes keep their counts, only the chosen tab shows its close mark, and each tab is 44 px wide
-   while the strip has room, 14 px each side of its 16 px icon. The rules read the custom properties these set, so one switch turns every tab. */
-.tab .tab-label, .tab.diff-tab .tab-badge { display: var(--sb-tab-label-display, block); }
-.tab, .tab-open { justify-content: var(--sb-tab-justify, normal); }
-.tab:not(.selected) > .tab-close { display: var(--sb-tab-close-other, flex); }
-.tab:not(.selected) > .tab-open { margin-right: calc(-1 * var(--sb-tab-icons, 0) * var(--sb-tab-pad)); padding-right: calc(var(--sb-tab-icons, 0) * var(--sb-tab-pad)); }
-@container (max-width: 600px) { .tabs > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 696px) { .tabs:has(> :nth-child(6 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 812px) { .tabs:has(> :nth-child(7 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 928px) { .tabs:has(> :nth-child(8 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 1044px) { .tabs:has(> :nth-child(9 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 1160px) { .tabs:has(> :nth-child(10 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 1276px) { .tabs:has(> :nth-child(11 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 1392px) { .tabs:has(> :nth-child(12 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 1508px) { .tabs:has(> :nth-child(13 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 1624px) { .tabs:has(> :nth-child(14 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 1740px) { .tabs:has(> :nth-child(15 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-@container (width < 1856px) { .tabs:has(> :nth-child(16 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }
-.tabs:has(> :nth-child(17 of :is(.tab, .artifact-more))) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; }
-/* Under 600 px, a file tab shows only while chosen. Under 360 px the tabs' padding shrinks. */
-@container (max-width: 600px) {
-  .tab.diff-tab:not(.selected) { display: none; }
+/* On a touch screen a close mark is a 44 px target, its glyph as before, reaching to the tab's end. */
+@media (hover: none), (pointer: coarse) {
+  .tab { --sb-tab-close-room: 50px; }
+  .tab-close { width: 44px; height: 44px; margin-right: calc(-1 * var(--sb-tab-pad)); border-radius: 0; }
 }
-@container (max-width: 360px) {
-  .tab, .artifact-more { --sb-tab-pad: 9px; }
+/* More and its count, at the strip's end after its tabs, while some tabs do not fit or some artifacts are closed, opening a menu of them. It and
+   the maximize button have no border of their own, so the last tab's border is the only line between them, whether or not they touch. */
+.tab-more { position: relative; display: flex; flex: none; margin-left: auto; }
+.tab-more > .tab { --sb-tab-pad: 12px; flex: none; min-width: 0; max-width: none; border-right: none; }
+/* Its count carries the unread dot on its top-right corner, as a notification badge; the button has no caret, its menu named by aria-haspopup. */
+.tab.tab-more-button .tab-badge { position: relative; }
+.tab.tab-more-button .tab-badge > .unread-dot { position: absolute; top: -3px; right: -3px; box-shadow: 0 0 0 1.5px var(--sb-tab-strip); }
+.tab.tab-more-button.open .tab-badge > .unread-dot { box-shadow: 0 0 0 1.5px var(--sb-tab-surface); }
+.tab.tab-more-button.open { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
+.tab-badge.muted { color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
+/* Under 480 px, as on a phone, the tabs' padding shrinks, so a strip there keeps more of them. */
+@container (max-width: 480px) {
+  .tab { --sb-tab-pad: 9px; }
+  .tab-more > .tab { --sb-tab-pad: 8px; }
   .tab > .unread-dot { top: 8px; right: 0; }
 }
-/* The Artifacts menu's rows share its columns, so each artifact's kind lines up under the one above: the title takes the room left and is cut
-   first, and a kind longer than a word is cut at 14 characters so it cannot crowd the title out. The menu may reach past its strip, up to 480 px and the viewport's width, so on a viewport under 520 px, as on a phone, it leaves the kind
-   out rather than cut the title further. */
-.artifact-menu { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; max-width: min(480px, calc(100vw - 16px)); }
-.artifact-menu .menu-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; column-gap: 0; }
-.artifact-menu .menu-row.in-bar .title { color: var(--vscode-descriptionForeground); }
-/* A title cut with an ellipsis, then the unread dot of an artifact this device has not opened, as a conversation's row has it. */
-.artifact-menu .title { display: flex; align-items: center; gap: 6px; padding-block: 0; }
-.artifact-menu .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.artifact-menu .menu-gutter { margin-right: 6px; }
-.artifact-menu .menu-kind { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; margin-left: 24px; color: var(--vscode-descriptionForeground); }
-.artifact-menu .menu-row:is(:hover, :focus) .menu-kind { color: inherit; opacity: 0.8; }
-.artifact-menu .menu-note { margin-left: 12px; }
-@media (max-width: 519.98px) { .artifact-menu .menu-kind { display: none; } }
+/* The More menu's rows share its columns, so each row's kind lines up under the one above: the title takes the room left and is cut first, and a
+   kind longer than a word is cut at 14 characters so it cannot crowd the title out. The menu may reach past its strip, up to 480 px and the
+   viewport's width, so on a viewport under 520 px, as on a phone, it leaves the kind out rather than cut the title further. */
+.tab-menu { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; max-width: min(480px, calc(100vw - 16px)); }
+.tab-menu .menu-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; column-gap: 0; }
+.tab-menu .menu-separator { grid-column: 1 / -1; }
+/* A title cut with an ellipsis, then the unread dot of an unread row, as a conversation's row has it. */
+.tab-menu .title { display: flex; align-items: center; gap: 6px; padding-block: 0; }
+.tab-menu .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tab-menu .menu-gutter { margin-right: 6px; }
+.tab-menu .menu-kind { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; margin-left: 24px; color: var(--vscode-descriptionForeground); }
+.tab-menu .menu-row:is(:hover, :focus) .menu-kind { color: inherit; opacity: 0.8; }
+.tab-menu .menu-note { margin-left: 12px; }
+@media (max-width: 519.98px) { .tab-menu .menu-kind { display: none; } }
 .tab-badge { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center; text-transform: none; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 20px calc(16px + var(--sb-end)); touch-action: pan-y pinch-zoom; }
 /* Chrome and Edge move a touch that starts near a box with a :hover or :active style, such as a tab strip, onto that box (touch adjustment),
@@ -1016,9 +994,9 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 :where(html:not(.phone)) #root.wide > .detail { display: flex; flex: 1 1 360px; flex-direction: column; min-width: 360px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
 /* Maximized (main.ts), the column covers the whole page, the list and the conversation too, which keep their places under it; its strip's last
    button restores it. */
-.tab.panel-max { flex: none; justify-content: center; margin-left: auto; padding: 0 10px; border-right: none; border-left: 1px solid var(--vscode-panel-border); cursor: pointer; }
-/* At the strip's end; after Artifacts, which already sits there, it needs no push of its own. */
-.artifact-more + .tab.panel-max { margin-left: 0; }
+.tab.panel-max { flex: none; min-width: 0; max-width: none; justify-content: center; margin-left: auto; padding: 0 10px; border-right: none; cursor: pointer; }
+/* At the strip's end; after More, which already sits there, it needs no push of its own. */
+.tab-more + .tab.panel-max { margin-left: 0; }
 @media (hover: none), (pointer: coarse) { .tab.panel-max { min-width: 44px; } }
 /* The maximize button is no tab: it keeps the strip's background when focused or pressed, so it never looks chosen, shows the focus outline
    alone for the keyboard, and takes an icon button's hover where the pointer can hover. */

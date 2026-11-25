@@ -4,7 +4,7 @@ import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 import type { PageState } from './model.js';
 import { MENU_MAX_WIDTH, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
-import { ARTIFACTS_SEEN, ARTIFACT_TABS_MAX, artifactShow, artifactTabsFit, artifactTabWidth, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
+import { ARTIFACTS_SEEN, artifactShow, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, NewDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -40,6 +40,7 @@ import type { Answer } from './request.js';
 import { dotView, renderBanner, renderScreen, renderUpdate } from './connectionView.js';
 import type { ConnectionView } from './connectionView.js';
 import { renderOpening, renderOpeningHead, renderOpeningSide, renderOpeningTabs } from './opening.js';
+import type { TabFit } from './tabs.js';
 import type { Opening } from './opening.js';
 import { parseScrolls, parseTabSets, ROUTE_KEY, routeHash, SCROLL_KEY, startRoute, tabSetKey, TABS_KEY, withScroll, withTabSet } from './route.js';
 import type { Route, ScrollPlace, TabSet } from './route.js';
@@ -2424,7 +2425,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       artifactsOpened([shownArtifact]);
     }
 
-    const strip = { ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), open: shownArtifact, fit: view.artifactFit, menu: view.artifactMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen), files: localFiles.view, changes: changes.view };
+    const strip = { ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), open: shownArtifact, fit: view.tabFit, menu: view.tabMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen), files: localFiles.view, changes: changes.view };
 
     // The History tab reads the hub only while it shows.
     followHistory((side ? sideTab() : mainTab()) === 'history' && !(isPhone() && root.classList.contains('listing')));
@@ -2579,56 +2580,70 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Conversation view, Menus). */
-  // A menu may set a wider max-width of its own, as the Artifacts menu does for its kind column.
+  // A menu may set a wider max-width of its own, as the More menu does for its kind column.
   const fitMenus = (): void => {
     placeRowMenus();
     placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }, (menu) => parseFloat(getComputedStyle(menu as unknown as Element).maxWidth) || MENU_MAX_WIDTH);
   };
   /**
-   * How many artifact tabs the shown strip fits (`artifactTabsFit`), measured after a draw: its other tabs and the Artifacts button as drawn, and
-   * each artifact tab at its most width as page.css draws it (`artifactTabWidth`), read from the strip's own custom properties. A strip that can
-   * keep its labels readable, at least `--sb-tab-least` for each of its tabs and the Artifacts button, shows no more tabs than keep it so; one that
-   * cannot shows its tabs as icons (page.css), and fits as many icon tabs as it has room for. True when that changes which tabs show, so the strip
-   * is drawn again; a change of the strip's width draws again (`stripWidth`).
+   * The shown strip's room for its tabs (`fitTabs` in tabs.ts), measured after a draw: its width less the maximize button's, More's width, and
+   * each tab's least width, its label cut to `--sb-tab-label-least` (page.css): a drawn tab's as drawn less what its label has beyond that, kept
+   * while it is in More under the same sizing rules, and an undrawn one's from page.css's numbers, with a close mark or without. True when that changes, so the strip is drawn
+   * again; a change of the strip's width draws again (`stripWidth`).
    */
-  const fitArtifactTabs = (): boolean => {
+  /** The sizing rules the strip's tabs were last measured under: `--sb-tab-pad`, `--sb-tab-label-least` and `--sb-tab-close-room`. */
+  let tabSizing = '';
+  const fitStripTabs = (): boolean => {
     const strip = (wide() ? detailHead : head).querySelector<HTMLElement>('.tabs');
 
     if (strip === null) {
       return false;
     }
 
-    // Each other tab at its whole width, as drawn plus whatever its label lost to the ellipsis, since a crowded strip shrinks every tab (page.css).
-    // A label grows no wider than its own max-width (--sb-tab-label-max), however long its text.
-    const whole = (tab: HTMLElement): number =>
-      [...tab.querySelectorAll<HTMLElement>('.tab-label')].reduce((sum, label) => sum + Math.max(0, Math.min(label.scrollWidth, parseFloat(getComputedStyle(label).maxWidth) || Infinity) - label.clientWidth), tab.getBoundingClientRect().width);
-    const others = [...strip.querySelectorAll<HTMLElement>(':scope > .tab:not(.artifact-tab), :scope > .link-tab')];
-    const fixed = others.reduce((sum, tab) => sum + whole(tab), 0);
-    const button = strip.querySelector<HTMLElement>('.artifact-menu-button');
-    const menu = button === null ? undefined : whole(button);
-    const count = state.artifacts.length;
-    const width = strip.getBoundingClientRect().width;
-    // The sizing rule's own numbers; a page without its stylesheet, as under test, has none and fits labelled tabs at their most width.
-    const read = (node: Element | undefined, name: string): string => {
-      const style = node === undefined ? null : (getComputedStyle(node) as Partial<CSSStyleDeclaration> | null);
+    const width = (node: Element | null): number => node?.getBoundingClientRect().width ?? 0;
 
-      return typeof style?.getPropertyValue === 'function' ? style.getPropertyValue(name).trim() : '';
+    // A strip not laid out, as under the phone's list, shows every tab until it is.
+    if (width(strip) <= 0) {
+      const changed = view.tabFit.width > 0;
+
+      view.tabFit = { ...view.tabFit, width: 0 };
+      return changed;
+    }
+
+    // The sizing rule's own numbers; a page without its stylesheet, as under test, has none and takes page.css's.
+    const read = (node: Element | null, name: string, fallback: number): number => {
+      const style = node === null ? null : (getComputedStyle(node) as Partial<CSSStyleDeclaration> | null);
+
+      return parseFloat(typeof style?.getPropertyValue === 'function' ? style.getPropertyValue(name) : '') || fallback;
     };
-    const least = parseFloat(read(strip, '--sb-tab-least'));
-    const labelMax = parseFloat(read(strip, '--sb-tab-label-max')) || 100;
-    const pad = parseFloat(read(others[0], '--sb-tab-pad')) || 14;
-    const iconsNow = read(others[0], '--sb-tab-icons') === '1';
-    // The tabs page.css counts beside the artifact tabs, the Artifacts button and the maximize button with them.
-    const counted = others.length + 1;
-    const readable = Number.isNaN(least) ? Infinity : Math.floor(width / least) - counted;
-    const labelled = Number.isNaN(least) || (width > 600 && readable >= 0);
-    // Drawn as icons, the other tabs measured narrower than they are with labels, so their labelled fit waits for the draw that shows them.
-    const fit = labelled
-      ? Math.max(0, Math.min(iconsNow ? Math.min(count, ARTIFACT_TABS_MAX) : artifactTabsFit(width, fixed, count, menu || undefined, artifactTabWidth(pad, labelMax, false)), readable))
-      : artifactTabsFit(width, fixed, count, menu || undefined, artifactTabWidth(pad, labelMax, true));
-    const changed = Math.min(fit, count) !== Math.min(view.artifactFit, count);
+    const first = strip.querySelector(':scope > .tab[data-id]');
+    const pad = read(first, '--sb-tab-pad', 14);
+    const label = read(first, '--sb-tab-label-least', 44);
+    const close = read(first, '--sb-tab-close-room', 32);
+    // A tab measured under other sizing rules, as across the 480 px breakpoint or on a touch screen, is measured again, or taken from page.css's
+    // numbers while it is not drawn.
+    const sizing = first === null ? tabSizing : `${pad} ${label} ${close}`;
+    const measured = sizing === tabSizing ? { ...view.tabFit.measured } : {};
 
-    view.artifactFit = fit;
+    tabSizing = sizing;
+
+    for (const tab of strip.querySelectorAll<HTMLElement>(':scope > [data-id]')) {
+      const cut = tab.querySelector('.tab-label');
+
+      measured[tab.dataset['id']!] = Math.ceil(width(tab) - width(cut) + (cut === null ? 0 : label));
+    }
+
+    // The icon, its gap and the border with the label; More's icon, gap and count before it is drawn.
+    const fit: TabFit = {
+      width: Math.floor(width(strip) - [...strip.querySelectorAll(':scope > .panel-max')].reduce((sum, one) => sum + width(one), 0)),
+      more: Math.ceil(width(strip.querySelector(':scope > .tab-more')) || 2 * pad + 43),
+      plain: Math.ceil(2 * pad + 23 + label),
+      closable: Math.ceil(pad + 23 + label + close),
+      measured,
+    };
+    const changed = JSON.stringify(fit) !== JSON.stringify(view.tabFit);
+
+    view.tabFit = fit;
     return changed;
   };
   // Makes the rest of the page inert while the persona dialog shows, so Tab and clicks reach only the dialog, as Settings does.
@@ -2739,8 +2754,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawRegions();
     restoreCardFocus(focus);
 
-    // Measured again after a draw that changed the tabs, since the Artifacts button may have come or gone; twice at most.
-    for (let again = 0; again < 3 && fitArtifactTabs(); again++) {
+    // Measured again after a draw that changed the tabs, since More and the tabs drawn may have changed; twice at most.
+    for (let again = 0; again < 3 && fitStripTabs(); again++) {
       drawRegions();
     }
 
@@ -3884,6 +3899,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   root.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
 
+    // A More menu row does what its tab does, and the menu closes.
+    if (view.tabMenu && target.closest('.tab-menu .menu-row') !== null) {
+      view.tabMenu = false;
+    }
+
     if (changes.click(target) || localFiles.click(target)) {
       return;
     }
@@ -4199,7 +4219,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         chooseTab('artifacts');
 
         view.artifact = button!.dataset['path'] ?? null;
-        view.artifactMenu = false;
+        view.tabMenu = false;
 
         // Choosing a closed artifact opens its tab again.
         if (view.artifact !== null && closedNow().has(view.artifact)) {
@@ -4209,8 +4229,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
         saveTab();
         break;
-      case 'artifact-menu':
-        view.artifactMenu = !view.artifactMenu;
+      case 'tab-menu':
+        view.tabMenu = !view.tabMenu;
         draw();
         break;
       case 'close-artifact': {
@@ -4229,7 +4249,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           chooseTab('status');
         }
 
-        view.artifactMenu = false;
+        view.tabMenu = false;
         draw();
 
         // The work item's kept artifact goes; Status shows without becoming the choice for every work item.
@@ -4458,8 +4478,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
 
-    if (view.artifactMenu && !(event.target instanceof Element && event.target.closest('.artifact-more') !== null)) {
-      view.artifactMenu = false;
+    if (view.tabMenu && !(event.target instanceof Element && event.target.closest('.tab-more') !== null)) {
+      view.tabMenu = false;
       draw();
     }
 
@@ -4532,8 +4552,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     // Left and Right, Home and End move between a tab strip's tabs, as in a tab list; Enter or Space then chooses one.
     const tab = event.target instanceof HTMLElement && event.target.getAttribute('role') === 'tab' ? event.target : null;
-    // A narrow strip hides some diff tabs (page.css), which cannot take the focus.
-    const tabs = tab === null ? [] : [...(tab.closest('.tabs')?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])].filter((one) => getComputedStyle(one.closest('.tab') ?? one).display !== 'none');
+    const tabs = tab === null ? [] : [...(tab.closest('.tabs')?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])];
 
     if (tab !== null && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) && tabs.length > 1) {
       const at = tabs.indexOf(tab);
@@ -4560,10 +4579,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.sheet = null;
       draw();
       event.stopImmediatePropagation();
-    } else if (event.key === 'Escape' && view.artifactMenu) {
-      view.artifactMenu = false;
+    } else if (event.key === 'Escape' && view.tabMenu) {
+      view.tabMenu = false;
       draw();
-      root.querySelector<HTMLElement>('.artifact-menu-button')?.focus();
+      root.querySelector<HTMLElement>('.tab-more-button')?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.rowMenu !== null) {
       const opener = view.rowMenu;
@@ -4594,9 +4613,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // A console typing into its session stops its keys first (console.ts), so its Escape stays the session's.
       maximizePanel(false);
       event.stopImmediatePropagation();
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.viewMenu || view.rowMenu !== null)) {
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.viewMenu || view.rowMenu !== null || view.tabMenu)) {
       // Up and Down move between the open menu's enabled rows.
-      const rows = [...(view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row:not(:disabled)') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row:not(:disabled)'))];
+      const rows = [...(view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row:not(:disabled)') : view.tabMenu ? root.querySelectorAll<HTMLElement>('.tab-menu .menu-row') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row:not(:disabled)'))];
       const at = rows.indexOf(document.activeElement as HTMLElement);
 
       if (rows.length > 0) {
@@ -5189,7 +5208,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The sibling frame draws over the page. A host that cuts holes (iframeBrowser.holes) cuts each menu, popover, dialog, toast or the drawer
   // that overlaps the frame out of it, so the layer shows and takes the pointer, and darkens the frame under a modal backdrop, which then takes
   // the pointer. An older host does not, so the frame hides under a modal dialog or the list's drawer, and under a menu, popover or toast only
-  // where that layer's box overlaps the frame's, as the Artifacts menu does when it drops from its strip over the Browser tab. A menu that opens
+  // where that layer's box overlaps the frame's, as the More menu does when it drops from its strip over the Browser tab. A menu that opens
   // beside the frame, such as the session dropdown, leaves it showing.
   const frameLayers = (): FrameCover | undefined => {
     const slot = iframe.slotRect();
@@ -5293,7 +5312,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       clearTimeout(framesHold);
     }
   });
-  // A strip that widens or narrows fits another number of artifact tabs.
+  // A strip that widens or narrows fits another set of tabs.
   let stripWidth = -1;
   const strips = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
     const width = (wide() ? detailHead : head).getBoundingClientRect().width;

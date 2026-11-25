@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { stripTabs } from '../src/tabs.js';
-import type { DocTab, StripState } from '../src/tabs.js';
+import { fitTabs, stripTabs, UNMEASURED } from '../src/tabs.js';
+import type { DocTab, StripState, TabFit } from '../src/tabs.js';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
 import { newChanges } from '../src/changes.js';
 import type { LocalTab } from '../src/localFiles.js';
@@ -95,7 +95,7 @@ describe('stripTabs', () => {
 
 describe('the strips drawn from stripTabs', () => {
   const state: PageState = { ...EMPTY, artifacts: full.artifacts as ArtifactView[] };
-  const strip = { links, link: links[1]!.url, open: null, fit: 3, menu: false, now: 0, files: full.files, changes: newChanges() };
+  const strip = { links, link: links[1]!.url, open: null, menu: false, now: 0, files: full.files, changes: newChanges() };
   const draw = (tree: ReturnType<typeof renderTabs>): HTMLElement[] => {
     const host = document.createElement('div');
 
@@ -115,12 +115,73 @@ describe('the strips drawn from stripTabs', () => {
     expect(draw(renderTabs(newView(), state, true, strip, true, true)).map(name)).toEqual(['conversation', ...drawnOrder]);
   });
 
-  it('Strip_ArtifactsBeyondTheFit_GoToTheArtifactsMenuAtTheEnd', () => {
+  it('Strip_TabsBeyondTheFit_GoToMoreAtTheEnd', () => {
+    const host = document.createElement('div');
+    // Room for Status, History and the first link beside More.
+    const fit: TabFit = { width: 350, more: 50, plain: 100, closable: 100, measured: {} };
+
+    mount(host, renderSideSwitch('status', state, true, { ...strip, fit }, true, true));
+    expect(draw(renderSideSwitch('status', state, true, { ...strip, fit }, true, true)).map(name)).toEqual(drawnOrder.slice(0, 3));
+    // After every tab drawn, with the count of the rest, Console among them.
+    expect(host.querySelector('nav')!.lastElementChild!.classList.contains('tab-more')).toBe(true);
+    expect(host.querySelector('.tab-more-button .tab-badge')!.textContent).toBe(String(drawnOrder.length - 3));
+    // Each drawn tab names its id, by which the page measures it.
+    expect([...host.querySelectorAll<HTMLElement>('nav > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(ORDER.slice(0, 3));
+  });
+
+  it('LinkTab_Tooltip_IsItsLabelAndUrl', () => {
     const host = document.createElement('div');
 
-    mount(host, renderSideSwitch('status', state, true, { ...strip, fit: 1 }, true, true));
-    expect([...host.querySelectorAll<HTMLElement>('.artifact-tab:not(.link-tab)')].map((tab) => tab.dataset['path'])).toEqual(['chat/a9.md']);
-    // After every tab, Console too.
-    expect(host.querySelector('nav')!.lastElementChild!.classList.contains('artifact-more')).toBe(true);
+    mount(host, renderSideSwitch('browser', state, true, strip, true, true));
+    expect(host.querySelector<HTMLElement>(`[data-url="${links[0]!.url}"].tab-open`)!.title).toBe(`Issue 1 · ${links[0]!.url}`);
+  });
+});
+
+describe('fitTabs', () => {
+  const tabs = stripTabs({ ...full, shown: 'artifacts', open: 'chat/a2.md' }, 'narrow');
+  const ids2 = (fitted: { shown: DocTab[]; hidden: DocTab[] }): [string[], string[]] => [ids(fitted.shown), ids(fitted.hidden)];
+  // Every tab 100 px, a closable one 120 px, More 60 px.
+  const fit = (width: number, measured: Record<string, number> = {}): TabFit => ({ width, more: 60, plain: 100, closable: 120, measured });
+  const all = ['conversation', ...ORDER];
+  // 4 plain tabs (Conversation, Status, Changes, Console) and 8 closable ones (History, two links, three artifacts, two files).
+  const total = 4 * 100 + 8 * 120;
+
+  it('FitTabs_UnmeasuredOrRoomForAll_ShowsEveryTab', () => {
+    expect(ids2(fitTabs(tabs, UNMEASURED))).toEqual([all, []]);
+    expect(ids2(fitTabs(tabs, fit(total)))).toEqual([all, []]);
+    // More for the closed artifacts needs its room too.
+    expect(ids2(fitTabs(tabs, fit(total), true))[1]).not.toEqual([]);
+    expect(ids2(fitTabs(tabs, fit(total + 60), true))).toEqual([all, []]);
+  });
+
+  it('FitTabs_TooNarrow_KeepsTheSelectedTabConversationAndStatusThenTheRestInStripOrder', () => {
+    // 60 for More, 120 for the selected artifact, 100 each for Conversation and Status, then History at 120: 500.
+    const [shown, hidden] = ids2(fitTabs(tabs, fit(500)));
+
+    expect(shown).toEqual(['conversation', 'status', 'history', 'artifact:chat/a2.md']);
+    expect(hidden).toEqual(all.filter((id) => !shown.includes(id)));
+    // One pixel short of History: it and every tab after it go, even one that would fit.
+    expect(ids2(fitTabs(tabs, fit(499)))[0]).toEqual(['conversation', 'status', 'artifact:chat/a2.md']);
+  });
+
+  it('FitTabs_StripTooNarrowForTheKeptTabs_DropsStatusThenConversationButNeverTheSelectedTab', () => {
+    expect(ids2(fitTabs(tabs, fit(379)))[0]).toEqual(['conversation', 'artifact:chat/a2.md']);
+    expect(ids2(fitTabs(tabs, fit(279)))[0]).toEqual(['artifact:chat/a2.md']);
+    expect(ids2(fitTabs(tabs, fit(10)))[0]).toEqual(['artifact:chat/a2.md']);
+    // Every tab not shown is in More.
+    expect(ids2(fitTabs(tabs, fit(10)))[1]).toHaveLength(all.length - 1);
+  });
+
+  it('FitTabs_SelectedConversation_KeepsStatusNext', () => {
+    const conversation = stripTabs({ ...full, shown: 'conversation' }, 'narrow');
+
+    expect(ids2(fitTabs(conversation, fit(260)))[0]).toEqual(['conversation', 'status']);
+  });
+
+  it('FitTabs_MeasuredTab_UsesItsOwnWidthOverItsKinds', () => {
+    // History measured at 300 px no longer fits where it did at 120.
+    expect(ids2(fitTabs(tabs, fit(500, { history: 300 })))[0]).toEqual(['conversation', 'status', 'artifact:chat/a2.md']);
+    // A narrow Status measured at 60 px lets History in at 460.
+    expect(ids2(fitTabs(tabs, fit(460, { status: 60 })))[0]).toEqual(['conversation', 'status', 'history', 'artifact:chat/a2.md']);
   });
 });

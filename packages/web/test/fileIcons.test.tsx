@@ -172,7 +172,7 @@ describe('the page', () => {
   beforeEach(() => resetFileIcons());
   afterEach(() => resetFileIcons());
 
-  it("draws each change's and each artifact's file type icon, in the tabs and the Artifacts menu, once the mapping loads", async () => {
+  it("draws each change's and each artifact's file type icon, in the tabs and the More menu, once the mapping loads", async () => {
     const root = document.createElement('div');
     const rows = [
       { path: 'src/main.ts', status: 'M', stages: ['working'], additions: 1, deletions: 0, binary: false },
@@ -196,11 +196,19 @@ describe('the page', () => {
     const seti = (path: string) => `file-icon seti-${iconOf(MAP, path)}`;
     const tabIcons = [...root.querySelectorAll('.artifact-tab .tab-open > span:first-child')].map((icon) => icon.className);
 
-    expect(tabIcons.length).toBeGreaterThan(0);
-    expect(tabIcons).toEqual([...artifacts].reverse().slice(0, tabIcons.length).map((one) => seti(one.path)));
+    // Unmeasured, the strip shows every tab.
+    expect(tabIcons).toEqual([...artifacts].reverse().map((one) => seti(one.path)));
 
-    root.querySelector<HTMLElement>('.artifact-menu-button')?.click();
-    expect([...root.querySelectorAll('.artifact-menu .menu-gutter > span')].map((icon) => icon.className)).toEqual([...artifacts].reverse().map((one) => seti(one.path)));
+    // A strip too narrow for any tab but the chosen one puts every artifact in More.
+    const strip = root.querySelector('.artifact-tab')!.closest<HTMLElement>('.tabs')!;
+
+    const narrow = vi.spyOn(strip, 'getBoundingClientRect').mockReturnValue({ width: 1 } as DOMRect);
+    strip.querySelector<HTMLElement>('[data-side="status"], [data-tab="status"]')!.click();
+    root.querySelector<HTMLElement>('.tab-more-button')!.click();
+    expect([...root.querySelectorAll('.tab-menu [data-action="artifact"] .menu-gutter > span')].map((icon) => icon.className)).toEqual([...artifacts].reverse().map((one) => seti(one.path)));
+    // Measured unmeasured again, the strip shows every tab, Changes among them.
+    narrow.mockRestore();
+    strip.querySelector<HTMLElement>('[data-side="status"], [data-tab="status"]')!.click();
 
     root.querySelector<HTMLElement>('.changes-tab')!.click();
     await flush();

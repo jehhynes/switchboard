@@ -2705,7 +2705,7 @@ describe('the page in use', () => {
     vi.unstubAllGlobals();
   });
 
-  it('marks the artifacts this device has not opened with the unread dot in the Artifacts menu, until opened here or on another of its pages', () => {
+  it('marks the artifacts this device has not opened with the unread dot in the More menu, until opened here or on another of its pages', () => {
     window.innerWidth = 1920;
     // Kept before the page loaded: work item 1 seen with chat/a5.md opened; another work item's opened path does not count.
     localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md'], '2': ['chat/a6.md'] }));
@@ -2721,23 +2721,26 @@ describe('the page in use', () => {
       source.emit('artifact', { artifact: { path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 10_000 + index } });
     }
 
-    vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect);
+    vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 1 } as DOMRect);
+    // Too narrow for any tab but Console, chosen: every artifact is in More.
     click('#detail [data-side="console"]');
 
-    const dotted = () => [...root.querySelectorAll<HTMLElement>('#detail .artifact-menu .menu-row')].filter((row) => row.querySelector('.title > .unread-dot') !== null).map((row) => row.dataset['path']);
+    const dotted = () => [...root.querySelectorAll<HTMLElement>('#detail .tab-menu .menu-row[data-path]')].filter((row) => row.querySelector('.title > .unread-dot') !== null).map((row) => row.dataset['path']);
 
-    click('#detail [data-action="artifact-menu"]');
+    // More carries the dot while a row in it is unread.
+    expect(root.querySelector('#detail .tab-more-button .tab-badge > .unread-dot')).not.toBeNull();
+    click('#detail [data-action="tab-menu"]');
     expect(dotted()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a4.md']);
-    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a4.md"]')!.getAttribute('aria-label')).toBe('Note 4, unread, note, just now');
-    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a5.md"]')!.getAttribute('aria-label')).toBe('Note 5, note, just now');
-    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a4.md"] .unread-dot')!.getAttribute('aria-label')).toBe('Unread');
+    expect(root.querySelector('#detail .tab-menu [data-path="chat/a4.md"]')!.getAttribute('aria-label')).toBe('Note 4, unread, note, just now');
+    expect(root.querySelector('#detail .tab-menu [data-path="chat/a5.md"]')!.getAttribute('aria-label')).toBe('Note 5, note, just now');
+    expect(root.querySelector('#detail .tab-menu [data-path="chat/a4.md"] .unread-dot')!.getAttribute('aria-label')).toBe('Unread');
     // No row says whether its tab is closed.
-    expect(root.querySelector('#detail .artifact-menu')!.textContent).not.toContain('Closed');
+    expect(root.querySelector('#detail .tab-menu')!.textContent).not.toContain('Closed');
 
     // Opening one clears its dot and keeps it for this device, added to what another page kept meanwhile.
     localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md', 'chat/a6.md'], '2': ['chat/a6.md'] }));
-    click('#detail .artifact-menu [data-path="chat/a4.md"]');
-    click('#detail [data-action="artifact-menu"]');
+    click('#detail .tab-menu [data-path="chat/a4.md"]');
+    click('#detail [data-action="tab-menu"]');
     expect(dotted()).toEqual(['chat/a7.md']);
     expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md', 'chat/a6.md', 'chat/a4.md'], '2': ['chat/a6.md'] });
 
@@ -2761,12 +2764,13 @@ describe('the page in use', () => {
     hello(source);
     expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/p.html', 'chat/plan.md'] });
     source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
-    vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect);
+    vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 1 } as DOMRect);
+    // Too narrow for any tab but Console, chosen: every artifact is in More.
     click('#detail [data-side="console"]');
-    click('#detail [data-action="artifact-menu"]');
+    click('#detail [data-action="tab-menu"]');
     // By the hub's file times alone: an artifact with an older time than the page's clock is still new.
-    expect(root.querySelector('#detail .artifact-menu [data-path="chat/new.md"] .unread-dot')).not.toBeNull();
-    expect(root.querySelector('#detail .artifact-menu [data-path="chat/plan.md"] .unread-dot')).toBeNull();
+    expect(root.querySelector('#detail .tab-menu [data-path="chat/new.md"] .unread-dot')).not.toBeNull();
+    expect(root.querySelector('#detail .tab-menu [data-path="chat/plan.md"] .unread-dot')).toBeNull();
     page.close();
 
     // A later page whose copy is stale, as when another page kept the work item first without this one hearing of it, adds nothing at its hello.
@@ -2822,7 +2826,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('fits the artifact tabs to the strip, newest first, and lists every artifact in the Artifacts menu with those in tabs dimmed', async () => {
+  it('fits the tabs to the strip, keeping the chosen one and Status, and lists the rest in More, every tab reachable through it', async () => {
     window.innerWidth = 1920;
     onTestFinished(() => {
       vi.unstubAllGlobals();
@@ -2836,86 +2840,112 @@ describe('the page in use', () => {
       source.emit('artifact', { artifact: { path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 10_000 + index } });
     }
 
-    // Unmeasured, the strip shows the most tabs, ARTIFACT_TABS_MAX, then Artifacts with the rest.
     const paths = () => [...root.querySelectorAll<HTMLElement>('#detail .artifact-tab')].map((tab) => tab.dataset['path']);
+    const selected = () => root.querySelector<HTMLElement>('#detail .tabs > .tab.selected');
+    const menuRows = () => [...root.querySelectorAll<HTMLElement>('#detail .tab-menu .menu-row')];
 
-    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md']);
-    expect(root.querySelector('#detail .artifact-menu-button .tab-badge')!.textContent).toBe('10');
+    // Unmeasured, the strip shows every tab and no More.
+    expect(paths()).toHaveLength(10);
+    expect(root.querySelector('#detail .tab-more')).toBeNull();
 
-    // A 700 px strip whose Status and Console take 200 px fits (700 - 200 - 132) / 168, two tabs beside the menu.
-    vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 700 } as DOMRect);
-    root.querySelectorAll<HTMLElement>('#detail .tabs > .tab[data-side]').forEach((tab) => vi.spyOn(tab, 'getBoundingClientRect').mockReturnValue({ width: 100 } as DOMRect));
+    // A 400 px strip. jsdom draws every tab 0 wide, so each measures as its 44 px least label alone, and More as page.css's 71 px: 329 px keep
+    // seven tabs, Console chosen, Status, then the five newest artifacts.
+    const narrow = vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 400 } as DOMRect);
+
     click('#detail [data-side="console"]');
-    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md']);
+    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md']);
+    expect(root.querySelector('#detail .side-switch > [data-side="status"]')).not.toBeNull();
+    expect(root.querySelector('#detail .tab-more-button .tab-badge')!.textContent).toBe('6');
 
-    // The menu lists all eight, newest first, those with a tab dimmed; picking one shows it in place of the last tab.
-    click('#detail [data-action="artifact-menu"]');
-    const rows = [...root.querySelectorAll<HTMLElement>('#detail .artifact-menu .menu-row')];
+    // More lists the rest in strip order: the older artifacts, then Changes; picking one chooses it, closes the menu, and gives it a tab in place
+    // of Console, which More now holds.
+    click('#detail [data-action="tab-menu"]');
+    expect(menuRows().slice(0, 3).map((row) => row.dataset['path'])).toEqual(['chat/a2.md', 'chat/a1.md', 'chat/a0.md']);
+    expect(menuRows().at(-1)!.dataset['action']).toBe('diff-tab');
+    expect(menuRows()).toHaveLength(6);
+    click('#detail .tab-menu [data-path="chat/a1.md"]');
+    expect(root.querySelector('#detail .tab-menu')).toBeNull();
+    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md', 'chat/a1.md']);
+    expect(selected()!.dataset['path']).toBe('chat/a1.md');
+    expect(root.querySelector('#detail .side-switch > [data-side="console"]')).toBeNull();
 
-    // The hello's own two artifacts are older than the eight.
-    expect(rows.map((row) => row.dataset['path']).slice(0, 8)).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md', 'chat/a2.md', 'chat/a1.md', 'chat/a0.md']);
-    expect(rows).toHaveLength(10);
-    expect(rows.filter((row) => row.classList.contains('in-bar')).map((row) => row.dataset['path'])).toEqual(['chat/a7.md', 'chat/a6.md']);
-    click('#detail .artifact-menu [data-path="chat/a1.md"]');
-    expect(root.querySelector('#detail .artifact-menu')).toBeNull();
-    expect(paths()).toEqual(['chat/a7.md', 'chat/a1.md']);
-    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/a1.md');
-    expect(root.querySelector('#detail .artifact-menu-button .tab-badge')!.textContent).toBe('10');
+    // Console and Changes are reached through More too.
+    click('#detail [data-action="tab-menu"]');
+    click('#detail .tab-menu [data-side="console"]');
+    expect(selected()!.dataset['side']).toBe('console');
+    expect(root.querySelector('#detail .tab-menu')).toBeNull();
+    answers['/v1/conversation/changes'] = { status: 404, body: { error: 'No changes here.' } };
+    click('#detail [data-action="tab-menu"]');
+    click('#detail .tab-menu [data-action="diff-tab"]');
+    expect(root.querySelector('#detail .changes-tab.selected')).not.toBeNull();
+    expect(root.querySelector('#detail .tab-menu')).toBeNull();
 
-    // The menu closes on a press elsewhere and on Escape.
-    click('#detail [data-action="artifact-menu"]');
+    // Up and Down move through the menu's rows; Escape closes it and gives the focus back to More; so does a press elsewhere.
+    click('#detail [data-action="tab-menu"]');
+    const more = root.querySelector<HTMLElement>('#detail .tab-more-button')!;
+
+    more.focus();
+    more.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(menuRows()[0]);
+    menuRows()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(document.activeElement).toBe(menuRows()[1]);
+    menuRows()[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(document.activeElement).toBe(menuRows()[0]);
+    menuRows()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('#detail .tab-menu')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('#detail .tab-more-button'));
+    click('#detail [data-action="tab-menu"]');
     root.querySelector('#panel')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
     root.querySelector('#panel')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     root.querySelector('#panel')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(root.querySelector('#detail .artifact-menu')).toBeNull();
-    click('#detail [data-action="artifact-menu"]');
-    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.querySelector('#detail .artifact-menu')).toBeNull();
+    expect(root.querySelector('#detail .tab-menu')).toBeNull();
 
-    // Left, Right, Home and End move between the strip's tabs, the artifact tabs among them.
+    // A narrower strip keeps the chosen tab and Status, the rest going into More.
+    click('#detail [data-action="tab-menu"]');
+    click('#detail .tab-menu [data-path="chat/a1.md"]');
+    narrow.mockReturnValue({ width: 200 } as DOMRect);
+    click('#detail .artifact-tab[data-path="chat/a1.md"] .tab-open');
+    expect(paths()).toEqual(['chat/a1.md']);
+    expect(selected()!.dataset['path']).toBe('chat/a1.md');
+    expect([...root.querySelectorAll<HTMLElement>('#detail .side-switch > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(['status', 'artifact:chat/a1.md']);
+    narrow.mockReturnValue({ width: 400 } as DOMRect);
+    click('#detail .artifact-tab[data-path="chat/a1.md"] .tab-open');
+
+    // Left, Right, Home and End move between the strip's tabs, the artifact tabs among them, in the strip's order (tabs.ts) as on screen.
     const strip = () => [...root.querySelectorAll<HTMLElement>('#detail .tabs [role="tab"]')];
 
     strip()[0]!.focus();
     strip()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[1]);
-    // The keyboard follows the strip's order (tabs.ts) as on screen: after the artifact tabs, Changes, then Console last.
     strip()[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-    expect(document.activeElement).toBe(root.querySelector('#detail [data-side="console"]'));
-    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-    expect(document.activeElement).toBe(root.querySelector('#detail .changes-tab'));
-    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     expect((document.activeElement as HTMLElement).closest<HTMLElement>('.artifact-tab')!.dataset['path']).toBe('chat/a1.md');
+    (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect((document.activeElement as HTMLElement).closest<HTMLElement>('.artifact-tab')!.dataset['path']).toBe('chat/a3.md');
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[0]);
-    // A tab a narrow strip hides (page.css) is skipped, since it cannot take the focus.
-    const hidden = strip()[1]!.closest<HTMLElement>('.tab')!;
-
-    hidden.style.display = 'none';
-    strip()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    expect(document.activeElement).toBe(strip()[2]);
-    hidden.style.display = '';
-    strip()[0]!.focus();
     // The open artifact's close button is its own, and shows Status.
     root.querySelector<HTMLElement>('#detail .artifact-tab.selected .tab-close')!.click();
-    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');
-    // Closed, its tab is gone for the work item, kept in the hub for every device; the menu still lists it, unmarked.
+    expect(selected()!.getAttribute('data-side')).toBe('status');
+    // Closed, its tab is gone for the work item, kept in the hub for every device; More lists it after the tabs it holds.
     expect(paths()).not.toContain('chat/a1.md');
     expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-2)?.body).toMatchObject({ workItemId: 1, close: { path: 'chat/a1.md', updatedAt: 10_001 } });
     const cleared = posts.filter((post) => post.url.endsWith('/page-tabs')).at(-1)!.body;
 
     expect(cleared).toMatchObject({ workItemId: 1, tab: null });
     expect(cleared).not.toHaveProperty('openOn');
-    click('#detail [data-action="artifact-menu"]');
-    expect(root.querySelector('#detail .artifact-menu [data-path="chat/a1.md"]')!.className).toBe('menu-row');
+    click('#detail [data-action="tab-menu"]');
+    expect(root.querySelector('#detail .tab-menu .menu-separator + [data-path="chat/a1.md"]')).not.toBeNull();
     // Choosing it opens its tab again.
-    click('#detail .artifact-menu [data-path="chat/a1.md"]');
-    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/a1.md');
+    click('#detail .tab-menu [data-path="chat/a1.md"]');
+    expect(selected()!.getAttribute('data-path')).toBe('chat/a1.md');
     expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-2)?.body).toMatchObject({ workItemId: 1, reopen: 'chat/a1.md' });
     // Another device closing the open artifact shows Status here.
     source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [{ path: 'chat/a1.md', updatedAt: 10_001 }] } });
-    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');
+    expect(selected()!.getAttribute('data-side')).toBe('status');
     expect(paths()).not.toContain('chat/a1.md');
+    narrow.mockRestore();
+    click('#detail [data-side="status"]');
     // Another device closing a tab closes it here too, and a newer version opens it again.
     source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [{ path: 'chat/a7.md', updatedAt: 10_007 }] } });
     expect(paths()).not.toContain('chat/a7.md');
@@ -2928,6 +2958,65 @@ describe('the page in use', () => {
     expect(root.querySelector('#detail .artifact-tab')).toBeNull();
     expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('status');
     vi.unstubAllGlobals();
+    page.close();
+  });
+
+  it('measures hidden tabs again when the strip crosses the 480 px breakpoint, so a tab measured under the other padding neither overflows nor hides', () => {
+    window.innerWidth = 1920;
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+
+    const { page, source } = start();
+
+    hello(source);
+
+    for (let index = 0; index < 8; index++) {
+      source.emit('artifact', { artifact: { path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 10_000 + index } });
+    }
+
+    // page.css's sizing: --sb-tab-pad is 14 px, or 9 px in a strip of 480 px or less. Each tab is drawn at its least width under the padding in
+    // force, its label 44 px: an artifact's pad + 99 px, Status 2 * pad + 67 px, Changes 2 * pad + 111 px, More 2 * pad + 43 px.
+    let pad = 14;
+    let strip = 600;
+
+    vi.spyOn(window, 'getComputedStyle').mockImplementation(() => ({ display: 'block', maxWidth: '', getPropertyValue: (name: string) => (name === '--sb-tab-pad' ? `${pad}px` : '') }) as unknown as CSSStyleDeclaration);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const width = this.matches('#detail .tabs')
+        ? strip
+        : this.matches('#detail .tabs > .tab-more')
+          ? 2 * pad + 43
+          : this.matches('#detail .tabs > .changes-tab')
+            ? 2 * pad + 111
+            : this.matches('#detail .tabs > [data-id]')
+              ? this.querySelector(':scope > .tab-close') === null ? 2 * pad + 67 : pad + 99
+              : this.matches('#detail .tabs .tab-label')
+                ? 44
+                : 0;
+
+      return { width } as DOMRect;
+    });
+
+    const shown = () => [...root.querySelectorAll<HTMLElement>('#detail .tabs > [data-id]')].map((tab) => tab.dataset['id']);
+    const redraw = () => click('#detail [data-side="status"]');
+
+    // 600 px at 14 px padding: Status (95 px) and three artifacts (113 px each) beside More (71 px); the rest, hidden, were measured at 113 px.
+    redraw();
+    expect(shown()).toEqual(['status', 'artifact:chat/a7.md', 'artifact:chat/a6.md', 'artifact:chat/a5.md']);
+    // 472 px takes 9 px padding: Status 85 px, More 61 px and 108 px an artifact leave 326 px, three artifacts' room. With a7 closed, a4 fits at
+    // 108 px, which a measure kept from 14 px padding would hide.
+    strip = 472;
+    pad = 9;
+    redraw();
+    expect(shown()).toEqual(['status', 'artifact:chat/a7.md', 'artifact:chat/a6.md', 'artifact:chat/a5.md']);
+    root.querySelector<HTMLElement>('#detail .artifact-tab[data-path="chat/a7.md"] .tab-close')!.click();
+    expect(shown()).toEqual(['status', 'artifact:chat/a6.md', 'artifact:chat/a5.md', 'artifact:chat/a4.md']);
+    // Back to 14 px padding at 615 px: 449 px less Status leaves room for three artifacts at 113 px, not a fourth that a measure kept from 9 px
+    // padding (108 px) would let in.
+    strip = 615;
+    pad = 14;
+    redraw();
+    expect(shown()).toEqual(['status', 'artifact:chat/a6.md', 'artifact:chat/a5.md', 'artifact:chat/a4.md']);
     page.close();
   });
 
@@ -4438,16 +4527,16 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('hides the embedded browser under a menu only where the menu overlaps it, as the Artifacts menu does, and under a modal dialog always', async () => {
+  it('hides the embedded browser under a menu only where the menu overlaps it, as the More menu does, and under a modal dialog always', async () => {
     const postMessage = vi.fn();
     vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window);
     onTestFinished(() => { vi.restoreAllMocks(); });
     window.innerWidth = 1920;
-    // The column's Browser tab at the right; the session dropdown drops over the conversation, the Artifacts menu over the Browser tab.
+    // The column's Browser tab at the right; the session dropdown drops over the conversation, the More menu over the Browser tab.
     const boxes: Record<string, { left: number; top: number; right: number; bottom: number }> = {
       'iframe-slot': { left: 1000, top: 120, right: 1900, bottom: 1000 },
       'conversation-menu': { left: 300, top: 60, right: 700, bottom: 600 },
-      'artifact-menu': { left: 1400, top: 100, right: 1880, bottom: 500 },
+      'tab-menu': { left: 1400, top: 100, right: 1880, bottom: 500 },
     };
     // Size observers that report only when the test says so, so the toast's host can say its toast grew.
     const sized: Array<{ report: () => void; watched: Element[] }> = [];
@@ -4476,6 +4565,8 @@ describe('the page in use', () => {
     await flush();
     click('#detail [data-action="iframe-open"]');
     await flush();
+    // The column's strip narrowed to room for the chosen tab alone, so the rest go into More.
+    boxes['side-switch'] = { left: 1000, top: 85, right: 1001, bottom: 120 };
     const shown = (): boolean => {
       const last = postMessage.mock.calls.map(([message]) => message as Record<string, unknown>).filter((message) => message['type'] === 'switchboard-iframe').at(-1);
       return last !== undefined && 'left' in last;
@@ -4491,12 +4582,12 @@ describe('the page in use', () => {
     click('[data-action="picker"]');
     await flush();
 
-    // The Artifacts menu drops over the Browser tab, so the frame hides while it is open and comes back once it closes.
-    click('#detail [data-action="artifact-menu"]');
+    // The More menu drops over the Browser tab, so the frame hides while it is open and comes back once it closes.
+    click('#detail [data-action="tab-menu"]');
     await flush();
-    expect(root.querySelector('#detail .artifact-menu')).not.toBeNull();
+    expect(root.querySelector('#detail .tab-menu')).not.toBeNull();
     expect(shown()).toBe(false);
-    click('#detail [data-action="artifact-menu"]');
+    click('#detail [data-action="tab-menu"]');
     await settle();
     expect(shown()).toBe(true);
 
@@ -4530,7 +4621,7 @@ describe('the page in use', () => {
     window.innerWidth = 1920;
     const boxes: Record<string, { left: number; top: number; right: number; bottom: number }> = {
       'iframe-slot': { left: 1000, top: 120, right: 1900, bottom: 1000 },
-      'artifact-menu': { left: 1400, top: 100, right: 1880, bottom: 500 },
+      'tab-menu': { left: 1400, top: 100, right: 1880, bottom: 500 },
       'test-backdrop': { left: 0, top: 0, right: 1920, bottom: 1080 },
       'test-dialog': { left: 700, top: 300, right: 1300, bottom: 700 },
     };
@@ -4551,24 +4642,28 @@ describe('the page in use', () => {
     await flush();
     click('#detail [data-action="iframe-open"]');
     await flush();
+    // The column's strip narrowed to room for the chosen tab alone, so the rest go into More.
+    boxes['side-switch'] = { left: 1000, top: 85, right: 1001, bottom: 120 };
+    click('#detail .link-tab.selected [data-action="iframe-open"]');
+    await flush();
     const last = (): Record<string, unknown> | undefined => postMessage.mock.calls.map(([message]) => message as Record<string, unknown>).filter((message) => message['type'] === 'switchboard-iframe').at(-1);
     const answer = (origin: string): void => { window.dispatchEvent(new MessageEvent('message', { source: parentWindow, origin, data: { type: 'switchboard-iframe-holes' } })); };
     // Only the extension host's answer counts; another origin's leaves the page hiding the frame under the menu.
     answer('https://github.com');
-    click('#detail [data-action="artifact-menu"]');
+    click('#detail [data-action="tab-menu"]');
     await flush();
     expect(last()).not.toHaveProperty('left');
-    click('#detail [data-action="artifact-menu"]');
+    click('#detail [data-action="tab-menu"]');
     await new Promise((done) => setTimeout(done, FRAME_SHOW_DELAY_MS + 20)); await flush();
     answer('chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije');
     await flush();
     expect(last()).toMatchObject({ left: 1000, holes: [], dim: 0, modal: false });
 
-    // The Artifacts menu over the Browser tab is cut out of the frame, which stays.
-    click('#detail [data-action="artifact-menu"]');
+    // The More menu over the Browser tab is cut out of the frame, which stays.
+    click('#detail [data-action="tab-menu"]');
     await flush();
     expect(last()).toMatchObject({ left: 1000, holes: [{ left: 1400, top: 100, width: 480, height: 400 }], modal: false });
-    click('#detail [data-action="artifact-menu"]');
+    click('#detail [data-action="tab-menu"]');
     await flush();
     expect(last()).toMatchObject({ left: 1000, holes: [] });
 
@@ -6112,7 +6207,7 @@ describe('the page in use', () => {
     expect(root.classList.contains('listing')).toBe(false);
     expect(root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab']).toBe('status');
     if (root.querySelector('#head [data-action="artifact"][data-path="chat/plan.md"]') === null) {
-      click('#head .artifact-menu-button');
+      click('#head .tab-more-button');
     }
 
     click('#head [data-action="artifact"][data-path="chat/plan.md"]');

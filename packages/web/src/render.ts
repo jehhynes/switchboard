@@ -8,6 +8,8 @@ import type { CardDraft as SharedDraft } from '@switchboard/conversation/questio
 import type { ArtifactView, MessageView, NativeRequest, PageAction, PageGroup, PageRow, ReplyView, ScreenPrompt, StatusView, VoiceView } from '@switchboard/protocol';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
 import type { DotView } from './connectionView.js';
+import { UNMEASURED } from './tabs.js';
+import type { TabFit } from './tabs.js';
 
 /** `diff` shows the open file's diff tab (`changes.tsx`), which has no fixed tab of its own. */
 export type Tab = 'conversation' | 'status' | 'artifacts' | 'console' | 'browser' | 'history' | 'diff' | 'file';
@@ -28,38 +30,6 @@ export function tabIcon(tab: Tab | SideTab): string {
 /** What the column right of the conversation shows on a wide screen. */
 export type SideTab = 'status' | 'artifacts' | 'console' | 'browser' | 'history' | 'diff' | 'file';
 export const SIDE_TABS: readonly SideTab[] = ['status', 'artifacts', 'console', 'browser', 'history'];
-
-/** The most artifact tabs a strip shows, whatever its width (PRD R109): the rest are in the Artifacts menu at its end. */
-export const ARTIFACT_TABS_MAX = 5;
-/**
- * The most width an artifact tab takes, as page.css draws it with its sides' padding `pad` (`--sb-tab-pad`): with its label, its 16 px icon, the
- * label at `labelMax` (`--sb-tab-label-max`) and its close mark, each 6 px apart, the mark 6 px from its end, and its 1 px border; as an icon
- * alone, its icon in its padding and its border.
- */
-export function artifactTabWidth(pad: number, labelMax: number, icons: boolean): number {
-  return icons ? 2 * pad + 17 : pad + 55 + labelMax;
-}
-
-/** An artifact tab's most width with its label at page.css's padding and label cap, and the room the Artifacts menu's button takes. */
-export const ARTIFACT_TAB_WIDTH = artifactTabWidth(14, 100, false);
-export const ARTIFACT_MENU_WIDTH = 132;
-
-/**
- * How many artifact tabs fit a strip `stripWidth` pixels wide whose other tabs take `fixedWidth`: all of them when they fit without the menu,
- * else as many as fit beside the menu, `menuWidth` wide as drawn, none when even one does not, and at most {@link ARTIFACT_TABS_MAX}. An
- * unmeasured strip, 0 wide, shows the most.
- */
-export function artifactTabsFit(stripWidth: number, fixedWidth: number, count: number, menuWidth = ARTIFACT_MENU_WIDTH, tabWidth = ARTIFACT_TAB_WIDTH): number {
-  if (stripWidth <= 0) {
-    return Math.min(count, ARTIFACT_TABS_MAX);
-  }
-
-  if (count <= ARTIFACT_TABS_MAX && fixedWidth + count * tabWidth <= stripWidth) {
-    return count;
-  }
-
-  return Math.max(0, Math.min(ARTIFACT_TABS_MAX, count, Math.floor((stripWidth - fixedWidth - menuWidth) / tabWidth)));
-}
 
 /**
  * The artifacts whose tabs are closed (architecture.md § Web page): each closed at its version, until a newer version opens its tab again.
@@ -107,22 +77,6 @@ export function openArtifactsSeen(seen: ArtifactsSeen, workItemId: number, paths
   const added = paths.filter((path) => !(opened ?? []).includes(path));
 
   return opened !== undefined && added.length === 0 ? null : { ...seen, [String(workItemId)]: [...(opened ?? []), ...added] };
-}
-
-/**
- * The artifacts newest first, and those with a tab: those not closed, the first `fit`, with the open one in place of the last of them when it is not among them, so
- * the open artifact always has its tab.
- */
-export function artifactBar(artifacts: readonly ArtifactView[], open: string | null, fit: number, closed: ReadonlySet<string> = new Set()): { ordered: ArtifactView[]; tabs: ArtifactView[] } {
-  const ordered = [...artifacts].sort((a, b) => b.updatedAt - a.updatedAt);
-  const tabs = ordered.filter((artifact) => !closed.has(artifact.path)).slice(0, fit);
-  const shown = open === null ? undefined : ordered.find((artifact) => artifact.path === open);
-
-  if (shown !== undefined && !tabs.includes(shown) && tabs.length > 0) {
-    tabs[tabs.length - 1] = shown;
-  }
-
-  return { ordered, tabs };
 }
 
 /**
@@ -212,9 +166,9 @@ export interface View {
   newDraft: NewDraft | null;
   /** The prompt the session waits on in its terminal, as last read, for the session it was read for; a key being sent waits. */
   prompt: { sessionId: string; prompt: ScreenPrompt | null; sending: boolean } | null;
-  /** How many artifact tabs the shown strip fits, measured after each draw, and whether its Artifacts menu is open. */
-  artifactFit: number;
-  artifactMenu: boolean;
+  /** The shown strip's room for its tabs (`fitTabs`), measured after each draw, and whether its More menu is open. */
+  tabFit: TabFit;
+  tabMenu: boolean;
   /** The connection's dot in the conversation's head (connectionView.tsx); none before the page first connected. */
   connection?: DotView | null;
 }
@@ -238,7 +192,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, newDraft: null, side: 'status', viewMenu: false, details: false, briefReplies: null, artifactFit: ARTIFACT_TABS_MAX, artifactMenu: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, newDraft: null, side: 'status', viewMenu: false, details: false, briefReplies: null, tabFit: UNMEASURED, tabMenu: false });
 
 /** The longest menu label for a link, carried over from the retired dock; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

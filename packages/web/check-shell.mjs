@@ -1,6 +1,7 @@
 // Checks the page's shell at iPhone sizes and an iPad's in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
-// app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer, a sheet
-// and the persona dialog, and the list at 200 px. Line 2's playbook or host is never cut, its pills are whole or left out whole, the ticket
+// app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer, a sheet,
+// the persona dialog, a work item with more tabs than fit, and the list at 200 px. Every tab shown keeps its label, no tab passes its strip, and
+// the More menu lies above everything under it. Line 2's playbook or host is never cut, its pills are whole or left out whole, the ticket
 // key always shows, and line 2 paints the same while the same list is sent again.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
@@ -22,7 +23,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
 ];
-const VIEWS = ['list', 'narrow', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet', 'persona'];
+const VIEWS = ['list', 'narrow', 'conversation', 'empty', 'history', 'settings', 'drawer', 'sheet', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
 /** --shots <dir> saves a screenshot of each view there. */
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
@@ -71,10 +72,12 @@ for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
 }
 history.replaceState(null, '', location.search + (open ? '#w=1' : '#'));
+// The tabs view's work item has more artifacts, with long titles, than any strip here fits.
+const artifacts = view === 'tabs' ? Array.from({ length: 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
 class FakeSource {
   constructor() {
     this.listeners = {};
-    setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: open ? [session] : [], items, more: false, status: null, artifacts: [], unread: 0 }), 20);
+    setTimeout(() => this.emit('hello', { key: 'pk', groups, scope, sessions: open ? [session] : [], items, more: false, status: null, artifacts, unread: 0 }), 20);
     if (listing) setInterval(() => this.emit('list', { groups }), 120);
   }
   addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); }
@@ -162,6 +165,18 @@ const measure = `(() => {
         return { text: pill.textContent, ticket: pill.classList.contains('ticket'), state: inside ? 'whole' : outside ? 'out' : 'cut' };
       });
     }),
+    // Each shown tab strip: a label shown cut narrower than about five characters, or not at all, and any tab past the strip's edges.
+    strips: [...document.querySelectorAll('.tabs:not(.opening-tabs)')].filter(shown).map((strip) => {
+      const edge = strip.getBoundingClientRect();
+      const tabs = [...strip.children].filter(shown);
+
+      return {
+        tabs: tabs.length,
+        more: strip.querySelector('.tab-more') !== null,
+        cut: [...strip.querySelectorAll('.tab-label')].filter((label) => !shown(label) || label.getBoundingClientRect().width < Math.min(43.5, label.scrollWidth - 0.5)).map((label) => label.textContent),
+        past: tabs.filter((tab) => { const box = tab.getBoundingClientRect(); return box.left < edge.left - 0.5 || box.right > edge.right + 0.5; }).map(name),
+      };
+    }),
     tops: { header: top('.header'), listHeader: top('.list-header'), settingsHead: top('.settings-head'), personaHead: top('.persona-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
@@ -173,7 +188,22 @@ const OPEN = {
   drawer: ['[data-action=drawer]'],
   sheet: ['[data-action=actions]', '[data-action=row-action][data-label=Delete]'],
   persona: ['[data-action=view-menu]', '[data-action=persona]'],
+  // An artifact chosen from More, so the strip keeps it beside the tabs it always keeps.
+  tabs: ['.tab-more-button', '.tab-menu [data-action=artifact]'],
 };
+
+/** Opens the More menu again and answers whether it lies above everything at the centres of its rows in view, and inside the viewport. */
+const moreOnTop = `(async () => {
+  document.querySelector('.tab-more-button').click();
+  await new Promise((done) => setTimeout(done, 150));
+  const menu = document.querySelector('.tab-menu');
+  if (!menu) return { open: false };
+  const box = menu.getBoundingClientRect();
+  // The rows in view: a menu taller than the room scrolls inside itself.
+  const rows = [...menu.querySelectorAll('.menu-row')].filter((row) => { const r = row.getBoundingClientRect(); return r.top + r.height / 2 > box.top && r.top + r.height / 2 < box.bottom; });
+  const covered = rows.filter((row) => { const r = row.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !hit || !menu.contains(hit); }).map((row) => row.textContent);
+  return { open: true, rows: rows.length, covered, inside: box.left >= -0.5 && box.top >= -0.5 && box.right <= innerWidth + 0.5 && box.bottom <= innerHeight + 0.5 };
+})()`;
 
 /** Checks one view's measurements; answers its failures. */
 function failures(view, size, m) {
@@ -201,6 +231,12 @@ function failures(view, size, m) {
   for (const pill of m.pills) {
     if (pill.state === 'cut' || (pill.ticket && pill.state !== 'whole')) out.push('line 2\'s pill ' + pill.text + ' is ' + (pill.state === 'cut' ? 'cut' : 'left out'));
   }
+  for (const strip of m.strips) {
+    if (strip.cut.length > 0) out.push('a tab strip hides or cuts below five characters the labels ' + strip.cut.slice(0, 4).join(', '));
+    if (strip.past.length > 0) out.push('a tab passes its strip: ' + strip.past.slice(0, 4).join(', '));
+  }
+  // The tabs view's strip has more tabs than fit, so More holds the rest.
+  if (view === 'tabs' && !m.strips.some((strip) => strip.more)) out.push('no strip shows More for a work item with more tabs than fit');
   for (const [bar, top] of Object.entries(m.tops)) {
     // The dialogs, Settings and the persona dialog, outside the phone's layout sit inside the dimmed page's margin.
     if ((['header', 'listHeader'].includes(bar) || (['settingsHead', 'personaHead'].includes(bar) && size.phone)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
@@ -306,6 +342,13 @@ try {
         await wait(200);
         const m = await evaluate(measure);
         const found = missing.length > 0 ? ['could not open the view: no ' + missing.join(', ')] : failures(view, size, m);
+
+        if (view === 'tabs' && missing.length === 0) {
+          const more = await evaluate(moreOnTop);
+
+          if (!more.open) found.push('More opened no menu');
+          else if (more.covered.length > 0 || !more.inside || more.rows === 0) found.push('the More menu is covered at ' + more.covered.join(', ') + (more.inside ? '' : ', or passes the viewport') + (more.rows === 0 ? ', or has no rows' : ''));
+        }
 
         // The phone's layout by the device, never the drawer on a phone; the tablet's on the iPad.
         if (m.phone !== size.phone) found.push((size.phone ? 'no' : 'the') + " phone's layout on the " + size.device + ' at ' + size.width + ' px');

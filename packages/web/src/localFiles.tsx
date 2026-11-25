@@ -35,13 +35,13 @@ export const LOCAL_TABS_MAX = 12;
 const baseName = (path: string): string => path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || path;
 
 /** A tab's name: the file's, once read, else the last part of the target. */
-function tabName(tab: LocalTab): string {
+export function localTabName(tab: LocalTab): string {
   return tab.entry.state === 'ok' ? tab.entry.data.name : baseName(tab.target);
 }
 
 /** A file's tab, after the artifact tabs and before Changes (tabs.ts), with its file's icon and a close mark. */
 export function LocalTabButton({ tab, selected }: { tab: LocalTab; selected: boolean }) {
-  const name = tabName(tab);
+  const name = localTabName(tab);
   const dir = tab.entry.state === 'ok' && tab.entry.data.kind === 'dir';
   const title = tab.entry.state === 'ok' ? tab.entry.data.path : tab.target;
 

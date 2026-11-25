@@ -935,10 +935,10 @@ describe('the Console tab', () => {
 
     expect([...html(renderTabs(newView(), state)).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'status', 'console']);
     expect([...html(renderSideSwitch('console', state)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'console']);
-    expect(html(renderSideSwitch('console', state))).toMatch(/aria-selected="true"[^>]*aria-label="Console">/);
+    expect(html(renderSideSwitch('console', state))).toMatch(/aria-selected="true"[^>]*aria-label="Console"[ >]/);
     expect([...html(renderSideSwitch('browser', state, true)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['status', 'browser', 'console']);
     // After Changes, and before the column's end, as the maximize button.
-    const strip = { open: null, fit: 0, menu: false, now: 0, changes: newChanges() };
+    const strip = { open: null, menu: false, now: 0, changes: newChanges() };
 
     expect(html(renderSideSwitch('status', state, false, strip, true, false, h('i', { class: 'end' })))).toMatch(/changes-tab[\s\S]*data-side="console"[\s\S]*class="end"/);
     expect(html(renderTabs(newView(), state, false, strip))).toMatch(/changes-tab[\s\S]*data-tab="console"/);

@@ -6,10 +6,13 @@ import { EMPTY } from '../src/model.js';
 import type { PageState } from '../src/model.js';
 import { newView, TABS } from '../src/render.js';
 import { PAGE_ASSETS } from '../dist/index.js';
+import type { TabFit } from '../src/tabs.js';
 import type { ComponentChild } from 'preact';
 import type { ArtifactView, SessionView } from '@switchboard/protocol';
 
 const css = PAGE_ASSETS['page.css']!.body;
+/** Room for `n` tabs of 100 px beside a 50 px More. */
+const room = (n: number): TabFit => ({ width: n * 100 + 50, more: 50, plain: 100, closable: 100, measured: {} });
 const artifact = (n: number): ArtifactView => ({ path: `chat/a${n}.${n % 2 === 0 ? 'md' : 'png'}`, owner: 'o', kind: 'notes', title: `A ${n}`, ext: n % 2 === 0 ? 'md' : 'png', type: n % 2 === 0 ? 'markdown' : 'image', updatedAt: n });
 const session: SessionView = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
@@ -33,13 +36,15 @@ function labelSelector(): string {
 
 describe('the tab strips', () => {
   const strips = [
-    draw(renderTabs(newView(), state, true, { open: null, fit: 2, menu: false, now: 0, changes }, true, true)),
-    draw(renderSideSwitch('status', state, true, { open: 'chat/a2.md', fit: 2, menu: false, now: 0, changes }, true, true)),
+    draw(renderTabs(newView(), state, true, { open: null, menu: false, now: 0, changes }, true, true)),
+    draw(renderSideSwitch('status', state, true, { open: 'chat/a2.md', fit: room(8), menu: false, now: 0, changes }, true, true)),
   ];
 
   it('TabStrips_EveryTab_ShowsAnIcon', () => {
+    // The column's strip has room for all but Console, so More shows there.
+    expect(strips[1]!.querySelector('.tab-more-button')).not.toBeNull();
     for (const strip of strips) {
-      const tabs = [...strip.querySelectorAll<HTMLElement>('[role="tab"], .artifact-menu-button')];
+      const tabs = [...strip.querySelectorAll<HTMLElement>('[role="tab"], .tab-more-button')];
 
       expect(tabs.length).toBeGreaterThan(5);
       for (const tab of tabs) {
@@ -71,8 +76,8 @@ describe('the tab strips', () => {
     const links = [{ url: 'https://github.com/o/r/issues/1', label: 'Issue 1' }, { url: 'https://example.com/', label: 'example.com' }];
 
     for (const strip of [
-      draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { links, link: links[0]!.url, open: null, fit: 2, menu: false, now: 0, changes }, true, true)),
-      draw(renderSideSwitch('browser', state, true, { links, link: links[0]!.url, open: null, fit: 2, menu: false, now: 0, changes }, true, true)),
+      draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { links, link: links[0]!.url, open: null, menu: false, now: 0, changes }, true, true)),
+      draw(renderSideSwitch('browser', state, true, { links, link: links[0]!.url, open: null, menu: false, now: 0, changes }, true, true)),
     ]) {
       const tabs = [...strip.querySelectorAll<HTMLElement>('.link-tab .tab-open')];
 
@@ -123,50 +128,41 @@ describe('the tab strips', () => {
     expect(chosen).toContain('border-bottom-color: var(--sb-tab-surface);');
   });
 
-  it('TabStrip_EveryTab_GrowsEvenlyToItsContentWithNoMinimumOfItsOwn', () => {
-    // One rule for every tab and the Artifacts button's cell: grown evenly from nothing, never past the tab's own content, never held wider.
-    expect(css).toContain('.tab, .artifact-more { --sb-tab-pad: 14px; flex: 1 1 0; min-width: 0; max-width: max-content; }');
+  it('TabStrip_EveryTab_GrowsEvenlyToItsContentAndNeverBelowItsLeastWidth', () => {
+    // One rule for every tab: grown evenly from nothing, never past the tab's own content, never below its least width: its padding, 16 px icon,
+    // 6 px gap, 1 px border and a 44 px label, with its close mark's room or the Changes count's.
+    expect(css).toContain('\n.tab { --sb-tab-pad: 14px; --sb-tab-close-room: 32px; box-sizing: border-box; flex: 1 1 0; min-width: calc(2 * var(--sb-tab-pad) + 23px + var(--sb-tab-label-least)); max-width: max-content; position: relative;');
+    expect(css).toContain('.tab:has(> .tab-close) { min-width: calc(var(--sb-tab-pad) + 23px + var(--sb-tab-label-least) + var(--sb-tab-close-room)); }');
     expect(css).toMatch(/\n\.tab \{[^}]*overflow: hidden;[^}]*padding: 0 var\(--sb-tab-pad\);/);
-    // A label is cut with an ellipsis, at most as wide as the artifact tab's cap.
-    expect(css).toContain('.tab .tab-label { min-width: 0; max-width: var(--sb-tab-label-max); overflow: hidden; text-overflow: ellipsis; }');
+    // A label is cut with an ellipsis, between about five characters and the most a label takes.
+    expect(css).toContain('.tabs { --sb-tab-label-max: 100px; --sb-tab-label-least: 44px; }');
+    expect(css).toContain('.tab .tab-label { min-width: var(--sb-tab-label-least); max-width: var(--sb-tab-label-max); overflow: hidden; text-overflow: ellipsis; }');
     // Link tabs are the strip's own tabs, not a scroller of fixed-width tabs that crowds the rest.
     expect(css).not.toContain('.link-tabs');
     expect(css).not.toMatch(/\.link-tab[^{]*\{[^}]*width:/);
-    // No tab has a width, a minimum or a maximum of its own, but the maximize button, which is no tab, and Artifacts inside its cell.
-    const own = [...css.matchAll(/(?:^|\n|\})\s*([^{}@]*\.(?:tab|artifact-tab|link-tab|history-tab|diff-tab|changes-tab|artifact-menu-button)\b[^{}@]*)\{([^}]*)\}/g)]
-      .filter(([, selector, body]) => !/panel-max|tab-(?:label|open|close|badge)|\.tabs\b|artifact-menu\b|\.codicon/.test(selector!) && /(?:^|[ ;])(?:min-|max-)?width:|flex:/.test(body!))
+    // No tab has a width of its own but its least width, by what it holds; the maximize button and More are no tabs.
+    const own = [...css.matchAll(/(?:^|\n|\})\s*([^{}@]*\.(?:tab|artifact-tab|link-tab|history-tab|diff-tab|changes-tab)\b[^{}@]*)\{([^}]*)\}/g)]
+      .filter(([, selector, body]) => !/panel-max|tab-(?:label|open|close|badge|more)|\.tabs\b|tab-menu\b|\.codicon/.test(selector!) && /(?:^|[ ;])(?:min-|max-)?width:|flex:/.test(body!))
       .map(([, selector]) => selector!.trim());
 
-    expect(own).toEqual(['.tab, .artifact-more', '.artifact-more > .tab']);
+    // (The close-mark rule above is left out by its .tab-close.)
+    expect(own).toEqual(['.tab', '.tab.changes-tab']);
   });
 
-  it('NarrowStrip_Under600px_ShowsTheFixedTabsAsTheirIcons', () => {
-    // One switch for every tab: their labels, the fixed tabs', the link, History, artifact and file tabs' and Artifacts' alike, and every close mark
-    // but the chosen tab's.
-    expect(css).toContain('@container (max-width: 600px) { .tabs > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }');
-    expect(css).toContain('.tab .tab-label, .tab.diff-tab .tab-badge { display: var(--sb-tab-label-display, block); }');
-    expect(css).toContain('.tab:not(.selected) > .tab-close { display: var(--sb-tab-close-other, flex); }');
-    expect(css).not.toContain('@container (max-width: 760px)');
-    // No rule hides a tab's icon.
+  it('NarrowStrip_AnyWidth_KeepsEveryLabelAndIcon', () => {
+    // The icon-only rules are gone: no rule hides a tab's label or icon, at any width.
+    expect(css).not.toContain('--sb-tab-label-display');
+    expect(css).not.toContain('--sb-tab-icons');
+    expect(css).not.toMatch(/\.tab[^{]*\.tab-label[^{]*\{[^}]*display: none/);
     expect(css).not.toMatch(/\.tab[^{]*codicon(?!-chevron-down)[^{]*\{[^}]*display: (?:none|var)/);
   });
 
-  it('TabStrip_TooNarrowForFiveCharactersALabel_ShowsEveryTabAsItsIcon', () => {
-    // 116 px a tab (--sb-tab-least) keeps a cut label at five characters and the ellipsis, even beside a close mark; a strip narrower than that
-    // for each of its tabs, the maximize button among them, shows them all as icons, and one with 17 or more always does.
-    expect(css).toContain('.tabs { --sb-tab-label-max: 100px; --sb-tab-least: 116px; }');
-    const counted = ':is(.tab, .artifact-more)';
-
-    for (let n = 6; n <= 16; n++) {
-      expect(css).toContain(`@container (width < ${n * 116}px) { .tabs:has(> :nth-child(${n} of ${counted})) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; } }`);
-    }
-    expect(css).toContain(`.tabs:has(> :nth-child(17 of ${counted})) > * { --sb-tab-icons: 1; --sb-tab-label-display: none; --sb-tab-justify: center; --sb-tab-close-other: none; }`);
-    // Five tabs or fewer need no more than 580 px, which the 600 px rule already covers.
-    expect(5 * 116).toBeLessThan(600);
+  it('CloseMark_OnATouchScreen_IsA44pxTargetCountedInTheTabsLeastWidth', () => {
+    expect(css).toContain('@media (hover: none), (pointer: coarse) {\n  .tab { --sb-tab-close-room: 50px; }\n  .tab-close { width: 44px; height: 44px; margin-right: calc(-1 * var(--sb-tab-pad)); border-radius: 0; }\n}');
   });
 
   it('LinkTabs_InTheStrip_AreItsOwnChildrenSoTheyAreCounted', () => {
-    const strip = draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { open: null, fit: 0, menu: false, now: 0, links: [{ url: 'https://github.com/o/r/issues/1', label: 'Ticket' }, { url: 'https://github.com/o/r/pull/2', label: 'PR #2' }], link: 'https://github.com/o/r/pull/2' }));
+    const strip = draw(renderTabs({ ...newView(), tab: 'browser' }, state, true, { open: null, menu: false, now: 0, links: [{ url: 'https://github.com/o/r/issues/1', label: 'Ticket' }, { url: 'https://github.com/o/r/pull/2', label: 'PR #2' }], link: 'https://github.com/o/r/pull/2' }));
 
     expect([...strip.querySelectorAll(':scope .tabs > .link-tab')].map((tab) => tab.textContent)).toEqual(['Ticket', 'PR #2']);
   });
@@ -176,7 +172,7 @@ describe('the label beside an icon', () => {
   it('IconRows_EveryTextBesideAnIcon_IsTrimmedToItsCapHeight', () => {
     const selector = labelSelector();
     const hosts = [
-      draw(renderTabs(newView(), state, true, { open: null, fit: 2, menu: true, now: 0, changes }, true)),
+      draw(renderTabs(newView(), state, true, { open: null, fit: room(3), menu: true, now: 0, changes }, true)),
       draw(renderHeader(state, { ...newView(), picker: true })),
       draw(renderHeader(state, { ...newView(), viewMenu: true })),
     ];

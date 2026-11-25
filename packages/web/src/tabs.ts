@@ -71,3 +71,52 @@ export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
     ...(state.console ? [fixed('console')] : []),
   ];
 }
+
+/**
+ * What a strip has room for, measured after a draw (main.ts): the strip's width for its tabs and More, without the maximize button, 0 while
+ * unmeasured; More's width; and each tab's least width, its label cut to `--sb-tab-label-least` (page.css), as drawn by id, else by whether it has
+ * a close mark (`plain`, `closable`).
+ */
+export interface TabFit {
+  width: number;
+  more: number;
+  plain: number;
+  closable: number;
+  measured: Readonly<Record<string, number>>;
+}
+
+/** A strip not measured yet, which shows every tab. */
+export const UNMEASURED: TabFit = { width: 0, more: 0, plain: 0, closable: 0, measured: {} };
+
+/** Whether a tab has a close mark: History, a link, an artifact or a file. */
+export const closable = (tab: DocTab): boolean => tab.kind === 'history' || tab.kind === 'link' || tab.kind === 'artifact' || tab.kind === 'file';
+
+/**
+ * Which of a strip's tabs show and which go in More, each list in strip order. Every tab shows while all fit at their least widths, with More
+ * beside them when `menu` (closed artifacts for it to list). Else More takes its room and the tabs are kept in this order while they fit: the
+ * selected tab, Conversation, Status, then the rest in strip order, stopping at the first that does not fit; so a very narrow strip drops Status
+ * first, then Conversation, and keeps the selected tab whatever its width, every tab reachable through More. An unmeasured strip shows them all.
+ */
+export function fitTabs(tabs: readonly DocTab[], fit: TabFit, menu = false): { shown: DocTab[]; hidden: DocTab[] } {
+  const least = (tab: DocTab): number => fit.measured[tab.id] ?? (closable(tab) ? fit.closable : fit.plain);
+  const total = tabs.reduce((sum, tab) => sum + least(tab), 0);
+
+  if (fit.width <= 0 || total + (menu ? fit.more : 0) <= fit.width) {
+    return { shown: [...tabs], hidden: [] };
+  }
+
+  const order = [...tabs.filter((tab) => tab.selected), ...['conversation', 'status'].flatMap((id) => tabs.filter((tab) => tab.id === id && !tab.selected)), ...tabs.filter((tab) => !tab.selected && tab.id !== 'conversation' && tab.id !== 'status')];
+  const kept = new Set<DocTab>();
+  let room = fit.width - fit.more;
+
+  for (const tab of order) {
+    if (kept.size > 0 && least(tab) > room) {
+      break;
+    }
+
+    kept.add(tab);
+    room -= least(tab);
+  }
+
+  return { shown: tabs.filter((tab) => kept.has(tab)), hidden: tabs.filter((tab) => !kept.has(tab)) };
+}
