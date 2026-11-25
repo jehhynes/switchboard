@@ -19,6 +19,22 @@ import { join } from 'node:path';
 import { PAGE_ASSETS } from './dist/index.js';
 
 /**
+ * Settings' views: each page, by the navigation entries pressed to reach it. On a phone a list's entry drills into its list and on a desktop
+ * opens under it, so the same presses reach the page on both.
+ */
+const SETTINGS_PAGES = {
+  settings: ['sessions'],
+  'settings-triage': ['triage'],
+  'settings-source': ['sources', 'source:github'],
+  'settings-playbook': ['playbooks', 'namespace:dev', 'playbook:dev:build'],
+  'settings-schedule': ['schedules', 'schedule:weekly'],
+  'settings-display': ['display'],
+  'settings-devices': ['devices'],
+  'settings-advanced': ['advanced'],
+  'settings-voice': ['voice'],
+  'settings-persona': ['personas', 'persona:0'],
+};
+/**
  * iPhone 16 Pro in the installed app under the opaque status bar: 393 by 852 pt, less the 59 pt status bar in portrait; none in landscape. Both
  * draw the phone's layout. iPad Air 11" on its side, 1180 by 820 pt less its 24 pt status bar, draws the drawer.
  */
@@ -27,9 +43,11 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings-nav', 'settings', 'settings-table'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-table'] },
 ];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', 'settings', 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
+/** Settings' views that show switches or checkboxes, so their touch targets are measured. */
+const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-devices', 'settings-advanced', 'settings-voice'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -138,8 +156,8 @@ if (listing) {
 // History's tab reads a ticket with one entry per day over a week, so its pane scrolls.
 const historyView = { key: 'gh 1', title: 'Fix it', url: '', facts: [{ label: 'Status', value: 'Running' }], links: [], reconstructed: false, recordedSince: null, sections: [{ key: 'w1', workItemId: 1, title: 'dev:build', status: 'Running', tone: 'accent', facts: [], prompt: null, entries: Array.from({ length: 40 }, (_, i) => ({ key: 'e' + i, at: now - (40 - i) * 3600000, category: 'session', icon: 'play', text: 'Entry ' + i, lines: [], detail: null, shortId: null, links: [], tone: null, reconstructed: false, refused: null, stateChange: false })) }] };
 // Settings reads a file with checkboxes on General and in the playbooks' table.
-const settingsRead = { settings: { path: 'C:/home/settings.json', version: 'v1', value: { sessions: { codeMode: true }, playbooks: { 'dev:build': { description: 'Build it', template: 'Build.' }, 'dev:plan': { description: 'Plan it', template: 'Plan.', autoStart: true } } }, error: null }, permissionModes: ['default', 'auto'], codexPermissionModes: ['default'], providers: ['claude', 'codex'], templateVariables: [], sourceKinds: ['github'], sourceLabels: { github: 'GitHub' }, inUse: {}, enabled: {}, configDir: 'C:/home' };
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
+const settingsRead = { settings: { path: 'C:/Users/someone/.switchboard/settings.json', version: 'v1', value: { sessions: { codeMode: true }, web: { tailscale: true }, sources: { github: { repo: 'o/r', logins: ['me'], repoRoot: 'D:/git/r' } }, schedules: { weekly: { playbook: 'dev:build', repoRoot: 'D:/git/r', every: 'week', day: 'mon', at: '09:00' } }, voice: { enabled: true, personas: [{ id: 'nova', name: 'Nova', voice: 'cedar' }], playbookPersonas: { 'dev:build': 'nova' } }, playbooks: { 'dev:build': { description: 'Build it', template: 'Build.', reports: ['done', 'approval'] }, 'dev:plan': { description: 'Plan it', template: 'Plan.', autoStart: true } } }, error: null }, permissionModes: ['default', 'auto'], codexPermissionModes: ['default'], providers: ['claude', 'codex'], templateVariables: [], sourceKinds: ['github'], sourceLabels: { github: 'GitHub' }, inUse: {}, enabled: { github: true }, configDir: 'C:/Users/someone/.switchboard' };
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/page-devices') ? { devices: [{ id: 'a1', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true }, { id: 'b2', label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now, current: false, voice: true }] } : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -419,8 +437,7 @@ const OPEN = {
   history: ['[data-action=actions]', '[data-action=row-history]'],
   // Settings as it opens: on a phone its navigation's categories alone.
   'settings-nav': ['[data-action=list-more]', '[data-action=list-settings]'],
-  // General, which a phone's Settings opens on its navigation rather than shows.
-  settings: ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry.item'],
+  ...Object.fromEntries(Object.entries(SETTINGS_PAGES).map(([view, keys]) => [view, ['[data-action=list-more]', '[data-action=list-settings]', ...keys.map((key) => '.settings-nav-entry[data-key="' + key + '"]')]])),
   // A namespace's playbooks table.
   // On a phone Playbooks and the namespace drill into their lists, the namespace's starting with its table; on a desktop they open in place.
   'settings-table': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="playbooks"]', '.settings-nav-entry[data-key="namespace:dev"]', '.settings-nav-entry.item[data-page="namespace:dev"], .settings-page-title h2'],
@@ -782,7 +799,7 @@ try {
             }
           }
           for (const one of small) found.push('a touch target under 44 px: ' + one);
-          if (view.startsWith('settings') && view !== 'settings-nav' && checks === 0) found.push('Settings showed no checkbox to measure');
+          if (SWITCHED.includes(view) && checks === 0) found.push('Settings showed no switch or checkbox to measure');
         }
 
         // Each link pill's and key's accessible name is its text, whether it shows its text or its icon alone.

@@ -93,7 +93,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
   it('ends the navigation with Voice: Voice settings, then Personas with each persona by its name or ID, and New persona', async () => {
     await open();
 
-    expect(texts('.settings-nav-heading')).toEqual(['Work', 'Voice']);
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
     expect(texts('.settings-nav-category:last-child .settings-nav-list > .settings-nav-entry .settings-nav-label')).toEqual(['Voice settings', 'Personas']);
     host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="personas"]')!.click();
     await vi.advanceTimersByTimeAsync(0);

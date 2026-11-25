@@ -32,7 +32,7 @@
 .settings-page-title { flex: 1; min-width: 0; }
 .settings-page-title h2 { margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
 .settings-lede { margin: 4px 0 0; color: var(--vscode-descriptionForeground); }
-.settings-file { display: block; font-size: 12px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-help.settings-file { overflow-wrap: anywhere; }
 .settings-buttons { flex: none; display: flex; gap: 6px; }
 .settings-note { margin: 4px 0; color: var(--vscode-editorWarning-foreground); }
 .settings-error, .settings-field-error { margin: 4px 0; color: var(--vscode-errorForeground); }
@@ -89,9 +89,8 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
 .settings-input.settings-assign { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .settings-assign .settings-select { width: 180px; }
 .settings-assign-note { color: var(--vscode-descriptionForeground); }
-/* General's paired devices and Pair a device under Remote access (architecture.md § Remote access); the list and the code are drawn as the Pair a device sheet's. */
+/* The Devices page's paired devices and Pair a device (architecture.md § Remote access); the list and the code are drawn as the Pair a device sheet's. */
 .settings-devices { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 9px 14px; }
-.settings-devices-heading { margin: 0; font-size: 13px; font-weight: 600; }
 .settings-devices .device-list { align-self: stretch; margin-bottom: 4px; }
 .settings-devices .pair { align-self: stretch; margin-top: 8px; }
 .settings-enroll-status { margin: 0; }

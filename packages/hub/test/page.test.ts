@@ -1275,7 +1275,7 @@ describe('the web page routes', () => {
     const here = `http://127.0.0.1:${server.port}`;
     const post = (command: string, headers: Record<string, string>, body: Record<string, unknown> = {}) => send(server.port, 'POST', `/v1/conversation/${command}`, { 'Content-Type': 'application/json', ...headers }, { window: 'page-1', ...body });
 
-    expect(JSON.parse((await post('page-pair', { Cookie: localCookie, Origin: here })).body)).toEqual({ error: expect.stringContaining('Pairing a device needs remote access') });
+    expect(JSON.parse((await post('page-pair', { Cookie: localCookie, Origin: here })).body)).toEqual({ error: expect.stringMatching(/^Pairing a device needs remote access: .* on the Devices page of Settings, /) });
     remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com', 'other@example.com'] };
 
     const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'Tailscale-User-Login': 'alex@example.com', 'User-Agent': 'Mozilla/5.0 (Linux; Android 15) Chrome/141.0 Mobile Safari/537.36' };

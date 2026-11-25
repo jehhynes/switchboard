@@ -29,12 +29,16 @@ export interface Field {
   group?: string;
 }
 
-/** A page section; an `advanced` one starts collapsed, showing `summary`, or else its fields' labels, beside its heading. */
+/**
+ * A page section; an `advanced` one starts collapsed, showing `summary`, or else its fields' labels, beside its heading. A `block` section
+ * holds what Settings draws besides fields: the paired devices, or where settings.json and the config folder are.
+ */
 export interface Section {
   heading: string;
   fields: readonly Field[];
   advanced?: boolean;
   summary?: string;
+  block?: 'devices' | 'file';
 }
 
 /** settings.json as the hub read it: its value, or null and the error when it is not valid JSON. */
@@ -227,10 +231,22 @@ export const providerName = (provider: string): string => (provider === 'claude'
 
 /**
  * The Settings state: settings.json as read, one unsaved draft of the whole file with the version it started
- * from, the page, and the errors. Pages are `general`, and those the later parts of this file add.
+ * from, the page, and the errors. Pages are `sessions`, the first the navigation offers, and those the later parts of this file add.
  */
+/** The page Settings opens on, and shows after a page's own entry is removed. */
+export const HOME = 'sessions';
+
+/** The settings pages of no list, each with its title, the line under it, and its sections. */
+const PAGES: Readonly<Record<string, { title: string; lede: string; sections: (state: EditorState) => Section[] }>> = {
+  sessions: { title: 'Sessions', lede: 'How playbook and ad-hoc sessions run. A playbook can set its own agent, model and permission mode.', sections: (state) => sessionsFields(state) },
+  triage: { title: 'Triage', lede: 'How Switchboard chooses a playbook for each new ticket.', sections: () => triageFields() },
+  display: { title: 'Alerts and display', lede: 'How the pages on this computer tell you that work needs you, and how they show diffs.', sections: () => displayFields() },
+  devices: { title: 'Devices', lede: 'Phones and other computers that open this page through your tailnet.', sections: () => devicesFields() },
+  advanced: { title: 'Advanced', lede: 'Experiments, the programs Switchboard runs, and where settings.json is.', sections: () => advancedFields() },
+};
+
 export class EditorState {
-  page = 'general';
+  page = HOME;
   /** The unsaved settings.json, or null when there are no unsaved changes. */
   draft: JsonObject | null = null;
   /** The file version the draft started from, null for a missing file. */
@@ -1165,51 +1181,65 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
   return fields;
 }
 
-export function generalFields(state: EditorState): Section[] {
-  const modes = state.config.permissionModes.map((mode) => ({ value: mode, label: mode }));
-  const codexModes = state.config.codexPermissionModes.map((mode) => ({ value: mode, label: mode }));
-  const providers = state.config.providers.map((provider) => ({ value: provider, label: providerName(provider) }));
+/** The permission modes, providers and Codex modes the hub offers, as choices. */
+function sessionChoices(state: EditorState): { modes: FieldOption[]; codexModes: FieldOption[]; providers: FieldOption[] } {
+  return {
+    modes: state.config.permissionModes.map((mode) => ({ value: mode, label: mode })),
+    codexModes: state.config.codexPermissionModes.map((mode) => ({ value: mode, label: mode })),
+    providers: state.config.providers.map((provider) => ({ value: provider, label: providerName(provider) })),
+  };
+}
+
+const CODEX_SANDBOX_HELP = 'On Windows, commands in Codex’s sandbox can’t read your stored sign-ins: gh needs GH_TOKEN passed through your Codex shell environment, and git needs OpenSSL with gh as its credential helper. Skills that need more run in bypassPermissions.';
+
+/** The Sessions page: how playbook and ad-hoc sessions run, by default and for each agent. */
+export function sessionsFields(state: EditorState): Section[] {
+  const { modes, codexModes, providers } = sessionChoices(state);
 
   return [
     {
-      heading: 'Sessions',
+      heading: 'All agents',
       fields: [
         { path: 'sessions.provider', label: 'Default agent', kind: 'select', help: 'The agent playbook and ad-hoc sessions run in. A playbook can name its own.', placeholder: 'claude', options: providers },
         { path: 'sessions.concurrency', label: 'Concurrency', kind: 'integer', help: 'Sessions that run at once, 1 to 10. A start with no free slot waits as queued.', placeholder: '2' },
-        {
-          path: 'sessions.codeMode',
-          label: 'Code Mode (experimental)',
-          kind: 'boolean',
-          help: 'New Claude sessions use Claude Code’s Code Mode. With it on they use your Claude subscription sign-in, and the gateway in your Claude settings does not apply; with it off they run as your own claude does. Either way they run in Switchboard’s terminal holder and keep running between turns until you stop them or they sit idle for an hour. Sessions already started keep their mode.',
-          fallback: false,
-        },
-        { path: 'sessions.debriefs', label: 'Friction debriefs', kind: 'boolean', help: 'Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.', fallback: false },
       ],
     },
     {
-      heading: 'Claude sessions',
+      heading: 'Claude',
       fields: [
         { path: 'sessions.model', label: 'Model', kind: 'text', help: 'A playbook can set its own.', placeholder: "Claude's default" },
         { path: 'sessions.permissionMode', label: 'Permission mode', kind: 'select', help: 'A playbook can set its own.', placeholder: 'auto', options: modes },
       ],
     },
     {
-      heading: 'Codex sessions',
+      heading: 'Codex',
       fields: [
         { path: 'sessions.codex.model', label: 'Model', kind: 'text', help: 'A playbook can set its own.', placeholder: "Codex's default" },
-        { path: 'sessions.codex.permissionMode', label: 'Permission mode', kind: 'select', help: 'A playbook can set its own. On Windows, commands in Codex’s sandbox can’t read your stored sign-ins: gh needs GH_TOKEN passed through your Codex shell environment, and git needs OpenSSL with gh as its credential helper. Skills that need more run in bypassPermissions.', placeholder: 'auto', options: codexModes },
+        { path: 'sessions.codex.permissionMode', label: 'Permission mode', kind: 'select', help: `A playbook can set its own. ${CODEX_SANDBOX_HELP}`, placeholder: 'auto', options: codexModes },
       ],
     },
+  ];
+}
+
+/** The Triage page: the classifier that chooses each new ticket's playbook. */
+export function triageFields(): Section[] {
+  return [
     {
-      heading: 'Triage',
+      heading: 'Classifier',
       fields: [
-        { path: 'triage.concurrency', label: 'Concurrency', kind: 'integer', help: 'Triages that run at once.', placeholder: '2' },
         { path: 'triage.model', label: 'Model', kind: 'text', help: 'Triage uses the default agent. A model from the other agent falls back to its default.', placeholder: "Agent's default" },
-        { path: 'triage.timeoutSeconds', label: 'Timeout (seconds)', kind: 'integer', help: '', placeholder: '180' },
+        { path: 'triage.concurrency', label: 'Concurrency', kind: 'integer', help: 'Triages that run at once.', placeholder: '2' },
       ],
     },
+    { heading: 'Advanced', advanced: true, fields: [{ path: 'triage.timeoutSeconds', label: 'Timeout (seconds)', kind: 'integer', help: '', placeholder: '180' }] },
+  ];
+}
+
+/** The Alerts and display page: where needs-you alerts show, and how diffs show on every page. */
+export function displayFields(): Section[] {
+  return [
     {
-      heading: 'Alerts',
+      heading: 'Notifications',
       fields: [
         {
           path: 'alerts.surface',
@@ -1226,19 +1256,7 @@ export function generalFields(state: EditorState): Section[] {
       ],
     },
     {
-      heading: 'Web page',
-      fields: [
-        {
-          path: 'web.iframeBrowser',
-          label: 'Embedded browser tabs',
-          kind: 'boolean',
-          help: "Experimental web embedding on local and paired devices. Needs this branch's Chrome/Edge extension, access to HTTP and HTTPS sites, and Chromium 145+. Open with sign-in support keeps Switchboard and website frames inside an extension tab. Removes website framing headers and CSP only in verified experiment tabs, preserving Switchboard's CSP. Reload the page after changing this setting.",
-          fallback: false,
-        },
-      ],
-    },
-    {
-      heading: 'Diff viewer',
+      heading: 'Diffs',
       fields: [
         {
           path: 'web.diffLayout',
@@ -1266,25 +1284,68 @@ export function generalFields(state: EditorState): Section[] {
         },
       ],
     },
-    // Settings draws the paired devices and Pair a device after this section (architecture.md § Remote access).
+  ];
+}
+
+/** The Devices page (architecture.md § Remote access): the paired devices, which Settings draws, then remote access. */
+export function devicesFields(): Section[] {
+  return [
+    { heading: 'Paired devices', block: 'devices', fields: [] },
     {
       heading: 'Remote access',
       fields: [
         { path: 'web.tailscale', label: 'Tailscale', kind: 'boolean', help: "Let your devices open the web page through your tailnet. Switchboard adds this computer's Tailscale name and login to Allowed hosts and Allowed logins. Tailscale must be running here, and tailscale serve must point to the page's port, as in tailscale serve --bg 47616. Pair each device with Pair a device. Do not use Tailscale Funnel.", fallback: false },
-        { path: 'web.remoteHosts', label: 'Allowed hosts', kind: 'list', help: "One per line, such as pc.tailnet.ts.net, without https:// or a port: other names the page answers as through tailscale serve. With Tailscale on, this computer's own Tailscale name needs no line." },
-        { path: 'web.remoteLogins', label: 'Allowed logins', kind: 'list', help: "One per line, such as you@example.com: the Tailscale logins whose devices may pair and use the page; other people on your tailnet are refused. With Tailscale on, this computer's owner needs no line." },
       ],
     },
     {
       heading: 'Advanced',
       advanced: true,
       fields: [
-        { path: 'sessions.installHooks', label: 'Install hooks', kind: 'boolean', help: 'Add Switchboard’s hooks to your Claude and Codex settings, so the list shows when a session waits for you. Off, the session list and Codex’s run output alone decide state.', fallback: true },
+        { path: 'web.remoteHosts', label: 'Allowed hosts', kind: 'list', help: "One per line, such as pc.tailnet.ts.net, without https:// or a port: other names the page answers as through tailscale serve. With Tailscale on, this computer's own Tailscale name needs no line." },
+        { path: 'web.remoteLogins', label: 'Allowed logins', kind: 'list', help: "One per line, such as you@example.com: the Tailscale logins whose devices may pair and use the page; other people on your tailnet are refused. With Tailscale on, this computer's owner needs no line." },
+      ],
+    },
+  ];
+}
+
+/** The Advanced page: experiments, the programs Switchboard runs, a developer's setting, and where settings.json is. */
+export function advancedFields(): Section[] {
+  return [
+    {
+      heading: 'Experiments',
+      fields: [
+        {
+          path: 'sessions.codeMode',
+          label: 'Code Mode (experimental)',
+          kind: 'boolean',
+          help: 'New Claude sessions use Claude Code’s Code Mode. With it on they use your Claude subscription sign-in, and the gateway in your Claude settings does not apply; with it off they run as your own claude does. Either way they run in Switchboard’s terminal holder and keep running between turns until you stop them or they sit idle for an hour. Sessions already started keep their mode.',
+          fallback: false,
+        },
+        {
+          path: 'web.iframeBrowser',
+          label: 'Embedded browser tabs',
+          kind: 'boolean',
+          help: "Experimental web embedding on local and paired devices. Needs this branch's Chrome/Edge extension, access to HTTP and HTTPS sites, and Chromium 145+. Open with sign-in support keeps Switchboard and website frames inside an extension tab. Removes website framing headers and CSP only in verified experiment tabs, preserving Switchboard's CSP. Reload the page after changing this setting.",
+          fallback: false,
+        },
+      ],
+    },
+    {
+      heading: 'Programs',
+      fields: [
         { path: 'sessions.claudePath', label: 'Claude Code path', kind: 'text', help: 'The Claude Code CLI the hub and Open in terminal run. Set its full path when their PATH does not include it.', placeholder: 'claude' },
         { path: 'sessions.codexPath', label: 'Codex path', kind: 'text', help: 'The Codex CLI the hub and Open in terminal run. Set its full path when their PATH does not include it, such as a Codex installed through nvm.', placeholder: 'codex' },
         { path: 'sessions.nodePath', label: 'Node.js path', kind: 'text', help: 'The Node.js that Switchboard’s hooks and session reports run. Set its full path, with no spaces, when the agents’ PATH does not include it, such as a Node.js installed through nvm.', placeholder: 'node' },
+        { path: 'sessions.installHooks', label: 'Install hooks', kind: 'boolean', help: 'Add Switchboard’s hooks to your Claude and Codex settings, so the list shows when a session waits for you. Off, the session list and Codex’s run output alone decide state.', fallback: true },
       ],
     },
+    {
+      heading: 'Developer',
+      fields: [
+        { path: 'sessions.debriefs', label: 'Friction debriefs', kind: 'boolean', help: 'Ask each session what slowed it down, once its work item is done or 45 minutes after its last turn. The answers go to ~/.claude/.wip/debrief for the friction-review skill.', fallback: false },
+      ],
+    },
+    { heading: 'Settings file', block: 'file', fields: [] },
   ];
 }
 
@@ -1375,13 +1436,13 @@ export function sourceFields(state: EditorState, name: string): Section[] {
   const kind = sourceKind(value, name);
   const declared: OptionField[] = (state.config.sourceFields?.[kind] ?? []).map((entry) => ({ key: entry.key, field: { label: entry.label, kind: entry.type, help: typeof entry.help === 'string' ? entry.help : '', ...(entry.type === 'boolean' ? { fallback: entry.placeholder === 'true' } : typeof entry.placeholder === 'string' ? { placeholder: entry.placeholder } : {}) }, advanced: entry.advanced === true }));
   const options = (OPTION_FIELDS[kind] ?? declared).map((entry) => ({ field: { ...entry.field, path: `${path}.${entry.key}` } as Field, advanced: entry.advanced }));
-  const sections: Section[] = [{ heading: 'Source', fields: common }];
   const plain = options.filter((entry) => !entry.advanced).map((entry) => entry.field);
-  const advanced = options.filter((entry) => entry.advanced).map((entry) => entry.field);
+  // The kind is rarely changed once the source works, so it waits under Advanced with the plugin's own rare fields.
+  const advanced = [...common.filter((field) => field.path.endsWith('.kind')), ...options.filter((entry) => entry.advanced).map((entry) => entry.field)];
+  const work = common.filter((field) => !field.path.endsWith('.kind') && !field.path.endsWith('.pollIntervalSeconds'));
+  const sections: Section[] = plain.length > 0 ? [{ heading: 'Connection', fields: plain }] : [];
 
-  if (plain.length > 0) {
-    sections.push({ heading: sourceLabel(kind, state.config), fields: plain });
-  }
+  sections.push({ heading: 'Work', fields: [...work, ...common.filter((field) => field.path.endsWith('.pollIntervalSeconds'))] });
 
   if (advanced.length > 0) {
     sections.push({ heading: 'Advanced', fields: advanced, advanced: true });
@@ -1431,8 +1492,10 @@ export function scheduleFields(state: EditorState, name: string): Section[] {
 
 /** The sections of a settings page, by its name; none for a page this file does not know. */
 export function pageSections(state: EditorState, page: string): Section[] {
-  if (page === 'general') {
-    return generalFields(state);
+  const fixed = PAGES[page];
+
+  if (fixed !== undefined) {
+    return fixed.sections(state);
   }
 
   if (page.startsWith('source:')) {
@@ -1456,7 +1519,7 @@ export function pageSections(state: EditorState, page: string): Section[] {
 
 /** The settings pages the navigation offers, each of which owns the errors that name its fields. */
 export function settingsPages(state: EditorState): string[] {
-  return ['general', ...state.sourceNames.map((name) => `source:${name}`), ...state.scheduleNames.map((name) => `schedule:${name}`), 'voice', ...state.personas.map((_, index) => `persona:${index}`)];
+  return [...Object.keys(PAGES), ...state.sourceNames.map((name) => `source:${name}`), ...state.scheduleNames.map((name) => `schedule:${name}`), 'voice', ...state.personas.map((_, index) => `persona:${index}`)];
 }
 
 /** Every settings field path, with the page that shows it. */
@@ -1486,6 +1549,13 @@ export function fieldOfError(error: string, paths: readonly string[]): string | 
   return best?.path ?? null;
 }
 
+/** The page for an error that names no field but a section of settings.json, such as `web` holding no object, or null. */
+function sectionPage(error: string): string | null {
+  const section = /^([a-z]+)\b/i.exec(error)?.[1];
+
+  return section === 'voice' ? 'voice' : section === 'sessions' ? HOME : section === 'triage' ? 'triage' : section === 'alerts' ? 'display' : section === 'web' ? 'advanced' : null;
+}
+
 /** The page that holds each error's field; an error with no field, or whose page the navigation does not offer, maps to null and shows on every page. */
 export function errorPages(state: EditorState): Map<string, string | null> {
   const entries = settingsPaths(state);
@@ -1498,7 +1568,7 @@ export function errorPages(state: EditorState): Map<string, string | null> {
 
     // A persona's or the voice section's error that names no field, such as an entry that is not an object, shows on its page.
     const persona = /^voice\.personas\[(\d+)\]/.exec(error);
-    const page = path !== null ? (entries.find((entry) => entry.path === path)?.page ?? null) : persona !== null ? `persona:${persona[1]}` : error.startsWith('voice.') ? 'voice' : null;
+    const page = path !== null ? (entries.find((entry) => entry.path === path)?.page ?? null) : persona !== null ? `persona:${persona[1]}` : sectionPage(error);
 
     pages.set(error, page !== null && offered.has(page) ? page : null);
   }
@@ -1506,9 +1576,12 @@ export function errorPages(state: EditorState): Map<string, string | null> {
   return pages;
 }
 
-/** The parts of settings.json a page edits, by which the navigation marks it unsaved. */
-export function pagePaths(page: string): string[] {
-  return page === 'general' ? ['sessions', 'triage', 'alerts', 'web'] : page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : page.startsWith('schedule:') ? [`schedules.${page.slice('schedule:'.length)}`] : [];
+/**
+ * The parts of settings.json a page edits, by which the navigation marks it unsaved: a source's or schedule's whole entry, keys the page has
+ * no field for included, and otherwise each of its fields' keys, since pages such as Sessions and Advanced share the `sessions` object.
+ */
+export function pagePaths(state: EditorState, page: string): string[] {
+  return page.startsWith('source:') ? [`sources.${page.slice('source:'.length)}`] : page.startsWith('schedule:') ? [`schedules.${page.slice('schedule:'.length)}`] : PAGES[page] === undefined ? [] : pageSections(state, page).flatMap((section) => section.fields.map((field) => field.path));
 }
 
 export function pageDirty(state: EditorState, page: string): boolean {
@@ -1536,7 +1609,7 @@ export function pageDirty(state: EditorState, page: string): boolean {
   }
 
   // Text typed on a New page before Create is not a change to the file.
-  return state.draft !== null && pagePaths(page).some((path) => json(getAt(state.draft!, path)) !== json(getAt(state.config.settings.value, path)));
+  return state.draft !== null && pagePaths(state, page).some((path) => json(getAt(state.draft!, path)) !== json(getAt(state.config.settings.value, path)));
 }
 
 /** The voice section without its roster; one that holds only personas, or none, is no change to the Voice page. */
@@ -1644,12 +1717,14 @@ export function nav(state: EditorState): NavCategory[] {
     {
       label: 'Work',
       entries: [
-        item(state, 'general', 'General'),
+        item(state, 'sessions', 'Sessions'),
+        item(state, 'triage', 'Triage'),
         group(state, 'sources', 'Sources', sourceEntries, undefined, 'sources'),
         group(state, 'playbooks', 'Playbooks', playbookEntries, undefined, 'playbooks'),
         group(state, 'schedules', 'Schedules', [...state.scheduleNames.map((name) => item(state, `schedule:${name}`, name)), add(state, 'New schedule', 'new-schedule')], undefined, 'schedules'),
       ],
     },
+    { label: 'App', entries: [item(state, 'display', 'Alerts and display'), item(state, 'devices', 'Devices'), item(state, 'advanced', 'Advanced')] },
     {
       label: 'Voice',
       entries: [item(state, 'voice', 'Voice settings'), group(state, 'personas', 'Personas', [...state.personas.map((_, index) => item(state, `persona:${index}`, state.personaLabel(index))), add(state, 'New persona', 'new-persona')], undefined, 'voice.personas')],
@@ -1720,6 +1795,7 @@ export interface FieldView {
 export interface SectionView {
   heading: string;
   advanced: boolean;
+  block?: 'devices' | 'file';
   /** What a collapsed Advanced section holds, beside its heading. */
   summary: string;
   fields: FieldView[];
@@ -1761,7 +1837,8 @@ export interface PageView {
   newName?: NewNameView;
   table?: PlaybookTable;
   title: string;
-  filePath: string | null;
+  /** One line under the title saying what the page is for, or null. */
+  lede: string | null;
   buttons: PageButton[];
   notes: string[];
   errors: string[];
@@ -1787,7 +1864,7 @@ export function pageView(state: EditorState): PageView {
 
     return {
       title: 'New source',
-      filePath: null,
+      lede: null,
       buttons: [{ command: 'create', label: 'Create', primary: true }],
       notes: [],
       errors: [],
@@ -1814,7 +1891,7 @@ export function pageView(state: EditorState): PageView {
 
     return state.scheduleNames.includes(name)
       ? settingsPage(state, name, scheduleFields(state, name), [{ command: 'remove-schedule', label: 'Remove schedule', argument: name }], [])
-      : { title: name, filePath: state.config.settings.path, buttons: [], notes: [], errors: [], message: 'This schedule no longer exists.', sections: [] };
+      : { title: name, lede: null, buttons: [], notes: [], errors: [], message: 'This schedule no longer exists.', sections: [] };
   }
 
   if (page === 'voice') {
@@ -1833,7 +1910,7 @@ export function pageView(state: EditorState): PageView {
 
     return {
       title: 'New persona',
-      filePath: null,
+      lede: null,
       buttons: [{ command: 'create', label: 'Create', primary: true }],
       notes: [],
       errors: [],
@@ -1848,7 +1925,7 @@ export function pageView(state: EditorState): PageView {
 
     return {
       title: 'New schedule',
-      filePath: null,
+      lede: null,
       buttons: [{ command: 'create', label: 'Create', primary: true }],
       notes: [],
       errors: [],
@@ -1864,7 +1941,7 @@ export function pageView(state: EditorState): PageView {
 
     return {
       title: 'New playbook',
-      filePath: null,
+      lede: null,
       buttons: [{ command: 'create', label: 'Create', primary: true }],
       notes: [],
       errors: loose,
@@ -1884,11 +1961,10 @@ export function pageView(state: EditorState): PageView {
 
   if (page.startsWith('playbook:')) {
     const name = page.slice('playbook:'.length);
-    const path = state.config.settings.path;
     const blank = { notes: [], sections: [] };
 
     if (!state.hasPlaybook(name)) {
-      return { title: name, filePath: path, buttons: [], errors: [], message: 'This playbook no longer exists.', ...blank };
+      return { title: name, lede: null, buttons: [], errors: [], message: 'This playbook no longer exists.', ...blank };
     }
 
     const buttons: PageButton[] = [{ command: 'delete', label: 'Delete' }];
@@ -1896,15 +1972,17 @@ export function pageView(state: EditorState): PageView {
     const read = readPlaybook(state.playbookEntry(name));
 
     if (read.fields === null) {
-      return { title: name, filePath: path, buttons, errors: errors.length > 0 ? errors : [read.error!], message: FIX_ENTRY, ...blank };
+      return { title: name, lede: null, buttons, errors: errors.length > 0 ? errors : [read.error!], message: FIX_ENTRY, ...blank };
     }
 
     const { loose, sections } = playbookSections(state, read.fields, errors);
 
-    return { title: name, filePath: path, buttons, notes: [], errors: loose, message: null, sections };
+    return { title: name, lede: null, buttons, notes: [], errors: loose, message: null, sections };
   }
 
-  return settingsPage(state, 'General', generalFields(state), [], [configFolderNote(state.config.configDir)]);
+  const fixed = PAGES[page] ?? PAGES[HOME]!;
+
+  return settingsPage(state, fixed.title, fixed.sections(state), [], [], fixed.lede);
 }
 
 const FIX_ENTRY = 'Fix this entry in settings.json in an editor, or delete it.';
@@ -1914,7 +1992,7 @@ function personaPage(state: EditorState, at: string): PageView {
   const index = /^\d+$/.test(at) ? Number(at) : -1;
 
   if (index < 0 || index >= state.personas.length) {
-    return { title: 'Persona', filePath: state.config.settings.path, buttons: [], notes: [], errors: [], message: 'This persona no longer exists.', sections: [] };
+    return { title: 'Persona', lede: null, buttons: [], notes: [], errors: [], message: 'This persona no longer exists.', sections: [] };
   }
 
   const remove: PageButton = {
@@ -1934,20 +2012,52 @@ function personaPage(state: EditorState, at: string): PageView {
   return view.sections.length === 0 && view.message === null ? { ...view, message: 'Fix this entry in settings.json in an editor, or remove it.' } : view;
 }
 
-/** The errors that name no field, and the playbook's fields with the errors that name each. */
-function playbookSections(state: EditorState, playbook: PlaybookFields, errors: readonly string[]): { loose: string[]; sections: SectionView[] } {
+/**
+ * A playbook page's sections: what it is for, when it starts, what it reports, what it runs as and its prompt, then the rarely changed kind,
+ * returns and focus page under Advanced; a triage playbook's are what it is for, its instructions and its kind.
+ */
+export function playbookPageSections(state: EditorState, playbook: PlaybookFields): Section[] {
   const fields = playbookFields(state, playbook);
-  const paths = fields.map((field) => field.path);
-  const loose = errors.filter((error) => playbookFieldOfError(error, paths) === null);
-  const views = fields.map((field) => fieldView(field, playbookFieldValue(playbook, field.path), errors.filter((error) => playbookFieldOfError(error, paths) === field.path)));
+  const pick = (test: (path: string) => boolean): Field[] => fields.filter((field) => test(field.path));
+  const of = (...paths: string[]): Field[] => paths.flatMap((path) => fields.filter((field) => field.path === path));
 
-  return { loose, sections: [{ heading: '', advanced: false, summary: '', fields: views }] };
+  if (playbook.kind === 'triage') {
+    return [
+      { heading: 'About', fields: of('description', 'rates') },
+      { heading: 'Classifier instructions', fields: of('template') },
+      { heading: 'Advanced', advanced: true, fields: of('kind') },
+    ];
+  }
+
+  return [
+    { heading: 'About', fields: of('description') },
+    { heading: 'Start', fields: of('autoStart', 'requiresWorktree') },
+    { heading: 'Reports', fields: pick((path) => path.startsWith('reports.') || path === 'approvalSends') },
+    { heading: 'Run as', fields: of('provider', 'permissionMode', 'model', 'workdir') },
+    { heading: 'Prompt', fields: of('template') },
+    { heading: 'Advanced', advanced: true, fields: of('kind', 'returnOf', 'focus') },
+  ];
+}
+
+/** The errors that name no field, and the playbook's sections with the errors that name each field. */
+function playbookSections(state: EditorState, playbook: PlaybookFields, errors: readonly string[]): { loose: string[]; sections: SectionView[] } {
+  const sections = playbookPageSections(state, playbook);
+  const paths = sections.flatMap((section) => section.fields.map((field) => field.path));
+  const loose = errors.filter((error) => playbookFieldOfError(error, paths) === null);
+  const views = sections.map((section) => ({
+    heading: section.heading,
+    advanced: section.advanced === true,
+    summary: section.fields.map((field) => field.label).join(', '),
+    fields: section.fields.map((field) => fieldView(field, playbookFieldValue(playbook, field.path), errors.filter((error) => playbookFieldOfError(error, paths) === field.path))),
+  }));
+
+  return { loose, sections: views };
 }
 
 /** A namespace's playbooks as a table of their checkboxes, each row with its own errors. */
 function namespacePage(state: EditorState, space: string): PageView {
   const names = state.namespacePlaybooks(space);
-  const base = { title: `${space} playbooks`, filePath: null, buttons: [], notes: [], errors: [], sections: [] };
+  const base = { title: `${space} playbooks`, lede: null, buttons: [], notes: [], errors: [], sections: [] };
 
   if (names.length === 0) {
     return { ...base, message: 'This namespace has no playbooks.' };
@@ -1971,17 +2081,17 @@ function namespacePage(state: EditorState, space: string): PageView {
   return { ...base, message: null, table: { columns, rows } };
 }
 
-/** Where the config folder is and how to change it, since the hub keeps it outside settings.json (architecture.md § Config folder). */
-export function configFolderNote(configDir: string): string {
-  return `Config folder: ${configDir}. Change it with hub.js config set configDir <folder>.`;
+/** How to change the config folder, which the hub keeps outside settings.json (architecture.md § Config folder). */
+export function configFolderHelp(): string {
+  return 'Change it with hub.js config set configDir <folder>; Settings then reads the new folder.';
 }
 
-export function settingsPage(state: EditorState, title: string, sections: readonly Section[], buttons: PageButton[], notes: string[]): PageView {
+export function settingsPage(state: EditorState, title: string, sections: readonly Section[], buttons: PageButton[], notes: string[], lede: string | null = null): PageView {
   const settings = state.config.settings;
   const value = state.value;
 
   if (value === null) {
-    return { title, filePath: settings.path, buttons: [], notes, errors: [settings.error ?? 'settings.json must contain an object.'], message: FIX_BY_HAND, sections: [] };
+    return { title, lede, buttons: [], notes, errors: [`${settings.path}: ${settings.error ?? 'settings.json must contain an object.'}`], message: FIX_BY_HAND, sections: [] };
   }
 
   const paths = settingsPaths(state).map((entry) => entry.path);
@@ -1997,10 +2107,11 @@ export function settingsPage(state: EditorState, title: string, sections: readon
     heading: section.heading,
     advanced: section.advanced === true,
     summary: section.summary ?? section.fields.map((field) => field.label).join(', '),
+    ...(section.block === undefined ? {} : { block: section.block }),
     fields: section.fields.map((field) => fieldView(field, getAt(value, field.path), errors.filter((error) => fieldOfError(error, paths) === field.path))),
   }));
 
-  return { title, filePath: settings.path, buttons, notes, errors: loose, message: null, sections: views };
+  return { title, lede, buttons, notes, errors: loose, message: null, sections: views };
 }
 
 /** What a field shows for its value: an absent list with a default shows the default; a checkbox without a value shows its fallback. */

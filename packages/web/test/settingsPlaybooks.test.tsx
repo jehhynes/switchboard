@@ -88,7 +88,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     // Playbooks starts closed under Work, counting its playbooks and carrying the error mark of the one it cannot read.
     const playbooks = host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="playbooks"]')!;
 
-    expect(texts('.settings-nav-heading')).toEqual(['Work', 'Voice']);
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
     expect(playbooks.getAttribute('aria-expanded')).toBe('false');
     expect(playbooks.querySelector('.settings-nav-count')?.textContent).toBe('3');
     expect(playbooks.querySelector('.settings-errors')).not.toBeNull();
@@ -137,7 +137,10 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     await settle();
 
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev:build');
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Kind', 'Start', 'Reports', 'Approve sends the work', 'Working directory', 'Agent', 'Permission mode', 'Model', 'Return of', 'Focus page', 'Prompt']);
+    // Start and Reports are each a section whose checkboxes need no label of their own; Kind, Return of and Focus page wait under Advanced.
+    expect([...host.querySelectorAll('.settings-section-heading')].map((node) => (node.querySelector('.settings-toggle-label') ?? node).textContent)).toEqual(['About', 'Start', 'Reports', 'Run as', 'Prompt', 'Advanced']);
+    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Approve sends the work', 'Agent', 'Permission mode', 'Model', 'Working directory', 'Prompt']);
+    expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Kind, Return of, Focus page');
     expect(texts('.settings-check label:not(.settings-box)')).toEqual(['Automatically', 'Needs a worktree', 'Done', 'Approval', 'Worktree', 'Playbook', 'Paste']);
     expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['Sessions setting (auto)', 'default', 'auto', 'plan', 'bypassPermissions']);
     expect(control<HTMLInputElement>('model').placeholder).toBe('Sessions setting (Claude’s default)');
@@ -171,9 +174,11 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     await open();
     entry('triage').click();
     await settle();
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Kind', 'Rates importance', 'Classifier instructions']);
+    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Rates importance', 'Classifier instructions']);
 
     entry('build').click();
+    await settle();
+    host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
     await settle();
     pick('kind', 'triage');
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
@@ -190,7 +195,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     // An error that starts with no field's key, such as one about the reports, shows at the top of the page.
     expect(texts('.settings-page > .settings-error')).toEqual(['reports must list known reports.', 'Something else.']);
     expect(texts('.settings-group .settings-field-error')).toEqual([]);
-    expect(entry('General').querySelector('.settings-errors')).toBeNull();
+    expect(entry('Sessions').querySelector('.settings-errors')).toBeNull();
   });
 
   it("edits a namespace's playbooks in a table: Start, Reports with Sends only beside Approval, Repo root and Rates, with each row's dot and errors", async () => {
@@ -267,7 +272,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     await settle();
     [...host.querySelectorAll<HTMLButtonElement>('.settings-ask button')].find((one) => one.textContent === 'Delete')!.click();
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
-    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
     expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
     expect('dev:build' in checked().playbooks).toBe(false);
   });

@@ -5,7 +5,7 @@ import { mount } from './island.js';
 import { isPhone } from './layout.js';
 import { QrCode, usedText } from './listHeader.js';
 import type { Device, Pairing } from './listHeader.js';
-import { applyPlaybookCell, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, nav, navEntry, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
+import { applyPlaybookCell, configFolderHelp, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, HOME, nav, navEntry, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
 import type { Enrollment, Field, FieldOption, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -54,11 +54,11 @@ interface View {
   enrollment: Enrollment | null;
   /** Why the last enrolment request was refused or failed, or null. */
   enrollError: string | null;
-  /** General's paired devices and Pair a device (architecture.md § Remote access). */
+  /** Devices' paired devices and Pair a device (architecture.md § Remote access). */
   remote: RemoteView;
 }
 
-/** The paired devices as the hub last listed them, or null before General asked; the pairing link shown, or null; and a refusal. */
+/** The paired devices as the hub last listed them, or null before Devices asked; the pairing link shown, or null; and a refusal. */
 interface RemoteView {
   devices: Device[] | null;
   pairing: Pairing | null;
@@ -96,12 +96,12 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   let asked = false;
   // Each enrolment request, so an answer that a later request or a close overtook is dropped.
   let enrollSeq = 0;
-  // Whether General listed the devices since Settings opened, and each devices request, so an answer a close overtook is dropped.
+  // Whether Devices listed the devices since Settings opened, and each devices request, so an answer a close overtook is dropped.
   let devicesAsked = false;
   let remoteSeq = 0;
 
   /**
-   * General's paired devices (architecture.md § Remote access): lists them, with `pair` a new pairing link first, with `revoke` after
+   * Devices' paired devices (architecture.md § Remote access): lists them, with `pair` a new pairing link first, with `revoke` after
    * signing one out and with `voice` after allowing or forbidding voice on one, through the page's device commands, which the hub refuses
    * from a paired device.
    */
@@ -207,8 +207,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       return;
     }
 
-    // General lists the paired devices when it first shows.
-    if (state?.page === 'general' && !devicesAsked) {
+    // Devices lists the paired devices when it first shows.
+    if (state?.page === 'devices' && !devicesAsked) {
       devicesAsked = true;
       void devices();
     }
@@ -631,11 +631,11 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
         break;
       case 'remove-schedule':
         // Its work items stay, and Discard restores it.
-        change(setAt(value, `schedules.${pressed.argument!}`, undefined), 'general');
+        change(setAt(value, `schedules.${pressed.argument!}`, undefined), HOME);
         break;
       case 'remove-source':
         // Its work items stay, and Discard restores it.
-        change(setAt(value, `sources.${pressed.argument!}`, undefined), 'general');
+        change(setAt(value, `sources.${pressed.argument!}`, undefined), HOME);
         break;
     }
   };
@@ -871,7 +871,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
         if (choice === 'delete' && state !== null && value !== null && state.hasPlaybook(asked.name)) {
           state.setDraft(withPlaybook(value, asked.name, undefined));
-          state.page = 'general';
+          state.page = HOME;
           view.typing.clear();
           edited();
           // The page's title takes the focus from the closed question's button.
@@ -1150,11 +1150,7 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
       <div class="settings-page-head">
         <div class="settings-page-title">
           <h2 tabIndex={-1}>{page.title}</h2>
-          {page.filePath === null ? null : (
-            <span class="settings-file" title={page.filePath}>
-              {page.filePath}
-            </span>
-          )}
+          {page.lede === null ? null : <p class="settings-lede">{page.lede}</p>}
         </div>
         <div class="settings-buttons">
           {page.buttons.map((button) => (
@@ -1185,7 +1181,7 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
 }
 
 function SectionBlock({ state, section, view, on }: { state: EditorState; section: SectionView; view: View; on: Handlers }) {
-  const rows = runs(section.fields).map((run) => (run.length > 1 || run[0]!.field.group !== undefined ? <GroupRow views={run} on={on} /> : <FieldRow field={run[0]!} view={view} on={on} />));
+  const rows = runs(section.fields).map((run) => (run.length > 1 || run[0]!.field.group !== undefined ? <GroupRow views={run} heading={section.heading} on={on} /> : <FieldRow field={run[0]!} view={view} on={on} />));
 
   if (!section.advanced) {
     return (
@@ -1193,7 +1189,8 @@ function SectionBlock({ state, section, view, on }: { state: EditorState; sectio
         {section.heading === '' ? null : <h3 class="settings-section-heading">{section.heading}</h3>}
         <div class="settings-card">
           {rows}
-          {state.page === 'general' && section.heading === 'Remote access' ? <DevicesBlock remote={view.remote} on={on} /> : null}
+          {section.block === 'devices' ? <DevicesBlock remote={view.remote} on={on} /> : null}
+          {section.block === 'file' ? <FileBlock state={state} /> : null}
         </div>
       </section>
     );
@@ -1352,7 +1349,7 @@ function AssignRow({ assign, on }: { assign: { playbooks: string[]; personas: Fi
 }
 
 /**
- * General's paired devices under Remote access (architecture.md § Remote access), as Pair a device in More Actions shows them: each with its
+ * The Devices page's paired devices (architecture.md § Remote access), as Pair a device in More Actions shows them: each with its
  * name, where it signs in from, when it was last used and Sign out; then Pair a device…, which shows a new link's QR code and code.
  */
 function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
@@ -1361,7 +1358,6 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
 
   return (
     <div class="settings-devices" data-key="settings-devices">
-      <h4 class="settings-devices-heading">Paired devices</h4>
       {remote.devices === null ? (
         <p class="settings-help">Loading…</p>
       ) : remote.devices.length === 0 ? (
@@ -1411,6 +1407,27 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Where settings.json and the config folder are, which the hub keeps outside settings.json (architecture.md § Config folder). */
+function FileBlock({ state }: { state: EditorState }) {
+  return (
+    <>
+      <div class="settings-row action" data-key="settings-file">
+        <div class="settings-caption">
+          <span class="settings-label">settings.json</span>
+          <p class="settings-help settings-file">{state.config.settings.path}</p>
+        </div>
+      </div>
+      <div class="settings-row action" data-key="settings-config-folder">
+        <div class="settings-caption">
+          <span class="settings-label">Config folder</span>
+          <p class="settings-help settings-file">{state.config.configDir}</p>
+          <p class="settings-help">{configFolderHelp()}</p>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -1587,15 +1604,18 @@ function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: 
   );
 }
 
-/** A checkbox group's row: one checkbox per field, labelled with its own name and explained by its tooltip. */
-function GroupRow({ views, on }: { views: FieldView[]; on: Handlers }) {
+/** A checkbox group's row: one checkbox per field, labelled with its own name and explained by its tooltip; the group's name unless its section has it. */
+function GroupRow({ views, heading, on }: { views: FieldView[]; heading: string; on: Handlers }) {
   const first = views[0]!.field;
+  const name = first.group ?? first.label;
 
   return (
     <div class="settings-row group">
-      <div class="settings-caption">
-        <span>{first.group ?? first.label}</span>
-      </div>
+      {name === heading ? null : (
+        <div class="settings-caption">
+          <span>{name}</span>
+        </div>
+      )}
       <div class="settings-input settings-group">
         {views.map((shown) => (
           <span class="settings-check" title={shown.field.help === '' ? undefined : shown.field.help}>

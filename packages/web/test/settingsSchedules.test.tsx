@@ -118,7 +118,7 @@ describe('Settings schedules (architecture.md § Web page)', () => {
     expect(control<HTMLSelectElement>('schedules.adhoc.playbook').selectedOptions[0]?.textContent).toBe('dev:gone (missing)');
   });
 
-  it('New schedule refuses a taken name and adds an empty entry; Remove schedule takes it out of the draft and opens General', async () => {
+  it('New schedule refuses a taken name and adds an empty entry; Remove schedule takes it out of the draft and opens Sessions', async () => {
     await open();
     entry('+ New schedule').click();
     await vi.advanceTimersByTimeAsync(0);
@@ -145,7 +145,7 @@ describe('Settings schedules (architecture.md § Web page)', () => {
 
     press('Remove schedule');
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
-    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
     expect('nightly' in checked().schedules).toBe(false);
     expect(host.querySelector('.settings-bar')).toBeNull();
   });

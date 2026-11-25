@@ -166,7 +166,7 @@ export const VOICE_OFF = 'Voice is off. Turn it on in Settings on the computer t
 export const VOICE_NOT_ALLOWED = 'Voice is not allowed on this device. Allow it in Pair a device on the computer that runs Switchboard.';
 
 /** Why a pairing link cannot be made with no remote host and login. */
-export const REMOTE_OFF = 'Pairing a device needs remote access: turn on Tailscale, or set the allowed hosts and logins, under Remote access on the General page of Settings, and run tailscale serve.';
+export const REMOTE_OFF = 'Pairing a device needs remote access: turn on Tailscale, or set the allowed hosts and logins, on the Devices page of Settings, and run tailscale serve.';
 
 export interface HubServer {
   pageUrl(): Promise<string>;
