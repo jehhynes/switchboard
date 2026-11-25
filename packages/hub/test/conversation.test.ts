@@ -2235,6 +2235,10 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(page.frames.filter((frame) => frame.type === 'tabs')).toHaveLength(4);
     expect(page.frames.filter((frame) => frame.type === 'tabs').at(-1)).toMatchObject({ workItemId, tabs: { closed: [{ path: 'chat/old.md', updatedAt: 5 }] } });
     expect(elsewhere.frames.filter((frame) => frame.type === 'tabs')).toEqual([]);
+    // The sender's `tabs` carries its request's opId, so it knows the event that first holds its change; the other pages' carry none.
+    service.pageTabs({ window: page.key, workItemId, reopen: 'chat/old.md', opId: 'op-1' });
+    expect(page.frames.filter((frame) => frame.type === 'tabs').at(-1)).toMatchObject({ workItemId, opId: 'op-1', tabs: { closed: [] } });
+    expect(phone.frames.filter((frame) => frame.type === 'tabs').at(-1)).not.toHaveProperty('opId');
 
     expect(service.pageTabs({ window: elsewhere.key, workItemId, tab: 'console' }).status).toBe(403);
     expect(service.pageTabs({ window: 'forged', workItemId, tab: 'console' }).status).toBe(403);

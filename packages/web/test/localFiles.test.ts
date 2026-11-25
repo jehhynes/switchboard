@@ -341,7 +341,7 @@ describe('local file tabs', () => {
     // The same link shows the same tab, read again with its ETag, which an unchanged file answers with 304.
     link('Review').click();
     await flush();
-    expect(localGets()).toHaveLength(2);
+    expect(localGets()).toEqual([localFileUrl('pk', '.wip/review.md'), localFileUrl('pk', '.wip/review.md')]);
     expect(tabs()).toEqual([['review.md', true]]);
     expect(root.querySelector('.local-view .artifact-doc h1')!.textContent).toBe('Review');
 
@@ -568,6 +568,30 @@ describe('local file tabs', () => {
       expect(localGets()).toHaveLength(2);
       expect(validators).toEqual([null, null]);
       expect(heading()).toBe('Review');
+    });
+
+    it('keeps the answer of a slow read through the polls made while it is on its way', async () => {
+      start(true, 10);
+      link('Review').click();
+      await flush();
+      answers['.wip/review.md'] = review('# Slow');
+      held = { path: '.wip/review.md', release: () => {} };
+      await tick();
+      const asked = localGets().length;
+
+      // A poll leaves the read on its way to answer rather than asking for a newer one.
+      await tick();
+      await tick();
+      expect(localGets()).toHaveLength(asked);
+
+      const release = held.release;
+
+      held = null;
+      release();
+      await flush();
+      await flush();
+      expect(heading()).toBe('Slow');
+      expect(localGets()).toHaveLength(asked);
     });
 
     it('reads nothing while the page is hidden, and reads at once when it shows again', async () => {

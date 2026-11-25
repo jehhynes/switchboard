@@ -2716,9 +2716,10 @@ describe('the page in use', () => {
     vi.unstubAllGlobals();
   });
 
-  it('marks the artifacts this device has not opened with the unread dot in the More menu, until opened here or on another of its pages', () => {
+  it('marks the artifacts this device has not shown at their version with the unread dot, on their tabs and in the More menu, until shown here or on another of its pages', () => {
     window.innerWidth = 1920;
-    // Kept before the page loaded: work item 1 seen with chat/a5.md opened; another work item's opened path does not count.
+    // Kept before the page loaded, by an earlier page that kept paths alone: work item 1 seen with chat/a5.md opened; another work item's
+    // opened path does not count.
     localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md'], '2': ['chat/a6.md'] }));
     onTestFinished(() => {
       vi.unstubAllGlobals();
@@ -2748,19 +2749,63 @@ describe('the page in use', () => {
     // No row says whether its tab is closed.
     expect(root.querySelector('#detail .tab-menu')!.textContent).not.toContain('Closed');
 
-    // Opening one clears its dot and keeps it for this device, added to what another page kept meanwhile.
-    localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md', 'chat/a6.md'], '2': ['chat/a6.md'] }));
+    // The work item's hello kept the versions it had of the paths kept alone; a path it did not have stays shown at whatever version comes.
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': { 'chat/plan.md': 1_500, 'chat/p.html': 1_500, 'chat/a5.md': -1 }, '2': { 'chat/a6.md': -1 } });
+
+    // Opening one clears its dot and keeps its version for this device, merged with what another page kept meanwhile.
+    localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '1': { 'chat/plan.md': 1_500, 'chat/p.html': 1_500, 'chat/a5.md': -1, 'chat/a6.md': 10_006 }, '2': { 'chat/a6.md': -1 } }));
     click('#detail .tab-menu [data-path="chat/a4.md"]');
     click('#detail [data-action="tab-menu"]');
     expect(dotted()).toEqual(['chat/a7.md']);
-    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md', 'chat/a6.md', 'chat/a4.md'], '2': ['chat/a6.md'] });
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': { 'chat/plan.md': 1_500, 'chat/p.html': 1_500, 'chat/a5.md': -1, 'chat/a6.md': 10_006, 'chat/a4.md': 10_004 }, '2': { 'chat/a6.md': -1 } });
 
-    // Another of this device's pages opening one clears it here too.
-    const kept = JSON.stringify({ '1': ['chat/plan.md', 'chat/p.html', 'chat/a5.md', 'chat/a6.md', 'chat/a4.md', 'chat/a7.md'] });
+    // Another of this device's pages showing one clears it here too.
+    const kept = JSON.stringify({ '1': { 'chat/plan.md': 1_500, 'chat/p.html': 1_500, 'chat/a5.md': -1, 'chat/a6.md': 10_006, 'chat/a4.md': 10_004, 'chat/a7.md': 10_007 } });
 
     localStorage.setItem('switchboard.artifactsSeen', kept);
     window.dispatchEvent(new StorageEvent('storage', { key: 'switchboard.artifactsSeen', newValue: kept }));
     expect(dotted()).toEqual([]);
+
+    // A changed artifact is unread again, with the dot on its own tab where the strip has room for it, until its tab shows it.
+    vi.restoreAllMocks();
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    click('#detail [data-side="status"]');
+    source.emit('artifact', { artifact: { path: 'chat/a4.md', owner: 'chat', kind: 'note', title: 'Note 4', ext: 'md', type: 'markdown', updatedAt: 20_000 } });
+    const tabDot = (path: string) => root.querySelector(`#detail .artifact-tab[data-path="${path}"] > .unread-dot`);
+
+    expect(tabDot('chat/a4.md')).not.toBeNull();
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/a4.md"] .tab-open')!.getAttribute('aria-label')).toBe('Note 4, unread');
+    expect(tabDot('chat/a7.md')).toBeNull();
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/a7.md"] .tab-open')!.getAttribute('aria-label')).toBe('Note 7');
+    // An artifact kept without a version does not turn unread when it changes, until it has a version kept.
+    source.emit('artifact', { artifact: { path: 'chat/a5.md', owner: 'chat', kind: 'note', title: 'Note 5', ext: 'md', type: 'markdown', updatedAt: 20_000 } });
+    expect(tabDot('chat/a5.md')).toBeNull();
+    click('#detail .artifact-tab[data-path="chat/a4.md"] .tab-open');
+    expect(tabDot('chat/a4.md')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)['1']['chat/a4.md']).toBe(20_000);
+    // A new version that comes while its tab shows it is shown at once.
+    source.emit('artifact', { artifact: { path: 'chat/a4.md', owner: 'chat', kind: 'note', title: 'Note 4', ext: 'md', type: 'markdown', updatedAt: 30_000 } });
+    expect(tabDot('chat/a4.md')).toBeNull();
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)['1']['chat/a4.md']).toBe(30_000);
+    page.close();
+  });
+
+  it('opens again an artifact closed on every device when a newer version comes, unread', () => {
+    window.innerWidth = 1920;
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const { page, source } = start();
+
+    hello(source, { tabs: { tab: null, closed: [{ path: 'chat/plan.md', updatedAt: 1_500 }] } });
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).toBeNull();
+    // The same version again leaves it closed.
+    source.emit('artifact', { artifact: artifact('chat/plan.md', 'markdown', 'md') });
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).toBeNull();
+    source.emit('artifact', { artifact: { ...artifact('chat/plan.md', 'markdown', 'md'), updatedAt: 2_000 } });
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"] > .unread-dot')).not.toBeNull();
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/p.html"] > .unread-dot')).toBeNull();
     page.close();
   });
 
@@ -2773,7 +2818,7 @@ describe('the page in use', () => {
     const { page, source } = start();
 
     hello(source);
-    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/p.html', 'chat/plan.md'] });
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': { 'chat/p.html': 1_500, 'chat/plan.md': 1_500 } });
     source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
     vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 1 } as DOMRect);
     // Too narrow for any tab but Console, chosen: every artifact is in More.
@@ -2785,13 +2830,14 @@ describe('the page in use', () => {
     page.close();
 
     // A later page whose copy is stale, as when another page kept the work item first without this one hearing of it, adds nothing at its hello.
-    localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '2': [] }));
+    localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '2': {} }));
 
     const again = start();
+    const fresh = JSON.stringify({ '1': { 'chat/p.html': 1_500, 'chat/plan.md': 1_500 }, '2': {} });
 
-    localStorage.setItem('switchboard.artifactsSeen', JSON.stringify({ '1': ['chat/p.html', 'chat/plan.md'], '2': [] }));
+    localStorage.setItem('switchboard.artifactsSeen', fresh);
     hello(again.source, { artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html'), { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 }] });
-    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/p.html', 'chat/plan.md'], '2': [] });
+    expect(localStorage.getItem('switchboard.artifactsSeen')).toBe(fresh);
     again.page.close();
   });
 
@@ -2823,11 +2869,11 @@ describe('the page in use', () => {
     // History lies in its tab, not over the conversation: the conversation and its column stay.
     expect(root.classList.contains('history')).toBe(false);
     expect(root.querySelector('#panel .history-view')).toBeNull();
-    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': [] });
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': {} });
     click('#detail .artifact-tab[data-path="chat/new.md"] .tab-open');
     expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/new.md');
     expect(root.querySelector('.history-view')).toBeNull();
-    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': ['chat/new.md'] });
+    expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': { 'chat/new.md': 1 } });
 
     // A row that stops offering History takes the tab with it, and the column shows Status in its place.
     click('#detail [data-side="history"]');
@@ -2950,8 +2996,24 @@ describe('the page in use', () => {
     click('#detail .tab-menu [data-path="chat/a1.md"]');
     expect(selected()!.getAttribute('data-path')).toBe('chat/a1.md');
     expect(posts.filter((post) => post.url.endsWith('/page-tabs')).at(-2)?.body).toMatchObject({ workItemId: 1, reopen: 'chat/a1.md' });
-    // Another device closing the open artifact shows Status here.
+    // The hub sends this page's own changes back as `tabs`, each with its request's opId, its close after the reopen here: neither moves anything
+    // or keeps anything. Nor does another device's older event in which the artifact was open, though it holds the reopen's state before the
+    // reopen's own echo.
+    const echoed = kept().length;
+    const opOf = (key: string) => ([...kept()].reverse().find((body) => (body as Record<string, unknown>)[key] !== undefined) as { opId: string }).opId;
+    const [closeOp, reopenOp] = [opOf('close'), opOf('reopen')];
+
+    expect(closeOp).not.toBe(reopenOp);
+    source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [] } });
+    expect(selected()!.getAttribute('data-path')).toBe('chat/a1.md');
+    source.emit('tabs', { workItemId: 1, opId: closeOp, tabs: { tab: null, closed: [{ path: 'chat/a1.md', updatedAt: 10_001 }] } });
+    expect(selected()!.getAttribute('data-path')).toBe('chat/a1.md');
+    source.emit('tabs', { workItemId: 1, opId: reopenOp, tabs: { tab: 'artifact:chat/a1.md', closed: [] } });
+    expect(selected()!.getAttribute('data-path')).toBe('chat/a1.md');
+    expect(kept()).toHaveLength(echoed);
+    // Another device closing the open artifact shows Status here, and keeps nothing.
     source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [{ path: 'chat/a1.md', updatedAt: 10_001 }] } });
+    expect(kept()).toHaveLength(echoed);
     expect(selected()!.getAttribute('data-side')).toBe('status');
     expect(paths()).not.toContain('chat/a1.md');
     narrow.mockRestore();
@@ -3849,7 +3911,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("opens an artifact's file link by a fresh read each time: a link retargeted since opens the file, and a refused read says why", async () => {
+it("opens an artifact's file link by a fresh read each time: a link retargeted since opens the file, and a refused read says why", async () => {
     window.innerWidth = 1440;
     const { page, source } = start();
     const plan = '.wip/artifacts/w1/chat/plan.md';
@@ -3934,6 +3996,59 @@ describe('the page in use', () => {
     narrow.page.close();
   });
 
+  it('reads a file tab whose read is still on its way across a reconnect again once that read answers, loading or loaded, and never shows the earlier answer', async () => {
+    window.innerWidth = 1440;
+    history.replaceState(null, '', '#w=1');
+    const { page, source } = start();
+    const items = [reply('r1', 2, { opening: 'See [notes](notes.md).' })];
+    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/local-file?')).length;
+    const text = () => root.querySelector('#detail .detail-body .local-view > .artifact-doc')?.textContent?.trim();
+    let release = (): void => {};
+
+    answers['local-file'] = { status: 403, body: { error: 'Not this page.' }, wait: new Promise((resolve) => (release = resolve)) };
+    hello(source, { items });
+    click('#panel a.path-link');
+    await flush();
+    expect(reads()).toBe(1);
+
+    answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Fresh', tooLarge: false, size: 7, entries: null, more: false } };
+    source.emit('hello', { key: 'pk9', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    hello(source, { key: 'pk9', scope: { ...scope, scopeGen: 6 }, items });
+    await flush();
+    await flush();
+    // A tab is read once at a time, so the new stream's read waits for the earlier one.
+    expect(reads()).toBe(1);
+
+    release();
+    await flush();
+    await flush();
+    await flush();
+    expect(reads()).toBe(2);
+    expect(text()).toBe('Fresh');
+    expect(root.querySelector('#detail .local-view .empty')).toBeNull();
+
+    // A loaded tab read again as a turn ends, its read still on its way at a reconnect, is read again then, and the earlier answer never shows.
+    answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Stale', tooLarge: false, size: 7, entries: null, more: false }, wait: new Promise((resolve) => (release = resolve)) };
+    source.emit('session', { session: session({ state: 'running' }) });
+    source.emit('session', { session: session({ state: 'idle' }) });
+    await flush();
+    expect(reads()).toBe(3);
+    answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Current', tooLarge: false, size: 9, entries: null, more: false } };
+    source.emit('hello', { key: 'pk10', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    hello(source, { key: 'pk10', scope: { ...scope, scopeGen: 7 }, items });
+    await flush();
+    expect(reads()).toBe(3);
+    expect(text()).toBe('Fresh');
+
+    release();
+    await flush();
+    await flush();
+    await flush();
+    expect(reads()).toBe(4);
+    expect(text()).toBe('Current');
+    page.close();
+  });
+
   it('closes the tab shown to its neighbour in the strip, the one before it else after it, keeps the selection when another tab closes, and keeps no choice for the tab shown next', async () => {
     window.innerWidth = 1440;
     const { page, source } = start();
@@ -3970,6 +4085,163 @@ describe('the page in use', () => {
     expect(shown()).toBe('status');
     expect(kept().slice(before)).toEqual([expect.objectContaining({ close: { path: 'chat/plan.md', updatedAt: 1_500 } }), expect.objectContaining({ close: { path: 'chat/p.html', updatedAt: 1_500 } })]);
     page.close();
+  });
+
+  it('shows the conversation in place of an artifact another device closes on a narrow page, and Status on a wide one, keeping no choice', () => {
+    window.innerWidth = 1000;
+    const { page, source } = start();
+    const kept = () => posts.filter((post) => post.url.endsWith('/page-tabs')).length;
+
+    hello(source);
+    click('#head .artifact-tab[data-path="chat/plan.md"] .tab-open');
+    expect(root.querySelector('#head .artifact-tab.selected')?.getAttribute('data-path')).toBe('chat/plan.md');
+
+    const before = kept();
+
+    source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [{ path: 'chat/plan.md', updatedAt: 1_500 }] } });
+    expect(root.querySelector('#head .artifact-tab[data-path="chat/plan.md"]')).toBeNull();
+    expect(root.querySelector('#head [data-tab="conversation"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.classList.contains('off-conversation')).toBe(false);
+    // On a wider page the column shows Status, as it would have.
+    resizeTo(1920);
+    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(kept()).toBe(before);
+    page.close();
+  });
+
+  it('reads the file tab shown again when chosen, after a turn and on a reconnect, keeping its place and its view through a failed read, and a newer read wins', async () => {
+    window.innerWidth = 1440;
+    // The page asks for its work item, so it shows it again on a new stream.
+    history.replaceState(null, '', '#w=1');
+    const { page, source } = start();
+    const read = (contents: string, wait?: Promise<void>) => ({ status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents, tooLarge: false, size: 7, entries: null, more: false }, ...(wait === undefined ? {} : { wait }) });
+    const items = [reply('r1', 2, { opening: 'See [notes](notes.md).' })];
+    const doc = () => root.querySelector<HTMLElement>('#detail .detail-body .local-view > .artifact-doc');
+    const text = () => doc()?.textContent?.trim();
+    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/local-file?')).length;
+    const settle = async () => {
+      await flush();
+      await flush();
+    };
+    let release = (): void => {};
+
+    answers['local-file'] = read('# One');
+    hello(source, { items });
+    click('#panel a.path-link');
+    await settle();
+    expect(text()).toBe('One');
+    doc()!.scrollTop = 200;
+    doc()!.dispatchEvent(new Event('scroll'));
+
+    // A turn that ends reads it again, showing what it read until the answer comes, then the new text where the reader was.
+    answers['local-file'] = read('# Two', new Promise((resolve) => (release = resolve)));
+    source.emit('session', { session: session({ state: 'running' }) });
+    expect(reads()).toBe(1);
+    source.emit('session', { session: session({ state: 'idle' }) });
+    await settle();
+    expect(reads()).toBe(2);
+    expect(text()).toBe('One');
+    release();
+    await settle();
+    expect(text()).toBe('Two');
+    expect(doc()!.scrollTop).toBe(200);
+
+    // Chosen again, it reads again; a failed read keeps what it shows.
+    answers['local-file'] = { status: 500, body: { error: 'The disk is busy.' } };
+    click('#detail [data-side="status"]');
+    click('#detail [data-action="local-tab"]');
+    await settle();
+    expect(reads()).toBe(3);
+    expect(text()).toBe('Two');
+
+    // A reconnect tries it again once the new stream shows the work item.
+    answers['local-file'] = read('# Three');
+    source.emit('hello', { key: 'pk9', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Side' })])], scope: null, sessions: [], items: [], more: false, status: null, artifacts: [] });
+    expect(reads()).toBe(3);
+    hello(source, { key: 'pk9', scope: { ...scope, scopeGen: 6 }, items });
+    await settle();
+    expect(reads()).toBe(4);
+    expect(text()).toBe('Three');
+
+    // Chosen again while a read is on its way, the tab is read again once that read answers, and the earlier answer is dropped.
+    answers['local-file'] = read('# Old', new Promise((resolve) => (release = resolve)));
+    click('#detail [data-action="local-tab"]');
+    answers['local-file'] = read('# New');
+    click('#detail [data-action="local-tab"]');
+    await settle();
+    expect(reads()).toBe(5);
+    release();
+    await settle();
+    expect(reads()).toBe(6);
+    expect(text()).toBe('New');
+    page.close();
+  });
+
+  it('drops a file read for a work item the page has left, and gives a restored file tab to its artifact without keeping a choice or opening a closed one', async () => {
+    window.innerWidth = 1440;
+    const plan = '.wip/artifacts/w1/chat/plan.md';
+    const tabs = (target: string) => ({ side: 'file', tab: 'conversation', artifact: null, changes: false, changesFile: null, files: [{ target, line: null }], file: 0, history: false });
+
+    localStorage.setItem('switchboard.tabs', JSON.stringify({ w1: tabs(plan) }));
+    answers['local-file'] = { status: 200, body: { path: `D:/w/${plan}`, name: 'plan.md', kind: 'markdown', contents: '# Plan', tooLarge: false, size: 6, entries: null, more: false, artifact: 'chat/plan.md' } };
+    answers['/artifact/'] = { status: 200, body: {}, text: '# Plan' };
+
+    const { page, source } = start();
+    const kept = () => posts.filter((post) => post.url.endsWith('/page-tabs')).map((post) => post.body);
+
+    hello(source);
+    await flush();
+    await flush();
+    expect(root.querySelector('#detail .artifact-tab.selected')?.getAttribute('data-path')).toBe('chat/plan.md');
+    expect(root.querySelector('#detail .local-tab')).toBeNull();
+    expect(kept()).toEqual([]);
+    page.close();
+
+    // Closed on every device, it stays closed: Status shows.
+    localStorage.setItem('switchboard.tabs', JSON.stringify({ w1: tabs(plan) }));
+    const again = start();
+
+    hello(again.source, { tabs: { tab: null, closed: [{ path: 'chat/plan.md', updatedAt: 1_500 }] } });
+    await flush();
+    await flush();
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).toBeNull();
+    expect(root.querySelector('#detail [data-side="status"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(kept()).toEqual([]);
+
+    // A read that answers after the page has left its work item is dropped, there and on the work item's return.
+    let release = (): void => {};
+
+    answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Late', tooLarge: false, size: 6, entries: null, more: false }, wait: new Promise((resolve) => (release = resolve)) };
+    again.source.emit('reply', { reply: reply('r2', 3, { opening: 'See [notes](notes.md).' }) });
+    click('#panel a.path-link[data-target="notes.md"]');
+    click('[data-work-item="2"]');
+    hello(again.source, { scope: { ...scope, workItemId: 2, scopeGen: 4 } });
+    answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Now', tooLarge: false, size: 5, entries: null, more: false } };
+    click('[data-work-item="1"]');
+    hello(again.source, { scope: { ...scope, scopeGen: 5 }, items: [reply('r2', 3, { opening: 'See [notes](notes.md).' })] });
+    await flush();
+    await flush();
+    release();
+    await flush();
+    await flush();
+    expect(root.querySelector('#detail .local-view > .artifact-doc')?.textContent?.trim()).toBe('Now');
+    again.page.close();
+  });
+
+  it('ends its listeners when it closes, so a page started again on the same root handles each click once', () => {
+    window.innerWidth = 1440;
+    const first = start();
+
+    hello(first.source);
+    first.page.close();
+
+    const second = start();
+
+    hello(second.source);
+    posts = [];
+    click('#detail [data-side="console"]');
+    expect(posts.filter((post) => post.url.endsWith('/page-tabs')).map((post) => post.body)).toEqual([expect.objectContaining({ tab: 'console' })]);
+    second.page.close();
   });
 
   it("lists a pool ticket with a menu under its row instead of a conversation, and runs its Start, Start with guidance and Snooze through pool-action", async () => {

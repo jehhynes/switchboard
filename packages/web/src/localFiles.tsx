@@ -83,8 +83,8 @@ export interface LocalFilesDeps {
   draw(): void;
   /** Shows the file tab, in the side column on a wide screen and in the conversation's strip on a narrower one. */
   show(): void;
-  /** Opens a document's tab or shows the one it has (`openDoc` in main.ts): `file:<path>` at a line, or `artifact:<path>`. */
-  openDoc(id: string, line: number | null): void;
+  /** Opens a document's tab or shows the one it has (`openDoc` in main.ts): `file:<path>` at a line, or `artifact:<path>`; not `chosen` for a restore. */
+  openDoc(id: string, line: number | null, chosen?: boolean): void;
   /** Whether the page shows the file tab now: the column's tab on a wide page, the conversation's on a narrower one. */
   fileShown(): boolean;
   /** Makes an artifact the column's choice in place of a file tab kept there but not shown, as on a narrow page, without changing what shows. */
@@ -110,10 +110,14 @@ export class LocalFilesController {
   #for: string | null = null;
   #ids = 0;
   #module: Promise<DiffModule | null> | null = null;
+  /** The tabs a restore put back, until the operator opens one, whose giving way to an artifact is no choice of the operator's. */
+  readonly #restored = new WeakSet<LocalTab>();
   /** The file view on each host it draws into, dropped once its host leaves the page. */
   readonly #mounted = new Map<HTMLElement, FileMount | null>();
   /** The tabs being read, so a tab is never read twice at once. */
   readonly #reading = new Set<LocalTab>();
+  /** The tabs asked to be read again while a read was on its way: that read's answer is dropped and the tab read again at once. */
+  readonly #newer = new WeakSet<LocalTab>();
 
   constructor(private readonly deps: LocalFilesDeps) {}
 
@@ -139,15 +143,19 @@ export class LocalFilesController {
   }
 
   /**
-   * Opens a link's target in its own tab, or shows the tab it has, at the line the link names; a target the hub reads as an artifact opens that
-   * artifact. Every open reads the file, so the hub checks it each time.
+   * Opens a link's target in its own tab, or shows the tab it has, read again, at the line the link names; a target the hub reads as an artifact
+   * opens that artifact. Every open reads the file, so the hub checks it each time. Not `chosen` for a tab a restore puts back.
    */
-  open(target: string, line: number | null): void {
+  open(target: string, line: number | null, chosen = true): void {
     let tab = this.view.tabs.find((one) => one.target === target || (one.entry.state === 'ok' && one.entry.data.path === target));
 
     if (tab === undefined) {
       tab = { id: ++this.#ids, target, line, entry: { state: 'loading' } };
       this.view.tabs.push(tab);
+
+      if (!chosen) {
+        this.#restored.add(tab);
+      }
 
       while (this.view.tabs.length > LOCAL_TABS_MAX) {
         this.view.tabs.shift();
@@ -159,11 +167,26 @@ export class LocalFilesController {
         tab.line = line;
       }
 
+      if (chosen) {
+        this.#restored.delete(tab);
+      }
+
       void this.#read(tab, true);
     }
 
     this.view.open = tab.id;
     this.deps.show();
+  }
+
+  /** Shows a tab without opening it (`showDoc` in main.ts), read again. */
+  select(id: number): void {
+    const tab = this.view.tabs.find((one) => one.id === id);
+
+    this.view.open = tab?.id ?? null;
+
+    if (tab !== undefined) {
+      void this.#read(tab, true);
+    }
   }
 
   /** Removes the tab of a file, named by its path (`filePath`); `closeDoc` chooses what shows next. */
@@ -175,24 +198,38 @@ export class LocalFilesController {
     }
   }
 
-  /** Reads the tab shown again while it is in view, so a file changed on disk shows its new version (architecture.md § Web page, Local files). */
-  refresh(): void {
+  /**
+   * Reads the tab shown again while it is in view, so a file changed on disk shows its new version (architecture.md § Web page, Local files): after
+   * a turn ends, on a reconnect and when the page shows, so a failed read tries again; and on every `poll`, which leaves a read on its way to
+   * answer rather than asking for a newer one, so a slow hub still answers.
+   */
+  refresh(poll = false): void {
     const tab = this.shown();
 
     if (tab !== null && this.deps.inView()) {
-      void this.#read(tab, true);
+      void this.#read(tab, true, !poll);
     }
   }
 
   /**
    * Reads a tab's file. `again` reads a tab already shown, sending the ETag it holds, so an unchanged file answers 304 and nothing is drawn; such a
-   * read keeps what the tab shows when the hub does not answer or refuses for a reason other than the file being gone, as while it restarts.
+   * read keeps what the tab shows when the hub does not answer or refuses for a reason other than the file being gone, as while it restarts, and
+   * gives way to an artifact without the operator choosing it. A read asked for while another is on its way, unless by a poll (`newer` false),
+   * waits for that read, drops its answer and is made then, so the answer shows the file as it is after the ask.
    */
-  async #read(tab: LocalTab, again = false): Promise<void> {
+  async #read(tab: LocalTab, again = false, newer = true): Promise<void> {
     const key = this.deps.key();
     const conversation = this.#for;
 
-    if (this.#reading.has(tab) || (again && tab.entry.state === 'loading')) {
+    if (this.#reading.has(tab)) {
+      if (newer) {
+        this.#newer.add(tab);
+      }
+
+      return;
+    }
+
+    if (again && tab.entry.state === 'loading') {
       return;
     }
 
@@ -226,9 +263,11 @@ export class LocalFilesController {
       this.#reading.delete(tab);
     }
 
-    // A first read answered for what the page showed before reads the file again for what it shows now, so the tab does not stay loading.
-    if (conversation === this.#for && shown !== this.deps.shown() && tab.entry.state === 'loading' && this.view.tabs.includes(tab)) {
-      void this.#read(tab);
+    // A read asked for since, or a first read answered for what the page showed before, reads the file again now, dropping this answer.
+    const asked = this.#newer.delete(tab);
+
+    if (conversation === this.#for && this.view.tabs.includes(tab) && (asked || (shown !== this.deps.shown() && tab.entry.state === 'loading'))) {
+      void this.#read(tab, tab.entry.state !== 'loading');
       return;
     }
 
@@ -259,7 +298,8 @@ export class LocalFilesController {
         this.view.open = null;
 
         if (seen) {
-          this.deps.openDoc(`artifact:${artifact}`, null);
+          // A restored tab, or one read again, gives way without the operator choosing it.
+          this.deps.openDoc(`artifact:${artifact}`, null, !again && !this.#restored.has(tab));
         } else {
           this.deps.keepArtifact(artifact);
         }

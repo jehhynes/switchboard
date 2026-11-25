@@ -352,7 +352,7 @@ export interface ArtifactStrip {
   now: number;
   /** The artifacts whose tabs the operator closed (`closedArtifacts`). */
   closed?: ReadonlySet<string>;
-  /** The artifacts this device has not opened (`unreadArtifacts`), which the More menu marks with the unread dot. */
+  /** The artifacts this device has not shown at their version (`unreadArtifacts`), which their tabs and More's rows mark with the unread dot. */
   unread?: ReadonlySet<string>;
   /** The file tabs (localFiles.tsx). */
   files?: LocalFilesView;
@@ -360,14 +360,18 @@ export interface ArtifactStrip {
   changes?: ChangesView;
 }
 
-/** An artifact's tab: its kind's icon, its title, and a close mark beside it in one cell, so each takes the keyboard on its own. */
-function ArtifactTab({ artifact, selected }: { artifact: ArtifactView; selected: boolean }) {
+/**
+ * An artifact's tab: its kind's icon, its title, and a close mark beside it in one cell, so each takes the keyboard on its own; with the unread
+ * dot while this device has not shown its version (`unreadArtifacts`).
+ */
+function ArtifactTab({ artifact, selected, unread }: { artifact: ArtifactView; selected: boolean; unread: boolean }) {
   return (
     <span class={`tab artifact-tab${selected ? ' selected' : ''}`} role="presentation" data-action="artifact" data-path={artifact.path}>
-      <button class="tab-open" type="button" role="tab" aria-selected={selected} tabindex={selected ? 0 : -1} title={`${artifact.title} · ${artifact.kind}`}>
+      <button class="tab-open" type="button" role="tab" aria-selected={selected} tabindex={selected ? 0 : -1} title={`${artifact.title} · ${artifact.kind}`} aria-label={unread ? `${artifact.title}, unread` : artifact.title}>
         <FileIcon path={artifact.path} />
         <span class="tab-label">{artifact.title}</span>
       </button>
+      {unread ? <UnreadDot /> : null}
       <button class="tab-close" type="button" data-action="close-artifact" data-path={artifact.path} aria-label={`Close ${artifact.title}`} title="Close" tabindex={selected ? 0 : -1}>
         <span class="codicon codicon-close" aria-hidden="true"></span>
       </button>
@@ -514,7 +518,7 @@ function stripContent(layout: StripLayout, shown: Tab, state: PageState, browser
       case 'link':
         return LinkTab({ link: tab.link, selected: tab.selected });
       case 'artifact':
-        return ArtifactTab({ artifact: tab.artifact, selected: tab.selected });
+        return ArtifactTab({ artifact: tab.artifact, selected: tab.selected, unread: strip.unread?.has(tab.artifact.path) === true });
       case 'file':
         return LocalTabButton({ tab: tab.file, selected: tab.selected });
       case 'changes':

@@ -41,21 +41,32 @@ export function closedArtifacts(artifacts: readonly ArtifactView[], closed: Read
 }
 
 /**
- * Which artifacts this device has opened, kept in local storage under {@link ARTIFACTS_SEEN} (architecture.md § Web page): the paths opened, by
- * work item. A work item's artifacts the device first saw count as opened, so the dot marks only artifacts written since, by the hub's own file
- * times, whatever the device's clock says.
+ * Which artifact versions this device has shown, kept in local storage under {@link ARTIFACTS_SEEN} (architecture.md § Web page): by work item,
+ * each artifact's path and the `updatedAt` it last showed at. A work item's artifacts the device first saw count as shown, so the dot marks only
+ * artifacts written or changed since, by the hub's own file times, whatever the device's clock says.
  */
-export type ArtifactsSeen = Record<string, string[]>;
+export type ArtifactsSeen = Record<string, Record<string, number>>;
 
 export const ARTIFACTS_SEEN = 'switchboard.artifactsSeen';
 
-/** The kept {@link ArtifactsSeen}, its readable entries, or none when nothing readable was kept. */
+/** The version of a path an earlier page kept as a list of paths alone: shown, at the version the work item's next `hello` has (`unknownSeen`). */
+export const SEEN_UNKNOWN = -1;
+
+/** The kept {@link ArtifactsSeen}, its readable entries, or none when nothing readable was kept; a list of paths reads as {@link SEEN_UNKNOWN}. */
 export function parseArtifactsSeen(text: string | null): ArtifactsSeen {
   try {
     const read: unknown = JSON.parse(text ?? 'null');
 
     if (typeof read === 'object' && read !== null && !Array.isArray(read)) {
-      return Object.fromEntries(Object.entries(read).filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].every((path) => typeof path === 'string')));
+      return Object.fromEntries(
+        Object.entries(read).flatMap(([workItem, kept]): Array<[string, Record<string, number>]> => {
+          if (Array.isArray(kept)) {
+            return kept.every((path) => typeof path === 'string') ? [[workItem, Object.fromEntries(kept.map((path: string) => [path, SEEN_UNKNOWN]))]] : [];
+          }
+
+          return typeof kept === 'object' && kept !== null && Object.values(kept).every((at) => typeof at === 'number') ? [[workItem, kept as Record<string, number>]] : [];
+        }),
+      );
     }
   } catch {
     // None below.
@@ -64,19 +75,32 @@ export function parseArtifactsSeen(text: string | null): ArtifactsSeen {
   return {};
 }
 
-/** The work item's artifacts this device has not opened; none for a work item it has not seen yet. */
+/** The work item's artifacts this device has not shown at their version; none for a work item it has not seen yet. */
 export function unreadArtifacts(artifacts: readonly ArtifactView[], workItemId: number | null, seen: ArtifactsSeen): Set<string> {
-  const opened = workItemId === null ? undefined : seen[String(workItemId)];
+  const shown = workItemId === null ? undefined : seen[String(workItemId)];
 
-  return opened === undefined ? new Set() : new Set(artifacts.filter((artifact) => !opened.includes(artifact.path)).map((artifact) => artifact.path));
+  return shown === undefined ? new Set() : new Set(artifacts.filter((artifact) => !(artifact.path in shown) || (shown[artifact.path] !== SEEN_UNKNOWN && artifact.updatedAt > shown[artifact.path]!)).map((artifact) => artifact.path));
 }
 
-/** `seen` with the paths opened for the work item, an empty list recording it as seen, or null when nothing changes. */
-export function openArtifactsSeen(seen: ArtifactsSeen, workItemId: number, paths: readonly string[]): ArtifactsSeen | null {
-  const opened = seen[String(workItemId)];
-  const added = paths.filter((path) => !(opened ?? []).includes(path));
+/**
+ * The artifacts to record as shown at a work item's `hello`: all of them for a work item this device has not seen, else those an earlier page
+ * kept without a version.
+ */
+export function unknownSeen(artifacts: readonly ArtifactView[], workItemId: number, seen: ArtifactsSeen): ArtifactView[] {
+  const shown = seen[String(workItemId)];
 
-  return opened !== undefined && added.length === 0 ? null : { ...seen, [String(workItemId)]: [...(opened ?? []), ...added] };
+  return shown === undefined ? [...artifacts] : artifacts.filter((artifact) => shown[artifact.path] === SEEN_UNKNOWN);
+}
+
+/**
+ * `seen` with the artifacts shown for the work item at their versions, each the newer of the kept one and its own, so two pages' records merge;
+ * an empty record marks the work item as seen. Null when nothing changes.
+ */
+export function openArtifactsSeen(seen: ArtifactsSeen, workItemId: number, artifacts: ReadonlyArray<Pick<ArtifactView, 'path' | 'updatedAt'>>): ArtifactsSeen | null {
+  const shown = seen[String(workItemId)];
+  const added = artifacts.filter((artifact) => shown === undefined || !(artifact.path in shown) || shown[artifact.path] === SEEN_UNKNOWN || artifact.updatedAt > shown[artifact.path]!);
+
+  return shown !== undefined && added.length === 0 ? null : { ...seen, [String(workItemId)]: { ...shown, ...Object.fromEntries(added.map((artifact) => [artifact.path, artifact.updatedAt])) } };
 }
 
 /**

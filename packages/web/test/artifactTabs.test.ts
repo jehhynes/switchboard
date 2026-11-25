@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
-import { artifactUrl, closedArtifacts, newView, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts } from '../src/render.js';
+import { artifactUrl, closedArtifacts, newView, openArtifactsSeen, parseArtifactsSeen, SEEN_UNKNOWN, unknownSeen, unreadArtifacts } from '../src/render.js';
 import type { TabFit } from '../src/tabs.js';
 import { EMPTY } from '../src/model.js';
 import type { ArtifactView } from '@switchboard/protocol';
@@ -22,29 +22,38 @@ describe('closedArtifacts', () => {
   });
 });
 
-describe('the artifacts this device opened', () => {
-  it('reads the readable entries of what was kept, and none from nothing or something unreadable', () => {
-    expect(parseArtifactsSeen(JSON.stringify({ '1': ['chat/a1.md'], '2': 'bad', '3': [4] }))).toEqual({ '1': ['chat/a1.md'] });
+describe('the artifact versions this device showed', () => {
+  it('reads the readable entries of what was kept, an earlier list of paths as shown at an unknown version, and none from nothing or something unreadable', () => {
+    expect(parseArtifactsSeen(JSON.stringify({ '1': { 'chat/a1.md': 1_001 }, '2': 'bad', '3': [4], '4': { 'chat/a1.md': 'x' }, '5': ['chat/a5.md'] }))).toEqual({ '1': { 'chat/a1.md': 1_001 }, '5': { 'chat/a5.md': SEEN_UNKNOWN } });
     expect(parseArtifactsSeen(null)).toEqual({});
     expect(parseArtifactsSeen('{')).toEqual({});
     expect(parseArtifactsSeen('[["chat/a1.md"]]')).toEqual({});
   });
 
-  it('counts as unread the artifacts of a seen work item not opened, and none of a work item not seen yet', () => {
-    const seen = { '1': ['chat/a5.md', 'chat/a0.md'], '2': ['chat/a6.md'] };
+  it('counts as unread the artifacts of a seen work item not shown or changed since, none at an unknown version, and none of a work item not seen yet', () => {
+    // a5 shown at its version, a6 at an older one, a7 at an unknown one; a4 never.
+    const seen = { '1': { 'chat/a5.md': 1_005, 'chat/a6.md': 1_000, 'chat/a7.md': SEEN_UNKNOWN, 'chat/a0.md': 1_000 }, '2': { 'chat/a4.md': 1_004 } };
 
-    expect([...unreadArtifacts(eight.slice(4), 1, seen)]).toEqual(['chat/a4.md', 'chat/a6.md', 'chat/a7.md']);
+    expect([...unreadArtifacts(eight.slice(4), 1, seen)]).toEqual(['chat/a4.md', 'chat/a6.md']);
     expect([...unreadArtifacts(eight, 3, seen)]).toEqual([]);
     expect([...unreadArtifacts(eight, null, seen)]).toEqual([]);
   });
 
-  it('adds opened paths once, records a work item seen with none, and leaves the record it was given alone', () => {
-    const seen = { '1': ['chat/a1.md'] };
+  it('records each version shown, keeping the newer of two, records a work item seen with none, and leaves the record it was given alone', () => {
+    const seen = { '1': { 'chat/a1.md': 1_001, 'chat/a3.md': 5_000, 'chat/a4.md': SEEN_UNKNOWN } };
 
-    expect(openArtifactsSeen(seen, 1, ['chat/a2.md', 'chat/a1.md'])).toEqual({ '1': ['chat/a1.md', 'chat/a2.md'] });
-    expect(openArtifactsSeen(seen, 3, [])).toEqual({ '1': ['chat/a1.md'], '3': [] });
-    expect(openArtifactsSeen(seen, 1, ['chat/a1.md'])).toBeNull();
-    expect(seen).toEqual({ '1': ['chat/a1.md'] });
+    expect(openArtifactsSeen(seen, 1, [eight[2]!, eight[1]!, eight[3]!, eight[4]!])).toEqual({ '1': { 'chat/a1.md': 1_001, 'chat/a2.md': 1_002, 'chat/a3.md': 5_000, 'chat/a4.md': 1_004 } });
+    expect(openArtifactsSeen(seen, 1, [{ path: 'chat/a1.md', updatedAt: 2_000 }])).toEqual({ '1': { 'chat/a1.md': 2_000, 'chat/a3.md': 5_000, 'chat/a4.md': SEEN_UNKNOWN } });
+    expect(openArtifactsSeen(seen, 3, [])).toEqual({ ...seen, '3': {} });
+    expect(openArtifactsSeen(seen, 1, [eight[1]!])).toBeNull();
+    expect(seen).toEqual({ '1': { 'chat/a1.md': 1_001, 'chat/a3.md': 5_000, 'chat/a4.md': SEEN_UNKNOWN } });
+  });
+
+  it('gives a hello every artifact of a work item not seen yet, else those kept without a version', () => {
+    const seen = { '1': { 'chat/a1.md': SEEN_UNKNOWN, 'chat/a2.md': 1_002 } };
+
+    expect(unknownSeen(eight.slice(0, 3), 1, seen).map((one) => one.path)).toEqual(['chat/a1.md']);
+    expect(unknownSeen(eight.slice(0, 3), 2, seen).map((one) => one.path)).toEqual(['chat/a0.md', 'chat/a1.md', 'chat/a2.md']);
   });
 });
 

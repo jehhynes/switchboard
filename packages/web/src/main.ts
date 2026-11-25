@@ -4,7 +4,7 @@ import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 import type { PageState } from './model.js';
 import { MENU_MAX_WIDTH, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
-import { ARTIFACTS_SEEN, artifactShow, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
+import { ARTIFACTS_SEEN, artifactShow, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unknownSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, NewDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -393,7 +393,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   let tabChosen = false;
   /** The open work item's tabs as the hub keeps them for every device (`page-tabs`), or null before any was chosen. */
   let savedTabs: { workItemId: number; tab: string | null; closed: Array<{ path: string; updatedAt: number }> } | null = null;
-  /** Which artifacts this device has opened (`ArtifactsSeen`), read again when another of its pages keeps a change. */
+  /** Which artifact versions this device has shown (`ArtifactsSeen`), read again when another of its pages keeps a change. */
   const readArtifactsSeen = (): ReturnType<typeof parseArtifactsSeen> | null => {
     try {
       return parseArtifactsSeen(localStorage.getItem(ARTIFACTS_SEEN));
@@ -404,10 +404,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   let artifactsSeen = readArtifactsSeen() ?? {};
   /**
-   * Keeps artifacts of the open work item opened on this device, added to what its other pages kept since, so two pages opening different ones
-   * keep both.
+   * Keeps artifacts of the open work item shown on this device at their versions, merged with what its other pages kept since, so two pages
+   * showing different ones keep both.
    */
-  const artifactsOpened = (paths: readonly string[]): void => {
+  const artifactsOpened = (artifacts: ReadonlyArray<Pick<ArtifactView, 'path' | 'updatedAt'>>): void => {
     const workItemId = state.scope?.workItemId;
 
     if (workItemId == null) {
@@ -415,7 +415,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     const kept = readArtifactsSeen() ?? artifactsSeen;
-    const next = openArtifactsSeen(kept, workItemId, paths);
+    const next = openArtifactsSeen(kept, workItemId, artifacts);
 
     artifactsSeen = next ?? kept;
 
@@ -494,8 +494,37 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const next = closed ? [...kept, { path, updatedAt: artifact.updatedAt }] : kept;
 
     savedTabs = { workItemId, tab: savedTabs?.workItemId === workItemId ? savedTabs.tab : null, closed: next };
+    const change = closed ? { path, updatedAt: artifact.updatedAt } : null;
+    const pending = { change, opId: newOp() };
+
+    unechoed.set(path, pending);
     // One artifact at a time, so two devices closing different tabs do not overwrite each other.
-    void post('page-tabs', closed ? { workItemId, close: { path, updatedAt: artifact.updatedAt } } : { workItemId, reopen: path });
+    void post('page-tabs', closed ? { workItemId, close: change } : { workItemId, reopen: path }, false, { opId: pending.opId }).then((answer) => {
+      // A refused change has no echo to wait for.
+      if (answer.status !== 200 && unechoed.get(path) === pending) {
+        unechoed.delete(path);
+      }
+    });
+  };
+  /**
+   * This page's latest artifact close (the version) or reopen (null) by path, with its request's opId, until the `tabs` event that answers that
+   * request. The hub sends `tabs` to the sender too, with its opId, so one sent before a change of this page's can come after it; it is read
+   * with these changes over it, so it undoes none of them, even where it holds the same state from an older change.
+   */
+  const unechoed = new Map<string, { change: { path: string; updatedAt: number } | null; opId: string }>();
+  /** The closed artifacts of a `tabs` event with this page's changes it does not answer over them; the change it answers is no longer waited for. */
+  const withUnechoed = (closed: Array<{ path: string; updatedAt: number }>, opId: unknown): Array<{ path: string; updatedAt: number }> => {
+    let next = closed;
+
+    for (const [path, pending] of unechoed) {
+      if (pending.opId === opId) {
+        unechoed.delete(path);
+      } else {
+        next = [...next.filter((one) => one.path !== path), ...(pending.change === null ? [] : [pending.change])];
+      }
+    }
+
+    return next;
   };
   /** What the column right of the conversation shows: Status in place of a Browser tab that is gone. */
   const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'history' && !showHistory()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) || (view.side === 'file' && localFiles.shown() === null) ? 'status' : view.side);
@@ -595,7 +624,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       chooseTab('file');
       draw();
     },
-    openDoc: (id, line) => openDoc(id, { line }),
+    openDoc: (id, line, chosen = true) => openDoc(id, { line, chosen }),
     fileShown: () => (wide() ? sideTab() : mainTab()) === 'file',
     keepArtifact: (path) => {
       if (view.side === 'file' && state.artifacts.some((one) => one.path === path) && !closedNow().has(path)) {
@@ -614,7 +643,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     shown: () => `${state.key ?? ''} ${state.scope?.scopeGen ?? ''}`,
   });
   // An open file tab is read again while in view, so a file the session changes shows its new version.
-  const filePoll = setInterval(() => localFiles.refresh(), deps.filePollMs ?? FILE_POLL_MS);
+  const filePoll = setInterval(() => localFiles.refresh(true), deps.filePollMs ?? FILE_POLL_MS);
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
   const dropFileIcons = useFileIcons({ fetch: (...args) => readFetch(...args), loaded: () => draw() });
 
@@ -715,12 +744,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     return answer;
   };
   // The list's header: the source icons, search and More Actions (architecture.md § Web page).
+  // The page's listeners on its root, the document and the window end with the page.
+  const listening = new AbortController();
   // Settings over the whole page (architecture.md § Web page); it reads settings.json again when the page comes back.
   const settingsHost = root.appendChild(document.createElement('div'));
   const settingsPane = settings(settingsHost, { post: (name, body) => post(name, body), closed: () => root.querySelector<HTMLElement>('.more-actions')?.focus() });
 
-  window.addEventListener('focus', () => void settingsPane.reload());
-  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void settingsPane.reload());
+  window.addEventListener('focus', () => void settingsPane.reload(), { signal: listening.signal });
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void settingsPane.reload(), { signal: listening.signal });
   const local = deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
 
 
@@ -825,8 +856,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const attachButton = composerHost.querySelector<HTMLButtonElement>('button.attach')!;
   const attachInput = composerHost.querySelector<HTMLInputElement>('input.attach-input')!;
   const chips = composerHost.querySelector<HTMLElement>('.attachments')!;
-  // Document listeners end with the page.
-  const listening = new AbortController();
   // A drag of a Ready for review row moves it (PRD R73); its drop line redraws before the next repaint.
   const reorder = rowDrag(list, {
     changed: (drag) => {
@@ -2415,6 +2444,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     changes.follow(followed(), turnEnded || sessionMoved);
     localFiles.follow(followed());
 
+    // The session may have changed the file shown.
+    if (turnEnded) {
+      localFiles.refresh();
+    }
+
     if (state.scope === null || pending !== null) {
       iframe.follow(null);
       followHistory(false);
@@ -2436,9 +2470,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     iframe.follow(selectedRow(state), state.groups.some((group) => group.key === 'review' && group.rows.includes(selectedRow(state)!)));
     const shownArtifact = openArtifact();
 
-    // Opened only while it shows: not under the phone's list.
+    // Shown only while it shows: not under the phone's list. A new version that comes while it shows is shown too.
     if (shownArtifact !== null && (side ? sideTab() : mainTab()) === 'artifacts' && !(isPhone() && root.classList.contains('listing'))) {
-      artifactsOpened([shownArtifact]);
+      artifactsOpened(state.artifacts.filter((one) => one.path === shownArtifact));
     }
 
     const strip = { ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), open: shownArtifact, fit: view.tabFit, menu: view.tabMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen), files: localFiles.view, changes: changes.view };
@@ -2972,7 +3006,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     for (const one of set.files) {
-      localFiles.open(one.target, one.line);
+      localFiles.open(one.target, one.line, false);
     }
 
     localFiles.view.open = (set.file === null ? undefined : localFiles.view.tabs[set.file])?.id ?? localFiles.view.tabs.at(-1)?.id ?? null;
@@ -3175,9 +3209,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     checkSeen();
   };
 
-  window.addEventListener('focus', () => reportFocus());
-  window.addEventListener('blur', () => reportFocus());
-  document.addEventListener('visibilitychange', () => reportFocus());
+  window.addEventListener('focus', () => reportFocus(), { signal: listening.signal });
+  window.addEventListener('blur', () => reportFocus(), { signal: listening.signal });
+  document.addEventListener('visibilitychange', () => reportFocus(), { signal: listening.signal });
 
   /** Keeps a group's open or closed choice for the next load; a page whose storage refuses keeps it until it reloads. */
   const keepGroup = (group: string, open: boolean): void => {
@@ -3280,7 +3314,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       setHistoryUi({ ...shownHistory.ui, query: field.value });
       draw();
     }
-  });
+  }, { signal: listening.signal });
   // A section or run the operator opened or closed stays so across redraws.
   root.addEventListener(
     'toggle',
@@ -3302,7 +3336,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
       }
     },
-    true,
+    { capture: true, signal: listening.signal },
   );
 
   // ---- Selecting ----
@@ -3830,13 +3864,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /**
    * Opens a document's tab, or selects the tab it has (architecture.md § Web page), whatever opened it: a conversation or History link, Open
    * report, an artifact card, the More menu or a route. `id` is `artifact:<path>`, `file:<path>` at `line`, `link:<url>` named `name`, or
-   * `history`. A file the hub reads as an artifact gives way to that artifact's tab (localFiles.tsx).
+   * `history`. A file the hub reads as an artifact gives way to that artifact's tab (localFiles.tsx). Without `chosen`, as for a restore, it is no
+   * choice of the operator's: it keeps nothing in the hub (`page-tabs`) and opens no closed artifact again.
    */
-  const openDoc = (id: string, { line = null, name = '' }: { line?: number | null; name?: string } = {}): void => {
+  const openDoc = (id: string, { line = null, name = '', chosen = true }: { line?: number | null; name?: string; chosen?: boolean } = {}): void => {
     view.tabMenu = false;
 
     if (id.startsWith('artifact:')) {
       const path = id.slice('artifact:'.length);
+
+      if (!chosen && closedNow().has(path)) {
+        draw();
+        return;
+      }
 
       leaving('artifacts');
       chooseTab('artifacts');
@@ -3848,9 +3888,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       draw();
-      saveTab();
+
+      if (chosen) {
+        saveTab();
+      }
     } else if (id.startsWith('file:')) {
-      localFiles.open(id.slice('file:'.length), line);
+      localFiles.open(id.slice('file:'.length), line, chosen);
     } else if (id.startsWith('link:')) {
       const url = id.slice('link:'.length);
 
@@ -3872,7 +3915,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.artifact = tab.artifact.path;
       chooseTab('artifacts');
     } else if (tab?.kind === 'file') {
-      localFiles.view.open = tab.file.id;
+      localFiles.select(tab.file.id);
       chooseTab('file');
     } else if (tab?.kind === 'link') {
       if (!iframe.open(tab.link.url)) {
@@ -4471,7 +4514,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           draw();
         }
     }
-  });
+  }, { signal: listening.signal });
   root.addEventListener('toggle', (event) => {
     const fold = event.target as HTMLDetailsElement;
     const id = fold.dataset?.['fold'];
@@ -4483,7 +4526,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         view.open.delete(id);
       }
     }
-  }, true);
+  }, { capture: true, signal: listening.signal });
   root.addEventListener('input', (event) => {
     const field = event.target as HTMLInputElement;
 
@@ -4526,7 +4569,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     clearTimeout(otherTimers.get(id)?.timer);
     otherTimers.set(id, { target, key, timer: setTimeout(() => setDraft(key, cardUi(key).local ?? draft, true, target), OTHER_SETTLE_MS) });
-  });
+  }, { signal: listening.signal });
   // The dropdown closes on a press outside the header and on Escape, which gives the focus back to its button.
   document.addEventListener('pointerdown', (event) => {
     if (changes.pointerDown(event.target)) {
@@ -4552,7 +4595,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.viewMenu = false;
       draw();
     }
-  });
+  }, { signal: listening.signal });
   root.addEventListener('keydown', (event) => {
     // A question card's keys while it has the focus (design § 6): A–H pick, O opens Other, Enter goes on or sends, Backspace goes back.
     const cardEl = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('.question-card.qc') : null;
@@ -4686,7 +4729,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         event.preventDefault();
       }
     }
-  });
+  }, { signal: listening.signal });
   /** Opens a folded reply for good; the reply takes the focus its fade had, rather than leaving it to the page. */
   const openReply = (id: string): void => {
     view.open.add(`more:${id}`);
@@ -4701,12 +4744,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       event.preventDefault();
       openReply(fade.dataset['reply']!);
     }
-  });
+  }, { signal: listening.signal });
   root.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && (event.target as HTMLElement) !== input && state.voice?.here === true && state.voice.speaking !== null) {
       void command('stop-speaking');
     }
-  });
+  }, { signal: listening.signal });
 
   /** Answers a Codex request: a permission with its decision, questions with every answer given; the hub checks it is still pending. */
   const answerRequest = async (requestId: string, decision: string | null): Promise<void> => {
@@ -5404,7 +5447,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   settingsShown?.observe(settingsHost, { childList: true, subtree: false, attributes: true });
   settingsShown?.observe(root.querySelector('#list-sheet')!, { childList: true, subtree: true });
-  window.addEventListener('resize', () => reportFrames());
+  window.addEventListener('resize', () => reportFrames(), { signal: listening.signal });
   window.addEventListener('resize', fitMenus, { signal: listening.signal });
   // A scroll moves a menu's anchor; a menu's own scrolling does not.
   document.addEventListener('scroll', (event) => (event.target instanceof Element && event.target.closest('.menu') !== null ? undefined : fitMenus()), { capture: true, signal: listening.signal });
@@ -5478,6 +5521,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         if (changes.view.tab) {
           void changes.refresh();
         }
+
+        // So does the file tab shown, which tries again after a failed read.
+        localFiles.refresh();
       }
 
       // The work item being opened has come: its conversation replaces the placeholder.
@@ -5486,9 +5532,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       if (type === 'hello') {
-        // The artifacts a work item has when this device first sees it count as opened; only later ones are new.
-        if (state.scope?.workItemId != null && (readArtifactsSeen() ?? artifactsSeen)[String(state.scope.workItemId)] === undefined) {
-          artifactsOpened(state.artifacts.map((artifact) => artifact.path));
+        // The artifacts a work item has when this device first sees it count as shown, and so do those an earlier page kept without a version,
+        // at the versions they have now; only later ones and later versions are new.
+        const kept = readArtifactsSeen() ?? artifactsSeen;
+        const unknown = state.scope?.workItemId == null ? [] : unknownSeen(state.artifacts, state.scope.workItemId, kept);
+
+        if (state.scope?.workItemId != null && (unknown.length > 0 || kept[String(state.scope.workItemId)] === undefined)) {
+          artifactsOpened(unknown);
         }
 
         // A new stream has a new key, unbound: the page selects its work item again.
@@ -5594,23 +5644,25 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (type === 'hello') {
           }
 
-      // The hub's tabs for the work item: in each `hello`, and from another device in `tabs`.
+      // The hub's tabs for the work item: in each `hello`, which is the hub's whole state, and in `tabs`, from another device or this one's echo.
       if (type === 'hello' && state.scope?.workItemId != null && !keep) {
         const tabs = data['tabs'] as { tab: string | null; closed: Array<{ path: string; updatedAt: number }> } | null | undefined;
 
+        unechoed.clear();
         savedTabs = tabs == null ? null : { workItemId: state.scope.workItemId, tab: tabs.tab, closed: tabs.closed };
         openOn = data['openOn'] === 'status' || data['openOn'] === 'browser' ? data['openOn'] : null;
       } else if (type === 'tabs' && data['workItemId'] === state.scope?.workItemId) {
         const tabs = data['tabs'] as { tab: string | null; closed: Array<{ path: string; updatedAt: number }> };
 
-        savedTabs = { workItemId: data['workItemId'] as number, tab: tabs.tab, closed: tabs.closed };
+        savedTabs = { workItemId: data['workItemId'] as number, tab: tabs.tab, closed: withUnechoed(tabs.closed, data['opId']) };
       }
 
-      // The artifact shown here closed on another device, as a `tabs` event or a new `hello` tells: Status shows.
+      // The artifact shown here closed on another device, as a `tabs` event or a new `hello` tells: Status shows in its place, or the conversation
+      // where the column folds into the conversation's strip. A `tabs` event only reconciles, so it moves nothing else and keeps no choice.
       if ((type === 'tabs' || type === 'hello') && view.artifact !== null && closedNow().has(view.artifact)) {
         view.artifact = null;
         view.side = view.side === 'artifacts' ? 'status' : view.side;
-        view.tab = view.tab === 'artifacts' ? 'status' : view.tab;
+        view.tab = view.tab === 'artifacts' ? 'conversation' : view.tab;
       }
 
       // A work item opened anew, or the pane's state known before the operator chose a tab on it: its opening tabs (`openTabs`).
@@ -5666,7 +5718,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         } else if (tab === 'changes') {
           changes.openChanges(firstRoute.f ?? null);
         } else if (tab === 'file' && firstRoute.p != null) {
-          openDoc(`file:${firstRoute.p}`, { line: firstRoute.l ?? null });
+          openDoc(`file:${firstRoute.p}`, { line: firstRoute.l ?? null, chosen: false });
         }
 
         restoringTabs = false;

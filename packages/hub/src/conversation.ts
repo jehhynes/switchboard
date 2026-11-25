@@ -1165,11 +1165,12 @@ export class ConversationService {
   /**
    * `page-tabs {window, workItemId, tab?, close?, reopen?, openOn?}` (architecture.md § Web page): keeps the right column's chosen tab, `console` or
    * `artifact:<path>`, the tab every work item opens on, `status` or `browser`, for every work item, and closes an artifact's tab at its version, `{path, updatedAt}`, or opens one again by its path, for the page's
-   * work item, one artifact at a time so devices do not overwrite each other, and sends the result to every page showing it as `tabs`. 403 for
+   * work item, one artifact at a time so devices do not overwrite each other, and sends the result to every page showing it as `tabs`, the
+   * sender's with its `opId`. 403 for
    * a key that is not a page's or another work item.
    */
   pageTabs(body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, workItemId, tab, close, reopen, openOn } = body;
+    const { window, workItemId, tab, close, reopen, openOn, opId } = body;
     const tabOk = tab === undefined || tab === null || (typeof tab === 'string' && /^(console|artifact:.{1,500})$/s.test(tab));
     const openOnOk = openOn === undefined || openOn === 'status' || openOn === 'browser';
     const closeOk =
@@ -1200,9 +1201,10 @@ export class ConversationService {
     }
 
     for (const key of this.pages()) {
-      // The sender too: the stream's order makes the last `tabs` the hub's latest, whichever device's request came first.
+      // The sender too, with its request's opId, so it knows which `tabs` first carries its change: the stream's order makes the last `tabs`
+      // the hub's latest, whichever device's request came first.
       if (this.deps.windows.scope(key)?.workItemId === id) {
-        this.#send(key, 'tabs', { workItemId: id, tabs });
+        this.#send(key, 'tabs', { workItemId: id, tabs, ...(key === window && typeof opId === 'string' ? { opId } : {}) });
       }
     }
 
