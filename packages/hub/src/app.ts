@@ -1224,6 +1224,11 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         return refused === null ? { status: 200, body: { device: 'computer' } } : { status: 409, body: { error: refused } };
       },
+      // Temporary (mechanics.md M176, M177): a tap or a page shift traced on a touch screen, into the hub's log.
+      '/v1/conversation/page-trace': async (body) => {
+        deps.log(`page trace: ${JSON.stringify(body).slice(0, 16000)}`);
+        return { status: 200, body: {} };
+      },
       '/v1/conversation/page-holder-restart': async (body) => (isRecord(body) ? conversation.pageHolderRestart(body) : { status: 400, body: { error: 'Expected {window}.' } }),
       '/v1/conversation/page-notice-dismiss': async (body) => (isRecord(body) ? conversation.pageNoticeDismiss(body) : { status: 400, body: { error: 'Expected {window, id} or {window, all}.' } }),
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, schedule}.' } }),

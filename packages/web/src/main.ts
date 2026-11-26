@@ -28,6 +28,7 @@ import { toast } from './toast.js';
 import { composerOptionId, renderComposer, renderComposerMenu, renderDraftNote, renderEndedNote, renderFrame, renderShared } from './composer.js';
 import { composerInput } from './composerInput.js';
 import { listHeader } from './listHeader.js';
+import { traceTouches } from './touchTrace.js';
 import { modalLayers } from './layers.js';
 import { PhoneVoice } from './phoneVoice.js';
 import { MicStart } from '@switchboard/conversation/voiceControls';
@@ -887,6 +888,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   });
   /** A command for the conversation the page shows, refused by the hub when the page has moved on since. */
   const command = (name: string, body: Record<string, unknown> = {}, options: { timeout?: number; retryFor?: number; opId?: string } = {}): Promise<Answer> => post(name, () => ({ scopeGen: state.scope?.scopeGen ?? -1, ...body }), false, options);
+
+  traceTouches((body) => void post('page-trace', body));
 
   // ---- The composer ----
   mount(composerHost, renderComposer());
