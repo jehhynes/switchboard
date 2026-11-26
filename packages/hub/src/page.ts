@@ -90,7 +90,7 @@ export function pageOrigin(headers: IncomingHttpHeaders, peer: string | undefine
   const login = headers['tailscale-user-login'];
 
   if (!remote.hosts.includes(name)) {
-    return { refused: 'The page is not served as this name. Set web.tailscale or web.remoteHosts in settings.json.' };
+    return { refused: 'The page is not served as this name. Turn on Tailscale or set Allowed hosts in Settings › Devices.' };
   }
 
   if (headers['x-forwarded-proto'] !== 'https' || (headers['x-forwarded-host'] !== undefined && headers['x-forwarded-host'] !== host)) {
@@ -102,7 +102,7 @@ export function pageOrigin(headers: IncomingHttpHeaders, peer: string | undefine
   }
 
   if (typeof login !== 'string' || !remote.logins.includes(login.toLowerCase())) {
-    return { refused: 'This Tailscale login may not use the page. Set web.tailscale or web.remoteLogins in settings.json.' };
+    return { refused: 'This Tailscale login may not use the page. Set Allowed logins in Settings › Devices.' };
   }
 
   return { host: name, login: login.toLowerCase(), origin: `https://${name}` };
@@ -560,7 +560,7 @@ export function pageActions(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>):
   return offered
     .map((control) => {
       const action = String(control.action['type']) as PageActionType;
-      const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop the session for ${row.ticket}?`, detail: 'Switchboard stops its running session, and the work item waits for you as Stopped by you.', action: 'Stop session' } : null);
+      const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop the session for ${row.ticket}?`, detail: "Switchboard stops the session's process. The work item then waits for you: as Stopped by you, or for your approval if one was pending.", action: 'Stop session' } : null);
       const input = control.input === undefined ? null : { question: control.input.question, detail: control.input.detail, action: control.input.action, text: control.input.text ?? null, choice: control.input.choice === undefined ? null : { label: control.input.choice.label, value: control.input.choice.value, values: [...control.input.choice.values] } };
 
       return { label: control.label, action, icon: CONTROL_ICONS.get(control.glyph) ?? 'circle-outline', group: groupOf(control), confirm, input };
@@ -585,7 +585,7 @@ export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket
   const offered = pageActions(row).find((one) => one.label === label);
 
   if (offered === undefined) {
-    return { refused: 'The work item no longer offers this.' };
+    return { refused: 'This work item can no longer do that.' };
   }
 
   const control = row.controls.find((one) => one.label === label && one.group === undefined)!;
@@ -608,7 +608,7 @@ export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket
   }
 
   if (text === '' && choice === null) {
-    return { refused: `${input.question} needs a text.` };
+    return { refused: `Type the ${input.field === 'text' ? 'comment' : input.field} first.` };
   }
 
   return { event: { ...control.action, [input.field]: text, ...(choice === null ? {} : { [input.choice!.field]: choice }) } };
@@ -658,7 +658,7 @@ export function pageCommandOf(row: Pick<DockRow, 'window' | 'commands'>, label: 
   const destination = destinationOf(row);
 
   if (destination === null || label !== OPEN_IN_VSCODE) {
-    return { refused: label === OPEN_REPORT && pageReportOf(row) !== null ? 'Open report opens on the page.' : 'The work item no longer offers this.' };
+    return { refused: label === OPEN_REPORT && pageReportOf(row) !== null ? 'Open report shows in a tab here.' : 'This work item can no longer do that.' };
   }
 
   return { destination };

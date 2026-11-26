@@ -423,7 +423,7 @@ describe('the voice socket on the page origin', () => {
       'voice socket: refused 401: Not signed in.',
       'voice socket: refused 403: The page opens the voice only from its own origin.',
       'voice socket: refused 401: Not signed in.',
-      'voice socket: refused 403: The page is not served as this name. Set web.tailscale or web.remoteHosts in settings.json.',
+      'voice socket: refused 403: The page is not served as this name. Turn on Tailscale or set Allowed hosts in Settings › Devices.',
       'voice socket: refused 401: Not signed in.',
       'voice socket: refused 401: Not signed in.',
       'voice socket: refused 401: Not signed in.',

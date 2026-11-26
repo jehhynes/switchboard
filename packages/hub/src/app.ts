@@ -554,7 +554,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
    */
   const commandInWindow = async (workItemId: number, label: string): Promise<string | null> => {
     const row = dockRowOf(views().dock, workItemId);
-    const built = row === null ? { refused: 'The work item is gone.' } : pageCommandOf(row, label);
+    const built = row === null ? { refused: 'This work item is no longer in the list.' } : pageCommandOf(row, label);
 
     if ('refused' in built) {
       return built.refused;
@@ -660,7 +660,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const { refused } = runtime.send({ type: 'item-session', workItemId, prompt, ...(provider === undefined ? {} : { provider }) });
       const made = store.sessionsFor(workItemId).at(-1);
 
-      return refused === null && made !== undefined && made.id !== before ? { sessionId: made.id } : { refused: refused ?? 'The conversation was not started.' };
+      return refused === null && made !== undefined && made.id !== before ? { sessionId: made.id } : { refused: refused ?? 'The session was not started.' };
     },
     newStandalone: (folder, provider, model, prompt) => madeAdhoc({ type: 'new-session', repoRoot: folder, provider, model, ...(prompt === null ? {} : { prompt }) }, 'The session was not made.'),
     newTask: (folder, provider, model, prompt, start) => madeAdhoc({ type: 'adhoc', prompt, repoRoot: folder, start, provider, model }, 'The task was not made.'),
@@ -723,7 +723,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     // The page's row actions run the hub's own controls, rechecked against the row as it is now (architecture.md § Web page).
     rowAction: (workItemId, label, extra) => {
       const row = dockRowOf(views().dock, workItemId);
-      const built = row === null ? { refused: 'The work item is gone.' } : pageActionEvent(row, label, extra);
+      const built = row === null ? { refused: 'This work item is no longer in the list.' } : pageActionEvent(row, label, extra);
 
       if ('refused' in built) {
         return built.refused;
@@ -731,7 +731,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       const parsed = parseAction(built.event);
 
-      return parsed === null ? 'The work item no longer offers this.' : runtime.send(parsed).refused;
+      return parsed === null ? 'This work item can no longer do that.' : runtime.send(parsed).refused;
     },
     // The page's Resume: the attach terminal's resume of a Code Mode session or an ended registered one, without the terminal, or a Codex
     // app-server thread's.
@@ -779,7 +779,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const target = row === null ? null : rowOpenUrl(row, url);
 
       if (target === null) {
-        return row === null ? 'The work item is gone.' : 'The work item no longer links to this.';
+        return row === null ? 'This work item is no longer in the list.' : 'This work item no longer links to this.';
       }
 
       try {
@@ -887,7 +887,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
    */
   const restartHolder = (detail: unknown): string | null => {
     if (typeof detail === 'string' && detail !== views().dock.holderNotice?.confirm?.detail) {
-      return 'The held sessions changed since you were asked. Press Restart and resume again to see them.';
+      return 'The background sessions changed since you were asked. Press Restart and resume again to see them.';
     }
 
     return runtime.restartHolder();
@@ -1097,7 +1097,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         await runtime.listHeld();
         const held = builder.buildNow().dock.held?.find((one) => one.session === body['id']);
         if (held === undefined) return { status: 404, body: { error: `No held session ${body['id']}.` } };
-        if (held.terminal === null) return { status: 409, body: { error: 'This held session has no terminal to open.' } };
+        if (held.terminal === null) return { status: 409, body: { error: 'This background session has no terminal to open.' } };
         if (launch.openTerminal === undefined) return { status: 409, body: { error: 'This hub cannot open the terminal app.' } };
         try {
           await launch.openTerminal({ ...held.terminal, ...terminalRun(held.terminal) });

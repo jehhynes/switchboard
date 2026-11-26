@@ -18,7 +18,7 @@ export const ADHOC_SOURCE = 'adhoc';
 /** A hosted conversation's title until its first message titles it (architecture.md § Hosted conversations). */
 export const NEW_CONVERSATION_TITLE = 'New session';
 /** Why a Claude start is refused while hooks are off: a held session's state comes only from its hook markers (PRD R93). */
-export const NEEDS_HOOKS = 'Claude sessions need sessions.installHooks.';
+export const NEEDS_HOOKS = 'Claude sessions need Install hooks turned on in Settings › Advanced.';
 
 /** The statuses of a run; entering one from another status starts the Working clock (PRD R27). */
 const RUN_STATUSES: ReadonlySet<WorkItemStatus> = new Set(['setup', 'running']);
@@ -35,16 +35,16 @@ export const MESSAGES = {
   stopped: 'Stopped by you.',
   setupWithoutWorktree: 'Setup ended without a worktree.',
   setupAtLimit: SETUP_AT_LIMIT,
-  turnAtLimit: 'The turn stopped at a usage limit. Open the session to continue it after the reset.',
+  turnAtLimit: 'The turn stopped at a usage limit. Open the session after the reset to continue it.',
   limitSkipped: 'You typed in the session during its usage-limit wait, so Switchboard did not continue it.',
   limitGaveUp: `The session stopped at a usage limit, and ${MAX_ATTEMPTS} attempts to continue it did not start a turn.`,
-  turnEnded: 'The turn ended without a done report.',
-  sessionEnded: 'The session ended without a done report.',
-  turnEndedWithoutApproval: 'The turn ended without an approval report.',
-  sessionEndedWithoutApproval: 'The session ended without an approval report.',
+  turnEnded: 'The session finished its turn without reporting done.',
+  sessionEnded: 'The session ended without reporting done.',
+  turnEndedWithoutApproval: 'The session finished its turn without asking for approval.',
+  sessionEndedWithoutApproval: 'The session ended without asking for approval.',
   noTaskPlaybooks: 'No task playbooks to choose from.',
   doneStillAssigned: 'The session reported done, but the ticket is still assigned to you.',
-  nothingNew: 'Nothing is newer than the earlier work item',
+  nothingNew: 'Nothing new since the earlier work item',
   holderStopped: 'The terminal holder stopped.',
   legacyEnded: 'Switchboard no longer runs Claude background sessions (claude --bg), so it ended this one. Open it in a terminal to resume it in the terminal holder.',
   legacyCodexEnded: 'Switchboard no longer runs codex exec, so it ended this Codex session. Open it in a terminal to resume it with codex resume.',

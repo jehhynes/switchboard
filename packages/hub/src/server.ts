@@ -666,7 +666,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
             } else {
               json(response, 200, tail);
             }
-          }).catch(() => json(response, 500, { error: 'The hub log could not be read.' }));
+          }).catch(() => json(response, 500, { error: 'The Switchboard log could not be read.' }));
         }
       }
       return true;

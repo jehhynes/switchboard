@@ -218,12 +218,12 @@ describe('remote access', () => {
     // A proxied request is never local, even when it names the loopback, so a tailnet client cannot pass for this computer.
     expect(pageOrigin({ ...proxied, host: '127.0.0.1:5000', 'x-forwarded-host': '127.0.0.1:5000' }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
     expect(pageOrigin({ host: '127.0.0.1:5000', forwarded: 'for=1.2.3.4' }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
-    expect(pageOrigin({ ...proxied, host: 'other.tail.ts.net', 'x-forwarded-host': 'other.tail.ts.net' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is not served as this name. Set web.tailscale or web.remoteHosts in settings.json.' });
+    expect(pageOrigin({ ...proxied, host: 'other.tail.ts.net', 'x-forwarded-host': 'other.tail.ts.net' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is not served as this name. Turn on Tailscale or set Allowed hosts in Settings › Devices.' });
     expect(pageOrigin({ ...proxied, 'x-forwarded-proto': 'http' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is served to another device only over HTTPS through tailscale serve.' });
     expect(pageOrigin({ ...proxied, 'x-forwarded-proto': undefined }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
     expect(pageOrigin({ ...proxied, 'x-forwarded-host': 'evil.example' }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
     expect(pageOrigin({ ...proxied, 'tailscale-funnel-request': '?1' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is not served through Tailscale Funnel.' });
-    const login = { refused: 'This Tailscale login may not use the page. Set web.tailscale or web.remoteLogins in settings.json.' };
+    const login = { refused: 'This Tailscale login may not use the page. Set Allowed logins in Settings › Devices.' };
 
     expect(pageOrigin({ ...proxied, 'tailscale-user-login': undefined }, '127.0.0.1', 5000, remote)).toEqual(login);
     expect(pageOrigin({ ...proxied, 'tailscale-user-login': 'mallory@example.com' }, '127.0.0.1', 5000, remote)).toEqual(login);
@@ -406,9 +406,9 @@ describe('pageHeader', () => {
 
   it("carries the list view's notes and its held-session note, which is absent while every held session has a work item", () => {
     const notes = ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'];
-    const header = pageHeader({ notes, heldNote: '2 held sessions without a work item', sources: [], repoRoots: [], schedules: [] });
+    const header = pageHeader({ notes, heldNote: '2 background sessions without a work item', sources: [], repoRoots: [], schedules: [] });
 
-    expect(header).toMatchObject({ notes, heldNote: '2 held sessions without a work item' });
+    expect(header).toMatchObject({ notes, heldNote: '2 background sessions without a work item' });
     expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('heldNote');
     // The lost phone's note goes apart from the warning notes, untoned (PRD R119).
     expect(pageHeader({ notes: [], voiceNote: 'Voice stopped unexpectedly.', sources: [], repoRoots: [], schedules: [] })).toMatchObject({ notes: [], voiceNote: 'Voice stopped unexpectedly.' });
@@ -445,14 +445,14 @@ describe('pageList rows', () => {
     const dockRow = {
       key: 'item:3', title: 'Fix it', priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, ticket: 'gh 3', sourceKind: 'github', url: 'https://github.com/o/r/issues/3', playbook: 'dev:build',
       links: [{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false, pr: { state: 'open' } }],
-      returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Rate limited' },
-      details: [{ text: 'Rate limited · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' }, { text: 'Post the reply', title: null, tone: null }],
+      returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Usage limit' },
+      details: [{ text: 'Usage limit · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' }, { text: 'Post the reply', title: null, tone: null }],
       stripe: null, dim: false, controls: [], main: null, pastes: [], commands: [], search: 'Fix it · gh 3 · PR #9 · dev:build', band: 'Yesterday',
     } as unknown as DockView['groups'][number]['rows'][number];
     const dock = { groups: [{ key: 'progress', title: 'In progress', glyph: 'p', empty: null, rows: [dockRow] }] } as Pick<DockView, 'groups'>;
     const [shown] = pageList(dock, snapshot([item(3)]))[0]!.rows;
 
-    expect(shown).toMatchObject({ priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/3', returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Rate limited' }, details: dockRow.details });
+    expect(shown).toMatchObject({ priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/3', returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Usage limit' }, details: dockRow.details });
     expect(shown!.links).toEqual([{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false }]);
     // The list's search matches the list view row's search text.
     expect(shown!.search).toBe('Fix it · gh 3 · PR #9 · dev:build');
@@ -484,7 +484,7 @@ describe('pageActions', () => {
   it("builds the action from the row's own control, adds only Snooze's wake time and comment, and refuses one the row does not offer", () => {
     const row = rowOf(item(1, { status: 'unstarted' }));
 
-    const none = { refused: 'The work item no longer offers this.' };
+    const none = { refused: 'This work item can no longer do that.' };
 
     expect(pageActionEvent(row, 'Start', { until: 5, comment: 'x', text: 'ignored' })).toEqual({ event: { type: 'start', workItemId: 1 } });
     expect(pageActionEvent(row, 'Snooze…', { until: 5, comment: 'later' })).toEqual({ event: { type: 'snooze', ticketId: row.controls.find((one) => one.label === 'Snooze…')!.action['ticketId'], until: 5, comment: 'later' } });
@@ -524,10 +524,10 @@ describe('pageActions', () => {
     expect(guided.input?.choice).not.toHaveProperty('field');
     expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '  Use the staging DB ', choice: 'dev:build' })).toEqual({ event: { type: 'start', workItemId: 1, guidance: 'Use the staging DB' } });
     expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '', choice: 'dev:fix' })).toEqual({ event: { type: 'start', workItemId: 1, guidance: '', playbook: 'dev:fix' } });
-    expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '   ', choice: 'dev:build' })).toEqual({ refused: 'Start with guidance needs a text.' });
+    expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '   ', choice: 'dev:build' })).toEqual({ refused: 'Type the guidance first.' });
     expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: 'x', choice: 'ops:wipe' })).toEqual({ refused: 'Choose one of the offered playbooks.' });
     expect(pageActionEvent(row, 'Add comment…', { until: null, comment: null, text: 'Asked Ana' })).toEqual({ event: { type: 'comment', workItemId: 1, text: 'Asked Ana' } });
-    expect(pageActionEvent(row, 'Add comment…', { until: null, comment: null })).toEqual({ refused: 'Add comment needs a text.' });
+    expect(pageActionEvent(row, 'Add comment…', { until: null, comment: null })).toEqual({ refused: 'Type the comment first.' });
 
     const adhoc = rowOf(item(2, { status: 'unstarted', playbook: null, ticket: { ...item(2).ticket, source: 'adhoc', sourceKey: '9', url: '' }, prompt: 'Fix the build' } as never));
     const prompted = pageActions(adhoc).find((one) => one.label === 'Start with prompt…');
@@ -547,18 +547,18 @@ describe('pageActions', () => {
     expect(pageReportOf(review)).toBe('D:/git/wt/101/report.md');
     // The list view's row offers History and Open changes; the page shows History itself and its Changes tab replaces Open changes.
     expect(review.commands.map((one) => one.label)).toEqual(expect.arrayContaining(['History', 'Open changes']));
-    expect(pageCommandOf(review, 'Open changes')).toEqual({ refused: 'The work item no longer offers this.' });
+    expect(pageCommandOf(review, 'Open changes')).toEqual({ refused: 'This work item can no longer do that.' });
     // Open report opens on the page, never through VS Code.
-    expect(pageCommandOf(review, 'Open report')).toEqual({ refused: 'Open report opens on the page.' });
+    expect(pageCommandOf(review, 'Open report')).toEqual({ refused: 'Open report shows in a tab here.' });
     expect(pageCommandOf(review, 'Open in VS Code')).toEqual({ destination: review.window!.file });
-    expect(pageCommandOf(review, 'History')).toEqual({ refused: 'The work item no longer offers this.' });
-    expect(pageCommandOf(review, 'Open in terminal')).toEqual({ refused: 'The work item no longer offers this.' });
+    expect(pageCommandOf(review, 'History')).toEqual({ refused: 'This work item can no longer do that.' });
+    expect(pageCommandOf(review, 'Open in terminal')).toEqual({ refused: 'This work item can no longer do that.' });
 
     // A row with no window opens nothing in VS Code, and still opens its report on the page.
     const windowless = { window: null, commands: review.commands };
 
     expect(pageOpens(windowless)).toEqual([{ label: 'Open report', icon: 'symbol-file', file: 'D:/git/wt/101/report.md' }]);
-    expect(pageCommandOf(windowless, 'Open in VS Code')).toEqual({ refused: 'The work item no longer offers this.' });
+    expect(pageCommandOf(windowless, 'Open in VS Code')).toEqual({ refused: 'This work item can no longer do that.' });
     // A row that is not awaiting approval has no report.
     expect(pageReportOf(rowOf(item(1, { worktree, approvalReport: 'D:/git/wt/101/report.md' })))).toBeNull();
     // A folder-hosted conversation opens its folder.
@@ -963,7 +963,7 @@ describe('the web page routes', () => {
     fail = true;
     const failure = await send(server.port, 'GET', '/v1/page/hub-log', { Cookie: cookie });
     expect(failure.status).toBe(500);
-    expect(JSON.parse(failure.body)).toEqual({ error: 'The hub log could not be read.' });
+    expect(JSON.parse(failure.body)).toEqual({ error: 'The Switchboard log could not be read.' });
     fail = false;
     const pending = send(server.port, 'GET', '/v1/page/hub-log', { Cookie: cookie });
     await until(() => release ?? null);

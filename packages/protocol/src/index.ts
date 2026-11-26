@@ -27,7 +27,8 @@ export interface SessionView {
   provider?: string;
   requests?: NativeRequest[];
   /** While the session waits for a usage or rate limit to reset: when it resumes, and `retry` for the hub's next attempt. */
-  limit?: { until: number; retry: boolean } | null;
+  /** `throttle` for a provider's rate limit rather than a usage limit (architecture.md § Rate limits). */
+  limit?: { until: number; retry: boolean; throttle?: boolean } | null;
   /** The session's context size, null while the hub cannot read it (architecture.md § Context meter). */
   context?: ContextView | null;
   /**

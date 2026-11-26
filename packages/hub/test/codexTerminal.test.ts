@@ -125,7 +125,7 @@ describe('Codex terminals in the holder', () => {
     t.sessions.set('s1', codex({ execution: null, codeMode: true }));
     await expect(t.terminals.ensure('s1')).rejects.toThrow('This session has no Codex thread.');
     t.sessions.set('s1', codex({ state: 'ended' }));
-    await expect(t.terminals.ensure('s1')).rejects.toThrow('The session has ended. Resume continues it.');
+    await expect(t.terminals.ensure('s1')).rejects.toThrow('The session has ended. Resume it to send a message.');
     t.sessions.set('s1', codex({ releasing: true }));
     await expect(t.terminals.ensure('s1')).rejects.toThrow('The session has ended.');
     await expect(t.terminals.ensure('s2')).rejects.toThrow('The session is gone.');

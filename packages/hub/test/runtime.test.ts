@@ -681,7 +681,7 @@ describe('Runtime', () => {
 
     expect(cli.calls.filter((call) => call[1] === 'stop')).toEqual([]);
     expect(store.session('s1')).toMatchObject({ state: 'idle', released: false });
-    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.' });
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The session finished its turn without reporting done.' });
 
     cli.roster = [];
     await runtime.readRoster();
@@ -1222,7 +1222,7 @@ describe('Runtime', () => {
       expect(source.polls).toBe(5);
 
       expect(runtime.setSourceEnabled('github', false)).toBeNull();
-      expect(runtime.pollNow()).toBe('No source is polled. Turn one on in the header.');
+      expect(runtime.pollNow()).toBe('No source is on. Turn one on in the list header.');
       await vi.advanceTimersByTimeAsync(300_000);
       expect(source.polls).toBe(5);
       runtime.stop();
@@ -3765,7 +3765,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       const context = await attaching(codeMode, config({ installHooks: false }));
 
       endIt(context);
-      expect(await context.runtime.attach('s1')).toEqual({ refused: 'Claude sessions need sessions.installHooks.', status: 409 });
+      expect(await context.runtime.attach('s1')).toEqual({ refused: 'Claude sessions need Install hooks turned on in Settings › Advanced.', status: 409 });
       expect(codeMode.resumes).toEqual([]);
       context.runtime.stop();
     });

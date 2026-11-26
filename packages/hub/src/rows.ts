@@ -95,7 +95,7 @@ function promptedStart(message: Record<string, unknown>, prompt: string): Contro
 
 /** Add comment…: a note on the work item, which its row shows in a tooltip on line 2 (PRD R87). */
 function commentControl(item: WorkItemView): Control {
-  const input = { question: 'Add comment', detail: 'Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.', field: 'text', action: 'Add' };
+  const input = { question: 'Add comment', detail: 'Shown on the work item only; it is not sent to the ticket.', field: 'text', action: 'Add' };
 
   return { label: 'Add comment…', icon: 'comment', message: { type: 'action', action: { type: 'comment', workItemId: item.id } }, input };
 }
@@ -391,11 +391,11 @@ export function clockOf(item: WorkItemView): Clock {
 
   if (group === 'done') {
     // Never the ticket's scopeAt: a ticket that returned after the work item was done has a later one.
-    return { since: item.scopeAt ?? item.createdAt, label: 'In scope from' };
+    return { since: item.scopeAt ?? item.createdAt, label: 'Yours from' };
   }
 
   if (item.ticket.snoozed || group === 'unstarted') {
-    return { since: item.ticket.scopeAt ?? item.createdAt, label: 'In scope since' };
+    return { since: item.ticket.scopeAt ?? item.createdAt, label: 'Yours since' };
   }
 
   if (group === 'blocked') {
@@ -403,14 +403,14 @@ export function clockOf(item: WorkItemView): Clock {
 
     const latest = item.sessions.at(-1);
 
-    return !byStatus && latest !== undefined && waitsOnQuestion(item) ? { since: latest.stateAt, label: 'Waiting since' } : { since: item.statusAt, label: 'In this status since' };
+    return !byStatus && latest !== undefined && waitsOnQuestion(item) ? { since: latest.stateAt, label: 'Waiting since' } : { since: item.statusAt, label: item.status === 'blocked' ? 'Blocked since' : item.status === 'failed' ? 'Failed since' : 'Waiting since' };
   }
 
   if (group === 'review') {
     return { since: item.readyAt!, label: 'Ready since' };
   }
 
-  return { since: item.runStartedAt ?? item.statusAt, label: 'Working since' };
+  return { since: item.runStartedAt ?? item.statusAt, label: 'Started working' };
 }
 
 export function utcText(time: number): string {
@@ -613,11 +613,11 @@ export function startPromptText(item: WorkItemView): { text: string; title: stri
   if (waitsToStart(session)) {
     const before = codeMode ? 'Claude asks before the Code Mode session starts, such as to trust the folder.' : "Claude asks before the session starts, such as to approve the project's MCP servers.";
 
-    return [{ text: 'Waits on a prompt before it starts', title: `${before} Open in terminal to answer it.` }];
+    return [{ text: 'Waits for you in its terminal before starting', title: `${before} Open in terminal to answer it.` }];
   }
 
   return isBackground(session) && waitsOnPermission(session)
-    ? [{ text: 'Waits on a permission prompt', title: `Claude asks to approve a tool call${codeMode ? ' in the Code Mode session' : ''}. Open in terminal to answer it; stopping the session would drop the prompt.` }]
+    ? [{ text: 'Waits for your permission in its terminal', title: `Claude asks to approve a tool call${codeMode ? ' in the Code Mode session' : ''}. Open in terminal to answer it; stopping the session would drop the prompt.` }]
     : [];
 }
 
@@ -626,20 +626,25 @@ export function waitTexts(item: WorkItemView): { text: string; title: string }[]
   return item.waits.map((wait) => {
     switch (wait.kind) {
       case 'slot':
-        return { text: `Waits for a slot · ${wait.used}/${wait.limit} in use`, title: `${wait.used} sessions are running; sessions.concurrency is ${wait.limit}.` };
+        return { text: `Waits to start · ${wait.used} of ${wait.limit} sessions running`, title: `Switchboard starts at most ${wait.limit} sessions at once (Settings › Sessions); this one starts when fewer are running.` };
       case 'session': {
-        const owner = wait.ownItem ? 'its session' : `the ${wait.playbook ?? 'ad-hoc'} session`;
+        const owner = wait.ownItem ? 'its session' : wait.playbook ?? 'the ad-hoc session';
 
-        return { text: `Waits for ${owner}'s turn to end`, title: `Session ${wait.shortId ?? wait.sessionId} on this ticket is running or waiting on a question. This starts when its turn ends.` };
+        return { text: `Waits for ${owner} to finish its turn`, title: `Session ${wait.shortId ?? wait.sessionId} on this ticket is running or waiting on a question. This starts when its turn ends.` };
       }
       case 'snoozed':
         return { text: 'Starts after the snooze ends', title: 'The ticket is snoozed.' };
       case 'blockers':
         return { text: `Starts when ${refList(wait.blockers)} ${wait.blockers.length === 1 ? 'closes' : 'close'}`, title: blockersTitle(wait.blockers) };
       case 'limit':
-        return { text: `Starts after the usage limit resets, ${limitTime(wait.until, null)}`, title: `A ${wait.provider === 'codex' ? 'Codex' : 'Claude'} session stopped at a usage limit, so new ${wait.provider === 'codex' ? 'Codex' : 'Claude'} sessions wait until it resets at ${limitTime(wait.until, null, true)}.` };
+        return { text: `Starts when the usage limit resets, ${limitTime(wait.until, null)}`, title: `A ${wait.provider === 'codex' ? 'Codex' : 'Claude'} session stopped at a usage limit, so new ${wait.provider === 'codex' ? 'Codex' : 'Claude'} sessions wait until it resets at ${limitTime(wait.until, null, true)}.` };
     }
   });
+}
+
+/** A limit in words: a usage limit waits for its quota to reset, a throttle for the provider to accept requests again. */
+function limitWord(limit: { kind?: string }): string {
+  return limit.kind === 'throttle' ? 'Rate limited' : 'Usage limit';
 }
 
 /** A limit's time: `1:20 PM` today, else with its weekday, `Mon 4:00 AM`; `full` gives the date too. */
@@ -671,24 +676,24 @@ export function limitTexts(item: WorkItemView, now: number): { text: string; tit
 
   // A background session is released after its turn, so its blocked work item shows the reset until it passes.
   if (!held) {
-    const next = session.kind === 'setup' ? 'Retry setup after the reset.' : 'Open the session to continue it after the reset.';
+    const next = session.kind === 'setup' ? 'Retry setup after the reset.' : 'Open the session after the reset to continue it.';
 
-    return limit.resetsAt === null || limit.resetsAt <= now || item.status !== 'blocked' ? [] : [{ text: `Rate limited · resets ${limitTime(limit.resetsAt, now)}`, title: [...lines, next].join('\n') }];
+    return limit.resetsAt === null || limit.resetsAt <= now || item.status !== 'blocked' ? [] : [{ text: `${limitWord(limit)} · resets ${limitTime(limit.resetsAt, now)}`, title: [...lines, next].join('\n') }];
   }
 
   if (!waitsOnLimit(session)) {
     return [];
   }
 
-  const attempts = limit.attempts === 0 ? [] : [`Switchboard typed the continue text ${limit.attempts} ${limit.attempts === 1 ? 'time' : 'times'}.`];
+  const attempts = limit.attempts === 0 ? [] : [`Switchboard sent continue ${limit.attempts} ${limit.attempts === 1 ? 'time' : 'times'}.`];
 
   if (limit.cli && limit.resetsAt !== null && limit.attempts === 0) {
-    return [{ text: `Rate limited · resumes ${limitTime(limit.resetsAt, now)}`, title: [...lines, `Claude Code continues on its own after the reset; Switchboard continues it at ${limitTime(limit.nextAt, now)} if it has not.`].join('\n') }];
+    return [{ text: `${limitWord(limit)} · resumes ${limitTime(limit.resetsAt, now)}`, title: [...lines, `Claude Code continues on its own after the reset; Switchboard continues it at ${limitTime(limit.nextAt, now)} if it has not.`].join('\n') }];
   }
 
   const verb = limit.resetsAt === null || limit.attempts > 0 ? 'retries' : 'resumes';
 
-  return [{ text: `Rate limited · ${verb} ${limitTime(limit.nextAt, now)}`, title: [...lines, `Switchboard continues it at ${limitTime(limit.nextAt, now, true)}.`, ...attempts].join('\n') }];
+  return [{ text: `${limitWord(limit)} · ${verb} ${limitTime(limit.nextAt, now)}`, title: [...lines, `Switchboard continues it at ${limitTime(limit.nextAt, now, true)}.`, ...attempts].join('\n') }];
 }
 
 /** The open issues blocking a ticket whose work has not queued, for line 3 of an open work item's or pool ticket's row (PRD R90). */
@@ -794,7 +799,7 @@ export const GROUP_TITLES: Record<RowGroup, string> = {
 export const GROUP_EMPTY: Partial<Record<RowGroup, string>> = {
   review: 'Nothing to review. Finished work appears here for you to check.',
   progress: 'Nothing in progress. Work appears here while its session runs.',
-  unstarted: 'Nothing to start. New work appears here until its session starts.',
+  unstarted: 'Nothing to start. New work items wait here until their session starts.',
 };
 
 /** A row's `data-row` key: `item:<work item ID>` or `ticket:<pool ticket ID>`. */
@@ -857,7 +862,7 @@ export function setupNotes(snapshot: Snapshot): string[] {
     snapshot.sources.length > 0
       ? null
       : snapshot.sourceStates.length > 0
-        ? 'No source is polled. Turn one on in the header.'
+        ? 'No source is on. Turn one on in the list header.'
         : `No source is configured. Add one in ${settings}.`,
     snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under playbooks in ${settings}.` : null,
   ].filter((line): line is string => line !== null);

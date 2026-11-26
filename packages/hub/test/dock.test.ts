@@ -54,7 +54,7 @@ describe('dockView', () => {
       ['review', 'Ready for review', 'Nothing to review. Finished work appears here for you to check.', []],
       ['blocked', 'Blocked on you', null, ['item:1']],
       ['progress', 'In progress', 'Nothing in progress. Work appears here while its session runs.', ['item:2']],
-      ['unstarted', 'Unstarted', 'Nothing to start. New work appears here until its session starts.', ['item:3', 'ticket:4']],
+      ['unstarted', 'Unstarted', 'Nothing to start. New work items wait here until their session starts.', ['item:3', 'ticket:4']],
       ['done', 'Done', null, []],
     ]);
     // Blocked on you is left out when empty, as Snoozed is.
@@ -110,7 +110,7 @@ describe('dockView', () => {
   it('lists configuration errors, then what an unconfigured home lacks', () => {
     expect(dockView(snapshot([], { sources: [], errors: { settings: 'bad JSON', playbooks: [], hooks: null, sources: {} } }), NOW, W).notes).toEqual([
       'Settings: bad JSON',
-      'No source is polled. Turn one on in the header.',
+      'No source is on. Turn one on in the list header.',
     ]);
   });
 
@@ -153,7 +153,7 @@ describe('dockView', () => {
       mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' },
       stripe: 'warning',
       main: 'Open in terminal',
-      details: [{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.', tone: null }],
+      details: [{ text: 'Waits for your permission in its terminal', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.', tone: null }],
     });
     expect(permission.open).toEqual({ type: 'session', sessionId: 's1', cwd: 'D:/git/widgets', provider: 'claude' });
   });
@@ -167,7 +167,7 @@ describe('dockView', () => {
   });
 
   it('says why an unstarted work item waits when nothing is newer than the earlier work item (PRD R80)', () => {
-    expect(row(item(1, { status: 'unstarted', error: MESSAGES.nothingNew })).details).toEqual([{ text: 'Nothing is newer than the earlier work item', title: null, tone: 'warning' }]);
+    expect(row(item(1, { status: 'unstarted', error: MESSAGES.nothingNew })).details).toEqual([{ text: 'Nothing new since the earlier work item', title: null, tone: 'warning' }]);
   });
 
   it('names the open blockers on line 3 of an open work item or pool row, as a wait reason once queued, and not once done (PRD R90)', () => {
@@ -228,7 +228,7 @@ describe('dockView', () => {
 
   it('names the mark in words on line 3 when nothing else is there', () => {
     expect(row(item(1, { status: 'setup' })).details).toEqual([{ text: 'Setting up', title: null, tone: null }]);
-    expect(row(item(1, { status: 'finished' })).details).toEqual([{ text: 'Review the finished turn', title: null, tone: null }]);
+    expect(row(item(1, { status: 'finished' })).details).toEqual([{ text: 'Review the turn', title: null, tone: null }]);
     expect(row(item(1, { status: 'setup', state: workState('creating the worktree', NOW - 60_000), sessions: [session()] })).details).toEqual([
       { text: 'creating the worktree · 1m', title: null, tone: null },
     ]);
@@ -245,7 +245,7 @@ describe('dockView', () => {
         label: 'Add comment…',
         glyph: '\u{ea6b}',
         action: { type: 'comment', workItemId: 7 },
-        input: { question: 'Add comment', detail: expect.stringContaining('It is not sent to the source.') as string, field: 'text', action: 'Add' },
+        input: { question: 'Add comment', detail: expect.stringContaining('it is not sent to the ticket.') as string, field: 'text', action: 'Add' },
       },
       {
         label: 'Delete',
@@ -364,8 +364,8 @@ describe('dockView', () => {
     const view = dockView(snapshot([], { sourceStates: [{ name: 'github', kind: 'github', label: 'github', enabled: true }, { name: 'zoho', kind: 'zoho', label: 'zoho', enabled: false }] }), NOW, W);
 
     expect(view.sources).toEqual([
-      { kind: 'github', label: 'github', enabled: true, title: 'github: polled\nClick to stop polling it.', sources: [{ name: 'github', enabled: true }] },
-      { kind: 'zoho', label: 'zoho', enabled: false, title: 'zoho: not polled\nClick to poll it.', sources: [{ name: 'zoho', enabled: false }] },
+      { kind: 'github', label: 'github', enabled: true, title: 'github: on\nClick to turn it off.', sources: [{ name: 'github', enabled: true }] },
+      { kind: 'zoho', label: 'zoho', enabled: false, title: 'zoho: off\nClick to turn it on.', sources: [{ name: 'zoho', enabled: false }] },
     ]);
     expect(view.repoRoots).toEqual(['D:/git/widgets', 'D:/git/support']);
   });
@@ -406,13 +406,13 @@ describe('dockView', () => {
         label: 'GitHub',
 
         enabled: true,
-        title: 'github: not polled\npersonal: polled\nClick to choose which to poll.',
+        title: 'github: off\npersonal: on\nClick to choose which are on.',
         sources: [
           { name: 'github', enabled: false },
           { name: 'personal', enabled: true },
         ],
       },
-      { kind: 'zoho', label: 'Zoho Desk', enabled: false, title: 'zoho: not polled\nClick to poll it.', sources: [{ name: 'zoho', enabled: false }] },
+      { kind: 'zoho', label: 'Zoho Desk', enabled: false, title: 'zoho: off\nClick to turn it on.', sources: [{ name: 'zoho', enabled: false }] },
     ]);
     expect(sourceGroups([{ name: 'github', kind: 'github', label: 'github', enabled: false }, { name: 'personal', kind: 'github', label: 'github', enabled: false }])[0]!.enabled).toBe(false);
   });
@@ -594,8 +594,8 @@ describe('dockView held sessions (PRD R94)', () => {
     const view = dockView(snapshot([owner], { held: [orphan, entry()] }), NOW, W);
 
     expect(view.held?.[0]).toMatchObject({ session: 'o1', item: 'No work item', nativeSessionId: '-', idle: '-', memory: '-', orphan: true, exited: true, terminal: null });
-    expect(view.heldNote).toBe('1 held session without a work item');
-    expect(dockView(snapshot([], { held: [orphan, { ...orphan, session: 'o2' }] }), NOW, W).heldNote).toBe('2 held sessions without a work item');
+    expect(view.heldNote).toBe('1 background session without a work item');
+    expect(dockView(snapshot([], { held: [orphan, { ...orphan, session: 'o2' }] }), NOW, W).heldNote).toBe('2 background sessions without a work item');
   });
 
   it("keeps an older held session's terminal name after a newer session starts in another folder", () => {
@@ -633,10 +633,10 @@ describe('dockView holder notice (architecture.md § Restarting the holder)', ()
     const view = dockView(snapshot(items, { holder: older, held: [held('o1', { orphan: true, workItemId: null }), held('s1'), held('s2', { key: 'gh 108' }), held('s3', { key: 'gh 109' }), held('s4'), held('x1', { exitedAt: NOW })] }), NOW, W);
 
     expect(view.holderNotice).toEqual({
-      text: 'The terminal holder is from an older build. Restart it to update (3 sessions will be resumed).',
+      text: 'The terminal holder that runs background sessions is out of date. Restart it to update; its 3 sessions stop and resume.',
       confirm: {
         question: 'Restart the terminal holder?',
-        detail: 'Restarting stops the 3 held sessions and resumes them in a holder of the installed build. These sessions are not idle, so the restart interrupts their turns: Issue <8> (gh 108), Issue <9> (gh 109). 2 other held sessions end and are not resumed.',
+        detail: 'Restarting stops the 3 background sessions and resumes them in a holder of the installed build. These sessions are not idle, so the restart interrupts their turns: Issue <8> (gh 108), Issue <9> (gh 109). 2 other background sessions end and are not resumed.',
         action: 'Restart and resume',
       },
     });
@@ -644,13 +644,13 @@ describe('dockView holder notice (architecture.md § Restarting the holder)', ()
 
     const one = dockView(snapshot([items[1]!], { holder: older, held: [held('s2', { key: 'gh 108' })] }), NOW, W);
 
-    expect(one.holderNotice?.text).toBe('The terminal holder is from an older build. Restart it to update (1 session will be resumed).');
-    expect(one.holderNotice?.confirm?.detail).toBe('Restarting stops the held session and resumes it in a holder of the installed build. This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).');
+    expect(one.holderNotice?.text).toBe('The terminal holder that runs background sessions is out of date. Restart it to update; its 1 session stops and resumes.');
+    expect(one.holderNotice?.confirm?.detail).toBe('Restarting stops the background session and resumes it in a holder of the installed build. This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).');
 
     const none = dockView(snapshot([], { holder: older }), NOW, W);
 
-    expect(none.holderNotice).toMatchObject({ text: 'The terminal holder is from an older build. Restart it to update.', confirm: { detail: 'The terminal holder holds no live session.' } });
-    expect(dockView(snapshot([], { holder: older, held: [held('o1', { orphan: true, workItemId: null })] }), NOW, W).holderNotice?.confirm?.detail).toBe('1 held session ends and is not resumed.');
+    expect(none.holderNotice).toMatchObject({ text: 'The terminal holder that runs background sessions is out of date. Restart it to update.', confirm: { detail: 'The terminal holder holds no live session.' } });
+    expect(dockView(snapshot([], { holder: older, held: [held('o1', { orphan: true, workItemId: null })] }), NOW, W).holderNotice?.confirm?.detail).toBe('1 background session ends and is not resumed.');
   });
 
   it('offers no restart while one runs, and shows the last result, failed when the holder or a session failed', () => {
@@ -890,8 +890,8 @@ describe('a row waiting on a usage limit (architecture.md § Rate limits)', () =
     const resetsAt = NOW + 3_600_000;
     const limited = row(item(1, { status: 'running', state: workState('2/5 finding defects', NOW), sessions: [session({ codeMode: true, state: 'failed', stateDetail: 'rate_limit', rateLimit: { kind: 'usage', window: 'five_hour', resetsAt, exact: true, cli: true, message: 'limit', since: NOW, at: NOW, launchId: 'l', attempts: 0, nextAt: resetsAt + 180_000 } })] }));
 
-    expect(limited).toMatchObject({ mark: { kind: 'limited', glyph: '\u{eb7c}', title: 'Rate limited' }, stripe: null, turn: 'agent' });
-    expect(limited.details[0]?.text).toMatch(/^Rate limited · resumes \d{1,2}:\d{2} [AP]M$/);
+    expect(limited).toMatchObject({ mark: { kind: 'limited', glyph: '\u{eb7c}', title: 'Usage limit' }, stripe: null, turn: 'agent' });
+    expect(limited.details[0]?.text).toMatch(/^Usage limit · resumes \d{1,2}:\d{2} [AP]M$/);
     expect(dockView(snapshot([item(1, { status: 'running', sessions: [session({ codeMode: true, state: 'failed', stateDetail: 'rate_limit', rateLimit: { kind: 'usage', window: null, resetsAt: null, exact: false, cli: false, message: null, since: NOW, at: NOW, launchId: 'l', attempts: 0, nextAt: NOW + 300_000 } })] })]), NOW, W).groups.find((group) => group.rows.length > 0)?.key).toBe('progress');
   });
 });

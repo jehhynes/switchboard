@@ -23,7 +23,7 @@
           "mark": {
             "kind": "running",
             "glyph": "",
-            "title": "Running"
+            "title": "Working"
           },
           "details": [
             {
@@ -93,7 +93,7 @@
               },
               "input": {
                 "question": "Add comment",
-                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "detail": "Shown on the work item only; it is not sent to the ticket.",
                 "field": "text",
                 "action": "Add"
               }
@@ -167,11 +167,11 @@
           "mark": {
             "kind": "finished",
             "glyph": "",
-            "title": "Review the finished turn"
+            "title": "Review the turn"
           },
           "details": [
             {
-              "text": "Review the finished turn",
+              "text": "Review the turn",
               "title": null,
               "tone": null
             }
@@ -233,7 +233,7 @@
               },
               "input": {
                 "question": "Add comment",
-                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "detail": "Shown on the work item only; it is not sent to the ticket.",
                 "field": "text",
                 "action": "Add"
               }
@@ -418,7 +418,7 @@
               },
               "input": {
                 "question": "Add comment",
-                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "detail": "Shown on the work item only; it is not sent to the ticket.",
                 "field": "text",
                 "action": "Add"
               }
@@ -504,7 +504,7 @@
           "priority": null,
           "time": {
             "text": "10m",
-            "title": "In this status since 2026-10-03 11:50 UTC"
+            "title": "Failed since 2026-10-03 11:50 UTC"
           },
           "playbook": "dev:develop",
           "ticket": "gh 114",
@@ -567,7 +567,7 @@
               },
               "input": {
                 "question": "Add comment",
-                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "detail": "Shown on the work item only; it is not sent to the ticket.",
                 "field": "text",
                 "action": "Add"
               }
@@ -681,7 +681,7 @@
               },
               "input": {
                 "question": "Add comment",
-                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "detail": "Shown on the work item only; it is not sent to the ticket.",
                 "field": "text",
                 "action": "Add"
               }
@@ -813,7 +813,7 @@
               },
               "input": {
                 "question": "Add comment",
-                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "detail": "Shown on the work item only; it is not sent to the ticket.",
                 "field": "text",
                 "action": "Add"
               }
@@ -867,7 +867,7 @@
       "key": "unstarted",
       "title": "Unstarted",
       "glyph": "",
-      "empty": "Nothing to start. New work appears here until its session starts.",
+      "empty": "Nothing to start. New work items wait here until their session starts.",
       "rows": [
         {
           "key": "item:9",
@@ -875,7 +875,7 @@
           "priority": "Immediacy: BLOCKING   Severity: MED",
           "time": {
             "text": "0m",
-            "title": "In scope since 2026-10-03 12:00 UTC"
+            "title": "Yours since 2026-10-03 12:00 UTC"
           },
           "playbook": "dev:develop",
           "ticket": "gh 109",
@@ -951,7 +951,7 @@
               },
               "input": {
                 "question": "Add comment",
-                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "detail": "Shown on the work item only; it is not sent to the ticket.",
                 "field": "text",
                 "action": "Add"
               }
@@ -1082,7 +1082,7 @@
           "priority": null,
           "time": {
             "text": "11:59",
-            "title": "Done 2026-10-03 11:59 UTC; in scope from 2026-10-03 12:00 UTC"
+            "title": "Done 2026-10-03 11:59 UTC; yours from 2026-10-03 12:00 UTC"
           },
           "playbook": "dev:develop",
           "ticket": "gh 111",
@@ -1129,7 +1129,7 @@
               },
               "input": {
                 "question": "Add comment",
-                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "detail": "Shown on the work item only; it is not sent to the ticket.",
                 "field": "text",
                 "action": "Add"
               }
@@ -1176,7 +1176,7 @@
           "priority": null,
           "time": {
             "text": "9/3",
-            "title": "Done 2026-09-03 12:00 UTC; in scope from 2026-10-03 12:00 UTC"
+            "title": "Done 2026-09-03 12:00 UTC; yours from 2026-10-03 12:00 UTC"
           },
           "playbook": "dev:develop",
           "ticket": "gh 112",
@@ -1223,7 +1223,7 @@
               },
               "input": {
                 "question": "Add comment",
-                "detail": "Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.",
+                "detail": "Shown on the work item only; it is not sent to the ticket.",
                 "field": "text",
                 "action": "Add"
               }
@@ -1304,7 +1304,7 @@
       "kind": "github",
       "label": "GitHub",
       "enabled": true,
-      "title": "github: polled\nClick to stop polling it.",
+      "title": "github: on\nClick to turn it off.",
       "sources": [
         {
           "name": "github",
@@ -1316,7 +1316,7 @@
       "kind": "zoho",
       "label": "Zoho Desk",
       "enabled": false,
-      "title": "zoho: not polled\nClick to poll it.",
+      "title": "zoho: off\nClick to turn it on.",
       "sources": [
         {
           "name": "zoho",
@@ -1376,12 +1376,12 @@
       }
     }
   ],
-  "heldNote": "1 held session without a work item",
+  "heldNote": "1 background session without a work item",
   "holderNotice": {
-    "text": "The terminal holder is from an older build. Restart it to update (1 session will be resumed).",
+    "text": "The terminal holder that runs background sessions is out of date. Restart it to update; its 1 session stops and resumes.",
     "confirm": {
       "question": "Restart the terminal holder?",
-      "detail": "Restarting stops the held session and resumes it in a holder of the installed build. This session is not idle, so the restart interrupts its turn: Issue <15> (gh 115). 1 other held session ends and is not resumed.",
+      "detail": "Restarting stops the background session and resumes it in a holder of the installed build. This session is not idle, so the restart interrupts its turn: Issue <15> (gh 115). 1 other background session ends and is not resumed.",
       "action": "Restart and resume"
     }
   },

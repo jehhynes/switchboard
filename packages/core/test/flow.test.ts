@@ -562,7 +562,7 @@ describe('sessions', () => {
 
     const b = running(h, '2', 'dev:finish');
     h.act({ type: 'marker', sessionId: b.session, state: 'idle', detail: null });
-    expect(h.item(b.item)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.' });
+    expect(h.item(b.item)).toMatchObject({ status: 'blocked', error: 'The session finished its turn without reporting done.' });
 
     h.act({ type: 'marker', sessionId: b.session, state: 'running', detail: null });
     expect(h.item(b.item)).toMatchObject({ status: 'running', error: null });
@@ -573,7 +573,7 @@ describe('sessions', () => {
     const c = new Harness({ playbooks: playbooks(undefined, FINISH) });
     const d = running(c, '3', 'dev:finish');
     c.act({ type: 'roster', sessions: [] });
-    expect(c.item(d.item)).toMatchObject({ status: 'blocked', error: 'The session ended without a done report.' });
+    expect(c.item(d.item)).toMatchObject({ status: 'blocked', error: 'The session ended without reporting done.' });
     expect(c.store.session(d.session)).toMatchObject({ state: 'ended', endedAt: T0 });
   });
 
@@ -737,7 +737,7 @@ describe('sessions', () => {
     expect(h.store.worktreeFor(h.item(a.item).ticketId)).toBeNull();
 
     h.act({ type: 'marker', sessionId: a.session, state: 'idle', detail: null });
-    expect(h.item(a.item)).toMatchObject({ status: 'blocked', error: 'The turn ended without an approval report.' });
+    expect(h.item(a.item)).toMatchObject({ status: 'blocked', error: 'The session finished its turn without asking for approval.' });
 
     expect(h.item(a.item).readyAt).toBeNull();
 
@@ -1316,7 +1316,7 @@ describe('limits and the one-session-in-a-turn rule', () => {
     expect(h.item(1).unassignedAt).toBeNull();
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
-    expect(h.item(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.', warning: null });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: 'The session finished its turn without reporting done.', warning: null });
   });
 
   it('holds a reassigned ticket’s new work item while the done work item’s session is still in its turn', () => {

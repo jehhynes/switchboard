@@ -28,7 +28,7 @@ const POLL_MS = 1_000;
 const COLS = 120;
 const ROWS = 40;
 
-export const HOOKS_REQUIRED = 'Claude sessions need sessions.installHooks.';
+export const HOOKS_REQUIRED = 'Claude sessions need Install hooks turned on in Settings › Advanced.';
 /** The credential variables only Code Mode must drop (mechanics M64). */
 const CREDENTIALS = /^(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_CUSTOM_HEADERS|ANTHROPIC_API_KEY)$/i;
 /** The variable that turns Code Mode on (mechanics M63). */

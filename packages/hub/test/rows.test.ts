@@ -147,7 +147,7 @@ describe('controlsOf', () => {
       label: 'Add comment…',
       icon: 'comment',
       message: { type: 'action', action: { type: 'comment', workItemId: 7 } },
-      input: { question: 'Add comment', detail: 'Switchboard keeps it with the work item and shows it on the row. It is not sent to the source.', field: 'text', action: 'Add' },
+      input: { question: 'Add comment', detail: 'Shown on the work item only; it is not sent to the ticket.', field: 'text', action: 'Add' },
     });
   });
 
@@ -169,7 +169,7 @@ describe('controlsOf', () => {
 
     expect(labels(waiting)).toContain('Stop session');
     expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: { type: 'terminal', shortId: 'aaaa1111', active: false } });
-    expect(startPromptText(waiting)).toEqual([{ text: 'Waits on a prompt before it starts', title: "Claude asks before the session starts, such as to approve the project's MCP servers. Open in terminal to answer it." }]);
+    expect(startPromptText(waiting)).toEqual([{ text: 'Waits for you in its terminal before starting', title: "Claude asks before the session starts, such as to approve the project's MCP servers. Open in terminal to answer it." }]);
     expect(startPromptText(item(7, { sessions: [session({ codeMode: true, state: 'waiting' })] }))).toEqual([]);
     expect(mainControl(item(7, { sessions: [session({ codeMode: true, state: 'waiting' })] }))?.label).toBe('Open in terminal');
   });
@@ -179,7 +179,7 @@ describe('controlsOf', () => {
 
     expect(labels(waiting)).toContain('Stop session');
     expect(mainControl(waiting)).toMatchObject({ label: 'Open in terminal', message: { type: 'terminal', shortId: 'aaaa1111', active: false } });
-    expect(startPromptText(waiting)).toEqual([{ text: 'Waits on a permission prompt', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.' }]);
+    expect(startPromptText(waiting)).toEqual([{ text: 'Waits for your permission in its terminal', title: 'Claude asks to approve a tool call. Open in terminal to answer it; stopping the session would drop the prompt.' }]);
     // A registered session shows the prompt in the operator's own window.
     expect(startPromptText(item(7, { sessions: [session({ state: 'waiting', stateDetail: PERMISSION_PROMPT, released: true })] }))).toEqual([]);
   });
@@ -293,27 +293,27 @@ describe('clockOf', () => {
     const scoped = (patch: Partial<WorkItemView>, scopeAt: number | null = 5, snoozed = false) =>
       item(1, { createdAt: 1, statusAt: 2, runStartedAt: 3, ...patch, ticket: { ...item(1).ticket, scopeAt, snoozed } });
 
-    expect(clockOf(scoped({ status: 'blocked' }))).toEqual({ since: 2, label: 'In this status since' });
+    expect(clockOf(scoped({ status: 'blocked' }))).toEqual({ since: 2, label: 'Blocked since' });
     expect(clockOf(scoped({ status: 'running', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
     expect(clockOf(scoped({ status: 'setup', sessions: [session({ kind: 'setup', state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
     // Open in Claude ended the session but the question still waits from when it was asked (PRD R70).
     expect(clockOf(scoped({ status: 'running', sessions: [session({ state: 'ended', outcome: 'opened', stateAt: 4 })] }))).toEqual({ since: 4, label: 'Waiting since' });
     // A blocked item whose session still waits counts from the block.
-    expect(clockOf(scoped({ status: 'blocked', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 2, label: 'In this status since' });
+    expect(clockOf(scoped({ status: 'blocked', sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 2, label: 'Blocked since' });
     // A ready work item counts from when it became ready, through a question or a block.
     expect(clockOf(scoped({ status: 'awaiting-approval', readyAt: 6, sessions: [session({ state: 'waiting', stateAt: 4 })] }))).toEqual({ since: 6, label: 'Ready since' });
     expect(clockOf(scoped({ status: 'blocked', readyAt: 6 }))).toEqual({ since: 6, label: 'Ready since' });
     expect(clockOf(scoped({ status: 'awaiting-approval', readyAt: 6 }))).toEqual({ since: 6, label: 'Ready since' });
     expect(clockOf(scoped({ status: 'running', readyAt: 6 }))).toEqual({ since: 6, label: 'Ready since' });
-    expect(clockOf(scoped({ status: 'running' }))).toEqual({ since: 3, label: 'Working since' });
-    expect(clockOf(scoped({ status: 'setup', runStartedAt: null }))).toEqual({ since: 2, label: 'Working since' });
-    expect(clockOf(scoped({ status: 'queued' }))).toEqual({ since: 5, label: 'In scope since' });
-    expect(clockOf(scoped({ status: 'unstarted' }))).toEqual({ since: 5, label: 'In scope since' });
-    expect(clockOf(scoped({ status: 'unstarted' }, null))).toEqual({ since: 1, label: 'In scope since' });
-    expect(clockOf(scoped({ status: 'blocked' }, 5, true))).toEqual({ since: 5, label: 'In scope since' });
+    expect(clockOf(scoped({ status: 'running' }))).toEqual({ since: 3, label: 'Started working' });
+    expect(clockOf(scoped({ status: 'setup', runStartedAt: null }))).toEqual({ since: 2, label: 'Started working' });
+    expect(clockOf(scoped({ status: 'queued' }))).toEqual({ since: 5, label: 'Yours since' });
+    expect(clockOf(scoped({ status: 'unstarted' }))).toEqual({ since: 5, label: 'Yours since' });
+    expect(clockOf(scoped({ status: 'unstarted' }, null))).toEqual({ since: 1, label: 'Yours since' });
+    expect(clockOf(scoped({ status: 'blocked' }, 5, true))).toEqual({ since: 5, label: 'Yours since' });
     // Done keeps the scope entry the work item had, not the ticket's later one.
-    expect(clockOf(scoped({ status: 'done', doneAt: 9, scopeAt: 4 }, 8))).toEqual({ since: 4, label: 'In scope from' });
-    expect(clockOf(scoped({ status: 'done', doneAt: 9 }, 8))).toEqual({ since: 1, label: 'In scope from' });
+    expect(clockOf(scoped({ status: 'done', doneAt: 9, scopeAt: 4 }, 8))).toEqual({ since: 4, label: 'Yours from' });
+    expect(clockOf(scoped({ status: 'done', doneAt: 9 }, 8))).toEqual({ since: 1, label: 'Yours from' });
   });
 });
 
@@ -476,8 +476,8 @@ describe('waitTexts', () => {
         }),
       ),
     ).toEqual([
-      { text: 'Waits for a slot · 2/2 in use', title: '2 sessions are running; sessions.concurrency is 2.' },
-      { text: "Waits for the ad-hoc session's turn to end", title: 'Session s2 on this ticket is running or waiting on a question. This starts when its turn ends.' },
+      { text: 'Waits to start · 2 of 2 sessions running', title: 'Switchboard starts at most 2 sessions at once (Settings › Sessions); this one starts when fewer are running.' },
+      { text: "Waits for the ad-hoc session to finish its turn", title: 'Session s2 on this ticket is running or waiting on a question. This starts when its turn ends.' },
       { text: 'Starts after the snooze ends', title: 'The ticket is snoozed.' },
       { text: 'Starts when #12 closes', title: 'Open issues that block this one:\n#12 Migrate the schema' },
     ]);
@@ -486,10 +486,10 @@ describe('waitTexts', () => {
 
 describe('rowTime', () => {
   it('shows the time in queue, or the done time on an unsnoozed Done row', () => {
-    expect(rowTime(item(1, { status: 'blocked', statusAt: NOW - 3 * 3_600_000 }), NOW)).toEqual({ text: '3h', title: 'In this status since 2026-10-03 09:00 UTC' });
+    expect(rowTime(item(1, { status: 'blocked', statusAt: NOW - 3 * 3_600_000 }), NOW)).toEqual({ text: '3h', title: 'Blocked since 2026-10-03 09:00 UTC' });
     expect(rowTime(item(1, { status: 'done', doneAt: NOW - 2 * 86_400_000, scopeAt: NOW - 5 * 86_400_000 }), NOW)).toEqual({
       text: `${new Date(NOW - 2 * 86_400_000).getMonth() + 1}/${new Date(NOW - 2 * 86_400_000).getDate()}`,
-      title: 'Done 2026-10-01 12:00 UTC; in scope from 2026-09-28 12:00 UTC',
+      title: 'Done 2026-10-01 12:00 UTC; yours from 2026-09-28 12:00 UTC',
     });
   });
 });
@@ -513,7 +513,7 @@ describe('snapshotErrors and setupNotes', () => {
     expect(snapshotErrors(snapshot([]))).toEqual([]);
     expect(setupNotes(snapshot([]))).toEqual([]);
     expect(setupNotes(snapshot([], { sources: [], playbooks: [] }))).toEqual([
-      'No source is polled. Turn one on in the header.',
+      'No source is on. Turn one on in the list header.',
       'No task playbooks are loaded. Add them under playbooks in C:\\Users\\me\\.claude\\switchboard\\settings.json.',
     ]);
     expect(setupNotes(snapshot([], { sources: [], sourceStates: [] }))).toEqual(['No source is configured. Add one in C:\\Users\\me\\.claude\\switchboard\\settings.json.']);
@@ -530,20 +530,28 @@ describe('limitTexts (architecture.md § Rate limits)', () => {
   it("shows the reset Claude Code waits for itself, with Switchboard's own attempt in the tooltip", () => {
     const [text] = limitTexts(item(1, { status: 'running', sessions: [session({ codeMode: true, state: 'failed', stateDetail: 'rate_limit', rateLimit: limit })] }), NOW);
 
-    expect(text).toEqual({ text: `Rate limited · resumes ${time(RESET)}`, title: `${limit.message}\nClaude Code continues on its own after the reset; Switchboard continues it at ${time(RESET + 180_000)} if it has not.` });
+    expect(text).toEqual({ text: `Usage limit · resumes ${time(RESET)}`, title: `${limit.message}\nClaude Code continues on its own after the reset; Switchboard continues it at ${time(RESET + 180_000)} if it has not.` });
   });
 
   it("shows the hub's next attempt: resumes before the first, retries after one or without a reset time", () => {
     const held = (patch: object) => limitTexts(item(1, { status: 'running', sessions: [session({ execution: 'app-server', state: 'failed', stateDetail: 'rate_limit', rateLimit: { ...limit, ...patch } })] }), NOW)[0]!.text;
 
-    expect(held({ cli: false, nextAt: RESET + 60_000 })).toBe(`Rate limited · resumes ${time(RESET + 60_000)}`);
-    expect(held({ cli: false, resetsAt: null, nextAt: NOW + 300_000 })).toBe(`Rate limited · retries ${time(NOW + 300_000)}`);
-    expect(held({ attempts: 2, nextAt: NOW + 600_000 })).toBe(`Rate limited · retries ${time(NOW + 600_000)}`);
+    expect(held({ cli: false, nextAt: RESET + 60_000 })).toBe(`Usage limit · resumes ${time(RESET + 60_000)}`);
+    expect(held({ cli: false, resetsAt: null, nextAt: NOW + 300_000 })).toBe(`Usage limit · retries ${time(NOW + 300_000)}`);
+    expect(held({ attempts: 2, nextAt: NOW + 600_000 })).toBe(`Usage limit · retries ${time(NOW + 600_000)}`);
+  });
+
+  it('says Rate limited only for a provider throttle, and Usage limit for a quota', () => {
+    const shown = (kind: 'usage' | 'throttle', status: 'running' | 'blocked', patch: object) => limitTexts(item(1, { status, sessions: [session({ state: 'failed', stateDetail: 'rate_limit', rateLimit: { ...limit, kind }, ...patch })] }), NOW)[0]!.text;
+
+    expect(shown('throttle', 'running', { codeMode: true })).toBe(`Rate limited · resumes ${time(RESET)}`);
+    expect(shown('throttle', 'blocked', {})).toBe(`Rate limited · resets ${time(RESET)}`);
+    expect(shown('usage', 'blocked', {})).toBe(`Usage limit · resets ${time(RESET)}`);
   });
 
   it('shows when a background session can be continued, and nothing once a turn runs or without a limit', () => {
-    expect(limitTexts(item(1, { status: 'blocked', sessions: [session({ state: 'failed', stateDetail: 'rate_limit', rateLimit: limit })] }), NOW)[0]?.text).toBe(`Rate limited · resets ${time(RESET)}`);
-    expect(limitTexts(item(1, { status: 'blocked', sessions: [session({ state: 'ended', released: true, rateLimit: limit })] }), NOW)[0]?.text).toBe(`Rate limited · resets ${time(RESET)}`);
+    expect(limitTexts(item(1, { status: 'blocked', sessions: [session({ state: 'failed', stateDetail: 'rate_limit', rateLimit: limit })] }), NOW)[0]?.text).toBe(`Usage limit · resets ${time(RESET)}`);
+    expect(limitTexts(item(1, { status: 'blocked', sessions: [session({ state: 'ended', released: true, rateLimit: limit })] }), NOW)[0]?.text).toBe(`Usage limit · resets ${time(RESET)}`);
     expect(limitTexts(item(1, { status: 'blocked', sessions: [session({ state: 'ended', released: true, rateLimit: limit })] }), RESET)).toEqual([]);
     expect(limitTexts(item(1, { status: 'running', sessions: [session({ state: 'running', rateLimit: limit })] }), NOW)).toEqual([]);
     expect(limitTexts(item(1, { status: 'running', sessions: [session({ codeMode: true, state: 'running', rateLimit: limit })] }), NOW)).toEqual([]);
@@ -553,7 +561,7 @@ describe('limitTexts (architecture.md § Rate limits)', () => {
   it('tells the operator to retry a setup blocked at a limit after the reset', () => {
     const setup = item(1, { status: 'blocked', error: SETUP_AT_LIMIT, sessions: [session({ kind: 'setup', state: 'ended', released: true, rateLimit: limit })] });
 
-    expect(limitTexts(setup, NOW)).toEqual([{ text: `Rate limited · resets ${time(RESET)}`, title: `${limit.message}\nRetry setup after the reset.` }]);
+    expect(limitTexts(setup, NOW)).toEqual([{ text: `Usage limit · resets ${time(RESET)}`, title: `${limit.message}\nRetry setup after the reset.` }]);
   });
 
   it('shows a setup blocked at a limit as a wait on the operator, in Blocked on you with a warning stripe, and offers Retry as its main control (PRD R111)', () => {
@@ -565,7 +573,7 @@ describe('limitTexts (architecture.md § Rate limits)', () => {
     expect(controlsOf(setup).find((control) => control.label === 'Retry')?.message).toEqual({ type: 'action', action: { type: 'retry', workItemId: 1 } });
     // Resumed, the setup session goes on, so Retry would start a second one; blocked for another cause, the work item has nothing to retry.
     expect(labels({ ...setup, sessions: [session({ kind: 'setup', state: 'running', rateLimit: limit })] })).not.toContain('Retry');
-    expect(labels(item(1, { status: 'blocked', error: 'The turn ended without a done report.', sessions: [session({ state: 'ended' })] }))).not.toContain('Retry');
+    expect(labels(item(1, { status: 'blocked', error: 'The session finished its turn without reporting done.', sessions: [session({ state: 'ended' })] }))).not.toContain('Retry');
   });
 
   it('names another day by its weekday', () => {
@@ -576,7 +584,7 @@ describe('limitTexts (architecture.md § Rate limits)', () => {
   it("explains a queued start held by its provider's usage limit", () => {
     const [wait] = waitTexts(item(1, { status: 'queued', waits: [{ kind: 'limit', provider: 'codex', until: RESET }] }));
 
-    expect(wait!.text).toBe(`Starts after the usage limit resets, ${limitTime(RESET, null)}`);
+    expect(wait!.text).toBe(`Starts when the usage limit resets, ${limitTime(RESET, null)}`);
     expect(wait!.title).toContain('A Codex session stopped at a usage limit');
   });
 });

@@ -721,7 +721,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(held.reservations).toEqual([{ sessionId: 's2', launch: 'launch-1' }]);
 
     store.updateSession('s2', { state: 'ended' });
-    expect(service.continueAfterLimit('s2', 'Continue.')).toBe('The session has ended. Resume continues it.');
+    expect(service.continueAfterLimit('s2', 'Continue.')).toBe('The session has ended. Resume it to send a message.');
     expect(service.continueAfterLimit('nope', 'Continue.')).toBe('The session has ended.');
     expect(held.writes).toHaveLength(2);
   });
@@ -1114,7 +1114,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(refused({ scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(refused({ text: '  \n ' })).toEqual({ status: 400, body: { error: 'The message is empty.' } });
     expect(refused({ text: 'x'.repeat(10_001) })).toEqual({ status: 400, body: { error: 'The message is longer than 10,000 characters.' } });
-    expect(refused({ launch: 'launch-0' })).toEqual({ status: 409, body: { error: 'The session was resumed since the view showed it; send the message again.' } });
+    expect(refused({ launch: 'launch-0' })).toEqual({ status: 409, body: { error: 'The session restarted while you typed. Send the message again.' } });
     held.cannotType_ = 'The terminal holder is from an older build and cannot type. To switch to this build, run hub.js holder stop --all.';
     expect(refused({})).toEqual({ status: 409, body: { error: held.cannotType_ } });
     held.cannotType_ = null;
@@ -1122,7 +1122,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(refused({})).toEqual({ status: 409, body: { error: 'Switchboard cannot track this session while Install hooks is off.' } });
     setHooks(true);
     store.updateSession('s2', { state: 'ended' });
-    expect(refused({})).toEqual({ status: 409, body: { error: 'The session has ended. Resume continues it.' } });
+    expect(refused({})).toEqual({ status: 409, body: { error: 'The session has ended. Resume it to send a message.' } });
 
     expect(store.conversation('s2', null, 10).items).toEqual([]);
     expect(held.writes).toEqual([]);
@@ -1345,7 +1345,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(held.writes).toEqual(['\u0015']);
     expect(given(later).map((one) => [one.id, one.error]).sort()).toEqual([
       ['m-old', 'Switchboard restarted while the message was being typed and could not read its input box: check the terminal before sending it again.'],
-      ['m-resumed', 'The session was resumed since the view showed it; send the message again.'],
+      ['m-resumed', 'The session restarted while you typed. Send the message again.'],
     ]);
 
     // A window that closed while its message was settled gets it back when a window shows the session again.
@@ -1879,12 +1879,12 @@ describe('sessionView', () => {
   });
 
   it('names what the view can do with each kind of session', () => {
-    expect(sessionView(session({ codeMode: true, state: 'ended' }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Resume continues it.' });
+    expect(sessionView(session({ codeMode: true, state: 'ended' }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Resume it to send a message.' });
     expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot track this session while Install hooks is off.' });
     expect(sessionView(session({ state: 'waiting', stateDetail: null }), false, true)).toMatchObject({ waitingFor: 'question', conversation: 'none', current: false });
     expect(sessionView(session({ codeMode: true, state: 'failed' }), true, true)).toMatchObject({ state: 'idle', conversation: 'full' });
     // An ended registered session resumes in the holder, so the page offers Resume; while it runs in the operator's window it has no conversation (PRD R81).
-    expect(sessionView(session({ registered: true, state: 'ended' }), true, true)).toMatchObject({ conversation: 'read-only', reason: 'The session has ended. Resume continues it.' });
+    expect(sessionView(session({ registered: true, state: 'ended' }), true, true)).toMatchObject({ conversation: 'read-only', reason: 'The session has ended. Resume it to send a message.' });
     expect(sessionView(session({ registered: true, state: 'idle' }), true, true)).toMatchObject({ conversation: 'none' });
   });
 
@@ -1901,6 +1901,8 @@ describe('sessionView', () => {
     expect(sessionView(session({ codeMode: true, state: 'failed', rateLimit: { ...limit, attempts: 1 } }), true, true).limit).toEqual({ until: NOW + 3_780_000, retry: true });
     expect(sessionView(session({ codeMode: true, state: 'running', rateLimit: limit }), true, true).limit).toBeNull();
     expect(sessionView(session({ state: 'failed', rateLimit: limit }), true, true).limit).toBeNull();
+    // A provider's throttle is told apart from a usage limit, so the page names it Rate limited.
+    expect(sessionView(session({ codeMode: true, state: 'failed', rateLimit: { ...limit, kind: 'throttle' } }), true, true).limit).toEqual({ until: NOW + 3_600_000, retry: false, throttle: true });
   });
 
   it("shows the session's persona while voice is on, and its tone section pending until the prompt has the current one (architecture.md § Personas)", () => {
@@ -2241,13 +2243,13 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       rememberFolder: (folder) => remembered.push(folder),
       rowAction: (workItemId, label, snooze) => {
         actions.push([workItemId, label, snooze]);
-        return label === 'Approve' ? 'The work item no longer offers this.' : null;
+        return label === 'Approve' ? 'This work item can no longer do that.' : null;
       },
       rowPaste: async (_workItemId, label) => (label === 'Reply' ? 'Dear Ana' : null),
       uploads: join(dir, 'uploads'),
       rowCommand: async (workItemId, label) => {
         commands.push([workItemId, label]);
-        return label === 'Open report' ? null : 'The work item no longer offers this.';
+        return label === 'Open report' ? null : 'This work item can no longer do that.';
       },
       rowMove: (workItemId, after) => {
         moves.push([workItemId, after]);
@@ -2276,7 +2278,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     let pollRefusal: string | null = null;
     const refusePoll = (why: string | null) => void (pollRefusal = why);
     const restarts: Array<string | undefined> = [];
-    let header: PageHeader = { notes: [], sources: [{ kind: 'github', label: 'GitHub', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
+    let header: PageHeader = { notes: [], sources: [{ kind: 'github', label: 'GitHub', enabled: true, title: 'gh: on\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
     const opens: Array<[string, string]> = [];
     const pools: Array<[number, string, unknown]> = [];
@@ -2425,9 +2427,9 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(page.frames.at(-1)!['groups']).toBeInstanceOf(Array);
 
     // A voice problem changes the list's notes outside a build; `pageListChanged` sends it, and nothing when nothing changed.
-    setHeader({ notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item', sources: [], repoRoots: [], schedules: [] });
+    setHeader({ notes: ['Voice: the voice process stopped.'], heldNote: '1 background session without a work item', sources: [], repoRoots: [], schedules: [] });
     service.pageListChanged();
-    expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item' } });
+    expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { notes: ['Voice: the voice process stopped.'], heldNote: '1 background session without a work item' } });
     const sent = page.frames.length;
 
     service.pageListChanged();
@@ -2613,7 +2615,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
 
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Snooze…', until: 5, comment: '  later ' })).toEqual({ status: 200, body: { done: true } });
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Snooze…', until: 5 })).toEqual({ status: 200, body: { done: true } });
-    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'Approve' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'Approve' })).toEqual({ status: 409, body: { error: 'This work item can no longer do that.' } });
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Add comment…', text: 'Asked Ana', choice: null }).status).toBe(200);
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'd', workItemId: 3, label: 'Add comment…', text: 5 }).status).toBe(400);
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'd', workItemId: 3, label: 'Add comment…', text: 'x'.repeat(100_001) }).status).toBe(400);
@@ -2665,7 +2667,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(commands).toEqual([]);
     expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
     expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
-    expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'History' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'History' })).toEqual({ status: 409, body: { error: 'This work item can no longer do that.' } });
     expect(commands).toEqual([[3, 'Open report'], [3, 'History']]);
   });
 

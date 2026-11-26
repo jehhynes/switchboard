@@ -1,7 +1,7 @@
-import { DEFAULT_SETTINGS, MESSAGES, PERMISSION_PROMPT, Store, handle, parsePlaybook } from '@switchboard/core';
+import { DEFAULT_SETTINGS, MESSAGES, PERMISSION_PROMPT, Store, UNCONFIRMED_DONE, handle, parsePlaybook } from '@switchboard/core';
 import type { FlowEvent, HistoryChange, HistoryEvent, Playbook, Settings, TicketHistory } from '@switchboard/core';
 import { describe, expect, it } from 'vitest';
-import { durationText, historyView, sessionOpen, timeText } from '../src/history.js';
+import { durationText, historyView, outcomeText, sessionOpen, timeText } from '../src/history.js';
 import type { Entry } from '../src/history.js';
 
 const T0 = new Date(2026, 9, 7, 9, 0, 0).getTime();
@@ -86,7 +86,7 @@ describe('History model', () => {
     run.send({ type: 'handled', sessionId: 's1', source: 'github', sourceKey: '77', ref: '#77', repo: '', title: 'Fix', url: ISSUE.url, key: 'I:A', release: false, assigned: false });
     run.send({ type: 'mark-done', workItemId: 1 });
     const entries = historyView(run.store.ticketHistory(2)!, run.now).sections.flatMap((section) => section.entries);
-    expect(texts(entries)).toEqual(['Registered the assignment as already handled', 'Handled assignment ended: the work that handled it ended']);
+    expect(texts(entries)).toEqual(['Registered the assignment as already handled', 'The session that handled this assignment ended']);
   });
   it('words only the ticket entry as the release when the ended registration gives an assigned ticket a work item (PRD R85)', () => {
     const run = new Run();
@@ -95,10 +95,10 @@ describe('History model', () => {
     run.send({ type: 'poll', source: 'github', tickets: [ISSUE] });
     run.send({ type: 'mark-done', workItemId: 1 });
     const sections = historyView(run.store.ticketHistory(2)!, run.now).sections;
-    const ended = sections.flatMap((section) => section.entries).filter((entry) => entry.text === 'Handled assignment ended: the work that handled it ended');
+    const ended = sections.flatMap((section) => section.entries).filter((entry) => entry.text === 'The session that handled this assignment ended');
     expect(ended).toHaveLength(1);
     expect(sections.find((section) => section.key === 'ticket')!.entries).toContain(ended[0]);
-    expect(sections.filter((section) => section.key !== 'ticket').flatMap((section) => texts(section.entries))).not.toContain('Handled assignment ended: the work that handled it ended');
+    expect(sections.filter((section) => section.key !== 'ticket').flatMap((section) => texts(section.entries))).not.toContain('The session that handled this assignment ended');
   });
   it('says when a schedule came due and when its open run kept it from making another (PRD R82)', () => {
     const store = Store.open(':memory:');
@@ -183,7 +183,7 @@ describe('History model', () => {
       'You started it',
       'Session abc12345 started',
       'Session abc12345 finished its turn',
-      'Switchboard released session abc12345',
+      'Switchboard ended session abc12345 after its turn',
       'The session continues in fork 9e8d7c6b',
       'Session 9e8d7c6b finished its turn',
     ]);
@@ -215,8 +215,8 @@ describe('History model', () => {
       { label: 'Status', value: 'Queued' },
       { label: 'Work items', value: '1' },
       { label: 'Sessions', value: '1, 2h 11m' },
-      { label: 'Waited on you (logged)', value: '2h 12m' },
-      { label: 'In scope since', value: timeText(T0) },
+      { label: 'Waited on you', value: '2h 12m' },
+      { label: 'Yours since', value: timeText(T0) },
     ]);
     expect(view.links.map((link) => link.label)).toEqual(['Open ticket']);
     expect(item).toMatchObject({ title: 'dev:question', status: 'Queued', facts: [`Created ${timeText(T0)}`, '1 session, 2h 11m', 'Waited on you 2h 12m (logged)'] });
@@ -358,7 +358,7 @@ describe('History model', () => {
       [event('ticket', 'session', { source: 'github', sourceKey: '115', playbook: 'dev:develop' }), { text: 'Asked to move this work to gh 115 as dev:develop' }],
       [event('report', 'session', { kind: 'ticket', url: 'https://github.com/o/r/issues/115' }), { text: 'Asked to move this work to https://github.com/o/r/issues/115' }],
       [event('session-start-failed', 'hub', { message: 'Untrusted folder' }, [change('session', 'update', { state: ['starting', 'ended'], outcome: [null, 'failed'] }, { sessionId: 's1' }), change('workItem', 'update', { status: ['running', 'failed'], error: [null, 'Untrusted folder'] })]), { text: 'The session failed to start', detail: 'Untrusted folder', lines: ['Status: Running → Failed', 'Error: Untrusted folder'], tone: 'error' }],
-      [event('stop-succeeded', 'hub', { reason: 'release' }, [change('session', 'update', { state: ['idle', 'ended'], released: [false, true] }, { sessionId: 's1' })]), { text: 'Switchboard released session abc12345', lines: [] }],
+      [event('stop-succeeded', 'hub', { reason: 'release' }, [change('session', 'update', { state: ['idle', 'ended'], released: [false, true] }, { sessionId: 's1' })]), { text: 'Switchboard ended session abc12345 after its turn', lines: [] }],
       [event('stop-succeeded', 'hub', { reason: 'operator' }, [change('session', 'update', { outcome: [null, 'stopped'], outcomeDetail: [null, 'Stopped by you.'] }, { sessionId: 's1' })]), { text: 'Session abc12345 stopped', lines: ['Outcome: stopped, Stopped by you.'] }],
       [event('stop-succeeded', 'hub', { reason: 'open' }, [change('session', 'update', { state: ['waiting', 'ended'], outcome: [null, 'opened'] }, { sessionId: 's1' })]), { text: 'Session abc12345 stopped to open its question', lines: [] }],
       [event('stop-failed', 'hub', { reason: 'open', message: 'exit 1' }, [change('workItem', 'update', { error: [null, 'Stop failed: exit 1'] })]), { text: 'Stopping the session failed', detail: 'exit 1', lines: [], tone: 'error' }],
@@ -395,7 +395,7 @@ describe('History model', () => {
         { text: "Session abc12345's turn failed", detail: 'overloaded', category: 'session', tone: 'error' },
       ],
       [event('limit-found', 'hub', { limit: { kind: 'usage', window: null, resetsAt: null, cli: false } }, []), { text: 'Session abc12345 stopped at a usage limit', detail: 'No reset time given', category: 'session', tone: 'warning' }],
-      [event('limit-attempt', 'hub', { attempt: 2 }, []), { text: 'Switchboard typed the continue text into session abc12345 after its usage limit', detail: 'Attempt 2', category: 'session' }],
+      [event('limit-attempt', 'hub', { attempt: 2 }, []), { text: 'Switchboard sent continue to session abc12345 after its usage limit', detail: 'Attempt 2', category: 'session' }],
       [event('limit-attempt', 'hub', { attempt: 3, error: 'The session has ended.' }, []), { text: 'Switchboard could not continue session abc12345 after its usage limit', detail: 'The session has ended.', tone: 'warning' }],
       [
         event('limit-skipped', 'hub', { reason: 'input' }, [change('workItem', 'update', { status: ['running', 'blocked'], error: [null, MESSAGES.limitSkipped] })]),
@@ -422,7 +422,7 @@ describe('History model', () => {
         event('roster', 'hub', null, [change('session', 'update', { nativeSessionId: ['0f1e2d3c-0000', '9e8d7c6b-0000'], shortId: ['0f1e2d3c', '9e8d7c6b'] }, { sessionId: 's1' })]),
         { text: 'The session continues in fork 9e8d7c6b', lines: [], stateChange: false },
       ],
-      [event('poll', 'source', { source: 'github' }, [change('workItem', 'update', { unassignedAt: [null, 5] })], null), { text: 'Left the assigned state while a session was active', category: 'ticket' }],
+      [event('poll', 'source', { source: 'github' }, [change('workItem', 'update', { unassignedAt: [null, 5] })], null), { text: 'Stopped being yours while a session was active', category: 'ticket' }],
       [event('poll', 'source', { source: 'github' }, [change('workItem', 'update', { unassignedAt: [5, null], warning: [null, 'Odd'], stage: ['a', 'b'], approvalSummary: [null, 'Ship'], custom: [1, 2] })], null), { text: 'Assigned to you again', lines: ['Warning: Odd', 'State: b', 'Approval: Ship', 'custom: 1 → 2'] }],
       [event('pick', 'operator', null, [change('triage', 'update', { workItemId: [null, 1] }), change('triage', 'delete', {}, { workItemId: null })], null), { text: 'You picked it from the pool', lines: ['Pool triage attached to the work item', 'Pool triage discarded'] }],
       [event('tick', 'hub', null, [change('triage', 'insert', { startedAt: [null, 1] })], null), { text: 'Triage started', category: 'triage' }],
@@ -441,7 +441,7 @@ describe('History model', () => {
       [event('snooze', 'operator', { until: null }, [], null), { text: 'You snoozed it indefinitely' }],
       [event('snooze', 'operator', { until: null, comment: 'Waiting for the release.' }, [], null), { text: 'You snoozed it indefinitely', detail: 'Waiting for the release.', category: 'you', tone: 'accent' }],
       [event('comment', 'operator', { text: 'Waiting on Dana.\nAsk Monday.' }, [], null), { text: 'You commented', detail: 'Waiting on Dana.\nAsk Monday.', category: 'you', tone: 'accent' }],
-      [event('restore', 'operator', null, [], null), { text: 'You restored it', lines: [] }],
+      [event('restore', 'operator', null, [], null), { text: 'You unsnoozed it', lines: [] }],
       [event('stop', 'operator', null, [], null), { text: 'You asked to stop the session' }],
       [event('reconstructed', 'hub', { fact: 'created', playbook: 'dev:question' }), { text: 'Work item created: dev:question', reconstructed: true }],
       [event('reconstructed', 'hub', { fact: 'triageStarted' }), { text: 'Triage started' }],
@@ -589,5 +589,12 @@ describe('History model', () => {
     expect(durationText(3_600_000)).toBe('1h 0m');
     expect(durationText(86_400_000 + 3_600_000)).toBe('1d 1h');
     expect(durationText(-5)).toBe('0s');
+  });
+});
+
+describe('outcomeText', () => {
+  it("words a done report waiting for the second read as a check that the ticket left you, keeping its time, and leaves other details as stored", () => {
+    expect(outcomeText(`${UNCONFIRMED_DONE}; it was still assigned at 2026-10-13T16:25:13.183Z.`)).toBe('Checking that the ticket left you; it was still assigned at 2026-10-13T16:25:13.183Z.');
+    expect(outcomeText('Stopped by you.')).toBe('Stopped by you.');
   });
 });

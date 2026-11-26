@@ -56,7 +56,7 @@ export const INPUT_SETTLE_MS = 60_000;
 export const LIMIT_READ_MS = 120_000;
 /** Why a message cannot be typed into a session (architecture.md § Typing a message). */
 export const SESSION_ENDED = 'The session has ended.';
-export const SESSION_RELAUNCHED = 'The session was resumed since the view showed it; send the message again.';
+export const SESSION_RELAUNCHED = 'The session restarted while you typed. Send the message again.';
 /** Why a held session cannot be typed into: its holder is from an older build; `stopAll` is the command that replaces it (`hub.js holder stop --all`). */
 export function holderCannotType(stopAll: string): string {
   return `The terminal holder is from an older build and cannot accept messages from Switchboard. Open the session in a terminal to type there. To update it, run ${stopAll}, review the sessions listed, then run it again with --yes; those sessions will stop.`;
@@ -640,7 +640,7 @@ export class Runtime {
     if (this.sources.size === 0) {
       const errors = Object.entries(this.sourceErrors).map(([name, error]) => `${name}: ${error}`);
 
-      return errors.length > 0 ? errors.join(' ') : 'No source is polled. Turn one on in the header.';
+      return errors.length > 0 ? errors.join(' ') : 'No source is on. Turn one on in the list header.';
     }
 
     this.restartPolls();
@@ -1821,7 +1821,7 @@ export class Runtime {
     const record = this.holder.record();
 
     if (!('holder' in found) || record === null) {
-      throw new Error('The terminal holder is not running, so the session has no console. Resume continues it.');
+      throw new Error('The terminal holder is not running, so the session has no console. Resume the session to see it.');
     }
 
     if (!found.holder.compatible || !(found.holder.welcome.features ?? []).includes('view')) {
@@ -1835,7 +1835,7 @@ export class Runtime {
       onData: (data) => handlers.onData(data),
       onReplayed: () => handlers.onReplayed(),
       onExit: (exitCode) => handlers.onExit(exitCode),
-      onClose: (error) => handlers.onClose(error === null ? null : /^No session .* is held\.$/.test(error.message) ? 'The terminal holder no longer holds this session. Resume continues it.' : error.message),
+      onClose: (error) => handlers.onClose(error === null ? null : /^No session .* is held\.$/.test(error.message) ? 'The terminal holder no longer holds this session. Resume the session to see it.' : error.message),
     });
   }
 

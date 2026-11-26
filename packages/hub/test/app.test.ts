@@ -498,7 +498,7 @@ describe('createHubApp', () => {
 
     const page = app.page!.opened(false);
 
-    expect(await app.post['/v1/conversation/page-poll']!({ window: page })).toEqual({ status: 409, body: { error: 'No source is polled. Turn one on in the header.' } });
+    expect(await app.post['/v1/conversation/page-poll']!({ window: page })).toEqual({ status: 409, body: { error: 'No source is on. Turn one on in the list header.' } });
     expect(await toggleSource(app, { name: 'github', enabled: true })).toEqual({ status: 200, body: { done: true } });
     // A refresh while a read is in flight does not read again, so the first read finishes first.
     await new Promise((done) => setImmediate(done));
@@ -965,13 +965,13 @@ describe('createHubApp', () => {
 
     expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o1', workItemId: 1, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 200, body: { opened: true } });
     expect(opened).toEqual(['https://github.com/o/r/pull/5']);
-    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o2', workItemId: 1, url: 'https://evil.test/' })).toEqual({ status: 409, body: { error: 'The work item no longer links to this.' } });
-    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o3', workItemId: 99, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 409, body: { error: 'The work item is gone.' } });
+    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o2', workItemId: 1, url: 'https://evil.test/' })).toEqual({ status: 409, body: { error: 'This work item no longer links to this.' } });
+    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o3', workItemId: 99, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 409, body: { error: 'This work item is no longer in the list.' } });
     expect(await app.post['/v1/conversation/pool-action']!({ window: page, opId: 'o4', ticketId: 99, label: 'Start' })).toEqual({ status: 409, body: { error: 'The ticket is no longer in the pool.' } });
 
     // Open in VS Code runs on the page's selected work item; an ad-hoc work item with no session has no window to open.
     expect(await app.post['/v1/conversation/select']!({ window: page, opId: 'o5', workItemId: 1 })).toMatchObject({ status: 200 });
-    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen: 1, opId: 'o6', workItemId: 1, label: 'Open in VS Code' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen: 1, opId: 'o6', workItemId: 1, label: 'Open in VS Code' })).toEqual({ status: 409, body: { error: 'This work item can no longer do that.' } });
     expect(opened).toHaveLength(1);
   });
 
@@ -1033,7 +1033,7 @@ describe('createHubApp', () => {
     expect(existsSync(join(temp.home, '.switchboard', 'window-queue.json'))).toBe(false);
 
     // Open report opens on the page: never VS Code, and the local-file route reads that one draft outside the work item's folders, no other.
-    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId: 'c2', workItemId: 1, label: 'Open report' })).toEqual({ status: 409, body: { error: 'Open report opens on the page.' } });
+    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId: 'c2', workItemId: 1, label: 'Open report' })).toEqual({ status: 409, body: { error: 'Open report shows in a tab here.' } });
     expect(opened).toHaveLength(1);
     expect((await app.page!.localFile!(page, report, false))?.view).toMatchObject({ kind: 'markdown', contents: '# Reply\n' });
     expect(await app.page!.localFile!(page, join(drafts, 'other.md'), false)).toBeNull();
@@ -1269,7 +1269,7 @@ describe('createHubApp', () => {
 
     const page = app.page!.opened();
 
-    expect(await app.post['/v1/conversation/page-new-session']!({ window: page, folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Claude sessions need sessions.installHooks.' } });
+    expect(await app.post['/v1/conversation/page-new-session']!({ window: page, folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Claude sessions need Install hooks turned on in Settings › Advanced.' } });
     expect(app.runtime.snapshot().workItems).toHaveLength(1);
   });
   it("shows the page no mic mark while no session is the voice target, and a voice problem as a note in the list's header (architecture.md § Voice)", async () => {
@@ -1403,7 +1403,7 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/holder/stop', { id: 'nope' }, 5000)).toMatchObject({ status: 404, error: 'No held session nope.' });
     expect(await postToHub(record, '/holder/open', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {id}.' });
     expect(await postToHub(record, '/holder/open', { id: 'missing' }, 5000)).toMatchObject({ status: 404, error: 'No held session missing.' });
-    expect(await postToHub(record, '/holder/open', { id: 'orphan-1' }, 5000)).toMatchObject({ status: 409, error: 'This held session has no terminal to open.' });
+    expect(await postToHub(record, '/holder/open', { id: 'orphan-1' }, 5000)).toMatchObject({ status: 409, error: 'This background session has no terminal to open.' });
     expect(kills).toEqual([]);
     expect(await postToHub(record, '/holder/stop', { id: '9273f594' }, 5000)).toEqual({ status: 200, error: null, body: { stopped: 'orphan-1' } });
     expect(kills).toEqual(['orphan-1']);
@@ -1411,7 +1411,7 @@ describe('createHubApp', () => {
     // The holder's build b is not the installed one, so a restart starts; it ends the holder, whose installed build is incomplete here.
     expect(await postToHub({ ...record, token: 'wrong' }, '/holder/restart', {}, 5000)).toMatchObject({ status: 401 });
     // A confirmation the view no longer asks is refused, so no session is interrupted unnamed.
-    expect(await postToHub(record, '/holder/restart', { detail: 'Restarting stops the held session.' }, 5000)).toMatchObject({ status: 409, error: 'The held sessions changed since you were asked. Press Restart and resume again to see them.' });
+    expect(await postToHub(record, '/holder/restart', { detail: 'Restarting stops the held session.' }, 5000)).toMatchObject({ status: 409, error: 'The background sessions changed since you were asked. Press Restart and resume again to see them.' });
     expect(lock).toBe(true);
     expect(await postToHub(record, '/holder/restart', {}, 5000)).toEqual({ status: 200, error: null, body: { started: true } });
     expect(await postToHub(record, '/holder/restart', {}, 5000)).toMatchObject({ status: 409 });

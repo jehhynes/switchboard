@@ -41,7 +41,7 @@ export function noCodexTerminal(session: Session): string | null {
     return 'This session has no Codex thread.';
   }
 
-  return session.state === 'ended' || session.released || session.releasing ? 'The session has ended. Resume continues it.' : null;
+  return session.state === 'ended' || session.released || session.releasing ? 'The session has ended. Resume it to send a message.' : null;
 }
 
 /**

@@ -4,6 +4,14 @@ import type { HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatu
 import { adhocLabel, DONE_WORDS, PERMISSION_PROMPT, resumesHeld, START_PROMPT } from '@switchboard/core/group';
 import { shownKey, ticketKey } from './rows.js';
 
+/** The stored start of a done report waiting for the second read (`UNCONFIRMED_DONE` in core's flow.ts, which the flow matches), and its words. */
+const UNCONFIRMED_STORED = 'Waiting to read the ticket again';
+
+/** A session's outcome detail in History's words. */
+export function outcomeText(detail: string): string {
+  return detail.startsWith(UNCONFIRMED_STORED) ? `Checking that the ticket left you${detail.slice(UNCONFIRMED_STORED.length)}` : detail;
+}
+
 /** The filter chips of History (PRD R59). */
 export type Category = 'you' | 'session' | 'report' | 'triage' | 'ticket';
 
@@ -83,15 +91,15 @@ export const STATUS_WORDS: Record<WorkItemStatus, string> = {
 };
 
 /** An ad-hoc work item's section title, by how it was made. */
-const ADHOC_SECTIONS: Record<ReturnType<typeof adhocLabel>, string> = { 'ad-hoc': 'Ad-hoc prompt', task: 'Follow-up task', registered: 'Registered session', conversation: 'Conversation', session: 'Session' };
+const ADHOC_SECTIONS: Record<ReturnType<typeof adhocLabel>, string> = { 'ad-hoc': 'Ad-hoc prompt', task: 'Follow-up task', registered: 'Registered session', conversation: 'Interactive session', session: 'Session' };
 
 /** Statuses that wait for the operator. */
 const NEEDS_YOU: ReadonlySet<string> = new Set(['unstarted', 'awaiting-approval', 'finished', 'blocked', 'failed']);
 
 const OPERATOR: Record<string, { text: string; icon: string }> = {
-  adhoc: { text: 'You created the ad-hoc prompt', icon: 'add' },
+  adhoc: { text: 'You created a new session', icon: 'add' },
   register: { text: 'You registered the session', icon: 'plug' },
-  'run-schedule': { text: 'You ran it now', icon: 'play' },
+  'run-schedule': { text: 'You ran the schedule now', icon: 'play' },
   start: { text: 'You started it', icon: 'play' },
   approve: { text: 'You approved it', icon: 'check' },
   retry: { text: 'You retried it', icon: 'refresh' },
@@ -105,7 +113,7 @@ const OPERATOR: Record<string, { text: string; icon: string }> = {
   background: { text: 'You asked to continue the session in the background', icon: 'debug-step-out' },
   pick: { text: 'You picked it from the pool', icon: 'pin' },
   'retriage-pool': { text: 'You asked to triage the pool ticket again', icon: 'filter' },
-  restore: { text: 'You restored it', icon: 'bell' },
+  restore: { text: 'You unsnoozed it', icon: 'bell' },
   snooze: { text: 'You snoozed it', icon: 'bell-slash' },
   comment: { text: 'You commented', icon: 'comment' },
   move: { text: 'You moved it in Ready for review', icon: 'list-ordered' },
@@ -296,7 +304,7 @@ class Builder {
           }
           break;
         case 'workItem.unassignedAt':
-          lines.push(after === null ? 'Assigned to you again' : 'Left the assigned state while a session was active');
+          lines.push(after === null ? 'Assigned to you again' : 'Stopped being yours while a session was active');
           break;
         case 'workItem.taskPrompt':
           if (after !== null) {
@@ -308,7 +316,7 @@ class Builder {
           break;
         case 'session.outcome':
           if (after !== null) {
-            lines.push(`Outcome: ${str(after)}${has('outcomeDetail') && value('outcomeDetail') ? `, ${oneLine(str(value('outcomeDetail')))}` : ''}`);
+            lines.push(`Outcome: ${str(after)}${has('outcomeDetail') && value('outcomeDetail') ? `, ${oneLine(outcomeText(str(value('outcomeDetail'))))}` : ''}`);
           }
           break;
         case 'session.released':
@@ -472,7 +480,7 @@ class Builder {
 
   handledEndedHeadline(skip: Set<string>): Partial<Entry> {
     skip.add('handledAssignmentKey');
-    return { category: 'ticket', icon: 'issues', text: 'Handled assignment ended: the work that handled it ended' };
+    return { category: 'ticket', icon: 'issues', text: 'The session that handled this assignment ended' };
   }
 
   /** The entry's text, category, icon and links from its event; fields its text covers go in `skip`. An empty text takes the first change's line. */
@@ -604,13 +612,13 @@ class Builder {
         }
 
         return detail['reason'] === 'release'
-          ? { category: 'session', icon: 'debug-disconnect', text: `Switchboard released ${session}` }
+          ? { category: 'session', icon: 'debug-disconnect', text: `Switchboard ended ${session} after its turn` }
           : detail['reason'] === 'open'
             ? { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped to open its question` }
             : { category: 'session', icon: 'debug-stop', text: `${capital(session)} stopped` };
       case 'stop-failed':
         skip.add('error');
-        return { category: 'session', icon: 'error', text: detail['reason'] === 'release' ? 'Releasing the session failed' : 'Stopping the session failed', detail: str(detail['message']), tone: 'error' };
+        return { category: 'session', icon: 'error', text: detail['reason'] === 'release' ? 'Ending the session after its turn failed' : 'Stopping the session failed', detail: str(detail['message']), tone: 'error' };
       case 'session-resumed':
         skip.add('state').add('shortId').add('released').add('releasing').add('endedAt');
         return { category: 'session', icon: 'terminal', text: `${capital(session)} continues in the background` };
@@ -626,7 +634,7 @@ class Builder {
         return { category: 'session', icon: 'watch', text: `${capital(session)} stopped at a usage limit`, detail: limitDetail(detail['limit'] as Record<string, unknown>), tone: 'warning' };
       case 'limit-attempt':
         return detail['error'] == null
-          ? { category: 'session', icon: 'debug-continue', text: `Switchboard typed the continue text into ${session} after its usage limit`, detail: `Attempt ${str(detail['attempt'])}` }
+          ? { category: 'session', icon: 'debug-continue', text: `Switchboard sent continue to ${session} after its usage limit`, detail: `Attempt ${str(detail['attempt'])}` }
           : { category: 'session', icon: 'warning', text: `Switchboard could not continue ${session} after its usage limit`, detail: str(detail['error']), tone: 'warning' };
       case 'limit-skipped':
         skip.add('status').add('error');
@@ -756,7 +764,7 @@ class Builder {
           category: 'session',
           icon: detail['outcome'] === 'failed' ? 'error' : 'circle-slash',
           text: `${capital(session)} ended${detail['outcome'] ? `: ${str(detail['outcome'])}` : ''}`,
-          detail: detail['outcomeDetail'] ? str(detail['outcomeDetail']) : null,
+          detail: detail['outcomeDetail'] ? outcomeText(str(detail['outcomeDetail'])) : null,
           tone: detail['outcome'] === 'failed' ? 'error' : null,
         };
       case 'stage':
@@ -909,11 +917,11 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
   const waited = [...waiting.values()].reduce((total, time) => total + time, 0);
 
   if (waited > 0) {
-    facts.push({ label: 'Waited on you (logged)', value: durationText(waited) });
+    facts.push({ label: 'Waited on you', value: durationText(waited) });
   }
 
   if (ticket.scopeAt !== null) {
-    facts.push({ label: 'In scope since', value: timeText(ticket.scopeAt) });
+    facts.push({ label: ticket.pool ? 'In the pool since' : 'Yours since', value: timeText(ticket.scopeAt) });
   }
 
   if (ticket.snoozed) {
