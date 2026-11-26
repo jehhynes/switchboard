@@ -2,7 +2,7 @@
 // take a slot before they build and test, so checks from sessions committing at
 // the same time run one after another instead of slowing each other down.
 // See docs/testing.md.
-import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -50,6 +50,40 @@ export function takeSlot({ dir = tmpdir(), slots = Number(process.env.SWITCHBOAR
 }
 
 function tryLock(path, pid, alive, now) {
+  if (create(path, pid)) return true;
+
+  const holder = owner(path);
+  const stale = (seen) => (seen === null ? age(path, now) > EMPTY_MS : !alive(seen) || age(path, now) > HELD_MS);
+
+  if (!stale(holder)) return false;
+
+  // One waiter at a time removes a stale lock, under a recovery lock, after checking it is still the stale lock it
+  // saw; a recovery lock left by a killed waiter is removed after EMPTY_MS.
+  const recovery = `${path}.takeover`;
+
+  if (age(recovery, now) > EMPTY_MS) rmSync(recovery, { force: true });
+
+  try {
+    closeSync(openSync(recovery, 'wx'));
+  } catch (error) {
+    if (error.code === 'EEXIST') return false;
+    throw error;
+  }
+
+  try {
+    const current = owner(path);
+
+    if (current !== holder || !stale(current)) return false;
+    rmSync(path, { force: true });
+  } finally {
+    rmSync(recovery, { force: true });
+  }
+
+  return create(path, pid);
+}
+
+/** Makes `path` holding `pid`, or answers false when it exists. */
+function create(path, pid) {
   try {
     const fd = openSync(path, 'wx');
 
@@ -57,32 +91,9 @@ function tryLock(path, pid, alive, now) {
     closeSync(fd);
     return true;
   } catch (error) {
-    if (error.code !== 'EEXIST') throw error;
+    if (error.code === 'EEXIST') return false;
+    throw error;
   }
-
-  const holder = owner(path);
-
-  if (holder === null ? age(path, now) > EMPTY_MS : !alive(holder) || age(path, now) > HELD_MS) {
-    // Moved aside first, so of two waiters that saw the same stale lock only one takes it; one that moved another's
-    // new lock puts it back.
-    const aside = `${path}.${pid}.stale`;
-
-    try {
-      renameSync(path, aside);
-    } catch {
-      return false;
-    }
-
-    if (owner(aside) !== holder) {
-      try { renameSync(aside, path); } catch { /* Its holder frees its slot by removing a file that is gone; it ends either way. */ }
-      return false;
-    }
-
-    rmSync(aside, { force: true });
-    return tryLock(path, pid, () => true, now);
-  }
-
-  return false;
 }
 
 /** Milliseconds since `path` last changed, or 0 when it is gone. */

@@ -86,6 +86,22 @@ describe('takeSlot', () => {
     expect(readdirSync(dir)).toEqual(['switchboard-check-1.lock']);
   });
 
+  it('TakeSlot_StaleLockWhileAnotherWaiterTakesItOver_LeavesItUntilTheRecoveryLockIsOld', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'slot-'));
+    const lock = join(dir, 'switchboard-check-1.lock');
+    const recovery = `${lock}.takeover`;
+    const naps: number[] = [];
+    let clock = Date.now();
+
+    writeFileSync(lock, '777');
+    writeFileSync(recovery, '');
+    // Another waiter's takeover for 12 s: its recovery lock is old after 10 s, and is removed then.
+    takeSlot({ dir, env: {}, pid: 888, alive: () => false, sleep: (ms: number) => { naps.push(ms); clock += 6000; }, log: () => {}, now: () => clock });
+    expect(naps).toEqual([1000, 1000]);
+    expect(readFileSync(lock, 'utf8')).toBe('888');
+    expect(readdirSync(dir)).toEqual(['switchboard-check-1.lock']);
+  });
+
   it('TakeSlot_TwoSlots_TakesTheSecondWhileTheFirstIsHeld', () => {
     const dir = mkdtempSync(join(tmpdir(), 'slot-'));
 
