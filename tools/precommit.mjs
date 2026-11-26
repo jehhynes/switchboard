@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Pre-commit checks for the staged files. See docs/testing.md.
 //
-// Runs build, typecheck and tests only for the workspaces the staged files
-// touch and the workspaces that depend on them; dependencies of those are
+// Runs build, typecheck and tests, without coverage, only for the workspaces the
+// staged files touch and the workspaces that depend on them; dependencies of those are
 // built first, because tests run built bundles. A staged file outside every
 // workspace runs the full `npm run verify`. Markdown and text files need no
 // checks. The full suite runs before a merge into main, not here.
@@ -87,7 +87,8 @@ for (let grew = true; grew; ) {
 
 const flags = (set, script) => workspaces.filter((w) => set.has(w.name) && w.scripts[script]).flatMap((w) => ['--workspace', w.name]);
 console.log(`pre-commit: checking ${[...affected].join(', ')}`);
-for (const [script, set] of [['build', toBuild], ['typecheck', affected], ['test', affected]]) {
+// Tests run without coverage: its thresholds are checked by the full verify before a merge.
+for (const [script, set, extra] of [['build', toBuild, []], ['typecheck', affected, []], ['test', affected, ['--', '--coverage.enabled=false']]]) {
   const f = flags(set, script);
-  if (f.length > 0) run(['run', script, ...f]);
+  if (f.length > 0) run(['run', script, ...f, ...extra]);
 }
