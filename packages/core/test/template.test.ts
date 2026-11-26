@@ -70,7 +70,14 @@ describe('renderTaskPrompt, sessionPrompt and sessionContract', () => {
   });
 
   it('does not list the task report a session may send, so only the operator starts one (PRD R68)', () => {
-    expect(sessionContract('s-4', 'R', ['stage', 'link', 'task'], 'claude')).toBe(sessionContract('s-4', 'R', ['stage', 'link'], 'claude'));
+    const contract = sessionContract('s-4', 'R', ['stage', 'link', 'task'], 'claude');
+
+    expect(contract.split('\n').filter((line) => line.startsWith('- R '))).toEqual([
+      '- R stage s-4 <headline>, when you start a new phase of the work between tool calls: it sets the headline of your state, which the list of work items shows.',
+      '- R link s-4 --label <text> --target <url>, for each GitHub issue or pull request that tracks or delivers this work, such as one you create, but not a related, base or parent one.',
+      "- R handled s-4 <ticket url> [--release <assignment key>], only when a skill directs it: register another ticket's current assignment as already handled before publishing it to the work queue; save the returned assignment key for an explicit release.",
+    ]);
+    expect(contract).not.toContain('task');
   });
 });
 
