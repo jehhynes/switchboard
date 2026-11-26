@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Exec } from '@switchboard/claude';
+import { CodexRunner } from '@switchboard/codex';
 import { Store } from '@switchboard/core';
+import type { SessionRunner } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { windowOf, windowsDir } from '../src/dock.js';
@@ -12,6 +14,7 @@ import type { Snapshot } from '../src/snapshot.js';
 import { gitBashRoot, handledBody, isPastePath, registerTitle, reportBody, ticketBody } from '../src/report.js';
 import { tempHome, until } from './helpers.js';
 import type { HubApp } from '../src/serve.js';
+import type { RuntimeDeps } from '../src/runtime.js';
 
 /** A page's source icon, which turns a source on or off as the list header posts it. */
 const toggleSource = (app: HubApp, body: Record<string, unknown>) => app.post['/v1/conversation/page-source']!({ window: app.page!.opened(false), ...body });
@@ -45,6 +48,25 @@ const noCli: Exec = async (file, args) => {
 
   throw new Error(`unexpected call ${file} ${args.join(' ')}`);
 };
+
+/**
+ * Stand-ins for the Codex runners: an app-server start gives the session a thread at once, and the hooks' trust exchange answers trusted, so no
+ * test starts a real `codex` (testing.md § Codex app-server).
+ */
+function fakeCodex(): NonNullable<RuntimeDeps['runners']> {
+  const codexAppServer: SessionRunner = {
+    start: async (action) => ({ shortId: `${action.sessionId}-thread`, nativeSessionId: `${action.sessionId}-thread` }),
+    observe: async (sessions) => ({ sessions: sessions.filter((session) => session.state !== 'ended').map((session) => ({ sessionId: session.id, state: 'running' as const, detail: null })) }),
+    markers: () => new Map(),
+    isBackground: async () => true,
+    stop: async () => null,
+    reconcile: async () => [],
+    installHooks: async () => null,
+  };
+  const codex = new CodexRunner({ codexPath: () => 'codex', nodePath: () => 'node', home: join(temp.home, '.switchboard'), codexHome: join(temp.home, '.codex'), env: {}, trust: async () => null });
+
+  return { codexAppServer, codex };
+}
 
 function writeSettings(settings: unknown): void {
   mkdirSync(join(temp.home, '.switchboard'), { recursive: true });
@@ -279,7 +301,8 @@ describe('loadConfig', () => {
 
 describe('createHubApp', () => {
   async function start(log: (line: string) => void = () => {}) {
-    const app = await createHubApp({ home: temp.home, log, deps: { exec: noCli } });
+    // A settings file the hub cannot use leaves the default installHooks on, so the Codex hooks' trust exchange is stubbed too.
+    const app = await createHubApp({ home: temp.home, log, deps: { exec: noCli, runners: { codex: fakeCodex().codex! } } });
     closers.push(() => app.close());
 
     return app;
@@ -893,7 +916,7 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { provider: 'codex' }, sources: { adhoc: { repoRoot: temp.home } } });
     const other = join(temp.home, 'other');
     mkdirSync(other, { recursive: true });
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, runners: fakeCodex() } });
     closers.push(() => app.close());
     const page = app.page!.opened();
     const first = await app.post['/v1/conversation/page-new-session']!({ window: page, opId: 'one', folder: temp.home, provider: 'codex', model: 'gpt-6.2-sol' });
@@ -917,7 +940,7 @@ describe('createHubApp', () => {
 
   it("starts the page's New conversation… as a new session of the work item it shows, keeping the earlier one (architecture.md § Web page)", async () => {
     writeSettings({ sessions: { provider: 'codex' }, sources: { adhoc: { repoRoot: temp.home } } });
-    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
+    const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli, runners: fakeCodex() } });
     closers.push(() => app.close());
     const page = app.page!.opened();
 
