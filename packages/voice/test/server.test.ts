@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VoiceClient } from '../src/client.js';
 import { encode, LineReader, parseHubMessage, parseVoiceMessage, PROTOCOL } from '../src/protocol.js';
 import type { HubMessage } from '../src/protocol.js';
@@ -32,11 +32,8 @@ async function start() {
   return { server, port: await server.listen(), received, connected, shutdowns: () => shutdowns };
 }
 
-const until = async (test: () => boolean): Promise<void> => {
-  for (let index = 0; index < 200 && !test(); index++) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-};
+/** Waits until `test` holds, within the test's own timeout, failing the test if it never does. */
+const until = (test: () => boolean): Promise<void> => vi.waitFor(() => expect(test()).toBe(true), { timeout: 4_500, interval: 5 });
 
 describe('voice server and client', () => {
   it('welcomes a hub with the token, greets it, takes its messages, and lets a new hub replace it', async () => {

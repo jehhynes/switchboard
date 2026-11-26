@@ -86,7 +86,7 @@ describe('Tts', () => {
     expect(sockets[0]!.sent[0]).toMatchObject({ type: 'session.update', session: { model: TTS_MODEL, instructions: READING, audio: { output: { voice: 'cedar', speed: 1.25, format: { type: 'audio/pcm', rate: 24000 } } } } });
     expect(sockets[0]!.sent[1]).toMatchObject({
       type: 'response.create',
-      response: { conversation: 'none', instructions: instructions('deadpan', null, false), input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Fixed it.' }] }] },
+      response: { conversation: 'none', instructions: `${READING} Sound dry and understated: low energy, with minimal emphasis.`, input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Fixed it.' }] }] },
     });
     sockets[0]!.event({ type: 'response.output_audio.delta', delta: Buffer.alloc(480).toString('base64') });
     sockets[0]!.event({ type: 'response.done', response: { status: 'completed' } });
