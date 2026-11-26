@@ -2952,7 +2952,7 @@ describe('the page in use', () => {
     again.page.close();
   });
 
-  it("shows History as a tab of the column after Status only once the Actions menu opens it, with Console last, and an artifact's tab replaces it", () => {
+  it("shows History as a tab of the column after Changes only once the Actions menu opens it, with Console last, and an artifact's tab replaces it", () => {
     window.innerWidth = 1920;
     history.replaceState(null, '', '#w=1');
     onTestFinished(() => {
@@ -2964,16 +2964,16 @@ describe('the page in use', () => {
 
     // History is in the strip whether or not the row offers the ticket's History.
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
-    expect(tabs()).toEqual(['History', 'Changes', 'Console']);
+    expect(tabs()).toEqual(['Changes', 'History', 'Console']);
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
     source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
-    // Console follows Changes, before the maximize button.
-    expect(tabs()).toEqual(['History', 'Changes', 'Console']);
+    // Console comes last, before the maximize button.
+    expect(tabs()).toEqual(['Changes', 'History', 'Console']);
     expect(root.querySelector('#detail .side-switch > :last-child')?.classList.contains('panel-max')).toBe(true);
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/new.md"]')).not.toBeNull();
     click('[data-action="actions"]');
     click('.actions-menu [data-action="row-history"]');
-    expect(tabs()).toEqual(['History', 'Changes', 'Console']);
+    expect(tabs()).toEqual(['Changes', 'History', 'Console']);
     expect(root.querySelector('.actions-menu')).toBeNull();
     expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(root.querySelector('#detail [data-side="history"]'));
@@ -2997,7 +2997,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('fits the tabs to the strip, keeping the chosen one and Status, and lists the rest in More, every tab reachable through it', async () => {
+  it('fits the tabs to the strip, keeping the chosen one, Changes and History, and lists the rest in More, every tab reachable through it', async () => {
     window.innerWidth = 1920;
     onTestFinished(() => {
       vi.unstubAllGlobals();
@@ -3020,28 +3020,30 @@ describe('the page in use', () => {
     expect(root.querySelector('#detail .tab-more')).toBeNull();
 
     // A 400 px strip. jsdom draws every tab 0 wide, so each measures as its 44 px least label alone, and More as page.css's 71 px: 329 px keep
-    // seven tabs, Console chosen, Status, then the five newest artifacts.
+    // seven tabs, Console chosen, Changes, History, then the four newest artifacts.
     const narrow = vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 400 } as DOMRect);
 
     click('#detail [data-side="console"]');
-    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md']);
+    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md']);
+    expect(root.querySelector('#detail .side-switch > .changes-tab')).not.toBeNull();
     expect(root.querySelector('#detail .side-switch > [data-side="history"]')).not.toBeNull();
     expect(root.querySelector('#detail .tab-more-button .tab-badge')!.textContent).toBe('6');
 
-    // More lists the rest in strip order: the older artifacts, then Changes; picking one chooses it, closes the menu, and gives it a tab in place
-    // of Console, which More now holds.
+    // More lists the rest in strip order, the older artifacts; picking one chooses it, closes the menu, and gives it a tab in place of Console,
+    // which More now holds.
     click('#detail [data-action="tab-menu"]');
-    expect(menuRows().slice(0, 3).map((row) => row.dataset['path'])).toEqual(['chat/a2.md', 'chat/a1.md', 'chat/a0.md']);
-    expect(menuRows().at(-1)!.dataset['action']).toBe('diff-tab');
+    expect(menuRows().slice(0, 4).map((row) => row.dataset['path'])).toEqual(['chat/a3.md', 'chat/a2.md', 'chat/a1.md', 'chat/a0.md']);
+    expect(root.querySelector('#detail .tab-menu [data-action="diff-tab"]')).toBeNull();
     expect(menuRows()).toHaveLength(6);
     click('#detail .tab-menu [data-path="chat/a1.md"]');
     expect(root.querySelector('#detail .tab-menu')).toBeNull();
-    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a3.md', 'chat/a1.md']);
+    expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md', 'chat/a1.md']);
     expect(selected()!.dataset['path']).toBe('chat/a1.md');
     expect(root.querySelector('#detail .side-switch > [data-side="console"]')).toBeNull();
 
-    // Console and Changes are reached through More too.
+    // Console is reached through More too, and so is Changes in a strip with room for the chosen tab alone.
     click('#detail [data-action="tab-menu"]');
+    narrow.mockReturnValue({ width: 115 } as DOMRect);
     click('#detail .tab-menu [data-side="console"]');
     expect(selected()!.dataset['side']).toBe('console');
     expect(root.querySelector('#detail .tab-menu')).toBeNull();
@@ -3050,6 +3052,7 @@ describe('the page in use', () => {
     click('#detail .tab-menu [data-action="diff-tab"]');
     expect(root.querySelector('#detail .changes-tab.selected')).not.toBeNull();
     expect(root.querySelector('#detail .tab-menu')).toBeNull();
+    narrow.mockReturnValue({ width: 400 } as DOMRect);
 
     // Up and Down move through the menu's rows; Escape closes it and gives the focus back to More; so does a press elsewhere.
     click('#detail [data-action="tab-menu"]');
@@ -3071,14 +3074,14 @@ describe('the page in use', () => {
     root.querySelector('#panel')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     expect(root.querySelector('#detail .tab-menu')).toBeNull();
 
-    // A narrower strip keeps the chosen tab and Status, the rest going into More.
+    // A narrower strip keeps the chosen tab and Changes, the rest going into More.
     click('#detail [data-action="tab-menu"]');
     click('#detail .tab-menu [data-path="chat/a1.md"]');
     narrow.mockReturnValue({ width: 200 } as DOMRect);
     click('#detail .artifact-tab[data-path="chat/a1.md"] .tab-open');
     expect(paths()).toEqual(['chat/a1.md']);
     expect(selected()!.dataset['path']).toBe('chat/a1.md');
-    expect([...root.querySelectorAll<HTMLElement>('#detail .side-switch > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(['history', 'artifact:chat/a1.md']);
+    expect([...root.querySelectorAll<HTMLElement>('#detail .side-switch > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(['changes', 'artifact:chat/a1.md']);
     narrow.mockReturnValue({ width: 400 } as DOMRect);
     click('#detail .artifact-tab[data-path="chat/a1.md"] .tab-open');
 
@@ -3091,7 +3094,7 @@ describe('the page in use', () => {
     strip()[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     expect((document.activeElement as HTMLElement).closest<HTMLElement>('.artifact-tab')!.dataset['path']).toBe('chat/a1.md');
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-    expect((document.activeElement as HTMLElement).closest<HTMLElement>('.artifact-tab')!.dataset['path']).toBe('chat/a3.md');
+    expect((document.activeElement as HTMLElement).closest<HTMLElement>('.artifact-tab')!.dataset['path']).toBe('chat/a4.md');
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(strip()[0]);
@@ -3186,23 +3189,24 @@ describe('the page in use', () => {
     const shown = () => [...root.querySelectorAll<HTMLElement>('#detail .tabs > [data-id]')].map((tab) => tab.dataset['id']);
     const redraw = () => click('#detail [data-side="history"]');
 
-    // 600 px at 14 px padding: Status (95 px) and three artifacts (113 px each) beside More (71 px); the rest, hidden, were measured at 113 px.
+    // 600 px at 14 px padding: Changes (139 px), History (95 px) and two artifacts (113 px each) beside More (71 px); the rest, hidden, were
+    // measured at 113 px.
     redraw();
-    expect(shown()).toEqual(['history', 'artifact:chat/a7.md', 'artifact:chat/a6.md', 'artifact:chat/a5.md']);
-    // 472 px takes 9 px padding: Status 85 px, More 61 px and 108 px an artifact leave 326 px, three artifacts' room. With a7 closed, a4 fits at
-    // 108 px, which a measure kept from 14 px padding would hide.
-    strip = 472;
+    expect(shown()).toEqual(['changes', 'history', 'artifact:chat/a7.md', 'artifact:chat/a6.md']);
+    // 385 px takes 9 px padding: Changes 129 px, History 85 px and More 61 px leave 110 px, one artifact's room at 108 px. With a7 closed, a6
+    // fits at 108 px, which a measure kept from 14 px padding would hide.
+    strip = 385;
     pad = 9;
     redraw();
-    expect(shown()).toEqual(['history', 'artifact:chat/a7.md', 'artifact:chat/a6.md', 'artifact:chat/a5.md']);
+    expect(shown()).toEqual(['changes', 'history', 'artifact:chat/a7.md']);
     root.querySelector<HTMLElement>('#detail .artifact-tab[data-path="chat/a7.md"] .tab-close')!.click();
-    expect(shown()).toEqual(['history', 'artifact:chat/a6.md', 'artifact:chat/a5.md', 'artifact:chat/a4.md']);
-    // Back to 14 px padding at 615 px: 449 px less Status leaves room for three artifacts at 113 px, not a fourth that a measure kept from 9 px
-    // padding (108 px) would let in.
-    strip = 615;
+    expect(shown()).toEqual(['changes', 'history', 'artifact:chat/a6.md']);
+    // Back to 14 px padding at 750 px: Changes, History and More leave 445 px, room for three artifacts at 113 px, not for a fourth that
+    // measures kept from 9 px padding (Changes 129 px, History 85 px, a6 108 px) would let in.
+    strip = 750;
     pad = 14;
     redraw();
-    expect(shown()).toEqual(['history', 'artifact:chat/a6.md', 'artifact:chat/a5.md', 'artifact:chat/a4.md']);
+    expect(shown()).toEqual(['changes', 'history', 'artifact:chat/a6.md', 'artifact:chat/a5.md', 'artifact:chat/a4.md']);
     page.close();
   });
 
@@ -4296,7 +4300,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click('#panel a.path-link[data-target="src/b.ts"]');
     await flush();
     click('#detail .local-tab [data-action="local-tab"]');
-    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['history', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'changes', 'console']);
+    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['changes', 'history', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'console']);
     expect(shown()).toBe('file:src/a.ts');
 
     // Closing a tab not shown changes nothing else, a file's or an artifact's.
@@ -7758,7 +7762,8 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     answers['/v1/conversation/changes'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } };
 
     const { page, source } = start();
-    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?')).length;
+    // The list's reads; the tree reads the uncommitted changes beside it.
+    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?') && !post.url.endsWith('&from=HEAD&to=worktree')).length;
 
     hello(source);
     click('#head [data-action="diff-tab"]');
@@ -7914,7 +7919,8 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     // The Changes tab, kept through a reconnect, reads its list again once the new stream shows the work item.
     answers['/v1/conversation/changes'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } };
     click('#head [data-action="diff-tab"]');
-    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?')).length;
+    // The list's reads; the tree reads the uncommitted changes beside it.
+    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?') && !post.url.endsWith('&from=HEAD&to=worktree')).length;
     const before = reads();
 
     expect(before).toBeGreaterThan(0);
@@ -8914,10 +8920,11 @@ describe("the list's CSS", () => {
     expect(css).not.toMatch(/row-links-(box|shown|fit)|@container row-links/);
     expect(declarationsOf((each) => each.startsWith('.row-line .row-links')).join(' ')).not.toMatch(/ellipsis/);
     expect(declarationsOf((each) => each === '.row-line .pill.ticket.source-github')).toEqual(['border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent);']);
-    // Marks in the foreground, Failed in the error colour; the muted texts in the list's grey, #717171 in Light Modern.
+    // Marks in the foreground, Failed in the error colour; the muted texts in the theme's description colour, in both schemes.
     expect(one('.row-details .mark')).toBe('font-size: 14px;');
     expect(declarationsOf((each) => each === '.row-details .mark.failed')).toEqual(['color: var(--vscode-testing-iconFailed);']);
-    expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-muted: #717171;/);
+    expect(css).toMatch(/^:root \{[^}]*--sb-row-muted: var\(--vscode-descriptionForeground\);/m);
+    expect(css).not.toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-muted/);
     expect(one('.row-time')).toContain('color: var(--sb-row-muted)');
   });
 
@@ -8990,7 +8997,7 @@ describe("the list's CSS", () => {
     expect(head).toContain('min-height: var(--group-head-height)');
     // Mixed with the list's background, never with transparent, so rows do not show through.
     for (const rule of [head, declarationsOf((selector) => selector === '.group-head:hover').join(' ')]) {
-      expect(rule).toMatch(/background: color-mix\(in srgb, var\(--vscode-focusBorder\) \d+%, var\(--vscode-sideBar-background\)\)/);
+      expect(rule).toMatch(/background: color-mix\(in srgb, var\(--vscode-focusBorder\) \d+%, var\(--sb-content\)\)/);
     }
     // A margin outside the section would unpin the header 8 px before the next one arrives.
     expect(declarationsOf((selector) => selector === '.group')).toEqual([]);

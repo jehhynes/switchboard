@@ -213,13 +213,14 @@ describe('the label beside an icon', () => {
 describe("Claude's provider mark", () => {
   const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => selector!.includes('[aria-label="Claude"]')).map(([, selector, body]) => [selector!.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^.*@media[^{]*\{/s, '').trim(), body!.trim()]);
 
-  it('ClaudeMark_AnyContext_HasNoBackgroundAndTakesTheTextColourWhereOrangeLacksContrast', () => {
+  it('ClaudeMark_AnyContext_HasNoBackgroundStaysOrangeInBothSchemesAndTakesTheTextColourOnlyOnAPressedButton', () => {
     expect(rules).toEqual([
       [':is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: #D97757;'],
       ['[aria-pressed="true"] :is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: inherit;'],
-      [':is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: inherit;'],
+      [':is(.provider, .provider-option-mark)[aria-label="Claude"]', 'color: #C96442;'],
     ]);
-    expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{ :is\(\.provider, \.provider-option-mark\)\[aria-label="Claude"\] \{ color: inherit; \} \}/);
+    // Light's darker orange is in the light scheme only; the pressed rule's attribute outranks it there.
+    expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{ :is\(\.provider, \.provider-option-mark\)\[aria-label="Claude"\] \{ color: #C96442; \} \}/);
   });
 
   it('ClaudeMark_HoveredOrFocusedMenuRow_KeepsItsColour', () => {

@@ -479,7 +479,7 @@ describe("the page's History tab in use", () => {
     }
   });
 
-  it("puts History in a phone's one tab strip once the menu opens it, after the conversation's fixed tabs, and Console after Changes", async () => {
+  it("puts History in a phone's one tab strip after Conversation and Changes, selected once the menu opens it", async () => {
     vi.stubGlobal('innerWidth', 390);
     vi.useFakeTimers();
     answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
@@ -489,9 +489,9 @@ describe("the page's History tab in use", () => {
     expect(document.documentElement.classList.contains('phone')).toBe(true);
     const tabs = () => [...root.querySelectorAll('#head .tabs > .tab')].map((one) => one.textContent);
 
-    expect(tabs()).toEqual(['Conversation', 'History', 'Changes']);
+    expect(tabs()).toEqual(['Conversation', 'Changes', 'History']);
     openFromMenu();
-    expect(tabs()).toEqual(['Conversation', 'History', 'Changes']);
+    expect(tabs()).toEqual(['Conversation', 'Changes', 'History']);
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     await flush();
     expect(root.querySelector('#panel.history-pane .history-view h1')?.textContent).toBe('Inbox <badge>');

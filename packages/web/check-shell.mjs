@@ -299,6 +299,9 @@ const measure = `(() => {
       return {
         tabs: tabs.length,
         more: strip.querySelector('.tab-more') !== null,
+        // Whether History shows, and how many artifact tabs show besides the one chosen: the tabs whose unread dots the tabs view expects.
+        history: tabs.some((tab) => tab.dataset.id === 'history'),
+        artifacts: tabs.filter((tab) => (tab.dataset.id ?? '').startsWith('artifact:') && !tab.classList.contains('selected') && tab.querySelector('[aria-selected="true"]') === null).length,
         cut: [...strip.querySelectorAll('.tab-label')].filter((label) => !shown(label) || label.getBoundingClientRect().width < Math.min(43.5, label.scrollWidth - 0.5)).map((label) => label.textContent),
         past: tabs.filter((tab) => { const box = tab.getBoundingClientRect(); return box.left < edge.left - 0.5 || box.right > edge.right + 0.5; }).map(name),
         // Each unread dot of a tab: where it lies against its label, its tab and its close mark, and whether hiding it changes the tab's width.
@@ -571,11 +574,11 @@ function failures(view, size, m) {
     if (one.close !== null && one.dot.right > one.close.left - 0.5 && one.dot.left < one.close.right + 0.5 && one.dot.bottom > one.close.top - 0.5 && one.dot.top < one.close.bottom + 0.5) out.push(where + ' covers its close mark');
     if (Math.abs(one.widthChange) > 0.5) out.push(where + ' changes its tab\'s or label\'s width by ' + one.widthChange + ' px');
   }
-  // The tabs view's state and artifacts are unread: History's dot, a tab without a close mark, shows at every size, and an artifact's, with a
-  // close mark, cut or not, wherever the strip has room for an artifact tab besides the one shown.
+  // The tabs view's state and artifacts are unread: History's dot, a tab without a close mark, shows wherever History has room after Changes,
+  // and an artifact's, with a close mark, cut or not, wherever the strip has room for an artifact tab besides the one shown.
   if (view === 'tabs') {
-    if (!dots.some((one) => !one.closable)) out.push('no unread dot on a tab without a close mark');
-    if (!(size.phone && size.orientation === 'portrait') && !dots.some((one) => one.closable)) out.push('no unread dot on an artifact tab');
+    if (m.strips.some((strip) => strip.history) && !dots.some((one) => !one.closable)) out.push('no unread dot on a tab without a close mark');
+    if (m.strips.some((strip) => strip.artifacts > 0) && !dots.some((one) => one.closable)) out.push('no unread dot on an artifact tab');
     if (size.device === 'ipad' && !(dots.some((one) => one.closable && one.cut) && dots.some((one) => one.closable && !one.cut))) out.push('no unread dot on both a cut and a whole artifact title');
   }
   // The tabs view's strip has more tabs than fit, so More holds the rest.

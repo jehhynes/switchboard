@@ -6,12 +6,14 @@ import { FileIcon } from './fileIcons.js';
 
 export { linkTarget, localFileUrl } from './localLinks.js';
 export type { LocalFileData } from './localLinks.js';
-import { mount } from './island.js';
 import { linkTarget, localFileUrl, localMarkdown } from './localLinks.js';
 import type { LocalFileData } from './localLinks.js';
-import { trusted } from './trusted.js';
 import { readVersion } from './readVersion.js';
-import type { DiffModule, FileMount } from './diff/types.js';
+import type { DiffModule } from './diff/types.js';
+import { CodeDraw, FileBody, WrapButton } from './fileView.js';
+import { diffLayout } from './changes.js';
+import type { DiffLayout, DiffWrap } from './changes.js';
+import { keepWrap, storedWrap } from './wrapPref.js';
 import { filePath } from './tabs.js';
 
 type LocalEntry = { state: 'loading' } | { state: 'ok'; data: LocalFileData; version: string; etag: string | null } | { state: 'error'; error: string };
@@ -102,6 +104,8 @@ export interface LocalFilesDeps {
   inView(): boolean;
   /** What the page shows: its page key and scope generation, so an answer read for an earlier one, as before a reconnect or a change of session, is dropped. */
   shown(): string;
+  /** The diff viewer's layout and wrapping, from the settings (`web.diffLayout`, `web.diffWrap`), which a code tab's Wrap follows until this device toggles it. */
+  diffSettings?(): { layout: DiffLayout; wrap: DiffWrap };
 }
 
 /** The page's side of local file links: opens and closes their tabs, reads each file from the hub and draws the one shown. */
@@ -109,17 +113,18 @@ export class LocalFilesController {
   readonly view: LocalFilesView = { tabs: [], open: null };
   #for: string | null = null;
   #ids = 0;
-  #module: Promise<DiffModule | null> | null = null;
   /** The tabs a restore put back, until the operator opens one, whose giving way to an artifact is no choice of the operator's. */
   readonly #restored = new WeakSet<LocalTab>();
-  /** The file view on each host it draws into, dropped once its host leaves the page. */
-  readonly #mounted = new Map<HTMLElement, FileMount | null>();
+  /** The file views it draws code into, each dropped once its host leaves the page. */
+  readonly #code: CodeDraw;
   /** The tabs being read, so a tab is never read twice at once. */
   readonly #reading = new Set<LocalTab>();
   /** The tabs asked to be read again while a read was on its way: that read's answer is dropped and the tab read again at once. */
   readonly #newer = new WeakSet<LocalTab>();
 
-  constructor(private readonly deps: LocalFilesDeps) {}
+  constructor(private readonly deps: LocalFilesDeps) {
+    this.#code = new CodeDraw({ loadDiff: () => deps.loadDiff(), takePane: (pane) => deps.takePane(pane) });
+  }
 
   /** Follows the page's work item (`followed` in main.ts): another one closes every file tab; a new session of the same one does not. */
   follow(id: string | null): void {
@@ -353,6 +358,13 @@ export class LocalFilesController {
       return true;
     }
 
+    if (action === 'file-wrap') {
+      // The opposite of what the tab shows, kept on this device for the Changes tab's diffs too.
+      keepWrap(this.#wrapped(target.closest<HTMLElement>('.diff-pane')) ? 'off' : 'on');
+      this.deps.draw();
+      return true;
+    }
+
     if (action === 'local-entry') {
       this.deps.openDoc(`file:${button!.dataset['path'] ?? ''}`, null);
       return true;
@@ -382,74 +394,22 @@ export class LocalFilesController {
     this.deps.drawDiagrams(pane);
   }
 
+  /** Whether a code tab's long lines wrap in `pane`: this device's Wrap choice, else `web.diffWrap`, as the Changes tab's file view decides. */
+  #wrapped(pane: HTMLElement | null): boolean {
+    const settings = this.deps.diffSettings?.() ?? { layout: 'auto', wrap: 'off' };
+
+    return diffLayout(settings.layout, storedWrap() ?? settings.wrap, pane?.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0)).wrap;
+  }
+
   #drawCode(pane: HTMLElement, tab: LocalTab, data: LocalFileData, version: string): void {
-    const place = `${tab.id}\u0000${tab.line ?? ''}`;
-    const id = `${place}\u0000${version}`;
-    let view = pane.querySelector<HTMLElement>(':scope > .diff-view.local-code');
+    const wrap = this.#wrapped(pane);
 
-    if (view?.dataset['local'] === id) {
-      return;
-    }
-
-    // A new version of the file shown replaces its text in the view, which keeps where it is scrolled to.
-    const shown = view?.dataset['place'] === place ? view.querySelector<HTMLElement>(':scope > .diff-host') : null;
-    const mounted = shown === null ? undefined : this.#mounted.get(shown);
-
-    if (view != null && mounted != null) {
-      mounted.update(data.contents ?? '', version);
-      view.dataset['local'] = id;
-      return;
-    }
-
-    this.deps.takePane(pane);
-    view = document.createElement('div');
-    view.className = 'diff-view local-code';
-    view.dataset['local'] = id;
-    view.dataset['place'] = place;
-
-    const host = document.createElement('div');
-    const suffix = document.createElement('span');
-    const say = (text: string): void => {
-      const line = document.createElement('p');
-
-      line.className = 'empty';
-      line.textContent = text;
-      host.replaceChildren(line);
-    };
-
-    suffix.className = 'diff-slot';
-    host.className = 'diff-host file-view';
-    view.append(host);
-    pane.replaceChildren(view);
-    this.drop();
-    mount(suffix, tab.line === null ? null : <span class="diff-at">:{tab.line}</span>);
-    this.#mounted.set(host, null);
-    say('Loading the file viewer…');
-    this.#module ??= this.deps.loadDiff();
-    void this.#module.then((module) => {
-      if (!this.#mounted.has(host) || !host.isConnected) {
-        return;
-      }
-
-      if (module === null) {
-        this.#module = null;
-        say('The file viewer could not be loaded. Reload the page to try again.');
-        return;
-      }
-
-      host.replaceChildren();
-      this.#mounted.set(host, module.mountFile(host, { path: data.path, side: 'disk', contents: data.contents, binary: false, tooLarge: false }, version, { wrap: false, line: tab.line, suffix }));
-    });
+    this.#code.draw(pane, { place: `${tab.id}\u0000${tab.line ?? ''}`, version, path: data.path, contents: data.contents ?? '', line: tab.line, wrap, suffix: tab.line === null ? null : <span class="diff-at">:{tab.line}</span>, meta: <WrapButton wrapped={wrap} action="file-wrap" /> }, 'diff-view local-code');
   }
 
   /** Ends the file views whose host has left the page, or every one with `all`. */
   drop(all = false): void {
-    for (const [host, mounted] of this.#mounted) {
-      if (all || !host.isConnected) {
-        this.#mounted.delete(host);
-        mounted?.dispose();
-      }
-    }
+    this.#code.drop(all);
   }
 }
 
@@ -482,12 +442,10 @@ function LocalView({ tab, note, pageKey }: { tab: LocalTab; note: string | null;
         {data.more ? <li class="empty">Only the first {data.entries?.length} entries are listed.</li> : null}
       </ul>
     );
-  } else if (data.kind === 'image') {
-    body = <img class="media" alt={data.name} src={rawUrl(pageKey, data)} />;
-  } else if (data.kind === 'pdf') {
-    body = <iframe class="artifact-frame artifact-pdf" referrerpolicy="no-referrer" src={rawUrl(pageKey, data)} title={data.name}></iframe>;
+  } else if (data.kind === 'image' || data.kind === 'pdf') {
+    body = <FileBody kind={data.kind} name={data.name} rawUrl={rawUrl(pageKey, data)} />;
   } else {
-    body = <div class="artifact-doc md-doc body">{trusted(localMarkdown(pageKey, data))}</div>;
+    body = <FileBody kind="markdown" name={data.name} html={localMarkdown(pageKey, data)} />;
   }
 
   return (

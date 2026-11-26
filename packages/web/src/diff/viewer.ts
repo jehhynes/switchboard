@@ -1,35 +1,61 @@
 // The diff viewer (PRD R118, architecture.md § Web page), built as its own ES modules (build.mjs) that the page imports the first time a diff
 // or a file shows, so nothing of it slows the page's first load: @pierre/diffs' CodeView over git's patch with both whole sides, so folded
-// unchanged regions expand, highlighted by Shiki in a pool of workers with VS Code's Dark Modern and Light Modern colours.
+// unchanged regions expand, highlighted by Shiki in a pool of workers with VS Code's 2026 Dark and 2026 Light colours (themes/, each theme resolved
+// with the themes it includes).
 import { CodeView, processFile, registerCustomTheme } from '@pierre/diffs';
 import type { CodeViewDiffItem, CodeViewItem, CodeViewOptions, FileDiffMetadata } from '@pierre/diffs';
 import { getOrCreateWorkerPoolSingleton } from '@pierre/diffs/worker';
 import type { WorkerPoolManager } from '@pierre/diffs/worker';
 import { largeReason } from '../changesWindow.js';
-import type { ChangesMount, ChangesMountOptions, ChangesRowInput, DiffData, DiffMount, DiffMountOptions, FileData, FileMount, FileMountOptions, RowContent } from './types.js';
+import type { ChangesMount, ChangesMountOptions, ChangesRowInput, DiffData, DiffMount, DiffMountOptions, FileData, FileMount, FileMountOptions, LineRange, RowContent } from './types.js';
 
-registerCustomTheme('sb-dark-modern', () => import('./themes/sb-dark-modern.json').then((module) => module.default as never));
-registerCustomTheme('sb-light-modern', () => import('./themes/sb-light-modern.json').then((module) => module.default as never));
+registerCustomTheme('sb-dark-2026', () => import('./themes/sb-dark-2026.json').then((module) => module.default as never));
+registerCustomTheme('sb-light-2026', () => import('./themes/sb-light-2026.json').then((module) => module.default as never));
 
-const THEME = { dark: 'sb-dark-modern', light: 'sb-light-modern' } as const;
+const THEME = { dark: 'sb-dark-2026', light: 'sb-light-2026' } as const;
 /**
- * The page's editor background under the code, its gutters and the file's header in both schemes, in place of the theme's own, so the viewer
- * matches the page around it; Pierre's `unsafe` layer comes after the theme's.
+ * The page's content background (page.css's `--sb-content`, else the editor's) under the code, its gutters and the file's header in both
+ * schemes, in place of the theme's own, so the viewer matches the page around it; Pierre's `unsafe` layer comes after the theme's.
  */
 const BACKGROUND_CSS =
-  ':host { --diffs-light-bg: var(--vscode-editor-background); --diffs-dark-bg: var(--vscode-editor-background); }' +
-  // VS Code's diff editor tints a changed line and its line number with diffEditor.insertedLineBackground (#9bb95533) or
-  // removedLineBackground (#ff000033) over the editor, in Dark Modern and Light Modern alike. Pierre mixes a solid colour into the line's
-  // background, 12 to 20 percent of it, so the same tint is the solid colour at 20 percent in both schemes.
-  ' :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer]):is([data-line-type="change-addition"], [data-line-type="change-deletion"]) { --mix-light: 80%; --mix-dark: 80%; }' +
-  ' :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer])[data-line-type="change-addition"] { --diffs-diff-line-mix-target: #9bb955; }' +
-  ' :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer])[data-line-type="change-deletion"] { --diffs-diff-line-mix-target: #ff0000; }';
+  ':host { --diffs-light-bg: var(--sb-content, var(--vscode-editor-background)); --diffs-dark-bg: var(--sb-content, var(--vscode-editor-background)); }' +
+  // VS Code's diff editor tints a changed line and its line number with diffEditor.insertedLineBackground or removedLineBackground over the
+  // editor: #347d3926 and #c93c3726 (15%) in 2026 Dark, VS Code's defaults #9bb95533 and #ff000033 (20%) in 2026 Light. Pierre mixes a solid
+  // colour into the line's background, 12 to 20 percent of it, so each scheme takes its solid colour at its own share.
+  ' :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer]):is([data-line-type="change-addition"], [data-line-type="change-deletion"]) { --mix-light: 80%; --mix-dark: 85%; }' +
+  ' :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer])[data-line-type="change-addition"] { --diffs-diff-line-mix-target: light-dark(#9bb955, #347d39); }' +
+  ' :is([data-line], [data-no-newline], [data-column-number], [data-gutter-buffer])[data-line-type="change-deletion"] { --diffs-diff-line-mix-target: light-dark(#ff0000, #c93c37); }';
 /** Files longer than this many lines show uncoloured (`tokenizeMaxLength` counts lines), so a lock file never ties up the workers. */
 export const TOKENIZE_MAX_LINES = 10_000;
 
 let pool: WorkerPoolManager | undefined;
 
 /** The highlighting workers, started once and shared by every view: without them a 3,000-line file holds the page for seconds. */
+/**
+ * Keeps a view's content at its top when it is shorter than the view. CodeView (1.6.4) puts the drawn lines in a sticky box whose `top` is the
+ * view's height less the box's, so a long file stays in view while it scrolls; for a short one that `top` is positive and pushes the lines down
+ * by however much room their container has, which differed by file and by a random offset of up to a line. A positive `top` holds nothing in
+ * view that the box's own place does not, so it is dropped. The method is private, so a CodeView without it is left as it is.
+ */
+export function keepAtTop(view: object): void {
+  const inner = view as { applyStickyPositioning?: (bounds: unknown) => void; stickyContainer?: HTMLElement };
+  const apply = inner.applyStickyPositioning;
+  const box = inner.stickyContainer;
+
+  if (typeof apply !== 'function' || !(box instanceof HTMLElement)) {
+    return;
+  }
+
+  inner.applyStickyPositioning = (bounds: unknown) => {
+    apply.call(view, bounds);
+
+    if (parseFloat(box.style.top) > 0) {
+      box.style.top = '0px';
+      box.style.bottom = 'auto';
+    }
+  };
+}
+
 function workers(): WorkerPoolManager {
   pool ??= getOrCreateWorkerPoolSingleton({
     poolOptions: {
@@ -85,6 +111,8 @@ function options(layout: 'split' | 'stacked', wrap: boolean): CodeViewOptions<un
     stickyHeaders: true,
     unsafeCSS: BACKGROUND_CSS,
     enableLineSelection: true,
+    // Each click on a hunk separator shows 20 more unchanged lines.
+    expansionLineCount: 20,
     layout: { paddingTop: 0, paddingBottom: 16, gap: 8 },
   };
 }
@@ -103,6 +131,7 @@ export function mountDiff(host: HTMLElement, data: DiffData, version: string, mo
   };
   const view = new CodeView<undefined, undefined>({ ...options(mount.layout, mount.wrap), ...callbacks } as CodeViewOptions<undefined, undefined>, workers());
 
+  keepAtTop(view);
   view.setup(host);
   view.setItems([item]);
 
@@ -114,10 +143,18 @@ export function mountDiff(host: HTMLElement, data: DiffData, version: string, mo
 
 /** Draws a whole file read-only into `host`, scrolled to `line` and with it selected (PRD R118's file view). */
 export function mountFile(host: HTMLElement, data: FileData, version: string, mount: FileMountOptions): FileMount {
-  const callbacks = { renderHeaderPrefix: () => mount.prefix ?? null, renderHeaderFilenameSuffix: () => mount.suffix ?? null, renderHeaderMetadata: () => mount.meta ?? null };
-  const view = new CodeView<undefined, undefined>({ ...options('stacked', mount.wrap), ...callbacks }, workers());
+  const callbacks = {
+    renderHeaderPrefix: () => mount.prefix ?? null,
+    renderHeaderFilenameSuffix: () => mount.suffix ?? null,
+    renderHeaderMetadata: () => mount.meta ?? null,
+    onSelectedLinesChange: (selection: { range: LineRange } | null) => mount.onSelect?.(selection?.range ?? null),
+  };
+  // Without its header, the file starts 8 px under whatever names it, as the diffs start under theirs.
+  const headless = mount.header === false ? { disableFileHeader: true, layout: { paddingTop: 8, paddingBottom: 16, gap: 8 } } : {};
+  const view = new CodeView<undefined, undefined>({ ...options('stacked', mount.wrap), ...callbacks, ...headless }, workers());
   const item: CodeViewItem<undefined> = { id: data.path, type: 'file', file: { name: data.path, contents: data.contents ?? '', cacheKey: version } };
 
+  keepAtTop(view);
   view.setup(host);
   view.setItems([item]);
 
@@ -127,7 +164,7 @@ export function mountFile(host: HTMLElement, data: FileData, version: string, mo
   }
 
   return {
-    set: (_layout, wrap) => view.setOptions({ ...options('stacked', wrap), ...callbacks }),
+    set: (_layout, wrap) => view.setOptions({ ...options('stacked', wrap), ...callbacks, ...headless }),
     update: (contents, nextVersion) => view.setItems([{ ...item, file: { ...item.file, contents, cacheKey: nextVersion } }]),
     dispose: () => view.cleanUp(),
   };
@@ -350,8 +387,12 @@ export function mountChanges(host: HTMLElement, rows: ChangesRowInput[], mount: 
         node.setAttribute('data-sb-item', kind?.kind ?? 'diff');
       },
       onLineNumberClick: (props: { lineNumber: number; annotationSide?: 'deletions' | 'additions' }, context: { item: { id: string } }) => mount.onLine?.(context.item.id, props.annotationSide === 'deletions' ? 'old' : 'new', props.lineNumber),
+      onSelectedLinesChange: (selection: { id: string; range: LineRange } | null) => mount.onSelect?.(selection?.id ?? null, selection?.range ?? null),
     }) as unknown as CodeViewOptions<undefined, undefined>;
   const view = new CodeView<undefined, undefined>(optionsFor(mount.layout, mount.wrap), workers());
+
+  keepAtTop(view);
+
   const unsubscribe = view.subscribeToScroll(want);
   const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(want) : null;
   const indexOf = (path: string): number => order.findIndex((row) => row.path === path);

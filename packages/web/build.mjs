@@ -71,8 +71,8 @@ const worklet = await bundle('src/voiceWorklet.ts');
 const workletName = `voice-worklet-${createHash('sha256').update(worklet).digest('hex').slice(0, 16)}.js`;
 const codicons = dirname(require.resolve('@vscode/codicons/dist/codicon.css'));
 const theme = readFileSync('src/theme.css', 'utf8');
-// The installed page's window and splash take the colour of the page's side bar and header: Dark Modern's, the default, and in the pages'
-// theme-color also Light Modern's while the operating system is set to light. A manifest has no light variant.
+// The installed page's window and splash take the colour of the page's bars and header, the side bar's: 2026 Dark's, the default, and in
+// the pages' theme-color also 2026 Light's while the operating system is set to light. A manifest has no light variant.
 const sideBar = (css) => /--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(css)[1];
 const lightStart = theme.indexOf('@media (prefers-color-scheme: light)');
 const themeColor = sideBar(theme.slice(0, lightStart));

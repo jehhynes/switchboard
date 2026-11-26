@@ -297,15 +297,15 @@ describe('mountChanges', () => {
     vi.unstubAllGlobals();
   });
 
-  it('Tints_OfChangedLines_AreVsCodesLineBackgroundsAtFullStrength', () => {
+  it('Tints_OfChangedLines_AreVsCodes2026LineBackgroundsAtFullStrength', () => {
     const { view } = mounted();
     const css = String(view.options['unsafeCSS']);
 
-    // Pierre mixes 12 to 20 percent of a solid colour into a line; 20 percent of VS Code's colours is its 0x33 alpha over the editor.
-    expect(css).toContain('--mix-light: 80%; --mix-dark: 80%;');
-    expect(css).toContain('[data-line-type="change-addition"] { --diffs-diff-line-mix-target: #9bb955; }');
-    expect(css).toContain('[data-line-type="change-deletion"] { --diffs-diff-line-mix-target: #ff0000; }');
-    expect(css).toContain('--diffs-dark-bg: var(--vscode-editor-background)');
+    // Pierre mixes 12 to 20 percent of a solid colour into a line: 2026 Dark's line colours are 15 percent (0x26), 2026 Light's 20 (0x33).
+    expect(css).toContain('--mix-light: 80%; --mix-dark: 85%;');
+    expect(css).toContain('[data-line-type="change-addition"] { --diffs-diff-line-mix-target: light-dark(#9bb955, #347d39); }');
+    expect(css).toContain('[data-line-type="change-deletion"] { --diffs-diff-line-mix-target: light-dark(#ff0000, #c93c37); }');
+    expect(css).toContain('--diffs-dark-bg: var(--sb-content, var(--vscode-editor-background))');
   });
 
   it('HeaderSuffix_ForACollapsedLargeFile_SaysWhyAndHowToRead', () => {

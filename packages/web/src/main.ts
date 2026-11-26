@@ -611,6 +611,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     command: (name, body) => command(name, body),
     workItemId: () => state.scope?.workItemId ?? null,
     diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
+    inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (mainTab() === 'diff' || (wide() && sideTab() === 'diff')),
+    drawDiagrams: (element) => drawDiagrams(element),
+    // A quote of lines joins the end of the message being written, after a blank line, and the box takes the focus.
+    quote: (text) => {
+      input.value = input.value.trim() === '' ? text : `${input.value.replace(/\s+$/, '')}\n\n${text}`;
+      input.setSelectionRange(input.value.length, input.value.length);
+      box.changed(input.value);
+      grow();
+      refresh();
+      keepDraft();
+      input.focus();
+    },
   });
   let changesSession: string | null = null;
   /** The session the Changes tab last followed, so a new session of the work item reads an open tab's list again. */
@@ -642,9 +654,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawDiagrams: (pane) => drawDiagrams(pane),
     inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (mainTab() === 'file' || (wide() && sideTab() === 'file')),
     shown: () => `${state.key ?? ''} ${state.scope?.scopeGen ?? ''}`,
+    diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
   });
-  // An open file tab is read again while in view, so a file the session changes shows its new version.
-  const filePoll = setInterval(() => localFiles.refresh(true), deps.filePollMs ?? FILE_POLL_MS);
+  // An open file tab, and the Changes tab's file view of a file on disk, are read again while in view, so a file the session changes shows its new version.
+  const filePoll = setInterval(() => (localFiles.refresh(true), changes.refreshFile(true)), deps.filePollMs ?? FILE_POLL_MS);
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
   const dropFileIcons = useFileIcons({ fetch: (...args) => readFetch(...args), loaded: () => draw() });
 
@@ -2685,6 +2698,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // The session may have changed the file shown.
     if (turnEnded) {
       localFiles.refresh();
+      changes.refreshFile();
     }
 
     if (state.scope === null || pending !== null) {
@@ -2950,7 +2964,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     for (const tab of strip.querySelectorAll<HTMLElement>(':scope > [data-id]')) {
       const cut = tab.querySelector('.tab-label');
 
-      measured[tab.dataset['id']!] = Math.ceil(width(tab) - width(cut) + (cut === null ? 0 : label));
+      // A tab cut to its least label is never narrower than its own min-width, as the Changes tab's, whose count may not show yet.
+      measured[tab.dataset['id']!] = Math.ceil(Math.max(width(tab) - width(cut) + (cut === null ? 0 : label), read(tab, 'min-width', 0)));
     }
 
     // The icon, its gap and the border with the label; More's icon, gap and count before it is drawn.
@@ -3340,7 +3355,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   window.addEventListener('pagehide', () => (keepScroll(), rememberTabs()), { signal: listening.signal });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && keepScroll(), { signal: listening.signal });
-  document.addEventListener('visibilitychange', () => localFiles.refresh(), { signal: listening.signal });
+  document.addEventListener('visibilitychange', () => (localFiles.refresh(), changes.refreshFile()), { signal: listening.signal });
 
 
   /** Draws before the next repaint, once however many events ask for it before then. */
@@ -5144,7 +5159,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    let changesClosed: 'files' | 'scope' | null = null;
+    let changesClosed: 'files' | 'more' | null = null;
     let cardMenu: HTMLElement | null = null;
     // A question card's open menu that holds the focus, or whose button does, for Up and Down.
     const cardAnchor = document.activeElement instanceof HTMLElement && document.activeElement.closest('.qc-menu-anchor')?.querySelector('.qc-menu') != null ? document.activeElement.closest<HTMLElement>('.qc-menu-anchor') : null;
@@ -5188,7 +5203,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && (changesClosed = changes.escape()) !== null) {
       draw();
-      root.querySelector<HTMLElement>(changesClosed === 'scope' ? '.changes-scope' : '.changes-files')?.focus();
+      root.querySelector<HTMLElement>(changesClosed === 'more' ? '.changes-more' : '.changes-files')?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.drawer !== null) {
       closeDrawer();
@@ -6028,8 +6043,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           void changes.refresh();
         }
 
-        // So does the file tab shown, which tries again after a failed read.
+        // So does the file tab shown, which tries again after a failed read, and the Changes tab's file view on disk.
         localFiles.refresh();
+        changes.refreshFile();
       }
 
       // The work item being opened has come: its conversation replaces the placeholder.

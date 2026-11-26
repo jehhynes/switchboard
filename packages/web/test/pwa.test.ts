@@ -146,8 +146,9 @@ describe('the service worker', () => {
 
 describe('the installable page', () => {
   const theme = PAGE_ASSETS['theme.css']!.body;
-  const sideBar = /--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(theme)![1];
-  const lightSideBar = /@media \(prefers-color-scheme: light\)[^@]*--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(theme)![1];
+  // The bars' colour, the side bar's.
+  const bars = /--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(theme)![1];
+  const lightBars = /@media \(prefers-color-scheme: light\)[^@]*--vscode-sideBar-background:\s*(#[0-9a-fA-F]{6})/.exec(theme)![1];
 
   /** A PNG's width and height from its header. */
   const size = (name: string): [number, number] => {
@@ -161,7 +162,7 @@ describe('the installable page', () => {
     const manifest = JSON.parse(PAGE_ASSETS['manifest.webmanifest']!.body) as Record<string, unknown> & { icons: Array<{ src: string; sizes: string; purpose: string }> };
 
     expect(PAGE_ASSETS['manifest.webmanifest']!.mime).toBe('application/manifest+json');
-    expect(manifest).toMatchObject({ id: '/page/', name: 'Switchboard', start_url: '/page/', scope: '/page/', display: 'standalone', theme_color: sideBar, background_color: sideBar });
+    expect(manifest).toMatchObject({ id: '/page/', name: 'Switchboard', start_url: '/page/', scope: '/page/', display: 'standalone', theme_color: bars, background_color: bars });
     expect(manifest.icons.map((icon) => [icon.src, icon.sizes, icon.purpose])).toEqual([
       ['icon-192.png', '192x192', 'any'],
       ['icon-512.png', '512x512', 'any'],
@@ -184,7 +185,7 @@ describe('the installable page', () => {
     expect(rule?.[1]).toContain('inset: var(--sb-top) 0 auto 0');
     // Only the installed app draws it; a browser tab has its own tab strip above the page.
     expect(css.replace(rule![0], '')).not.toMatch(/body::before/);
-    expect(JSON.parse(PAGE_ASSETS['manifest.webmanifest']!.body)).toMatchObject({ theme_color: sideBar });
+    expect(JSON.parse(PAGE_ASSETS['manifest.webmanifest']!.body)).toMatchObject({ theme_color: bars });
   });
 
   it("draws the composer from packages/conversation's composer.css, before the page's own rules, which leave the box alone", () => {
@@ -239,7 +240,7 @@ describe('the installable page', () => {
     expect(css).toMatch(/\.settings-backdrop \{[^}]*padding: max\(24px, var\(--sb-top\)\)/);
     expect(css).toMatch(/\.settings-backdrop \{ padding: var\(--sb-top\) env\(safe-area-inset-right\) 0 env\(safe-area-inset-left\);/);
     // The bars are opaque in both schemes, so the band and the header they meet are one colour.
-    expect(css).toMatch(/^:root \{[^}]*--sb-bar-background: var\(--vscode-sideBar-background\);/m);
+    expect(css).toMatch(/^:root \{[^}]*--sb-chrome: var\(--vscode-sideBar-background\);[^}]*--sb-bar-background: var\(--sb-chrome\);/m);
 
     const touch = css.slice(css.indexOf('@media (hover: none), (pointer: coarse) {\n  .composer-input'));
 
@@ -267,9 +268,9 @@ describe('the installable page', () => {
 
     expect(html).toContain('<link rel="manifest" href="manifest.webmanifest">');
     // A browser takes the first theme-color whose media matches, so the light one comes first and Dark Modern's is the fallback.
-    expect(html).toContain(`<meta name="theme-color" media="(prefers-color-scheme: light)" content="${lightSideBar}">\n<meta name="theme-color" content="${sideBar}">`);
+    expect(html).toContain(`<meta name="theme-color" media="(prefers-color-scheme: light)" content="${lightBars}">\n<meta name="theme-color" content="${bars}">`);
     expect(html).not.toMatch(/\{\{(?!build)[^}]*\}\}/);
-    expect(lightSideBar).not.toBe(sideBar);
+    expect(lightBars).not.toBe(bars);
 
     const worker = PAGE_ASSETS['sw.js']!.body;
 
@@ -287,8 +288,8 @@ describe('the installable page', () => {
     const style = /<style>([\s\S]*?)<\/style>/.exec(html)![1]!;
 
     // Inline, so the first paint has the right background in dark and light, with nothing loaded.
-    expect(style).toContain(`html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; color-scheme: dark; background: ${sideBar}; }`);
-    expect(style).toMatch(new RegExp(`@media \\(prefers-color-scheme: light\\) \\{\\n  html \\{ color-scheme: light; background: ${lightSideBar}; \\}`));
+    expect(style).toContain(`html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; color-scheme: dark; background: ${bars}; }`);
+    expect(style).toMatch(new RegExp(`@media \\(prefers-color-scheme: light\\) \\{\\n  html \\{ color-scheme: light; background: ${lightBars}; \\}`));
     expect(html.indexOf('<div id="boot"')).toBeLessThan(html.indexOf('<link rel="stylesheet"'));
     expect(html).toContain("<h2>Switchboard is not reachable</h2>");
     // The boot script comes first, so it sees page.js or a stylesheet fail.

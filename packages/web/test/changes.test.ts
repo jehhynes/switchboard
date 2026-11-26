@@ -179,8 +179,23 @@ describe('the Changes list', () => {
     };
   });
 
+  /** The tree's reads (changesTree.tsx), kept apart from the list's: the stack, the worktree's files and the uncommitted changes. */
+  let treeGets: string[] = [];
+  let lastUrl = '';
+
   const start = () => {
+    treeGets = [];
     const fetch = vi.fn(async (url: string, init?: unknown) => {
+      // The tree reads its uncommitted list right after the worktree's files, in one go; it answers with no rows here.
+      const forTree = url.startsWith('/v1/conversation/stack') || url.startsWith('/v1/conversation/tree') || (lastUrl.startsWith('/v1/conversation/tree') && url.endsWith('&from=HEAD&to=worktree'));
+
+      lastUrl = url;
+
+      if (forTree) {
+        treeGets.push(url);
+        return { status: 404, ok: false, headers: new Headers(), json: async () => ({ error: 'not found' }) } as unknown as Response;
+      }
+
       if (url.startsWith('/v1/conversation/changes')) {
         gets.push(url);
       }
@@ -307,47 +322,35 @@ describe('the Changes list', () => {
     expect(root.querySelector('.changes-menu')).toBeNull();
   });
 
-  const scopeButton = () => root.querySelector<HTMLButtonElement>('[data-action="changes-scope"]')!;
-  /** Opens the scope menu and picks the choice whose text holds `text`. */
+  /** What the bar says the diffs compare. */
+  const scopeButton = () => root.querySelector<HTMLElement>('.changes-scope')!;
+  /** Chooses a range from the tree: the uncommitted changes, every change (the bar's way back), or a commit by its subject. */
   const pick = async (text: string) => {
-    if (root.querySelector('.changes-scope-menu') === null) {
-      scopeButton().click();
+    if (text === 'All changes') {
+      root.querySelector<HTMLElement>('[data-action="changes-back"]')!.click();
+    } else if (text === 'Uncommitted changes') {
+      root.querySelector<HTMLElement>('.changes-tree [data-action="tree-range"][data-from="HEAD"]')!.click();
+    } else {
+      [...root.querySelectorAll<HTMLElement>('.changes-tree .tree-item.commit')].find((one) => one.querySelector('.tree-label')!.textContent!.includes(text))!.querySelector<HTMLElement>('[data-action="tree-range"]')!.click();
     }
 
-    [...root.querySelectorAll<HTMLElement>('.scope-item')].find((one) => one.textContent!.includes(text))!.click();
     await flush();
   };
 
-  it('ScopeMenu_Opened_OffersAllUncommittedEachCommitNewestFirstAndCompare', async () => {
+  it('names the range the diffs compare in the bar, with a way back to every change since the base', async () => {
+    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone({ ...LIST, from: FIRST, to: HEAD }) }, { status: 200, body: structuredClone(LIST) });
     start();
     await openList();
     expect(scopeButton().textContent).toBe('All changes');
     expect(scopeButton().title).toBe('Comparing: All changes since the base, 0123456');
-    expect(root.querySelector('[data-action="changes-uncommitted"]')).toBeNull();
+    // The tree chooses the range; the bar has no menu of its own for it, and no way back while it shows every change.
+    expect(root.querySelector('[data-action="changes-scope"], .changes-scope-menu, [data-action="changes-back"]')).toBeNull();
 
-    scopeButton().click();
-    // One menu at a time: the scope menu closes the Files menu.
-    expect(root.querySelectorAll('.changes-menu')).toHaveLength(1);
-    expect(scopeButton().getAttribute('aria-expanded')).toBe('true');
-
-    const items = [...root.querySelectorAll<HTMLElement>('.scope-item')];
-
-    expect(items.map((one) => [one.textContent, one.getAttribute('aria-pressed')])).toEqual([
-      ['All changes since the base', 'true'],
-      ['Uncommitted changes', 'false'],
-      ['fedcba9Second change1 h ago', 'false'],
-      ['1111111First change2 h ago', 'false'],
-      ['Compare…', 'false'],
-    ]);
-    expect(items[2]!.dataset).toMatchObject({ from: FIRST, to: HEAD });
-    expect(items[3]!.dataset).toMatchObject({ from: BASE, to: FIRST });
-
-    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.querySelector('.changes-scope-menu')).toBeNull();
-    expect(document.activeElement).toBe(scopeButton());
-    scopeButton().click();
-    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
-    expect(root.querySelector('.changes-scope-menu')).toBeNull();
+    await pick('Second change');
+    expect(scopeButton().textContent).toBe('fedcba9 Second change');
+    await pick('All changes');
+    expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk');
+    expect(scopeButton().textContent).toBe('All changes');
   });
 
   it('ScopeMenu_UncommittedPicked_ReadsTheUncommittedListSaysSoAndIsNotKept', async () => {
@@ -362,9 +365,6 @@ describe('the Changes list', () => {
 
     await pick('Uncommitted changes');
     expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk&from=HEAD&to=worktree');
-    expect(root.querySelector('.changes-scope-menu')).toBeNull();
-    // The scope button keeps the focus once the menu goes with the choice.
-    expect(document.activeElement).toBe(scopeButton());
     expect(scopeButton().textContent).toBe('Uncommitted');
     expect(scopeButton().querySelector('.codicon-diff-modified')).not.toBeNull();
     filesButton().click();
@@ -380,8 +380,7 @@ describe('the Changes list', () => {
 
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
-    expect(root.querySelector('.changes-empty')!.textContent).toBe('No uncommitted changes. They appear here when the session edits a file.');
-    expect(scopeButton().disabled).toBe(false);
+    expect(root.querySelector('.changes-empty')!.textContent).toBe('No uncommitted changes.');
     // Nothing of the scope is kept on the device.
     expect(Object.keys(localStorage).filter((name) => /changes|scope/i.test(name) || /HEAD|worktree/.test(localStorage.getItem(name) ?? ''))).toEqual([]);
 
@@ -408,12 +407,10 @@ describe('the Changes list', () => {
     expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Commit fedcba9: Second change');
     expect(button().title).toBe("Every changed file's diff: Commit fedcba9: Second change");
 
-    scopeButton().click();
-    expect([...root.querySelectorAll<HTMLElement>('.scope-item')].map((one) => one.getAttribute('aria-pressed'))).toEqual(['false', 'false', 'true', 'false', 'false']);
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
     filesButton().click();
-    expect(root.querySelector('.changes-empty')!.textContent).toBe('This commit changes no files. Choose other changes from Compare.');
+    expect(root.querySelector('.changes-empty')!.textContent).toBe('This commit changes no files. Choose another range in the tree.');
   });
 
   it('ScopeMenu_CommitGoneAfterARebase_FallsBackToEveryChangeSinceTheBase', async () => {
@@ -440,62 +437,6 @@ describe('the Changes list', () => {
 
     expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk');
     expect(scopeButton().textContent).toBe('All changes');
-  });
-
-  it('ScopeMenu_ComparePickers_OfferOnlyANewerEndAndReadTheRange', async () => {
-    const compared = structuredClone({ ...LIST, from: 'base', to: HEAD });
-
-    answers.push({ status: 200, body: structuredClone(LIST) }, { status: 200, body: structuredClone({ ...LIST, from: 'base', to: 'HEAD' }) }, { status: 200, body: compared });
-    start();
-    await openList();
-    scopeButton().click();
-    root.querySelector<HTMLElement>('[data-action="changes-compare"]')!.click();
-
-    const from = () => root.querySelector<HTMLSelectElement>('select[data-compare="from"]')!;
-    const to = () => root.querySelector<HTMLSelectElement>('select[data-compare="to"]')!;
-    const go = () => root.querySelector<HTMLButtonElement>('[data-action="changes-compare-go"]')!;
-    const choose = (select: HTMLSelectElement, value: string) => {
-      select.value = value;
-      select.dispatchEvent(new Event('input', { bubbles: true }));
-    };
-
-    expect([...from().options].map((one) => one.textContent)).toEqual(['Base (0123456)', 'fedcba9 Second change', '1111111 First change']);
-    expect([...to().options].map((one) => [one.textContent, one.disabled])).toEqual([
-      ['HEAD, following new commits', false],
-      ['fedcba9 Second change', false],
-      ['1111111 First change', false],
-      ['Working tree', false],
-    ]);
-    expect([from().value, to().value]).toEqual(['base', 'worktree']);
-
-    // From the first commit, only a newer end can be chosen, and a To no longer newer moves to the working tree.
-    choose(to(), FIRST);
-    choose(from(), FIRST);
-    expect([...to().options].map((one) => one.disabled)).toEqual([false, false, true, false]);
-    choose(from(), HEAD);
-    // From the newest commit only the working tree is newer.
-    expect([...to().options].map((one) => one.disabled)).toEqual([true, true, true, false]);
-    choose(from(), FIRST);
-    expect(to().value).toBe('worktree');
-    expect(go().disabled).toBe(false);
-
-    choose(from(), 'base');
-    choose(to(), 'HEAD');
-    go().click();
-    await flush();
-
-    expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk&from=base&to=HEAD');
-    expect(scopeButton().textContent).toBe('Base → HEAD');
-    scopeButton().click();
-    root.querySelector<HTMLElement>('[data-action="changes-compare"]')!.click();
-    choose(to(), HEAD);
-    go().click();
-    await flush();
-
-    expect(listGets().at(-1)).toBe(`/v1/conversation/changes?window=pk&from=base&to=${HEAD}`);
-    expect(root.querySelector('.changes-scope-menu')).toBeNull();
-    expect(scopeButton().textContent).toBe('Base → fedcba9');
-    expect(scopeButton().title).toBe('Comparing: From Base to fedcba9');
   });
 
   it("says why when the hub refuses, and says when the worktree matches its base", async () => {
@@ -569,10 +510,12 @@ describe('the Changes list', () => {
     expect(changesMounts[0]!.scrolls).toEqual(['src/new.ts']);
     // A phone's width (test/setup.ts): stacked and wrapped.
     expect(changesMounts[0]).toMatchObject({ layout: 'stacked', wrap: true });
-    // The bar, then the diffs; each file's own header carries only its Viewed tick from the page.
-    expect([...root.querySelector('.diff-view')!.children].map((one) => one.className)).toEqual(['changes-bar', 'diff-host']);
+    // The tree, its splitter, the bar, then the diffs; each file's own header carries only its Viewed tick from the page. At a phone's width
+    // the tree is a flyout the bar's first button opens.
+    expect([...root.querySelector('.diff-view')!.children].map((one) => one.className)).toEqual(['changes-tree', 'tree-splitter', 'changes-bar', 'diff-host']);
+    expect(root.querySelector('.diff-view')!.classList.contains('tree-pinned')).toBe(false);
     expect(root.querySelector('.changes-bar .changes-note')!.textContent).toBe('3 files · +3 −1');
-    expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['changes-menu', 'changes-scope', 'changes-hide-viewed', 'changes-collapse-all', 'changes-expand-all', 'changes-wrap', 'changes-refresh']);
+    expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['tree-flyout', 'changes-menu', 'changes-hide-viewed', 'changes-collapse-all', 'changes-expand-all', 'changes-wrap', 'changes-refresh', 'changes-more']);
     expect(root.querySelector('.diff-head')).toBeNull();
     expect([...root.querySelectorAll<HTMLInputElement>('.diff-host .diff-viewed input')].map((box) => [box.dataset['path'], box.checked])).toEqual([
       ['docs/a.md', false],
@@ -1071,9 +1014,11 @@ describe('the Changes list', () => {
     changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
     await flush();
     await flush();
-    root.querySelector('.diff-view')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    // From inside the file view, which leaves the page: the focus goes back to the Changes view, so its keys keep working.
+    root.querySelector('.file-overlay .fake')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.file-overlay')).toBeNull();
     expect(changesMounts[0]!.disposed).toBe(false);
+    expect(document.activeElement).toBe(root.querySelector('.diff-view'));
   });
 
   it('ChangesMenu_Buttons_HideViewedCollapseAndExpandEveryFile', async () => {
@@ -1122,13 +1067,13 @@ describe('the Changes list', () => {
     await flush();
     await flush();
     expect(gets.at(-1)).toBe(`/v1/conversation/file?window=pk&path=docs%2Fa.md&side=base${range}`);
-    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':2 at 1111111');
-    root.querySelector<HTMLElement>('[data-action="diff-back"]')!.click();
+    expect(root.querySelector('.changes-bar .diff-at')!.textContent).toBe(':2 at 1111111');
+    root.querySelector<HTMLElement>('[data-action="changes-back"]')!.click();
     changesMounts[1]!.onLine!('docs/a.md', 'new', 3);
     await flush();
     await flush();
     expect(gets.at(-1)).toBe(`/v1/conversation/file?window=pk&path=docs%2Fa.md&side=disk${range}`);
-    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':3 at fedcba9');
+    expect(root.querySelector('.changes-bar .diff-at')!.textContent).toBe(':3 at fedcba9');
   });
 
   it('ViewedEvent_InAnotherScope_LeavesTheListShownAlone', async () => {
@@ -1167,7 +1112,7 @@ describe('the Changes list', () => {
     await flush();
 
     expect(changesMounts).toHaveLength(0);
-    expect(root.querySelector('.diff-host')!.textContent).toBe('No uncommitted changes. They appear here when the session edits a file.');
+    expect(root.querySelector('.diff-host')!.textContent).toBe('No uncommitted changes.');
   });
 
   it('ViewedTick_QueuedBeforeAnotherScopeIsPicked_PostsForTheListItWasShownIn', async () => {
@@ -1183,8 +1128,7 @@ describe('the Changes list', () => {
     ticksGate = held;
     box().click();
     box().click();
-    scopeButton().click();
-    [...root.querySelectorAll<HTMLElement>('.scope-item')].find((one) => one.textContent === 'Uncommitted changes')!.click();
+    root.querySelector<HTMLElement>('.changes-tree [data-action="tree-range"][data-from="HEAD"]')!.click();
     answer();
     await flush();
     await flush();
@@ -1201,13 +1145,16 @@ describe('the Changes list', () => {
     await flush();
     expect(gets.at(-1)).toBe('/v1/conversation/file?window=pk&path=src%2Fnew.ts&side=disk');
     expect(files.at(-1)).toEqual({ path: 'src/new.ts', side: 'disk', line: 12 });
-    // The file's own header has the way back before its name and the line after it; nothing sits above it.
+    // The bar has the file's name and the line after it, beside the way back; the file has no header of its own.
     expect(root.querySelector('.file-overlay .fake')!.textContent).toBe('file src/new.ts at 12');
-    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':12');
+    expect(root.querySelector('.changes-bar .changes-file-title bdi')!.textContent).toBe('src/new.ts');
+    expect(root.querySelector('.changes-bar .diff-at')!.textContent).toBe(':12');
     expect(root.querySelector('.file-overlay .diff-head')).toBeNull();
     expect(root.querySelector('[data-action="diff-open-vscode"]')).toBeNull();
 
-    root.querySelector<HTMLElement>('.file-overlay [data-action="diff-back"]')!.click();
+    // The bar's back, the one way back from a file and from a range, closes the file first.
+    expect(root.querySelector('.file-overlay [data-action="changes-back"], .file-overlay .diff-back')).toBeNull();
+    root.querySelector<HTMLElement>('.changes-bar [data-action="changes-back"]')!.click();
     await flush();
     expect(root.querySelector('.file-overlay')).toBeNull();
     expect(changesMounts).toHaveLength(1);
@@ -1218,7 +1165,7 @@ describe('the Changes list', () => {
     await flush();
     await flush();
     expect(files.at(-1)).toEqual({ path: 'src/old.ts', side: 'base', line: 3 });
-    expect(root.querySelector('.file-overlay .diff-at')!.textContent).toBe(':3 at the base');
+    expect(root.querySelector('.changes-bar .diff-at')!.textContent).toBe(':3 at the base');
   });
 
   it('offers the way back from a file view before the viewer draws its header', async () => {
@@ -1226,7 +1173,7 @@ describe('the Changes list', () => {
     await openRow(1);
     changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
     expect(root.querySelector('.file-overlay .empty')!.textContent).toBe('Reading the file…');
-    expect(root.querySelector('.file-overlay .empty [data-action="diff-back"]')).not.toBeNull();
+    expect(root.querySelector('.changes-bar [data-action="changes-back"]')).not.toBeNull();
   });
 
   it('lays the diffs out as the settings say, and again when they change', async () => {
@@ -1366,8 +1313,10 @@ describe('the Changes list', () => {
     changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
     await flush();
     await flush();
-    // The file view covers the bar, so its own header has Wrap, pressed as the file wraps.
-    const fileWrap = () => root.querySelector<HTMLElement>('.file-overlay [data-action="changes-wrap"]')!;
+    // The file view lies under the bar, whose Wrap wraps the file too; the file's header has no Wrap of its own.
+    const fileWrap = () => root.querySelector<HTMLElement>('.changes-bar > [data-action="changes-wrap"]')!;
+
+    expect(root.querySelector('.file-overlay [data-action="changes-wrap"]')).toBeNull();
 
     expect(fileWrap().getAttribute('aria-pressed')).toBe('true');
     fileWrap().click();
@@ -1486,8 +1435,8 @@ describe('the Changes list text', () => {
     expect(listBase({ ...LIST, from: 'HEAD' })).toBe('Uncommitted changes, against the last commit');
     expect(listBase({ ...LIST, from: BASE, to: FIRST })).toBe('Commit 1111111: First change');
     expect(listBase({ ...LIST, from: 'base', to: HEAD })).toBe('From Base to fedcba9');
-    expect(emptyNote({ ...LIST, from: 'HEAD' })).toBe('No uncommitted changes. They appear here when the session edits a file.');
-    expect(emptyNote({ ...LIST, from: BASE, to: HEAD })).toBe('No changes between these points. Choose other changes from Compare.');
+    expect(emptyNote({ ...LIST, from: 'HEAD' })).toBe('No uncommitted changes.');
+    expect(emptyNote({ ...LIST, from: BASE, to: HEAD })).toBe('No changes between these points. Choose another range in the tree.');
     expect(emptyNote({ ...LIST, base: null })).toBe('No uncommitted changes, and no merge base was found. Changes appear here when the session edits a file.');
     expect(emptyNote(LIST)).toBe('No changes since the merge base. They appear here when the session edits a file.');
     // A held diff against HEAD is read again after a commit.

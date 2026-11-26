@@ -1,13 +1,13 @@
 /* The question card (packages/conversation/src/questionCard.ts), drawn by the web page, whose build puts this
    file before its own styles. Only the theme copy's VS Code variables. The card never scrolls or takes touch gestures of its own, so a
    vertical pan over it scrolls the conversation. */
-.question-card.qc { position: relative; --qc-border: var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); --qc-accent: var(--vscode-focusBorder, #0078d4); display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; max-width: 760px; margin: 8px 0 4px; padding: 10px 14px; border: 1px solid var(--qc-border); border-radius: 10px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-input-background)) 85%, var(--vscode-foreground) 4%); color: var(--vscode-foreground); overflow: visible; touch-action: auto; }
+.question-card.qc { position: relative; --qc-border: var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); --qc-accent: var(--vscode-focusBorder); display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; max-width: 760px; margin: 8px 0 4px; padding: 10px 14px; border: 1px solid var(--qc-border); border-radius: 10px; background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-input-background)) 85%, var(--vscode-foreground) 4%); color: var(--vscode-foreground); overflow: visible; touch-action: auto; }
 /* Header labels, short questions and notes: the description colour taken a little toward the background, quieter than the answers. */
 .question-card.qc, .answers-bubble { --qc-muted: color-mix(in srgb, var(--vscode-descriptionForeground) 85%, var(--vscode-editor-background, transparent)); }
 .question-card.qc.qc-collapsed { gap: 0; }
 .question-card.qc:focus { outline: none; }
 /* A card the Questions link went to is focused as well as highlighted; under reduced motion its still outline (bubbles.css) outranks the rule above. */
-@media (prefers-reduced-motion: reduce) { .question-card.qc.linked:focus { outline: 2px solid var(--vscode-focusBorder, #0078d4); } }
+@media (prefers-reduced-motion: reduce) { .question-card.qc.linked:focus { outline: 2px solid var(--vscode-focusBorder); } }
 .question-card.qc:focus-visible, .question-card.qc:focus-within { border-color: color-mix(in srgb, var(--qc-accent) 55%, var(--qc-border)); }
 .qc-head { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 0.9em; line-height: 1.5; }
 .qc-progress { overflow: hidden; color: var(--qc-muted); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
@@ -52,7 +52,7 @@
 .qc-option-body { display: flex; flex: 1; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px; min-width: 0; }
 .qc-label { font-weight: 600; overflow-wrap: anywhere; }
 .qc-label p { margin: 0; display: inline; }
-.qc-recommended { padding: 0 6px; border-radius: 8px; background: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 22%, transparent); color: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 70%, var(--vscode-foreground)); font-size: 0.78em; font-weight: 500; }
+.qc-recommended { padding: 0 6px; border-radius: 8px; background: color-mix(in srgb, var(--vscode-testing-iconPassed) 22%, transparent); color: color-mix(in srgb, var(--vscode-testing-iconPassed) 70%, var(--vscode-foreground)); font-size: 0.78em; font-weight: 500; }
 .qc-desc { flex-basis: 100%; color: var(--vscode-descriptionForeground); font-size: 0.9em; line-height: 1.45; overflow-wrap: anywhere; }
 .qc-comment-box { display: flex; flex-direction: column; gap: 4px; }
 .qc-comment-label { color: var(--qc-muted); font-size: 0.85em; }
@@ -76,7 +76,7 @@
 /* A row's state as a codicon, shown only when a card's questions differ in state: check answered, close withdrawn, dash dismissed. */
 .qc-state { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 1.5em; color: var(--qc-muted); }
 .qc-state .codicon { font-size: 14px; }
-.qc-answered .qc-state { color: var(--vscode-testing-iconPassed, #388a34); }
+.qc-answered .qc-state { color: var(--vscode-testing-iconPassed); }
 .qc-row-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .qc-row-question { color: var(--qc-muted); }
 .qc-row-question p { display: inline; margin: 0; }
@@ -85,12 +85,12 @@
 /* An answered row is one line where it fits: "Short question: Choice". */
 .qc-answered .qc-row-detail { display: inline; color: var(--vscode-foreground); font-weight: 600; }
 /* The link between a card and its answer, at the right of the card's header and of the Answers bubble's, alike in both. */
-.qc-cross-link { flex: none; margin-left: auto; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground, var(--vscode-focusBorder, #0078d4)); font: inherit; cursor: pointer; }
+.qc-cross-link { flex: none; margin-left: auto; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground, var(--vscode-focusBorder)); font: inherit; cursor: pointer; }
 .qc-cross-link:hover, .qc-cross-link:focus-visible { outline: none; text-decoration: underline; }
 
 /* The Answers bubble: an answer message, its tag hidden, a line per question, "Short question: Choice". Its box matches the card's corners,
    padding and border, without the tail corner of our other messages. */
-.message .box.answers { border: 1px solid color-mix(in srgb, var(--vscode-button-background, #0078d4) 35%, transparent); border-radius: 10px; padding: 10px 14px; }
+.message .box.answers { border: 1px solid color-mix(in srgb, var(--vscode-button-background) 35%, transparent); border-radius: 10px; padding: 10px 14px; }
 body.vscode-high-contrast .message .box.answers, body.vscode-high-contrast-light .message .box.answers { border-color: var(--vscode-contrastBorder); }
 .answers-bubble { display: flex; flex-direction: column; gap: 6px; }
 .answers-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-size: 0.82em; line-height: 1.5; }

@@ -329,3 +329,38 @@ describe("a question card's Markdown (renderCardText)", () => {
     expect(host.textContent).toContain('# Heading');
   });
 });
+
+describe('links a caller refuses', () => {
+  it('render as text with why, never as a file tab link, for a relative path, an absolute path and a file: URI', () => {
+    const asked: string[] = [];
+    const host = document.createElement('div');
+
+    host.innerHTML = renderMarkdown('[rel](../out.md) [abs](/etc/passwd) [uri](file:///D:/x.ts) [ok](a.md) [web](https://example.com)', undefined, (href) => {
+      asked.push(href);
+      return href === 'a.md' ? 'data-action="changes-file" data-path="a.md"' : { denied: 'Only files of this worktree <open> here.' };
+    });
+
+    expect(asked).toEqual(['../out.md', '/etc/passwd', 'file:///D:/x.ts', 'a.md']);
+
+    const links = [...host.querySelectorAll('a')];
+
+    for (const link of links.slice(0, 3)) {
+      expect(link.classList.contains('denied')).toBe(true);
+      expect(link.getAttribute('aria-disabled')).toBe('true');
+      expect(link.getAttribute('title')).toBe('Only files of this worktree <open> here.');
+      expect(link.hasAttribute('data-action')).toBe(false);
+      expect(link.hasAttribute('data-target')).toBe(false);
+      expect(link.hasAttribute('tabindex')).toBe(false);
+    }
+
+    expect(links[3]!.dataset['action']).toBe('changes-file');
+    expect(links[4]!.getAttribute('target')).toBe('_blank');
+  });
+
+  it('keeps a file tab link when the resolver answers null, as before', () => {
+    const host = document.createElement('div');
+
+    host.innerHTML = renderMarkdown('[x](notes.md)', undefined, () => null);
+    expect(host.querySelector('a')!.dataset['action']).toBe('local-file');
+  });
+});
