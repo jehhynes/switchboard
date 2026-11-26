@@ -20,7 +20,7 @@ describe('the hub log tail', () => {
     const close = vi.fn();
     const file = { stat: async () => ({ size: 512 * 1024 * 1024 }), read, close } as unknown as Awaited<ReturnType<typeof fs.open>>;
     vi.mocked(fs.open).mockResolvedValueOnce(file).mockResolvedValueOnce(file);
-    expect(await readHubLog(home, 500)).toEqual({ text: '', more: false, limited: false, missing: false });
+    expect(await readHubLog(home, 500)).toMatchObject({ text: '', more: false, limited: false, missing: false });
     expect(read).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
     read.mockResolvedValueOnce({ bytesRead: 10 });
@@ -29,11 +29,11 @@ describe('the hub log tail', () => {
   });
 
   it('distinguishes missing and empty logs and preserves CRLF, timestamps, UTF-8 and partial final lines', async () => {
-    expect(await readHubLog(home, 2)).toEqual({ text: '', more: false, limited: false, missing: true });
+    expect(await readHubLog(home, 2)).toEqual({ text: '', more: false, limited: false, missing: true, file: '', size: 0 });
     await writeFile(join(home, 'hub.log'), '');
-    expect(await readHubLog(home, 2)).toEqual({ text: '', more: false, limited: false, missing: false });
+    expect(await readHubLog(home, 2)).toMatchObject({ text: '', more: false, limited: false, missing: false });
     await writeFile(join(home, 'hub.log'), 'old\r\n2026-11-22T10:00:00Z café\r\npartial');
-    expect(await readHubLog(home, 2)).toEqual({ text: '2026-11-22T10:00:00Z café\r\npartial', more: true, limited: false, missing: false });
+    expect(await readHubLog(home, 2)).toMatchObject({ text: '2026-11-22T10:00:00Z café\r\npartial', more: true, limited: false, missing: false });
     expect((await readHubLog(home, 3)).more).toBe(false);
     await appendFile(join(home, 'hub.log'), '\r\n');
     expect((await readHubLog(home, 1)).text).toBe('partial\r\n');
@@ -46,15 +46,21 @@ describe('the hub log tail', () => {
     expect((await readHubLog(home, 2)).text).toBe('last\nappended');
     await writeFile(join(home, 'hub.log'), 'truncated\n');
     expect((await readHubLog(home, 2)).text).toBe('truncated\n');
+    const truncated = await readHubLog(home, 2);
+    expect(truncated.size).toBe(10);
     await rename(join(home, 'hub.log'), join(home, 'old.log'));
     await writeFile(join(home, 'hub.log'), 'rotated\n');
-    expect((await readHubLog(home, 2)).text).toBe('rotated\n');
+    const rotated = await readHubLog(home, 2);
+    expect(rotated.text).toBe('rotated\n');
+    // A new file has a new identity, so the page starts its view again.
+    expect(rotated.file).not.toBe(truncated.file);
+    expect(rotated.file).not.toBe('');
   });
 
   it('bounds a huge line and omits its partial beginning rather than fabricating text', async () => {
     await writeFile(join(home, 'hub.log'), 'é'.repeat(HUB_LOG_MAX_BYTES));
-    expect(await readHubLog(home, 500)).toEqual({ text: '', more: true, limited: true, missing: false });
+    expect(await readHubLog(home, 500)).toMatchObject({ text: '', more: true, limited: true, missing: false });
     await appendFile(join(home, 'hub.log'), '\nlast\n');
-    expect(await readHubLog(home, 500)).toEqual({ text: 'last\n', more: true, limited: true, missing: false });
+    expect(await readHubLog(home, 500)).toMatchObject({ text: 'last\n', more: true, limited: true, missing: false });
   });
 });

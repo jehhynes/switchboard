@@ -1,16 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'preact/test-utils';
 import { render } from 'preact';
-import { HubLog, HUB_LOG_POLL_MS } from '../src/hubLog.js';
+import { earlierLines, HubLog, HUB_LOG_POLL_MS, mergeTail, splitLines } from '../src/hubLog.js';
 
 let host: HTMLElement;
 const flush = async () => { await act(async () => { await Promise.resolve(); }); };
-const reply = (text: string, more = false) => ({ ok: true, json: async () => ({ text, more, limited: false, missing: false }) }) as Response;
-const click = async (label: string) => {
-  await act(() => { [...host.querySelectorAll('button')].find((node) => node.textContent === label)!.click(); });
+/** The file only grows unless a test says otherwise. */
+let size = 0;
+const reply = (text: string, more = false, extra: Record<string, unknown> = {}) => ({ ok: true, json: async () => ({ text, more, limited: false, missing: false, file: 'f1', size: size += text.length, ...extra }) }) as Response;
+const button = (label: string) => [...host.querySelectorAll('button')].find((node) => node.textContent === label);
+const click = async (label: string) => { await act(() => { button(label)!.click(); }); };
+const output = () => host.querySelector<HTMLElement>('[role=log]')!;
+const lines = () => [...host.querySelectorAll('.hub-log-line')].map((node) => node.textContent);
+const status = () => host.querySelector('[role=status]')!.textContent!;
+const tick = async (ms = HUB_LOG_POLL_MS) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+const numbered = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => `2026-11-22T12:00:${String(from + i).padStart(2, '0')}.000Z line ${from + i}\n`).join('');
+/** jsdom lays nothing out: each line is 20 px tall in a 100 px window. */
+const layout = () => {
+  const node = output();
+  Object.defineProperty(node, 'scrollHeight', { configurable: true, get: () => node.querySelectorAll('.hub-log-line').length * 20 });
+  Object.defineProperty(node, 'clientHeight', { configurable: true, value: 100 });
 };
+const scrollTo = async (top: number) => { await act(() => { output().scrollTop = top; output().dispatchEvent(new Event('scroll')); }); };
 
 beforeEach(() => {
+  size = 0;
   vi.useFakeTimers();
   host = document.createElement('div');
   document.body.replaceChildren(host);
@@ -21,79 +35,121 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('the hub log lines', () => {
+  it('splits a read into lines and marks a last line with no newline yet', () => {
+    expect(splitLines('a\r\nb\n')).toEqual({ rows: ['a', 'b'], partial: false });
+    expect(splitLines('a\nb')).toEqual({ rows: ['a', 'b'], partial: true });
+    expect(splitLines('')).toEqual({ rows: [], partial: false });
+  });
+
+  it('appends only the lines after the held end, tells repeated lines apart, and reports a gap when the read does not reach it', () => {
+    expect(mergeTail(['a', 'b', 'c'], ['b', 'c', 'd', 'e'])).toEqual({ rows: ['a', 'b', 'c', 'd', 'e'], added: 2, gap: false });
+    expect(mergeTail(['a', 'b'], ['a', 'b'])).toEqual({ rows: ['a', 'b'], added: 0, gap: false });
+    // "x" repeats: the held end could be either x, so the read starts the view again rather than guess.
+    expect(mergeTail(['1', 'x', 'x', '2', 'x'], ['x', 'x', '2', 'x', 'x', '2', 'x', 'new'])).toMatchObject({ gap: true });
+    expect(mergeTail(['1', 'x', '2'], ['x', '2', 'y', 'new'])).toEqual({ rows: ['1', 'x', '2', 'y', 'new'], added: 2, gap: false });
+    expect(mergeTail(['a', 'b'], ['y', 'z'])).toEqual({ rows: ['y', 'z'], added: 2, gap: true });
+    expect(mergeTail(['a', 'b', 'c'], ['c'])).toEqual({ rows: ['a', 'b', 'c'], added: 0, gap: false });
+    expect(mergeTail(['a', 'b'], ['b', 'x', 'b'])).toEqual({ rows: ['a', 'b', 'x', 'b'], added: 2, gap: false });
+    // The held end recurs among the new lines: which is the held one is unknown, so nothing is dropped silently.
+    expect(mergeTail(['b'], ['b', 'x', 'b'])).toEqual({ rows: ['b', 'x', 'b'], added: 3, gap: true });
+    expect(mergeTail(['p', 'q'], ['p', 'q', 'r', 'p', 'q'])).toMatchObject({ gap: true });
+    // One line at the read's start could be the held end too.
+    expect(mergeTail(['p', 'q'], ['q', 'r', 'p', 'q'])).toMatchObject({ gap: true });
+  });
+
+  it('finds the lines before the held start in a longer read, or none when the read no longer holds them', () => {
+    expect(earlierLines(['c', 'd'], ['a', 'b', 'c', 'd', 'e'])).toEqual(['a', 'b']);
+    expect(earlierLines(['c', 'd'], ['c', 'd'])).toEqual([]);
+    expect(earlierLines(['c', 'd'], ['x', 'y'])).toBeNull();
+  });
+});
+
 describe('the hub log sheet', () => {
-  it('loads 500 lines, preserves timestamps as text, filters, wraps and copies only matching lines', async () => {
+  it('reads 500 lines, shows text as text, filters with a match count, wraps, and copies the shown lines', async () => {
     const read = vi.fn().mockResolvedValue(reply('2026-11-22T12:01:00Z ready\r\n2026-11-22T12:02:00Z ERROR <img src=x>\r\n', true));
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     await act(() => render(<HubLog fetch={read} />, host));
     await flush();
     expect(read).toHaveBeenCalledWith('/v1/page/hub-log?lines=500', expect.objectContaining({ credentials: 'same-origin', cache: 'no-store' }));
-    expect(host.querySelector('pre')!.textContent).toContain('2026-11-22T12:02:00Z ERROR <img src=x>');
+    expect(lines()).toEqual(['2026-11-22T12:01:00Z ready', '2026-11-22T12:02:00Z ERROR <img src=x>']);
     expect(host.querySelector('img')).toBeNull();
     const filter = host.querySelector<HTMLInputElement>('input[type=search]')!;
     await act(() => { filter.value = 'error'; filter.dispatchEvent(new Event('input', { bubbles: true })); });
-    expect(host.querySelector('pre')!.textContent).toBe('2026-11-22T12:02:00Z ERROR <img src=x>\r\n');
-    Object.defineProperty(host.querySelector('pre')!, 'scrollHeight', { configurable: true, value: 2000 });
+    expect(lines()).toEqual(['2026-11-22T12:02:00Z ERROR <img src=x>']);
+    expect(status()).toContain('1 of 2 lines match · Load earlier lines to search further');
     await act(() => host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
-    expect(host.querySelector('pre')!.classList.contains('wrap')).toBe(true);
-    expect(host.querySelector('pre')!.scrollTop).toBe(2000);
-    await click('Copy filtered log');
-    expect(writeText).toHaveBeenCalledWith('2026-11-22T12:02:00Z ERROR <img src=x>\r\n');
-    expect(host.querySelector('[role=status]')!.textContent).toContain('Copied');
-    await click('Load 500 more lines');
-    await flush();
-    expect(read.mock.calls.at(-1)![0]).toBe('/v1/page/hub-log?lines=1000');
-    expect(filter.value).toBe('error');
+    expect(output().classList.contains('wrap')).toBe(true);
+    await click('Copy shown lines');
+    expect(writeText).toHaveBeenCalledWith('2026-11-22T12:02:00Z ERROR <img src=x>\n');
+    expect(status()).toContain('Copied');
+    // A poll that brings new text leaves the note for its three seconds.
+    read.mockResolvedValue(reply('2026-11-22T12:01:00Z ready\n2026-11-22T12:02:00Z ERROR <img src=x>\n2026-11-22T12:03:00Z error again\n', true));
+    await tick();
+    expect(status()).toContain('Copied');
+    await tick(1_100);
+    expect(status()).not.toContain('Copied');
+    await act(() => { filter.value = 'absent'; filter.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(status()).toContain('No lines match in the loaded lines.');
+    expect(button('Copy shown lines')!.disabled).toBe(true);
   });
 
-  it('polls without overlapping, pauses while hidden or live is off, and aborts when closed', async () => {
+  it('says it is live with the newest line\'s local time and how long ago it checked', async () => {
+    const read = vi.fn().mockResolvedValue(reply('2026-11-22T12:00:05.000Z one\nstack line\n'));
+    await act(() => render(<HubLog fetch={read} />, host));
+    await flush();
+    const time = new Date('2026-11-22T12:00:05.000Z').toLocaleTimeString();
+    expect(status()).toContain(`● Live — last line ${time}, checked 0 s ago`);
+    // A stalled read shows the check ageing.
+    read.mockImplementation(() => new Promise(() => {}));
+    await tick(HUB_LOG_POLL_MS + 5_000);
+    expect(status()).toMatch(/checked [67] s ago/);
+  });
+
+  it('polls without overlapping, stops while hidden, and aborts when closed', async () => {
     const read = vi.fn().mockResolvedValue(reply('first\n'));
     await act(() => render(<HubLog fetch={read} />, host));
     await flush();
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS); });
+    await tick();
     expect(read).toHaveBeenCalledTimes(2);
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
     await act(() => { document.dispatchEvent(new Event('visibilitychange')); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS * 3); });
+    await tick(HUB_LOG_POLL_MS * 3);
     expect(read).toHaveBeenCalledTimes(2);
     hidden.mockReturnValue(false);
     await act(() => { document.dispatchEvent(new Event('visibilitychange')); });
     expect(read).toHaveBeenCalledTimes(3);
-    await act(() => host.querySelectorAll<HTMLInputElement>('input[type=checkbox]')[1]!.click());
-    await flush();
-    const paused = read.mock.calls.length;
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS * 3); });
-    expect(read).toHaveBeenCalledTimes(paused);
     await act(() => render(null, host));
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS * 3); });
-    expect(read).toHaveBeenCalledTimes(paused);
+    await tick(HUB_LOG_POLL_MS * 3);
+    expect(read).toHaveBeenCalledTimes(3);
   });
 
-  it('reports missing files, no matches, bounded reads and failures, and recovers on the next poll', async () => {
-    const read = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: '', more: false, limited: false, missing: true }) });
+  it('keeps the lines while reads fail, says it is not updating, and recovers on the next poll', async () => {
+    const read = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: '', more: false, limited: false, missing: true, file: '', size: 0 }) });
     await act(() => render(<HubLog fetch={read} />, host));
     await flush();
-    expect(host.textContent).toContain('No Switchboard log yet. It appears when Switchboard writes its first line.');
+    expect(status()).toContain('No Switchboard log yet. It appears when Switchboard writes its first line.');
+    read.mockResolvedValueOnce(reply('kept\n'));
+    await tick();
     read.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Access to the hub log ended.' }) });
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS); });
-    expect(host.textContent).toContain('Access to the hub log ended.');
-    read.mockResolvedValueOnce({ ok: true, json: async () => ({ text: 'new\n', more: true, limited: true, missing: false }) });
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS); });
-    expect(host.querySelector('pre')!.textContent).toBe('new\n');
-    expect(host.textContent).not.toContain('Access to the hub log ended.');
+    await tick();
+    expect(status()).toContain('Not updating — Access to the hub log ended.; retrying');
+    expect(host.querySelector('.hub-log-failing')).not.toBeNull();
+    expect(lines()).toEqual(['kept']);
+    read.mockResolvedValueOnce({ ok: true, json: async () => ({ text: 'kept\nnew\n', more: true, limited: true, missing: false, file: 'f1', size: size += 100 }) });
+    await tick();
+    expect(status()).not.toContain('Not updating');
+    expect(lines()).toEqual(['kept', 'new']);
     expect(host.textContent).toContain('Only the last 4 MiB is shown');
-    expect([...host.querySelectorAll('button')].find((node) => node.textContent === 'Load 500 more lines')!.disabled).toBe(true);
-    const filter = host.querySelector<HTMLInputElement>('input[type=search]')!;
-    await act(() => { filter.value = 'absent'; filter.dispatchEvent(new Event('input', { bubbles: true })); });
-    expect(host.textContent).toContain('No matching lines. Change or clear the filter.');
+    expect(button('Load earlier lines')).toBeUndefined();
   });
 
   it('does not overlap a slow read or apply its answer after the sheet closes', async () => {
     let release: ((answer: Response) => void) | undefined;
     const read = vi.fn(() => new Promise<Response>((done) => { release = done; }));
     await act(() => render(<HubLog fetch={read} />, host));
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS * 5); });
+    await tick(HUB_LOG_POLL_MS * 5);
     expect(read).toHaveBeenCalledTimes(1);
     await act(() => { document.dispatchEvent(new Event('visibilitychange')); });
     expect(read).toHaveBeenCalledTimes(1);
@@ -102,7 +158,7 @@ describe('the hub log sheet', () => {
     expect(signal.aborted).toBe(true);
     await act(async () => { release!(reply('late private text\n')); });
     expect(host.textContent).toBe('');
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS * 3); });
+    await tick(HUB_LOG_POLL_MS * 3);
     expect(read).toHaveBeenCalledTimes(1);
   });
 
@@ -119,22 +175,141 @@ describe('the hub log sheet', () => {
     await act(() => { document.dispatchEvent(new Event('visibilitychange')); });
     await flush();
     expect(read).toHaveBeenCalledTimes(2);
-    expect(host.querySelector('pre')!.textContent).toBe('fresh\n');
+    expect(lines()).toEqual(['fresh']);
     await act(async () => { release!(reply('stale\n')); });
-    expect(host.querySelector('pre')!.textContent).toBe('fresh\n');
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS); });
+    expect(lines()).toEqual(['fresh']);
+    await tick();
     expect(read).toHaveBeenCalledTimes(3);
   });
 
-  it('retries an interrupted load-more request after returning, even with live follow off', async () => {
+  it('loads earlier lines at the top and keeps the line in view where it was', async () => {
+    const read = vi.fn().mockResolvedValue(reply(numbered(11, 20), true));
+    await act(() => render(<HubLog fetch={read} />, host));
+    await flush();
+    layout();
+    await scrollTo(60);
+    const earlier = host.querySelector('.hub-log-earlier')!;
+    // The button is above the first line, inside the scroller.
+    expect(earlier.nextElementSibling!.textContent).toContain('line 11');
+    read.mockResolvedValueOnce(reply(numbered(1, 21), false));
+    await click('Load earlier lines');
+    await flush();
+    expect(read.mock.calls.at(-1)![0]).toBe('/v1/page/hub-log?lines=510');
+    expect(lines()[0]).toContain('line 1');
+    expect(lines()).toHaveLength(20);
+    // Ten lines of 20 px were drawn above: the view moved down by 200 px, so line 14 is still at the top.
+    expect(output().scrollTop).toBe(260);
+    // The read started at the file's first line, so there is nothing earlier.
+    expect(button('Load earlier lines')).toBeUndefined();
+    // A newer line is held back, since the view is scrolled up.
+    read.mockResolvedValue(reply(numbered(11, 21), true));
+    await tick();
+    expect(status()).toContain('Paused — 1 new line');
+  });
+
+  it('says when earlier lines are gone because the file was replaced', async () => {
+    const read = vi.fn().mockResolvedValue(reply(numbered(11, 20), true));
+    await act(() => render(<HubLog fetch={read} />, host));
+    await flush();
+    read.mockResolvedValueOnce(reply(numbered(30, 40), true));
+    await click('Load earlier lines');
+    await flush();
+    expect(host.textContent).toContain('Earlier lines are no longer in the file');
+    expect(lines()[0]).toContain('line 11');
+  });
+
+  it('holds new lines back while scrolled up, counts them, and draws them with Jump to latest', async () => {
+    const read = vi.fn().mockResolvedValue(reply(numbered(1, 10)));
+    await act(() => render(<HubLog fetch={read} />, host));
+    layout();
+    await flush();
+    expect(output().scrollTop).toBe(200);
+    await scrollTo(40);
+    read.mockResolvedValue(reply(numbered(1, 12)));
+    await tick();
+    expect(lines()).toHaveLength(10);
+    expect(output().scrollTop).toBe(40);
+    expect(status()).toContain('Paused — 2 new lines');
+    read.mockResolvedValue(reply(numbered(1, 13)));
+    await tick();
+    expect(status()).toContain('Paused — 3 new lines');
+    await click('Jump to latest');
+    expect(lines()).toHaveLength(13);
+    expect(output().scrollTop).toBe(260);
+    expect(status()).toContain('● Live');
+  });
+
+  it('pauses with Pause, resumes with Resume, and follows again when scrolled to the end', async () => {
+    const read = vi.fn().mockResolvedValue(reply(numbered(1, 10)));
+    await act(() => render(<HubLog fetch={read} />, host));
+    await flush();
+    layout();
+    await click('Pause');
+    expect(status()).toContain('Paused — no new lines');
+    read.mockResolvedValue(reply(numbered(1, 11)));
+    await tick();
+    expect(lines()).toHaveLength(10);
+    expect(status()).toContain('Paused — 1 new line');
+    await click('Jump to latest');
+    expect(lines()).toHaveLength(11);
+    await click('Pause');
+    await click('Resume');
+    expect(status()).toContain('● Live');
+    // Scrolled up and back to the end, the waiting lines are drawn.
+    await scrollTo(0);
+    read.mockResolvedValue(reply(numbered(1, 12)));
+    await tick();
+    expect(lines()).toHaveLength(11);
+    await scrollTo(output().scrollHeight - 100);
+    expect(lines()).toHaveLength(12);
+    expect(status()).toContain('● Live');
+  });
+
+  it('starts again with a note when the file is replaced, cut, or more lines came than one read holds', async () => {
+    const read = vi.fn().mockResolvedValue(reply(numbered(1, 5)));
+    await act(() => render(<HubLog fetch={read} />, host));
+    await flush();
+    read.mockResolvedValue(reply('2026-11-22T13:00:00.000Z fresh\n', false, { file: 'f2' }));
+    await tick();
+    expect(lines()).toEqual(['2026-11-22T13:00:00.000Z fresh']);
+    expect(host.textContent).toContain('The log was replaced or cut; showing the new file.');
+    read.mockResolvedValue(reply(numbered(30, 40), true, { file: 'f2' }));
+    await tick();
+    expect(lines()[0]).toContain('line 30');
+    expect(host.textContent).toContain('Some lines were skipped; showing the newest.');
+  });
+
+  it('draws a partial last line completed while paused once the view is back at its end', async () => {
+    const read = vi.fn().mockResolvedValue(reply(numbered(1, 10) + 'tw'));
+    await act(() => render(<HubLog fetch={read} />, host));
+    layout();
+    await flush();
+    await scrollTo(0);
+    read.mockResolvedValue(reply(numbered(1, 10) + 'two\n'));
+    await tick();
+    expect(lines().at(-1)).toBe('tw');
+    expect(status()).toContain('Paused — no new lines');
+    await scrollTo(output().scrollHeight - 100);
+    expect(lines().at(-1)).toBe('two');
+  });
+
+  it('reads a partial last line again once it is complete', async () => {
+    const read = vi.fn().mockResolvedValue(reply('one\ntw'));
+    await act(() => render(<HubLog fetch={read} />, host));
+    await flush();
+    expect(lines()).toEqual(['one', 'tw']);
+    read.mockResolvedValue(reply('one\ntwo\nthree\n'));
+    await tick();
+    expect(lines()).toEqual(['one', 'two', 'three']);
+  });
+
+  it('retries an interrupted Load earlier lines after returning', async () => {
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     const read = vi.fn().mockResolvedValue(reply('recent\n', true));
     await act(() => render(<HubLog fetch={read} />, host));
     await flush();
-    await act(() => host.querySelectorAll<HTMLInputElement>('input[type=checkbox]')[1]!.click());
-    await flush();
     read.mockImplementationOnce(() => new Promise<Response>(() => {}));
-    await click('Load 500 more lines');
+    await click('Load earlier lines');
     const signal = read.mock.calls.at(-1)![1].signal as AbortSignal;
     hidden.mockReturnValue(true);
     await act(() => { document.dispatchEvent(new Event('visibilitychange')); });
@@ -143,10 +318,7 @@ describe('the hub log sheet', () => {
     hidden.mockReturnValue(false);
     await act(() => { document.dispatchEvent(new Event('visibilitychange')); });
     await flush();
-    expect(read.mock.calls.at(-1)![0]).toBe('/v1/page/hub-log?lines=1000');
-    expect(host.querySelector('pre')!.textContent).toBe('older\nrecent\n');
-    const settled = read.mock.calls.length;
-    await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS * 3); });
-    expect(read).toHaveBeenCalledTimes(settled);
+    expect(read.mock.calls.at(-1)![0]).toBe('/v1/page/hub-log?lines=501');
+    expect(lines()).toEqual(['older', 'recent']);
   });
 });

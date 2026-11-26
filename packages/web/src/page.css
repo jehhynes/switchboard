@@ -919,12 +919,17 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .sheet.hub-log-sheet { width: min(1100px, 100%); height: min(800px, calc(100% - 32px)); display: flex; flex-direction: column; overflow: hidden; }
 .hub-log { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 10px; margin-bottom: 12px; }
 .hub-log > .sheet-detail, .hub-log-note { margin: 0; color: var(--vscode-descriptionForeground); }
+.hub-log-note { flex: 1 1 0; min-width: 0; }
 .hub-log-tools { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; flex: none; }
-.hub-log-tools .sheet-input { flex: 1 1 200px; min-width: 0; width: auto; min-height: 32px; max-height: none; }
+.hub-log-tools .sheet-input { flex: 1 1 120px; min-width: 0; width: auto; min-height: 32px; max-height: none; }
 .hub-log-tools label { display: inline-flex; gap: 4px; align-items: center; min-height: 32px; }
+.hub-log-live { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; flex: none; }
+.hub-log-failing { color: var(--vscode-editorWarning-foreground); }
 .hub-log-output { flex: 1; min-height: 60px; margin: 0; padding: 10px; overflow: auto; overscroll-behavior: contain; white-space: pre; font: 12px/1.6 var(--vscode-editor-font-family, monospace); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
 .hub-log-output.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (hover: none), (pointer: coarse) { .hub-log-tools .sheet-input, .hub-log-tools label { min-height: 44px; } }
+.hub-log-line { min-height: 1.6em; }
+.hub-log-earlier { padding-bottom: 8px; font-family: var(--vscode-font-family, sans-serif); white-space: normal; }
+@media (hover: none), (pointer: coarse) { .hub-log-tools .sheet-input, .hub-log-tools label, .hub-log .sheet-button { min-height: 44px; } }
 .held-sheet { width: min(1000px, 100%); }
 .held-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; margin-bottom: 16px; }
 .held-row, .held-confirm { border: 1px solid var(--vscode-widget-border); padding: 12px; border-radius: 4px; min-width: 0; }

@@ -822,7 +822,7 @@ describe('the web page routes', () => {
   // The remote hosts and logins the served page reads, none until a test sets them.
   let remoteAccess: RemoteAccess = { hosts: [], logins: [] };
 
-  async function serve(hubLog: PageRoutes['hubLog'] = async (lines) => ({ text: `2026-11-22T12:00:00Z ${lines} lines\n`, more: lines < 1000, limited: false, missing: false }), heartbeatMs?: number) {
+  async function serve(hubLog: PageRoutes['hubLog'] = async (lines) => ({ text: `2026-11-22T12:00:00Z ${lines} lines\n`, more: lines < 1000, limited: false, missing: false, file: 'f', size: 1 }), heartbeatMs?: number) {
     const iframe = { enabled: false };
     const uploadLogs: string[] = [];
     remoteAccess = { hosts: [], logins: [] };
@@ -977,7 +977,7 @@ describe('the web page routes', () => {
     const tail = await get();
     expect(tail.status).toBe(200);
     expect(tail.headers['cache-control']).toBe('no-store');
-    expect(JSON.parse(tail.body)).toEqual({ text: '2026-11-22T12:00:00Z 500 lines\n', more: true, limited: false, missing: false });
+    expect(JSON.parse(tail.body)).toEqual({ text: '2026-11-22T12:00:00Z 500 lines\n', more: true, limited: false, missing: false, file: 'f', size: 1 });
     expect(JSON.parse((await get('?lines=1000')).body).more).toBe(false);
     for (const count of ['0', '-1', '1.5', 'abc', '', '20001', 'Infinity']) expect((await get(`?lines=${count}`)).status).toBe(400);
     expect((await send(server.port, 'POST', '/v1/page/hub-log', { Cookie: cookie })).status).toBe(405);
@@ -1005,7 +1005,7 @@ describe('the web page routes', () => {
     await serve(async () => {
       if (fail) throw new Error('EACCES C:/private/hub.log');
       await new Promise<void>((done) => { release = done; });
-      return { text: 'private', more: false, limited: false, missing: false };
+      return { text: 'private', more: false, limited: false, missing: false, file: 'f', size: 7 };
     });
     const link = new URL(JSON.parse((await send(server.port, 'POST', '/page/link', { Authorization: `Bearer ${server.token}` })).body).url);
     const exchange = await send(server.port, 'GET', `${link.pathname}${link.search}`, {});

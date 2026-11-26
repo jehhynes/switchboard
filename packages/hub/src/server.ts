@@ -18,6 +18,7 @@ import { isWebSocketUpgrade } from './webSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
 import { OTHER_SIGN_IN, PAGE_GONE } from './windows.js';
 import { HUB_LOG_LINES, HUB_LOG_MAX_LINES } from './hubLog.js';
+import type { LogTail } from './hubLog.js';
 import { appShortcut, linuxAppShortcut } from './appShortcut.js';
 import { zip } from './browserExtension.js';
 import type { VoiceDevice } from './voiceSocket.js';
@@ -59,7 +60,7 @@ export interface PageRoutes {
   /** The remote hosts and logins the page is served to through `tailscale serve` (architecture.md § Remote access); none without it. */
   remote?(): RemoteAccess;
   /** The fixed hub.log tail, read only from the hub's injected home. */
-  hubLog?(lines: number): Promise<{ text: string; more: boolean; limited: boolean; missing: boolean }>;
+  hubLog?(lines: number): Promise<LogTail>;
   /** A file of the page itself, by its name under `/page/`, `index.html` for the page; null for none. */
   asset(name: string): { mime: string; body: Buffer | string; immutable?: boolean; gzip?: Buffer } | null;
   /** Registers a page's conversation stream, `installed` when it runs as the installed app, `remote` from a paired device, and returns its page key. */
