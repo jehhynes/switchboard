@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startPage } from '../src/main.js';
-import { EMPTY_HISTORY_UI, entryShown, gapText, historyAction, historyUrl, renderHistory, RUN_LIMIT } from '../src/history.js';
-import type { HistoryOpen } from '../src/history.js';
+import { EMPTY_HISTORY_UI, entryShown, expandable, historyAction, historyUrl, needsYou, renderHistory, RUN_LIMIT } from '../src/history.js';
+import type { HistoryHead, HistoryOpen } from '../src/history.js';
 import { html } from './html.js';
-import type { HistoryCategory, HistoryEntry, HistoryView, PageGroup, PageRow } from '@switchboard/protocol';
+import type { HistoryCategory, HistoryEntry, HistoryView, PageGroup, PageRow, StateView } from '@switchboard/protocol';
 import { drawAtOnce } from './frame.js';
 
 class FakeSource {
@@ -43,7 +43,7 @@ const view = (patch: Partial<HistoryView> = {}): HistoryView => ({
   status: 'Running',
   tone: 'accent',
   playbook: 'dev:build',
-  facts: ['In scope since 2026-10-07 09:00'],
+  facts: ['Yours since 2026-10-07 09:00'],
   links: [{ label: 'Open ticket', icon: 'link-external', title: 'https://github.com/o/r/issues/77', open: { type: 'openUrl', url: 'https://github.com/o/r/issues/77' } }],
   reconstructed: false,
   recordedSince: null,
@@ -68,80 +68,193 @@ const view = (patch: Partial<HistoryView> = {}): HistoryView => ({
 });
 const open = (patch: Partial<HistoryOpen> = {}): HistoryOpen => ({ ticketId: 77, key: 'gh 77', view: view(), categories: CATEGORIES, error: null, ui: { ...EMPTY_HISTORY_UI }, ...patch });
 
-describe("the page's History (architecture.md § Web page)", () => {
-  it('draws the state at the top of History, before the ticket, and the state alone for a row that offers no ticket History', () => {
-    const root = document.createElement('div');
-    const state = { id: 'st-1', sessionId: 's1', at: T0, headline: '2/5 fixing tests', body: 'Two left.', stale: null, unread: true } as const;
+const HEAD: HistoryHead = { key: 'gh 77', title: 'Inbox badge from the row', sourceKind: 'github', playbook: 'dev:build', status: 'Running', needsYou: null, workItemId: 1, sessionId: 's1' };
+const pinned = (patch: Partial<StateView> = {}): StateView => ({ id: 'st-1', sessionId: 's1', at: T0 - 4 * MINUTE, headline: '2/5 fixing tests', body: 'Two **left**.', stale: null, unread: true, shortId: 'abc12345', endedAt: null, ...patch });
+const draw = (o: HistoryOpen | null, state: StateView | null = null, head: Partial<HistoryHead> = {}, now = T0 + 25 * 60 * MINUTE): HTMLElement => {
+  const root = document.createElement('div');
 
-    root.innerHTML = html(renderHistory(open(), state, T0 + 60_000));
-    expect(root.querySelector('.history-view')!.firstElementChild!.className).toBe('state-view unread');
-    expect(root.querySelector('.state-headline')?.textContent).toBe('2/5 fixing tests');
-    expect(root.querySelector('.state-view + .hist-hero')).not.toBeNull();
-    root.innerHTML = html(renderHistory(null, state, T0 + 60_000));
-    expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('History');
-    expect(root.querySelector('.state-body')?.textContent?.trim()).toBe('Two left.');
-    expect(root.querySelector('.hist-hero')).toBeNull();
-    root.innerHTML = html(renderHistory(null, null, T0));
-    expect(root.querySelector('.history-view')?.textContent).toBe('No state yet. It appears here when the session sets one.');
+  root.innerHTML = html(renderHistory(o, state, now, { ...HEAD, ...head }));
+  return root;
+};
+const texts = (root: HTMLElement, selector: string): string[] => [...root.querySelectorAll(selector)].map((one) => one.textContent ?? '');
+
+describe("the page's History (architecture.md § Web page)", () => {
+  it('heads the page with the key, repository, links, the title as its only h1, and one line of status, playbook and summary', () => {
+    const root = draw(open());
+    const headings = [...root.querySelectorAll('h1, h2, h3')];
+
+    expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('gh 77 History');
+    // The title is the page's first heading and stands above the pinned state; groups are h2, the pinned state's headline alone is h3.
+    expect(headings[0]?.tagName).toBe('H1');
+    expect(root.querySelectorAll('h1')).toHaveLength(1);
+    expect(root.querySelector('h1')?.textContent).toBe('Inbox <badge>');
+    expect(root.querySelector('.hist-head')!.compareDocumentPosition(root.querySelector('.hist-now')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(texts(root, 'h2 .hist-group-title')).toEqual(['dev:build', 'Ticket']);
+    expect(root.querySelector('.hist-key')?.textContent).toBe('gh 77');
+    expect(root.querySelector('.hist-key svg.source-logo.github')).not.toBeNull();
+    expect(root.querySelector('.hist-repo')?.textContent).toBe('r');
+    expect(texts(root, '.hist-meta > *')).toEqual(['Running', 'dev:build', 'Yours since 2026-10-07 09:00']);
+    expect(root.querySelector('.hist-head-links button.hist-link')?.getAttribute('data-url')).toBe('https://github.com/o/r/issues/77');
   });
 
-  it("draws the History tab's header, chips, sections with day headings, gaps and marks, the first section open", () => {
-    const root = document.createElement('div');
+  it('shows the head from the row before History loads, after a failed read, and for a row with no ticket History; a pool ticket has no state', () => {
+    let root = draw(open({ view: null }), pinned());
 
-    root.innerHTML = html(renderHistory(open(), null, T0));
-    expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('gh 77 History');
-    expect(root.querySelector('.hist-headline h1')?.textContent).toBe('Inbox <badge>');
+    expect(root.querySelector('h1')?.textContent).toBe('Inbox badge from the row');
     expect(root.querySelector('.hist-key')?.textContent).toBe('gh 77');
-    expect([...root.querySelectorAll('.hist-facts dd')].map((fact) => fact.textContent)).toEqual(['In scope since 2026-10-07 09:00']);
-    expect([...root.querySelectorAll('.hist-chip')].map((chip) => [chip.textContent, chip.getAttribute('aria-pressed')])).toEqual([['You', 'true'], ['Sessions', 'true'], ['Ticket', 'true']]);
-    expect([...root.querySelectorAll<HTMLDetailsElement>('details.hist-section')].map((section) => [section.dataset['section'], section.open])).toEqual([['w1', true], ['ticket', false]]);
-    expect(root.querySelectorAll('[data-section="w1"] .hist-day')).toHaveLength(2);
-    expect([...root.querySelectorAll('[data-section="w1"] .hist-gap')].map((gap) => gap.textContent)).toEqual(['', '+2m', '+23h 58m']);
+    expect(texts(root, '.hist-meta > *')).toEqual(['Running', 'dev:build']);
+    expect(root.querySelector('.hist-now .hist-now-headline')?.textContent).toBe('2/5 fixing tests');
+    expect(root.querySelector('.hist-empty')?.textContent).toBe('Loading…');
+    root = draw(open({ view: null, error: 'Unknown ticket 77.' }), pinned());
+    expect(root.querySelector('.hist-error')?.textContent).toBe('Unknown ticket 77.');
+    expect(root.querySelector('h1')?.textContent).toBe('Inbox badge from the row');
+    expect(root.querySelector('.hist-empty')).toBeNull();
+    root = draw(null, null);
+    expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('gh 77 History');
+    expect(root.querySelector('.hist-now.empty')?.textContent).toBe('No state yet. It appears here when the session sets one.');
+    expect(root.querySelector('.hist-empty')?.textContent).toBe('No History for this work item. It shows for a work item with a ticket.');
+    root = draw(open(), null, { workItemId: null });
+    expect(root.querySelector('.hist-now')).toBeNull();
+    expect(root.querySelector('h1')?.textContent).toBe('Inbox <badge>');
+  });
+
+  it("replaces the status pill with Waiting on you while the row waits on the operator, and never names another group's status in the head", () => {
+    expect(needsYou({ mark: { kind: 'permission', glyph: '', title: 'Approve a permission' } })).toBe('permission prompt');
+    expect(needsYou({ mark: { kind: 'question', glyph: '', title: '' } })).toBe('a question');
+    expect(needsYou({ mark: { kind: 'review', glyph: '', title: '' } })).toBe('approval');
+    expect(needsYou({ mark: { kind: 'running', glyph: '', title: '' }, questions: 2 })).toBe('2 questions');
+    expect(needsYou({ mark: { kind: 'running', glyph: '', title: '' } })).toBeNull();
+    expect(needsYou(null)).toBeNull();
+
+    let root = draw(open(), null, { needsYou: 'permission prompt' });
+
+    expect(root.querySelector('.hist-meta .hist-pill')?.textContent).toBe('Waiting on you · permission prompt');
+    expect(root.querySelector('.hist-meta .hist-pill')?.className).toContain('tone-warning');
+    // History opened for an older work item: the head takes that work item's status and playbook, not the newest's.
+    const older = view({ status: 'Running', playbook: 'dev:build', sections: [{ ...view().sections[0]!, key: 'w2', workItemId: 2, title: 'dev:build', status: 'Running' }, { ...view().sections[0]!, key: 'w1', workItemId: 1, title: 'dev:plan', status: 'Done', tone: 'success' }] });
+
+    root = draw(open({ view: older }), pinned(), { playbook: null });
+    expect(texts(root, '.hist-meta > *').slice(0, 2)).toEqual(['Done', 'dev:plan']);
+    // Its group comes first, holding the pinned state, the newer ones after it in the hub's order.
+    expect([...root.querySelectorAll<HTMLElement>('.hist-group')].map((group) => group.dataset['section'])).toEqual(['w1', 'w2']);
+    expect(root.querySelector('.hist-now')?.closest('.hist-group')?.getAttribute('data-section')).toBe('w1');
+  });
+
+  it('pins the state at the head of the open work item\'s timeline: Now, as of the last turn, the last state, or another session\'s, unread only while its own', () => {
+    let root = draw(open(), pinned(), {}, T0);
+    const now = root.querySelector('.hist-now')!;
+
+    expect(now.closest('[data-section]')?.getAttribute('data-section')).toBe('w1');
+    expect(now.parentElement!.firstElementChild).toBe(now);
+    expect(now.getAttribute('data-unread')).toBe('st-1');
+    expect(root.querySelectorAll('[data-unread]')).toHaveLength(1);
+    expect(now.querySelector('.hist-now-label')?.textContent).toBe('Now');
+    expect(now.querySelector('.hist-now-sub')?.textContent).toBe('State from session abc12345 · 4 min ago');
+    expect(now.querySelector('h3')?.textContent).toBe('2/5 fixing tests');
+    expect(now.querySelector('.hist-now-body strong')?.textContent).toBe('left');
+    expect(now.querySelector('.unread-dot')).not.toBeNull();
+    root = draw(open(), pinned({ stale: 'turn', unread: false }), {}, T0);
+    expect(root.querySelector('.hist-now')?.className).toBe('hist-now stale');
+    expect(root.querySelector('.hist-now-label')?.textContent).toBe('As of the last turn');
+    expect(root.querySelector('[data-unread]')).toBeNull();
+    root = draw(open(), pinned({ stale: 'session', unread: false, endedAt: new Date(2026, 9, 7, 9, 30).getTime() }), {}, T0);
+    expect(root.querySelector('.hist-now-label')?.textContent).toBe('Last state');
+    expect(root.querySelector('.hist-now-sub')?.textContent).toBe('Session abc12345 ended 09:30 · state from 4 min ago');
+    root = draw(open(), pinned({ sessionId: 's0', shortId: '7c21', stale: 'session', unread: false }), {}, T0);
+    expect(root.querySelector('.hist-now-sub')?.textContent).toBe('From session 7c21 · 4 min ago');
+    root = draw(open(), pinned({ sessionId: null, shortId: null, stale: 'session', unread: false }), {}, T0);
+    expect(root.querySelector('.hist-now-sub')?.textContent).toBe('State from 4 min ago');
+  });
+
+  it('draws one timeline newest first: day headings, state entries with the newest bodies open and older ones behind Details, groups and their facts', () => {
+    const states = [
+      entry('s1', T0 + MINUTE, { category: 'state', icon: 'pulse', text: 'Oldest', stateId: 'r1', body: 'Body one' }),
+      entry('s2', T0 + 2 * MINUTE, { category: 'state', icon: 'pulse', text: 'Second', stateId: 'r2', body: 'Body two' }),
+      entry('s3', T0 + 3 * MINUTE, { category: 'state', icon: 'pulse', text: 'Third', stateId: 'r3', body: 'Body three' }),
+      entry('s4', T0 + 4 * MINUTE, { category: 'state', icon: 'pulse', text: 'Fourth', stateId: 'r4', body: 'Body four' }),
+      entry('g', T0 + 5 * MINUTE, { category: 'state', icon: 'pulse', text: 'Planning', stateId: 'stage-s1-5', stage: true }),
+    ];
+    const timeline = view({ sections: [{ ...view().sections[0]!, entries: [...view().sections[0]!.entries, ...states].sort((a, b) => a.at - b.at) }, view().sections[1]!, { key: 'w0', workItemId: 0, title: 'dev:plan', status: 'Done', tone: 'success', facts: ['Created 2026-10-06 09:00'], prompt: null, entries: [entry('p', T0 - 1440 * MINUTE, { category: 'state', icon: 'pulse', text: 'Plan written', stateId: 'p1' })] }] });
+    const root = draw(open({ view: timeline }), pinned(), {}, T0 + 24 * 60 * MINUTE + MINUTE);
+
+    expect(texts(root, '[data-section="w1"] .hist-entry .hist-words')).toEqual(['Entry c', 'Planning', 'Fourth', 'Third', 'Second', 'Session started', 'Oldest', 'Entry a']);
+    expect(texts(root, '[data-section="w1"] .hist-day')).toEqual(['Today', 'Yesterday']);
+    expect(root.querySelector('[data-entry="g"] .hist-tag')?.textContent).toBe('stage report');
+    expect(['s4', 's3', 's2', 's1'].map((key) => root.querySelector<HTMLDetailsElement>(`[data-entry="${key}"] details.hist-more`)?.open)).toEqual([true, true, true, false]);
+    expect(root.querySelector('[data-entry="s4"] details.hist-more .hist-state-body')?.textContent?.trim()).toBe('Body four');
+    expect(root.querySelector('[data-entry="s1"] details.hist-more')?.getAttribute('data-body')).toBe('s1');
+    expect(root.querySelector('[data-entry="s1"] details.hist-more summary')?.textContent).toBe('Details');
+    expect(root.querySelector('[data-entry="s1"] time')?.textContent).toBe('09:01');
+    // The open work item's group carries no status pill, since the head says it; another shows its own and, closed, its last state and size.
+    expect(root.querySelector('[data-section="w1"] .hist-pill')).toBeNull();
+    expect(root.querySelector('[data-section="w1"] .hist-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('[data-section="w0"] .hist-pill')?.textContent).toBe('Done');
+    expect(root.querySelector('[data-section="w0"] .hist-group-facts')?.textContent).toBe('Created 2026-10-06 09:00 · Last state: Plan written · 1 entry');
+    expect(root.querySelector('[data-section="w0"] .hist-entry')).toBeNull();
+    expect(root.querySelector('[data-section="ticket"] .hist-prompt')).toBeNull();
+  });
+
+  it("leaves the pinned reply state out of the timeline and names its stage entry Stage report, keeping that entry's attribution and details", () => {
+    const entries = [
+      entry('r', T0, { category: 'state', icon: 'pulse', text: '2/5 fixing tests', stateId: 'st-1', body: 'Two left.' }),
+      entry('g', T0 + MINUTE, { category: 'state', icon: 'pulse', text: 'Planning', stateId: 'stage-1', stage: true, shortId: 'abc12345', lines: ['Status: Running → Blocked'], refused: null }),
+    ];
+    let root = draw(open({ view: view({ sections: [{ ...view().sections[0]!, entries }] }) }), pinned());
+
+    expect(root.querySelector('[data-entry="r"]')).toBeNull();
+    expect(root.querySelector('[data-entry="g"] .hist-words')?.textContent).toBe('Planning');
+    root = draw(open({ view: view({ sections: [{ ...view().sections[0]!, entries }] }) }), pinned({ id: 'stage-1' }));
+    expect(root.querySelector('[data-entry="r"]')).not.toBeNull();
+    expect(root.querySelector('[data-entry="g"]')?.className).toContain('pinned-stage');
+    expect(root.querySelector('[data-entry="g"] .hist-words')?.textContent).toBe('Stage report');
+    expect(root.querySelector('[data-entry="g"] .hist-sid')?.textContent).toBe('abc12345');
+    expect(texts(root, '[data-entry="g"] .hist-lines li')).toEqual(['Status: Running → Blocked']);
+  });
+
+  it('filters by chip and text, a body included, counting what matches, keeps the pinned state when a filter hides everything, and collapses a long run', () => {
+    let root = draw(open({ ui: { ...EMPTY_HISTORY_UI, hidden: ['session'] } }), pinned());
+
+    expect(root.querySelector('[data-section="w1"] .hist-group-facts')?.textContent).toBe('Started 09:00 · 2 of 3 match');
+    expect(root.querySelector('.hist-chip[data-category="session"]')?.getAttribute('aria-pressed')).toBe('false');
+    root = draw(open({ ui: { ...EMPTY_HISTORY_UI, query: 'nothing like this' } }), pinned());
+    expect(root.querySelectorAll('.hist-entry')).toHaveLength(0);
+    expect(root.querySelector('.hist-now-headline')?.textContent).toBe('2/5 fixing tests');
+    expect(root.querySelector('[data-section="w1"] .hist-empty')?.textContent).toBe('No entries match the filter. Clear it to see every entry.');
+    expect(entryShown(entry('x', T0, { body: 'The **retry** loop' }), { ...EMPTY_HISTORY_UI, query: 'retry' })).toBe(true);
+    expect(entryShown(entry('x', T0, { links: [{ label: 'PR #9', icon: 'git-pull-request', title: '', open: { type: 'openUrl', url: 'https://x' } }] }), { ...EMPTY_HISTORY_UI, query: 'pr #9' })).toBe(true);
+    expect(entryShown(entry('x', T0, { category: 'state' }), { ...EMPTY_HISTORY_UI, hidden: ['state'] })).toBe(false);
+
+    const states = Array.from({ length: RUN_LIMIT + 1 }, (_, index) => entry(`s${index}`, T0 + index * MINUTE, { category: 'session', stateChange: true }));
+    const long = view({ reconstructed: true, recordedSince: T0, sections: [{ ...view().sections[0]!, entries: states }] });
+
+    root = draw(open({ view: long }));
+    expect(root.querySelector('.hist-run summary')?.textContent).toBe(`${RUN_LIMIT + 1} session state changes, 09:00 to 09:05`);
+    expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.dataset['run']).toBe('s5');
+    expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(false);
+    expect(expandable(long, EMPTY_HISTORY_UI, HEAD, null, T0)).toMatchObject({ sections: { w1: true }, runs: ['s5'], bodies: {} });
+    // A body the filter hides now is opened too, so clearing the filter shows it as Expand all left it.
+    const bodied = view({ sections: [{ ...view().sections[0]!, entries: [entry('h', T0, { category: 'state', text: 'Hidden', body: 'Kept' }), entry('v', T0 + MINUTE, { category: 'state', text: 'Shown', body: 'Seen' })] }] });
+
+    expect(expandable(bodied, { ...EMPTY_HISTORY_UI, query: 'shown' }, HEAD, null, T0).bodies).toEqual({ h: true, v: true });
+    root = draw(open({ view: long, ui: { ...EMPTY_HISTORY_UI, runs: ['s5'] } }));
+    expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(true);
+    root = draw(open({ view: { ...long, sections: [{ ...long.sections[0]!, entries: states.slice(0, RUN_LIMIT) }] } }));
+    expect(root.querySelector('.hist-run')).toBeNull();
+    expect(root.querySelector('.hist-banner')?.textContent).toContain('Switchboard began logging on 2026-10-07 09:00.');
+  });
+
+  it('draws each entry with its marks, details, lines and links, and opens a link where the page can', () => {
+    const root = draw(open());
+
     expect(root.querySelector('[data-entry="b"]')?.className).toBe('hist-entry cat-session tone-warning');
     expect(root.querySelector('[data-entry="b"] .hist-sid')?.textContent).toBe('abc12345');
     expect(root.querySelector('[data-entry="b"] .hist-detail')?.textContent).toBe('Which branch?');
     expect(root.querySelector('[data-entry="c"] .refused-mark')?.textContent).toBe('refused');
-    expect([...root.querySelectorAll('[data-entry="c"] .hist-detail')].map((one) => one.textContent)).toEqual(['Not now.']);
+    expect(texts(root, '[data-entry="c"] .hist-detail')).toEqual(['Not now.']);
     expect(root.querySelector('[data-entry="c"] .hist-lines li')?.textContent).toBe('gh 78 moved');
-    expect(root.querySelector('[data-section="ticket"] .hist-prompt-text')?.textContent).toBe('Fix the badge');
-    // An http link opens in a tab; a folder opens the work item in VS Code, which its tooltip says.
-    expect(root.querySelector('.hist-hero-links button.hist-link')?.getAttribute('data-url')).toBe('https://github.com/o/r/issues/77');
     expect(root.querySelector('[data-entry="b"] button.hist-link')?.getAttribute('data-action')).toBe('history-folder');
     expect(root.querySelector('[data-entry="b"] button.hist-link')?.getAttribute('title')).toBe('D:/w1\nOpens the work item in VS Code.');
-    expect(root.querySelector('[data-entry="b"] .hist-link.off')).toBeNull();
     expect(root.querySelector('.hist-banner')).toBeNull();
-  });
-
-  it('filters by chip and text with the count of what shows, collapses a long run of state changes, and says when logging began', () => {
-    const root = document.createElement('div');
-
-    root.innerHTML = html(renderHistory(open({ ui: { ...EMPTY_HISTORY_UI, hidden: ['session'] } }), null, T0));
-    expect(root.querySelector('[data-section="w1"] .hist-count')?.textContent).toBe('2 of 3');
-    expect(root.querySelector('.hist-chip[data-category="session"]')?.getAttribute('aria-pressed')).toBe('false');
-    root.innerHTML = html(renderHistory(open({ ui: { ...EMPTY_HISTORY_UI, query: 'BRANCH', sections: { ticket: true } } }), null, T0));
-    expect(root.querySelectorAll('[data-section="w1"] .hist-entry')).toHaveLength(1);
-    expect(root.querySelector('[data-section="ticket"] .hist-empty')?.textContent).toBe('No entries match the filter. Clear it to see every entry.');
-    expect(entryShown(entry('x', T0, { links: [{ label: 'PR #9', icon: 'git-pull-request', title: '', open: { type: 'openUrl', url: 'https://x' } }] }), { ...EMPTY_HISTORY_UI, query: 'pr #9' })).toBe(true);
-
-    const states = Array.from({ length: RUN_LIMIT + 1 }, (_, index) => entry(`s${index}`, T0 + index * 1000, { category: 'session', stateChange: true }));
-    const long = view({ reconstructed: true, recordedSince: T0, sections: [{ ...view().sections[0]!, entries: states }] });
-
-    root.innerHTML = html(renderHistory(open({ view: long }), null, T0));
-    expect(root.querySelector('.hist-run summary')?.textContent).toBe(`${RUN_LIMIT + 1} session state changes, 09:00:00 to 09:00:05`);
-    expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(false);
-    root.innerHTML = html(renderHistory(open({ view: long, ui: { ...EMPTY_HISTORY_UI, runs: ['s0'] } }), null, T0));
-    expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(true);
-    root.innerHTML = html(renderHistory(open({ view: { ...long, sections: [{ ...long.sections[0]!, entries: states.slice(0, RUN_LIMIT) }] } }), null, T0));
-    expect(root.querySelector('.hist-run')).toBeNull();
-    expect(root.querySelector('.hist-banner')?.textContent).toContain('Switchboard began logging on 2026-10-07 09:00.');
-    // Before the hub answers, and when it cannot.
-    root.innerHTML = html(renderHistory(open({ view: null }), null, T0));
-    expect(root.querySelector('.hist-body .empty:not(.state-empty)')?.textContent).toBe('Loading…');
-    root.innerHTML = html(renderHistory(open({ view: null, error: 'Unknown ticket 77.' }), null, T0));
-    expect(root.querySelector('.hist-error')?.textContent).toBe('Unknown ticket 77.');
-    expect(root.querySelector('.hist-body .empty:not(.state-empty)')).toBeNull();
-    expect(gapText(45_000)).toBe('45s');
-    expect(gapText(3 * 86_400_000 + 4 * 3_600_000)).toBe('3d 4h');
     expect(historyUrl({ label: 'f', icon: 'file', title: '', open: { type: 'openUrl', url: 'D:/report.md' } })).toBeNull();
     // A file opens in a file tab, a session in the conversation by its work item and Switchboard ID; a session without them opens nowhere.
     expect(historyAction({ label: 'f', icon: 'file', title: '', open: { type: 'openUrl', url: 'D:/report.md' } })).toEqual({ 'data-action': 'history-file', 'data-path': 'D:/report.md' });
@@ -248,9 +361,10 @@ describe("the page's History tab in use", () => {
     expect(historyTab()?.textContent).toBe('History');
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(historyTab());
-    // The state stands at its top while the ticket's History loads.
-    expect(root.querySelector('.history-pane .history-view .state-empty')).not.toBeNull();
-    expect(root.querySelector('.history-pane .history-view > .empty:not(.state-empty)')?.textContent).toBe('Loading…');
+    // The head and the state stand at its top while the ticket's History loads.
+    expect(root.querySelector('.history-pane .history-view h1')?.textContent).toBe('Item 1');
+    expect(root.querySelector('.history-pane .history-view .hist-now.empty')).not.toBeNull();
+    expect(root.querySelector('.history-pane .history-view > .hist-empty')?.textContent).toBe('Loading…');
     // No bar of its own and no close mark: the tab names it.
     expect(root.querySelector('.hist-bar, .hist-close')).toBeNull();
     expect(root.querySelector('[data-action="close-history"]')).toBeNull();
@@ -258,21 +372,24 @@ describe("the page's History tab in use", () => {
     expect(histories()).toEqual([77]);
     expect(root.querySelector('.history-view h1')?.textContent).toBe('Inbox <badge>');
 
-    // A chip, the filter and a section the operator closed stay through the next read.
+    // A chip, the filter and a group the operator closed stay through the next read.
     root.querySelector<HTMLElement>('.hist-chip[data-category="session"]')!.click();
-    expect(root.querySelector('[data-section="w1"] .hist-count')?.textContent).toBe('2 of 3');
+    expect(root.querySelector('[data-section="w1"] .hist-group-facts')?.textContent).toBe('Started 09:00 · 2 of 3 match');
     const filter = root.querySelector<HTMLInputElement>('.hist-filter')!;
 
     filter.value = 'first saw';
     filter.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(root.querySelector('[data-section="ticket"] .hist-count')?.textContent).toBe('1');
-    expect(root.querySelector('[data-section="w1"] .hist-count')?.textContent).toBe('0 of 3');
-    const section = root.querySelector<HTMLDetailsElement>('[data-section="w1"]')!;
+    expect(root.querySelector('[data-section="ticket"] .hist-group-facts')?.textContent).toBe('1 entry');
+    expect(root.querySelector('[data-section="w1"] .hist-group-facts')?.textContent).toBe('Started 09:00 · 0 of 3 match');
+    const toggles = () => [...root.querySelectorAll('.hist-group-toggle')].map((one) => one.getAttribute('aria-expanded'));
 
-    section.open = false;
-    section.dispatchEvent(new Event('toggle'));
+    root.querySelector<HTMLElement>('[data-action="history-section"][data-section="w1"]')!.click();
+    expect(toggles()).toEqual(['false', 'false']);
     root.querySelector<HTMLElement>('[data-action="history-all"][data-all="open"]')!.click();
-    expect([...root.querySelectorAll<HTMLDetailsElement>('details.hist-section')].map((one) => one.open)).toEqual([true, true]);
+    expect(toggles()).toEqual(['true', 'true']);
+    root.querySelector<HTMLElement>('[data-action="history-all"][data-all="close"]')!.click();
+    expect(toggles()).toEqual(['false', 'false']);
+    root.querySelector<HTMLElement>('[data-action="history-all"][data-all="open"]')!.click();
 
     // A list change reads it again a second later, and so does the 30-second tick; a failed read keeps the view and says why.
     source.emit('list', { groups: groups(rows) });
@@ -287,7 +404,7 @@ describe("the page's History tab in use", () => {
     expect(root.querySelector<HTMLInputElement>('.hist-filter')!.value).toBe('first saw');
 
     // An http link opens in a tab.
-    root.querySelector<HTMLElement>('.hist-hero-links .hist-link')!.click();
+    root.querySelector<HTMLElement>('.hist-head-links .hist-link')!.click();
     expect(opened).toEqual(['https://github.com/o/r/issues/77']);
 
     // Another tab stops the reads, a list change included.
@@ -305,6 +422,41 @@ describe("the page's History tab in use", () => {
     await flush();
     expect(histories()).toEqual([77, 77, 77, 77]);
     expect(root.querySelector('.history-view h1')?.textContent).toBe('Renamed');
+    page.close();
+  });
+
+  it('reads History again soon after a new pinned state, not after the same state changes, and keeps a state body the operator opened', async () => {
+    vi.useFakeTimers();
+    const older = Array.from({ length: 4 }, (_, index) => entry(`r${index}`, T0 + index * MINUTE, { category: 'state', icon: 'pulse', text: `State ${index}`, stateId: `r${index}`, body: `Body ${index}` }));
+
+    answers['/page-history'] = { status: 200, body: { view: view({ sections: [{ ...view().sections[0]!, entries: older }] }), categories: CATEGORIES } };
+    const { page, source } = start();
+
+    hello(source);
+    openFromMenu();
+    await flush();
+    expect(histories()).toEqual([77]);
+    source.emit('state', { state: pinned({ id: 'st-9' }) });
+    source.emit('state', { state: pinned({ id: 'st-9', body: 'Grown.' }) });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(histories()).toEqual([77, 77]);
+    source.emit('state', { state: pinned({ id: 'st-9', stale: 'turn' }) });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(histories()).toEqual([77, 77]);
+    expect(root.querySelector('.hist-now-headline')?.textContent).toBe('2/5 fixing tests');
+
+    // The oldest state's body is behind Details; opened, it stays open through a read, and Collapse all closes it.
+    const more = () => root.querySelector<HTMLDetailsElement>('[data-entry="r0"] details.hist-more')!;
+
+    more().open = true;
+    more().dispatchEvent(new Event('toggle'));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(histories()).toEqual([77, 77, 77]);
+    expect(more().open).toBe(true);
+    root.querySelector<HTMLElement>('[data-action="history-all"][data-all="close"]')!.click();
+    root.querySelector<HTMLElement>('[data-action="history-section"][data-section="w1"]')!.click();
+    expect(more().open).toBe(false);
+    expect(root.querySelector<HTMLDetailsElement>('[data-entry="r3"] details.hist-more')!.open).toBe(false);
     page.close();
   });
 
@@ -383,7 +535,7 @@ describe("the page's History tab in use", () => {
     openItem(source, 2);
     expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
     openFromMenu();
-    expect(root.querySelector('.history-view .empty:not(.state-empty)')?.textContent).toBe('Loading…');
+    expect(root.querySelector('.history-view > .hist-empty')?.textContent).toBe('Loading…');
     await flush();
     expect(histories()).toEqual([77, 78]);
     expect(root.querySelector('.hist-chip[data-category="you"]')?.getAttribute('aria-pressed')).toBe('true');
@@ -396,11 +548,12 @@ describe("the page's History tab in use", () => {
     expect(histories()).toEqual([77, 78, 77]);
     expect(root.querySelector('.hist-chip[data-category="you"]')?.getAttribute('aria-pressed')).toBe('false');
 
-    // A work item whose row offers no ticket History has the tab, showing only the state, and no menu item, and reads nothing.
+    // A work item whose row offers no ticket History has the tab, showing its head, the state and why, and no menu item, and reads nothing.
     openItem(source, 3);
     historyTab()!.click();
-    expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('History');
-    expect(root.querySelector('.history-view .hist-hero, .history-view .empty:not(.state-empty)')).toBeNull();
+    expect(root.querySelector('.history-view h1')?.textContent).toBe('Item 3');
+    expect(root.querySelector('.history-view .hist-empty')?.textContent).toBe('No History for this work item. It shows for a work item with a ticket.');
+    expect(root.querySelector('.history-view .hist-toolbar')).toBeNull();
     root.querySelector<HTMLElement>('.header [data-action="actions"]')?.click();
     expect(root.querySelector('[data-action="row-history"]')).toBeNull();
 
@@ -465,7 +618,7 @@ describe("the page's History tab in use", () => {
       await flush();
       openFromMenu();
       await flush();
-      root.querySelector<HTMLElement>('.hist-hero-links [data-action="history-open"]')!.click();
+      root.querySelector<HTMLElement>('.hist-head-links [data-action="history-open"]')!.click();
       await flush();
       const tab = root.querySelector<HTMLElement>('[data-action="iframe-open"][aria-selected="true"]');
 

@@ -6,7 +6,8 @@ import { applyEvent, awaitingReply, EMPTY, inTurn, mentionOf, mentionQuery, comm
 import { parseQuestions, resolveAnswers } from '@switchboard/conversation/questions';
 import { linkTarget } from '../src/localLinks.js';
 import { artifactUrl, collapsedGroups, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
-import { renderArtifactView, renderState } from '../src/side.js';
+import { renderArtifactView } from '../src/side.js';
+import { renderHistory } from '../src/history.js';
 import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader, renderSideSwitch, renderTabs } from '../src/header.js';
 import { renderList, sourceIcons } from '../src/list.js';
@@ -18,7 +19,7 @@ import { LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, COMMENT_SETTLE_MS, 
 import { DETAIL_MIN } from '../src/layout.js';
 import { BACKOFF_MS, GRACE_MS, JITTER } from '../src/connection.js';
 import { NAVIGATION_MS } from '../src/request.js';
-import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
+import type { ArtifactView, MessageView, PageGroup, PageRow, ReplyView, SessionView, StateView } from '@switchboard/protocol';
 import { drawAtOnce } from './frame.js';
 import { showToast } from '../src/toast.js';
 
@@ -34,6 +35,9 @@ const resizeTo = (width: number): void => {
   window.innerWidth = width;
   window.dispatchEvent(new Event('resize'));
 };
+
+/** History with no ticket History: the head and the pinned state alone. */
+const renderState = (state: StateView | null, now: number) => renderHistory(null, state, now, { key: 'gh 1', title: 'Fix it', sourceKind: null, playbook: null, status: null, needsYou: null, workItemId: 1, sessionId: 's' });
 
 describe('the page model', () => {
   it('orders items by transcript place, drops not-sent messages, and starts from empty at hello', () => {
@@ -134,15 +138,15 @@ describe('question cards in replies', () => {
     const state = { id: 'st-r1', sessionId: 's', at: 1, headline: 'Blocked on a choice', body: ending, stale: null, unread: false } as const;
 
     host.innerHTML = html(renderState(state, 2));
-    expect(host.querySelector('.state-headline')?.textContent).toBe('Blocked on a choice');
-    expect(host.querySelectorAll('.state-body ol > li')).toHaveLength(1);
+    expect(host.querySelector('.hist-now-headline')?.textContent).toBe('Blocked on a choice');
+    expect(host.querySelectorAll('.hist-now-body ol > li')).toHaveLength(1);
     // The body is a Markdown document, typeset as an artifact's (`md-doc`).
-    expect(host.querySelector('.state-body')!.className).toBe('state-body md-doc body');
+    expect(host.querySelector('.hist-now-body')!.className).toBe('hist-now-body md-doc body');
     expect(host.querySelector('.question-card')).toBeNull();
     expect(host.querySelector('.questions-fold')).toBeNull();
     // A headline alone draws no body.
     host.innerHTML = html(renderState({ ...state, body: null }, 2));
-    expect(host.querySelector('.state-body')).toBeNull();
+    expect(host.querySelector('.hist-now-body')).toBeNull();
   });
 
   it('marks an unread status with the unread dot, not a New label, on the Status tab in the strip and the column and in its head', () => {
@@ -165,8 +169,8 @@ describe('question cards in replies', () => {
       expect(host.querySelector(tab)?.textContent).toBe('History');
       expect(host.querySelector('.tab-badge')).toBeNull();
     }
-    expect(dot(html(renderState(unread.state, 2)), '.state-head .unread-dot')?.getAttribute('aria-label')).toBe('Unread');
-    expect(host.querySelector('.state-head')?.textContent).not.toContain('New');
+    expect(dot(html(renderState(unread.state, 2)), '.hist-now-head .unread-dot')?.getAttribute('aria-label')).toBe('Unread');
+    expect(host.querySelector('.hist-now-head')?.textContent).not.toContain('New');
 
     // A seen state has none.
     expect(dot(html(renderTabs(newView(), seen)), '.unread-dot')).toBeNull();
@@ -179,14 +183,14 @@ describe('question cards in replies', () => {
     const state = { id: 'st-1', sessionId: 's', at: 1, headline: 'fixing tests', body: null, unread: false } as const;
     const drawn = (stale: 'turn' | 'session' | null) => {
       host.innerHTML = html(renderState({ ...state, stale }, 2));
-      return { label: host.querySelector('.state-label')?.textContent, dim: host.querySelector('.state-view')!.classList.contains('stale') };
+      return { label: host.querySelector('.hist-now-label')?.textContent, dim: host.querySelector('.hist-now')!.classList.contains('stale') };
     };
 
-    expect(drawn(null)).toEqual({ label: 'State', dim: false });
+    expect(drawn(null)).toEqual({ label: 'Now', dim: false });
     expect(drawn('turn')).toEqual({ label: 'As of the last turn', dim: true });
     expect(drawn('session')).toEqual({ label: 'Last state', dim: true });
     host.innerHTML = html(renderState(null, 2));
-    expect(host.textContent).toBe('No state yet. It appears here when the session sets one.');
+    expect(host.querySelector('.hist-now.empty')?.textContent).toBe('No state yet. It appears here when the session sets one.');
   });
 
   it("draws a tab's unread dot at its label's top-right, over the gap after it, and the dropdown's dot alike, so the dot leaves the tab's width as it was", () => {
@@ -2987,13 +2991,13 @@ describe('the page in use', () => {
     expect(root.querySelector('.history-view')).toBeNull();
     expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': { 'chat/new.md': 1 } });
 
-    // A row that stops offering History keeps the tab, which then shows the state alone.
+    // A row that stops offering History keeps the tab, which then shows the head and the state alone.
     click('#detail [data-side="history"]');
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
     expect(tabs()).toContain('History');
     expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
-    expect(root.querySelector('#detail .history-view .hist-hero')).toBeNull();
-    expect(root.querySelector('#detail .history-view .state-view')).not.toBeNull();
+    expect(root.querySelector('#detail .history-view .hist-toolbar')).toBeNull();
+    expect(root.querySelector('#detail .history-view .hist-now')).not.toBeNull();
     page.close();
   });
 
@@ -3212,7 +3216,7 @@ describe('the page in use', () => {
     answers['/artifact/'] = { status: 200, body: {}, text: '---\ntitle: Plan\n---\n# Plan\n\n![pic](plan/pic.png) ![up](../x.png)' };
     hello(source);
     click('[data-tab="history"]');
-    expect(root.querySelector('#panel')!.innerHTML).toContain('state-view');
+    expect(root.querySelector('#panel')!.innerHTML).toContain('hist-now');
     expect(mermaid).toHaveBeenCalled();
     // Each artifact has its own tab, newest first, and no Artifacts tab lists them.
     expect(root.querySelector('[data-tab="artifacts"]')).toBeNull();
@@ -7731,14 +7735,14 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     // History's body scrolls under its toolbar, and its place is the body's.
     window.innerWidth = 1440;
-    answers['/page-history'] = { status: 200, body: { view: { key: 'gh 7', title: 'Fix it', url: '', facts: [], links: [], reconstructed: false, recordedSince: null, sections: [] }, categories: [] } };
+    answers['/page-history'] = { status: 200, body: { view: { key: 'gh 7', title: 'Fix it', url: '', repo: null, status: 'Running', tone: null, playbook: null, facts: [], links: [], reconstructed: false, recordedSince: null, sections: [] }, categories: [] } };
     history.replaceState(null, '', '#w=1&t=history');
 
     const withHistory = { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 7, key: 'gh 7' } })])] };
     const second = start();
 
     hello(second.source, withHistory);
-    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-hero')).not.toBeNull());
+    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-toolbar')).not.toBeNull());
     root.querySelector<HTMLElement>('#detail .hist-body')!.scrollTop = 180;
     window.dispatchEvent(new Event('pagehide'));
     expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 history']).toMatchObject({ top: 180 });
@@ -7747,7 +7751,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const third = start();
 
     hello(third.source, withHistory);
-    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-hero')).not.toBeNull());
+    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-toolbar')).not.toBeNull());
     expect(root.querySelector<HTMLElement>('#detail .hist-body')!.scrollTop).toBe(180);
     third.page.close();
     window.innerWidth = 1024;
