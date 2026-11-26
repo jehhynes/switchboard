@@ -181,11 +181,13 @@ export interface SuperviseDeps {
   log(line: string): void;
   checkMs?: number;
   graceMs?: number;
+  /** The wait before the second start; `SUPERVISE_BASE_MS` when left out. */
+  restartDelayMs?: number;
 }
 
-/** The wait after the last start before the next, for the `attempts`th start since the hub last ran steadily. */
-export function restartDelay(attempts: number): number {
-  return attempts === 0 ? 0 : Math.min(SUPERVISE_BASE_MS * 2 ** (attempts - 1), SUPERVISE_MAX_MS);
+/** The wait after the last start before the next, for the `attempts`th start since the hub last ran steadily, doubling from `baseMs`. */
+export function restartDelay(attempts: number, baseMs = SUPERVISE_BASE_MS): number {
+  return attempts === 0 ? 0 : Math.min(baseMs * 2 ** (attempts - 1), SUPERVISE_MAX_MS);
 }
 
 /**
@@ -242,7 +244,7 @@ export class HubSupervisor {
 
         const handingOver = deps.handover();
         const stopped = handingOver ? null : deps.stopped();
-        const delay = restartDelay(attempts);
+        const delay = restartDelay(attempts, deps.restartDelayMs);
 
         if (handingOver) {
           say('the hub is handing over to a new build; waiting for the new hub');

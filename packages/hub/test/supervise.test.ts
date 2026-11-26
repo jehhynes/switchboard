@@ -75,7 +75,7 @@ describe('HubSupervisor', () => {
   });
 
   it('waits longer before each start while the hub keeps failing, and starts at once again after it ran steadily', async () => {
-    expect([0, 1, 2, 3, 4, 5, 6, 7, 8].map(restartDelay)).toEqual([0, 10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000]);
+    expect([0, 1, 2, 3, 4, 5, 6, 7, 8].map((attempts) => restartDelay(attempts))).toEqual([0, 10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000, 300_000]);
 
     // Each started hub fails before it takes the lock, until the lock is taken at 1,000 seconds and held for the steady time.
     const steadyFrom = 1_000_000;
@@ -86,6 +86,15 @@ describe('HubSupervisor', () => {
     expect(gaps).toEqual([10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000]);
     expect(state.lines).toContain('the hub is not running; starting it again 20 seconds after the last start');
     expect(state.starts.filter((at) => at >= steadyFrom)).toEqual([steadyFrom + SUPERVISE_STABLE_MS]);
+  });
+
+  it('waits the restart delay it is given before the second start, doubling it up to the maximum', async () => {
+    expect([0, 1, 2, 3, 12].map((attempts) => restartDelay(attempts, 500))).toEqual([0, 500, 1_000, 2_000, 300_000]);
+
+    // Each started hub fails before it takes the lock.
+    const state = await simulate(8_000, (world, now) => (world.locked = now < 1_000), { restartDelayMs: 2_000 });
+
+    expect(state.starts).toEqual([1_000, 3_000, 7_000]);
   });
 
   it('logs why a hub could not start and counts it as a start', async () => {

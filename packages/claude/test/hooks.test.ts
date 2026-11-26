@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BACKGROUND_DETAIL, CONTRACT_HOOK_SOURCE, CONTRACT_HOOK_WAIT_MS, HOOK_EVENTS, HOOK_SOURCE, markerState, planHooks } from '../src/hooks.js';
+import { BACKGROUND_DETAIL, CONTRACT_HOOK_SOURCE, CONTRACT_HOOK_WAIT_MS, contractHookSource, HOOK_EVENTS, HOOK_SOURCE, markerState, planHooks } from '../src/hooks.js';
 import type { Marker } from '../src/hooks.js';
 import { PERMISSION_PROMPT } from '@switchboard/core';
 
@@ -388,11 +388,16 @@ describe('contract hook', () => {
   });
 
   it("stops waiting for a hub that does not answer before Claude's 10-second hook timeout", async () => {
+    // The installed hook waits 5 seconds; this run waits 300 ms, so the test does not sit out the real wait.
+    expect(CONTRACT_HOOK_WAIT_MS).toBe(5_000);
+    expect(CONTRACT_HOOK_SOURCE).toContain('signal: AbortSignal.timeout(5000),');
+    writeFileSync(join(dir, 'contract.mjs'), contractHookSource(300));
     reply = null;
     const started = Date.now();
 
     expect(await run(compact)).toEqual({ status: 0, stdout: '' });
-    expect(Date.now() - started).toBeGreaterThanOrEqual(CONTRACT_HOOK_WAIT_MS - 100);
-    expect(Date.now() - started).toBeLessThan(9_000);
-  }, 15_000);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(200);
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(requests).toHaveLength(1);
+  });
 });

@@ -178,10 +178,13 @@ describe('built holder', () => {
     const home = newHome();
     const holder = startHolder(home, ['--idle-exit-ms=1500']);
     const found = await record(home);
+    // The holder starts its idle wait as it writes its record, so without a live session it would exit by this time.
+    const idleEnd = Date.now() + 1500;
     const client = await HolderClient.connect({ port: found.port, token: found.token });
 
     await client.spawn({ session: 's1', label: 'item 1', ...nodeProgram('setInterval(() => {}, 1000)') });
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    // A negative check: the holder is still up half a second past the idle time.
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, idleEnd + 500 - Date.now())));
     expect(alive(holder.pid)).toBe(true);
     await client.kill('s1');
 

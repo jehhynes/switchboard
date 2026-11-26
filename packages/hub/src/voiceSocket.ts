@@ -45,6 +45,8 @@ export interface VoiceSocketDeps {
   now(): number;
   /** How long a silent socket stays open; {@link VOICE_IDLE_MS} when left out. */
   idleMs?: number;
+  /** How long a socket may wait for its `hello`; {@link VOICE_HELLO_MS} when left out. */
+  helloMs?: number;
   log(line: string): void;
   /** The device's page said `hello`: it has the voice socket; `resumed` when it asked to take the voice back. */
   opened?(device: VoiceDevice, resumed: boolean): void;
@@ -93,7 +95,7 @@ export class VoiceSockets {
       at: this.deps.now(),
       messages: CONTROL_RATE * 2,
       messagesAt: this.deps.now(),
-      timer: setTimeout(() => one.socket.close(1008, 'No hello.'), VOICE_HELLO_MS),
+      timer: setTimeout(() => one.socket.close(1008, 'No hello.'), this.deps.helloMs ?? VOICE_HELLO_MS),
     };
     let reason = 'closed by the page';
     let refused = false;

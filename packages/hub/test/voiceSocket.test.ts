@@ -8,7 +8,7 @@ import { listenHub, VOICE_NOT_ALLOWED, VOICE_OFF, VOICE_TICKET_MS, VOICE_TICKETS
 import type { HubServer, PageRoutes } from '../src/server.js';
 import { PageAccess } from '../src/page.js';
 import type { RemoteAccess } from '../src/page.js';
-import { CONTROL_RATE, UPLINK_BYTES_PER_SECOND, VOICE_CLOSE, VOICE_HELLO_MS, VOICE_PENDING_MAX, VoiceSockets } from '../src/voiceSocket.js';
+import { CONTROL_RATE, UPLINK_BYTES_PER_SECOND, VOICE_CLOSE, VOICE_PENDING_MAX, VoiceSockets } from '../src/voiceSocket.js';
 import { PAGE_SESSION_MS } from '../src/page.js';
 import type { VoiceDevice } from '../src/voiceSocket.js';
 import { until } from './helpers.js';
@@ -176,12 +176,14 @@ describe('the voice socket on the page origin', () => {
     store.close();
   });
 
-  async function serve() {
+  /** `helloMs` shortens the wait for a socket's `hello`, for a test that sits it out. */
+  async function serve(helloMs?: number) {
     const events: string[] = [];
     const audio: Buffer[] = [];
     const sockets = new VoiceSockets({
       now: () => now,
       idleMs: 1_000,
+      ...(helloMs === undefined ? {} : { helloMs }),
       log: () => undefined,
       opened: (device, resumed) => events.push(`opened ${device.key}${resumed ? ' resumed' : ''}`),
       resumable: (device) => (events.push(`resumable ${device.key}`), resumeRefused),
@@ -545,7 +547,7 @@ describe('the voice socket on the page origin', () => {
   });
 
   it('closes a socket that never says hello, and one sending a frame over the limit', async () => {
-    const { pair, openPage, open, allow } = await serve();
+    const { pair, openPage, open, allow } = await serve(1_000);
     const phone = await pair();
     const phonePage = await openPage({ ...REMOTE, Cookie: phone });
     const good = { ...REMOTE, Cookie: phone, Origin: PHONE_ORIGIN };
@@ -567,7 +569,7 @@ describe('the voice socket on the page origin', () => {
     expect(await silent.status).toBe(101);
     await silent.closed;
     expect([silent.closeCode, silent.closeReason]).toEqual([1008, 'No hello.']);
-  }, VOICE_HELLO_MS + 5_000);
+  });
 
   it('closes the socket when voice is forbidden on the device, it is signed out, remote access drops it or its page closes, and a newer device takes it over', async () => {
     const { pair, openPage, open, allow, events, page } = await serve();

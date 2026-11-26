@@ -578,7 +578,7 @@ function config(home: string, rest: readonly string[]): Promise<number> {
   });
 }
 
-const SUPERVISE_USAGE = `Usage: hub.js supervise [--config=<dir>] [--grace-ms=<ms>] [--check-ms=<ms>] [${START_FLAGS.filter((name) => name !== 'config').map((name) => `--${name}=<value>`).join('] [')}]\n`;
+const SUPERVISE_USAGE = `Usage: hub.js supervise [--config=<dir>] [--grace-ms=<ms>] [--check-ms=<ms>] [--restart-delay-ms=<ms>] [${START_FLAGS.filter((name) => name !== 'config').map((name) => `--${name}=<value>`).join('] [')}]\n`;
 
 /**
  * Runs the supervisor that the autostart task or unit starts: it starts the installed hub again, with this runtime and the config folder `--config`
@@ -586,11 +586,11 @@ const SUPERVISE_USAGE = `Usage: hub.js supervise [--config=<dir>] [--grace-ms=<m
  * supervisor runs, 1 usage or an Electron runtime.
  */
 async function supervise(home: string, rest: readonly string[]): Promise<number> {
-  const known = [...START_FLAGS, 'grace-ms', 'check-ms'];
+  const known = [...START_FLAGS, 'grace-ms', 'check-ms', 'restart-delay-ms'];
   const passed = rest.filter((argument) => (START_FLAGS as readonly string[]).some((name) => name !== 'config' && argument.startsWith(`--${name}=`)));
   const named = flag(rest, 'config') || null;
 
-  if (rest.some((argument) => !known.some((name) => argument.startsWith(`--${name}=`))) || [flag(rest, 'grace-ms'), flag(rest, 'check-ms')].some((value) => value !== null && !/^\d+$/.test(value))) {
+  if (rest.some((argument) => !known.some((name) => argument.startsWith(`--${name}=`))) || [flag(rest, 'grace-ms'), flag(rest, 'check-ms'), flag(rest, 'restart-delay-ms')].some((value) => value !== null && !/^\d+$/.test(value))) {
     process.stderr.write(SUPERVISE_USAGE);
     return 1;
   }
@@ -617,6 +617,7 @@ async function supervise(home: string, rest: readonly string[]): Promise<number>
   };
   const grace = flag(rest, 'grace-ms');
   const check = flag(rest, 'check-ms');
+  const restartDelay = flag(rest, 'restart-delay-ms');
   const supervisor = new HubSupervisor({
     hubLocked: () => answers(lockAddress(home)),
     handover: () => pendingHandover(home) !== null,
@@ -638,6 +639,7 @@ async function supervise(home: string, rest: readonly string[]): Promise<number>
     log,
     ...(grace === null ? {} : { graceMs: Number(grace) }),
     ...(check === null ? {} : { checkMs: Number(check) }),
+    ...(restartDelay === null ? {} : { restartDelayMs: Number(restartDelay) }),
   });
 
   mkdirSync(switchboardHome(home), { recursive: true });
@@ -700,6 +702,8 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   const idle = Number(flag(argv, 'idle-ms'));
+  // How long a start that finds the hub lock held waits for a hub to answer; shorter for tests.
+  const wait = Number(flag(argv, 'wait-ms'));
   const codeModeIdle = flag(argv, 'code-mode-idle-ms');
 
   if (codeModeIdle !== null && !/^[1-9]\d*$/.test(codeModeIdle)) {
@@ -746,7 +750,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   const configDir = loaded.dir;
-  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: (carried) => createHubApp({ home, configDir, log, handover: carried, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(takeover === null ? {} : { takeover: Number(takeover) }), restart: { bundle: hubBundlePath(home), successor: () => startSuccessor({ execPath: process.execPath, bundle: hubBundlePath(home), args: argv, env: process.env, logPath: hubLogPath(home) }) }, ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }), ...(pagePort === null ? {} : { pagePort: Number(pagePort) }) });
+  const result = await serveHub({ home, version: VERSION, build, configDir, log, app: (carried) => createHubApp({ home, configDir, log, handover: carried, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(wait > 0 ? { waitMs: wait } : {}), ...(takeover === null ? {} : { takeover: Number(takeover) }), restart: { bundle: hubBundlePath(home), successor: () => startSuccessor({ execPath: process.execPath, bundle: hubBundlePath(home), args: argv, env: process.env, logPath: hubLogPath(home) }) }, ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }), ...(pagePort === null ? {} : { pagePort: Number(pagePort) }) });
 
   if ('existing' in result) {
     process.stdout.write(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.\n`);
