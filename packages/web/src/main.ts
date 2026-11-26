@@ -3067,7 +3067,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     tabSizing = sizing;
 
     for (const tab of strip.querySelectorAll<HTMLElement>(':scope > [data-id]')) {
-      const cut = tab.querySelector('.tab-label');
+      // Only a closable tab's label, in its open button, is cut: a fixed tab's least width is its whole width as drawn (page.css), or, not laid
+      // out, its least label's.
+      const fixed = tab.querySelector(':scope > .tab-label');
+      const cut = fixed !== null && width(tab) > 0 ? null : (fixed ?? tab.querySelector('.tab-open > .tab-label'));
 
       // A tab cut to its least label is never narrower than its own min-width, as the Changes tab's, whose count may not show yet.
       measured[tab.dataset['id']!] = Math.ceil(Math.max(width(tab) - width(cut) + (cut === null ? 0 : label), read(tab, 'min-width', 0)));

@@ -373,6 +373,8 @@ const measure = `(() => {
         // Whether History shows, and how many artifact tabs show besides the one chosen: the tabs whose unread dots the tabs view expects.
         history: tabs.some((tab) => tab.dataset.id === 'history'),
         artifacts: tabs.filter((tab) => (tab.dataset.id ?? '').startsWith('artifact:') && !tab.classList.contains('selected') && tab.querySelector('[aria-selected="true"]') === null).length,
+        // A fixed tab's label, outside an open button, drawn narrower than its text.
+        fixedCut: [...strip.querySelectorAll(':scope > .tab > .tab-label')].filter((label) => shown(label) && label.scrollWidth > label.clientWidth + 0.5).map((label) => label.textContent),
         cut: [...strip.querySelectorAll('.tab-label')].filter((label) => !shown(label) || label.getBoundingClientRect().width < Math.min(43.5, label.scrollWidth - 0.5)).map((label) => label.textContent),
         past: tabs.filter((tab) => { const box = tab.getBoundingClientRect(); return box.left < edge.left - 0.5 || box.right > edge.right + 0.5; }).map(name),
         // Each pair of unselected tabs side by side: the contrast of the line between them against each tab's fill, and of their fills
@@ -844,6 +846,7 @@ function failures(view, size, m) {
   if (view === 'narrow-330' && !m.pills.some((pill) => !pill.ticket && pill.state === 'whole')) out.push('no link pill on line 2 shows whole at 330 px');
   for (const strip of m.strips) {
     if (strip.cut.length > 0) out.push('a tab strip hides or cuts below five characters the labels ' + strip.cut.slice(0, 4).join(', '));
+    if (strip.fixedCut.length > 0) out.push('a tab strip cuts the fixed tabs\' labels ' + strip.fixedCut.join(', '));
     if (strip.past.length > 0) out.push('a tab passes its strip: ' + strip.past.slice(0, 4).join(', '));
   }
   // Two unselected tabs side by side show where one ends: the line between them, or their fills, at SEAM_MIN against each other at least.

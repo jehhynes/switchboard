@@ -647,6 +647,47 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('FitTabs_FixedTabLaidOut_CountsItsWholeLabel', () => {
+    window.innerWidth = 1920;
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+
+    const { page, source } = start();
+
+    hello(source);
+    source.emit('artifact', { artifact: { path: 'chat/a7.md', owner: 'chat', kind: 'note', title: 'Note 7', ext: 'md', type: 'markdown', updatedAt: 10_007 } });
+    // History drawn with its whole 90 px label (141 px), Changes 139 px, an artifact 113 px with its label at 44 px, and More 71 px in a 440 px strip: History and Changes
+    // leave 89 px, too little for the artifact. Counting History's label cut to 44 px (95 px) would keep the artifact, which then passes the strip.
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const width = this.matches('#detail .tabs')
+        ? 440
+        : this.matches('#detail .tabs > .tab-more')
+          ? 71
+          : this.matches('#detail .tabs > .changes-tab')
+            ? 139
+            : this.matches('#detail .tabs > [data-side="history"]')
+              ? 141
+              : this.matches('#detail .tabs > [data-id]')
+                ? 113
+                : this.matches('#detail .tabs > .tab > .tab-label')
+                  ? 90
+                  : this.matches('#detail .tabs .tab-label')
+                    ? 44
+                    : 0;
+
+      return { width } as DOMRect;
+    });
+
+    const shown = () => [...root.querySelectorAll<HTMLElement>('#detail .tabs > [data-id]')].map((tab) => tab.dataset['id']);
+
+    click('#detail [data-side="history"]');
+    click('#detail [data-side="history"]');
+    expect(shown()).toEqual(['changes', 'history']);
+    expect(root.querySelector('#detail .tab-more-button')).not.toBeNull();
+    page.close();
+  });
+
   it('switches tabs, opens artifacts in the page, and draws a Markdown artifact with its pictures from its own folder', async () => {
     const { page, source, mermaid } = start();
 

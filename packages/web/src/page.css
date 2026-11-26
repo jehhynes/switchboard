@@ -494,6 +494,11 @@ button.picker > .codicon-chevron-down { order: 2; }
 .tab-open { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; height: 100%; margin-left: calc(-1 * var(--sb-tab-pad)); padding: 0 0 0 var(--sb-tab-pad); border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .tab .tab-label { min-width: var(--sb-tab-label-least); max-width: var(--sb-tab-label-max); overflow: hidden; text-overflow: ellipsis; }
 .tab-open .tab-label { flex: 1 1 auto; }
+/* A fixed tab (Chat, Changes, History, Browser, Console) keeps its whole label at every width, so it never shrinks; only a link's, an artifact's
+   or a file's tab, whose label sits in its open button, is cut. */
+.tab:not(.tab-more-button):has(> .tab-label) { flex: none; }
+.tab:not(.tab-more-button, .changes-tab):has(> .tab-label) { min-width: 0; }
+.tab > .tab-label { min-width: max-content; }
 .tab .codicon { flex: none; font-size: 14px; }
 /* A tab's unread dot sits at its label's top-right, as a superscript, whether the label is cut or not. Its margins cancel the gap before it and its
    own width, so it is drawn over the gap after the label and changes neither the tab's width nor where its label or close mark sits. */
