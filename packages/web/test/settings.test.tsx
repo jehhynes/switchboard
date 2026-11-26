@@ -441,7 +441,16 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-devices .settings-error')).toBeNull();
     expect(host.querySelector('.settings-devices .pair-qr')).not.toBeNull();
     expect(host.querySelector('.settings-devices .pair-code')?.textContent).toBe('ABCD-EFGH');
-    expect(host.querySelector('.settings-devices .pair strong')?.textContent).toBe('https://pc.tail.ts.net/');
+    expect(host.querySelector('.settings-devices .pair-address .pair-url')?.textContent).toBe('https://pc.tail.ts.net/');
+    expect(host.querySelector('.settings-devices .pair-address button')?.textContent).toBe('Copy');
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    buttonIn('.settings-devices .pair-address', 'Copy').click();
+    await settle();
+    Reflect.deleteProperty(navigator, 'clipboard');
+    expect(writeText).toHaveBeenCalledWith('https://pc.tail.ts.net/');
+    expect(host.querySelector('.settings-devices .pair-address button')?.textContent).toBe('Copied');
     expect(button('New code')).toBeDefined();
     // Pairing changes nothing in settings.json.
     expect(host.querySelector('.settings-bar')).toBeNull();

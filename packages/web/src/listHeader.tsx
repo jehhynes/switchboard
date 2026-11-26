@@ -278,7 +278,7 @@ export type HeaderSheet =
   | { kind: 'extension'; remote: boolean }
   | { kind: 'shortcut' }
   | { kind: 'holder'; busy: boolean; error: string | null }
-  | { kind: 'devices'; pairing: Pairing | null; devices: Device[] | null; busy: boolean; error: string | null };
+  | { kind: 'devices'; pairing: Pairing | null; copied: boolean | null; devices: Device[] | null; busy: boolean; error: string | null };
 
 /**
  * What the header has open: a source kind's menu (`source:<kind>`), the range menu (`range`), More Actions (`more`), or nothing; and a sheet over
@@ -573,6 +573,33 @@ export function QrCode({ text }: { text: string }) {
   );
 }
 
+/** Puts the pairing address on the clipboard; false when the browser refuses. */
+export function copyAddress(host: string): Promise<boolean> {
+  return navigator.clipboard?.writeText(`https://${host}/`).then(() => true, () => false) ?? Promise.resolve(false);
+}
+
+/**
+ * The address a device opens to type the pairing code, on its own line, whole where it fits and broken anywhere where it does not, with Copy,
+ * which says Copied, or why it could not copy. `copy` is the button's `data-action` or click handler.
+ */
+export function PairAddress({ host, copied, copy }: { host: string; copied: boolean | null; copy: string | (() => void) }) {
+  return (
+    <>
+      <div class="pair-address">
+        <code class="pair-url">https://{host}/</code>
+        <button type="button" class="sheet-button secondary" title="Copy the address" {...(typeof copy === 'string' ? { 'data-action': copy } : { onClick: copy })}>
+          <span aria-live="polite">{copied === true ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
+      {copied === false ? (
+        <p class="sheet-error" role="alert">
+          The browser did not allow the clipboard. Select the address and copy it.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 /** When a device was last used, as the device list says it. */
 export function usedText(at: number): string {
   return new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -605,9 +632,8 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
       ) : (
         <div class="pair" data-key="pair">
           <QrCode text={pairing.url} />
-          <p class="sheet-detail">
-            Scan this with the device's camera, or open <strong>https://{pairing.host}/</strong> on it and type this code:
-          </p>
+          <p class="sheet-detail">Scan this with the device's camera, or open this address on it and type the code below:</p>
+          <PairAddress host={pairing.host} copied={sheet.copied} copy="list-pair-copy" />
           <p class="pair-code">{pairing.code}</p>
           <p class="sheet-detail">{minutes > 0 ? `It works once, for ${minutes === 1 ? '1 more minute' : `${minutes} more minutes`}.` : 'It has expired. Choose New code.'}</p>
         </div>
@@ -1417,13 +1443,14 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
     sheet.busy = false;
     sheet.pairing = pairing.status === 200 ? (pairing.body as unknown as Pairing) : null;
+    sheet.copied = null;
     sheet.error = pairing.status === 200 ? null : String(pairing.body['error'] ?? 'Switchboard did not give a code.');
     sheet.devices = devices.status === 200 ? ((devices.body['devices'] as Device[] | undefined) ?? []) : (sheet.devices ?? []);
     redraw();
   };
   /** Pair a device…: a new pairing link and the signed-in devices. */
   const openDevices = async (): Promise<void> => {
-    const sheet: Extract<HeaderSheet, { kind: 'devices' }> = { kind: 'devices', pairing: null, devices: null, busy: true, error: null };
+    const sheet: Extract<HeaderSheet, { kind: 'devices' }> = { kind: 'devices', pairing: null, copied: null, devices: null, busy: true, error: null };
 
     view.sheet = sheet;
     redraw();
@@ -1685,6 +1712,16 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       }
     } else if (button?.dataset['action'] === 'list-sheet-go') {
       void sheetGo();
+    } else if (action === 'list-pair-copy' && view.sheet?.kind === 'devices' && view.sheet.pairing !== null) {
+      const sheet = view.sheet;
+      const pairing = sheet.pairing;
+
+      void copyAddress(pairing!.host).then((copied) => {
+        if (view.sheet === sheet && sheet.pairing === pairing) {
+          sheet.copied = copied;
+          redraw();
+        }
+      });
     } else if (button?.dataset['action'] === 'list-device-revoke') {
       void revokeDevice(button.dataset['id'] ?? '');
     } else if (button?.dataset['action'] === 'list-device-voice') {

@@ -3,7 +3,7 @@
 import type { VNode } from 'preact';
 import { mount } from './island.js';
 import { isPhone } from './layout.js';
-import { QrCode, usedText } from './listHeader.js';
+import { copyAddress, PairAddress, QrCode, usedText } from './listHeader.js';
 import type { Device, Pairing } from './listHeader.js';
 import { applyPlaybookCell, configFolderHelp, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, HOME, nav, navEntry, navPathTo, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
 import type { Enrollment, Field, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
@@ -62,11 +62,13 @@ interface View {
 interface RemoteView {
   devices: Device[] | null;
   pairing: Pairing | null;
+  /** Whether Copy put the pairing address on the clipboard; null before it was chosen for this link. */
+  copied: boolean | null;
   busy: boolean;
   error: string | null;
 }
 
-const NO_REMOTE = (): RemoteView => ({ devices: null, pairing: null, busy: false, error: null });
+const NO_REMOTE = (): RemoteView => ({ devices: null, pairing: null, copied: null, busy: false, error: null });
 
 export interface Settings {
   /** Opens Settings and reads settings.json. */
@@ -142,6 +144,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
     if (action.pair === true) {
       remote.pairing = first?.status === 200 ? (first.body as unknown as Pairing) : null;
+      remote.copied = null;
     }
 
     draw();
@@ -863,6 +866,19 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     pair: () => void devices({ pair: true }),
     signOut: (id) => void devices({ revoke: id }),
     deviceVoice: (id, allow) => void devices({ voice: { id, allow } }),
+    copyAddress: () => {
+      const remote = view.remote;
+      const pairing = remote.pairing;
+
+      if (pairing !== null) {
+        void copyAddress(pairing.host).then((copied) => {
+          if (view.remote === remote && remote.pairing === pairing) {
+            remote.copied = copied;
+            draw();
+          }
+        });
+      }
+    },
     answer: async (choice) => {
       const asked = view.ask;
 
@@ -984,6 +1000,8 @@ interface Handlers {
   signOut(id: string): void;
   /** Allows or forbids voice on a paired device. */
   deviceVoice(id: string, allow: boolean): void;
+  /** Copies the pairing address. */
+  copyAddress(): void;
 }
 
 /** Settings: its header, the navigation and the page side by side (on a phone, one of them), and the bar under both. */
@@ -1378,9 +1396,8 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
       {pairing === null ? null : (
         <div class="pair" data-key="pair">
           <QrCode text={pairing.url} />
-          <p class="settings-help">
-            Scan this with the device's camera, or open <strong>https://{pairing.host}/</strong> on it and type this code:
-          </p>
+          <p class="settings-help">Scan this with the device's camera, or open this address on it and type the code below:</p>
+          <PairAddress host={pairing.host} copied={remote.copied} copy={on.copyAddress} />
           <p class="pair-code">{pairing.code}</p>
           <p class="settings-help">{minutes > 0 ? `It works once, for ${minutes === 1 ? '1 more minute' : `${minutes} more minutes`}.` : 'It has expired. Choose New code.'}</p>
         </div>

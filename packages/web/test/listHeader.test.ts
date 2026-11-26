@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'preact/test-utils';
 import { startPage } from '../src/main.js';
 import { bareKey, filterGroups, FOLDER_CHECK_MS, isKey, OTHER_MODEL, rangeSince, renderListHeader, renderMoreMenu, RUN_AS_KEY, SEARCH_DELAY_MS } from '../src/listHeader.js';
 import { html } from './html.js';
@@ -721,7 +722,41 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(sheet.querySelector('.sheet-title')?.textContent).toBe('Pair a device');
     expect(sheet.querySelector('svg.pair-qr path')?.getAttribute('d')).toMatch(/^M\d+ \d+h1v1h-1z/);
     expect(sheet.querySelector('.pair-code')?.textContent).toBe('ABCD-EFGH');
-    expect(sheet.textContent).toContain('open https://pc.tail.ts.net/ on it and type this code');
+    // The address stands on its own line, apart from the sentence, with Copy beside it.
+    expect(sheet.querySelector('.pair > .sheet-detail')?.textContent).toBe("Scan this with the device's camera, or open this address on it and type the code below:");
+    expect(sheet.querySelector('.pair-address .pair-url')?.textContent).toBe('https://pc.tail.ts.net/');
+
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'));
+
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const copy = sheet.querySelector<HTMLButtonElement>('.pair-address button')!;
+
+    expect(copy.textContent).toBe('Copy');
+    await act(async () => {
+      copy.click();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenCalledWith('https://pc.tail.ts.net/');
+    await flush();
+    expect(root.querySelector('#list-sheet .pair-address button [aria-live="polite"]')?.textContent).toBe('Copied');
+    await act(async () => {
+      root.querySelector<HTMLButtonElement>('#list-sheet .pair-address button')!.click();
+      await Promise.resolve();
+    });
+    await flush();
+    expect(root.querySelector('#list-sheet .pair .sheet-error')?.textContent).toBe('The browser did not allow the clipboard. Select the address and copy it.');
+    Reflect.deleteProperty(navigator, 'clipboard');
+    // New code forgets the copy.
+    answers['/page-devices'] = { status: 200, body: { devices: [phone, { ...phone, id: '4567cdef' }, own] } };
+    click('#list-sheet [data-action="list-sheet-go"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('#list-sheet .pair-address button')?.textContent).toBe('Copy');
+    expect(root.querySelector('#list-sheet .pair .sheet-error')).toBeNull();
+    answers['/page-devices'] = { status: 200, body: { devices: [phone, own] } };
+    click('#list-sheet [data-action="list-sheet-go"]');
+    await flush();
+    await flush();
     expect(sheet.textContent).toContain('It works once, for 5 more minutes.');
     expect([...sheet.querySelectorAll('.device-name')].map((one) => one.textContent)).toEqual(['Android · Chrome', 'Windows · Edge (this browser)']);
     expect(sheet.querySelector('.device-detail')?.textContent).toMatch(/^pc\.tail\.ts\.net as alex@example\.com · last used /);
