@@ -36,11 +36,13 @@ export interface TreeState {
   searchError: string | null;
   /** The row whose `…` menu is open. */
   menu: string | null;
+  /** Whether the search box's options menu is open. */
+  options: boolean;
 }
 
 export const PEEKS_KEPT = 20;
 
-export const newTree = (): TreeState => ({ stack: null, stackError: null, tree: null, uncommitted: null, peeks: new Map(), open: new Set(), closed: new Set(), files: null, query: '', text: false, matchCase: false, word: false, regex: false, search: null, searchError: null, menu: null });
+export const newTree = (): TreeState => ({ stack: null, stackError: null, tree: null, uncommitted: null, peeks: new Map(), open: new Set(), closed: new Set(), files: null, query: '', text: false, matchCase: false, word: false, regex: false, search: null, searchError: null, menu: null, options: false });
 
 const short = (sha: string): string => sha.slice(0, 7);
 const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
@@ -291,23 +293,56 @@ export function ChangesTreeView({ state, list, shown, now, pinned, canPin }: { s
   );
 }
 
+/** The search box's options, as its menu lists them: the option, its label and the glyph VS Code's search box shows for it. */
+const SEARCH_OPTIONS: ReadonlyArray<{ name: 'matchCase' | 'word' | 'regex' | 'text'; label: string; glyph: string | null }> = [
+  { name: 'matchCase', label: 'Match case', glyph: 'Aa' },
+  { name: 'word', label: 'Whole word', glyph: 'ab' },
+  { name: 'regex', label: 'Regular expression', glyph: '.*' },
+  { name: 'text', label: 'Search the text of every file', glyph: null },
+];
+
+/**
+ * The search box: the text, then one options button at its right end that opens a menu of Match case, Whole word, Regular expression and
+ * text search, so the text keeps the box's width at any width (the operator's decision, 2026-11-26). The button's badge counts the options on
+ * without changing its width; choosing an option keeps the menu open.
+ */
 function SearchBox({ state }: { state: TreeState }): VNode {
-  const option = (name: 'matchCase' | 'word' | 'regex', label: string, title: string) => (
-    <button class="tree-option" type="button" data-action="tree-option" data-option={name} aria-pressed={state[name]} title={title} aria-label={title}>
-      {label}
-    </button>
-  );
+  const on = SEARCH_OPTIONS.filter(({ name }) => state[name]).length;
+  const label = on === 0 ? 'Search options' : `Search options, ${on} on`;
 
   return (
     <div class="tree-search">
       <span class="codicon codicon-search" aria-hidden="true"></span>
       <input type="search" data-tree-search="1" value={state.query} placeholder="Search files and commits" aria-label="Search files and commits" />
-      {option('matchCase', 'Aa', 'Match case')}
-      {option('word', 'ab', 'Whole word')}
-      {option('regex', '.*', 'Regular expression')}
-      <button class="tree-option text" type="button" data-action="tree-option" data-option="text" aria-pressed={state.text} title="Search the text of every file">
-        Text
-      </button>
+      <div class="menu-anchor tree-options">
+        <button class={`tree-options-button${on > 0 ? ' active' : ''}`} type="button" data-action="tree-options" aria-haspopup="menu" aria-expanded={state.options} title={label} aria-label={label}>
+          <span class="codicon codicon-filter" aria-hidden="true"></span>
+          {on > 0 ? (
+            <span class="tree-options-count" aria-hidden="true">
+              {on}
+            </span>
+          ) : null}
+        </button>
+        {state.options ? (
+          <ul class="glass menu tree-options-menu" role="menu" aria-label="Search options">
+            {SEARCH_OPTIONS.map(({ name, label: text, glyph }) => (
+              <li role="none">
+                <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={state[name]} data-action="tree-option" data-option={name}>
+                  <span class="menu-gutter" aria-hidden="true">
+                    {state[name] ? <span class="codicon codicon-check"></span> : null}
+                  </span>
+                  <span class="title">{text}</span>
+                  {glyph === null ? null : (
+                    <span class="menu-note" aria-hidden="true">
+                      {glyph}
+                    </span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
     </div>
   );
 }

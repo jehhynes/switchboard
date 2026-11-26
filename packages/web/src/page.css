@@ -1144,13 +1144,14 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 .hist-toolbar { position: sticky; top: -22px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0; background: var(--hist-bg); border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent)); }
 .hist-tl-title { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .hist-order { font-size: 12px; font-weight: 400; color: var(--vscode-descriptionForeground); }
-.hist-tools { flex: 1 1 420px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* The filter and its buttons on a line of their own, the chips wrapping on the lines under it (the operator's decision, 2026-11-26). */
+.hist-tools { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .history-view button.hist-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 10px; border-radius: 12px; font-size: 12px; line-height: 20px; border: 1px solid var(--vscode-widget-border, var(--vscode-descriptionForeground)); background: transparent; color: var(--vscode-descriptionForeground); }
 .history-view button.hist-chip.on { border-color: var(--vscode-focusBorder); color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent); }
 .hist-chip .codicon { font-size: 13px; }
 .history-view button.hist-chips-toggle { display: none; align-items: center; gap: 5px; padding: 1px 10px; border-radius: 12px; font-size: 12px; line-height: 20px; border: 1px solid var(--vscode-widget-border, var(--vscode-descriptionForeground)); background: transparent; color: var(--vscode-foreground); }
 .history-view button.hist-chips-toggle.filtered { border-color: var(--vscode-focusBorder); background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent); }
-.hist-find { flex: 1 1 220px; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.hist-find { flex: 1 1 100%; display: flex; align-items: center; gap: 4px; min-width: 0; }
 .hist-filter-box { flex: 1 1 auto; min-width: 90px; display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-placeholderForeground); }
 .hist-filter-box:focus-within { border-color: var(--vscode-focusBorder); }
 .hist-filter { flex: 1; min-width: 0; padding: 0; border: none; outline: none; font: inherit; font-size: 12px; color: var(--vscode-input-foreground); background: transparent; }
@@ -1242,11 +1243,10 @@ ol.hist-timeline > :last-child::before { bottom: auto; height: 14px; }
   .hist-body { --hist-time: 40px; --hist-gap: 8px; --hist-rail: 57px; padding: 16px 14px calc(48px + var(--sb-end)); }
   /* A phone's screen is too short to keep the bar's two rows of 44 px chips in view. */
   .hist-toolbar { position: static; }
-  .hist-tl-title, .hist-tools { flex-basis: 100%; }
+  .hist-tl-title { flex-basis: 100%; }
   .hist-head-links { margin-left: -6px; }
-  .history-view button.hist-chips-toggle { display: inline-flex; order: 0; }
-  .hist-find { order: 1; flex: 1 1 0; }
-  .history-view .hist-tools > button.hist-chip { display: none; order: 2; }
+  .history-view button.hist-chips-toggle { display: inline-flex; }
+  .history-view .hist-tools > button.hist-chip { display: none; }
   .history-view .hist-tools.chips-open > button.hist-chip { display: inline-flex; }
   .hist-now-card { padding-right: 12px; }
   .hist-now-headline, .hist-now-body { padding-left: 12px; }

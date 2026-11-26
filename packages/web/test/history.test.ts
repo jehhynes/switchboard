@@ -211,6 +211,20 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(texts(root, '[data-entry="g"] .hist-lines li')).toEqual(['Status: Running → Blocked']);
   });
 
+  it('puts the text filter on a line of its own with Expand all and Collapse all, and Filters and the chips after it', () => {
+    const root = draw(open({ ui: { ...EMPTY_HISTORY_UI, hidden: ['session'], chips: true } }), pinned());
+    const tools = root.querySelector<HTMLElement>('.hist-tools')!;
+    const find = tools.querySelector<HTMLElement>('.hist-find')!;
+
+    // The filter's line holds the field and the two buttons only, so no chip or count can take the field's width.
+    expect(tools.firstElementChild).toBe(find);
+    expect([...find.querySelectorAll('input, button')].map((one) => one.getAttribute('aria-label'))).toEqual(['Filter the timeline', 'Expand all', 'Collapse all']);
+    expect(find.querySelector('.hist-chips-toggle, .hist-chip')).toBeNull();
+    // Filters, then every chip, after the filter's line, in that order.
+    expect([...tools.children].slice(1).map((one) => one.getAttribute('data-category') ?? one.textContent)).toEqual(['Filters · 1 hidden', ...CATEGORIES.map((one) => one.key)]);
+    expect(tools.className).toBe('hist-tools chips-open');
+  });
+
   it('filters by chip and text, a body included, counting what matches, keeps the pinned state when a filter hides everything, and collapses a long run', () => {
     let root = draw(open({ ui: { ...EMPTY_HISTORY_UI, hidden: ['session'] } }), pinned());
 

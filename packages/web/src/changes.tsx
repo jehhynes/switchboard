@@ -1172,11 +1172,16 @@ export class ChangesController {
         void this.#search();
         return true;
       }
+      case 'tree-options':
+        this.tree.options = !this.tree.options;
+        this.deps.draw();
+        return true;
       case 'tree-pin':
         this.togglePin();
         return true;
       case 'tree-flyout':
         this.#flyout = !this.#flyout;
+        this.tree.options = false;
         this.deps.draw();
         return true;
       case 'tree-menu': {
@@ -2639,7 +2644,8 @@ export class ChangesController {
 
   /**
    * The tree's keys, while the focus is in it: Up and Down go to the next and previous row, Right opens a row and Left closes it, Down in the
-   * search box goes to the first row, Escape closes the flyout. Enter and Space act as a click does, on the row's own button.
+   * search box goes to the first row, Escape closes the search's options menu, else the flyout. In the open options menu or on its button, Up
+   * and Down move along the menu's rows. Enter and Space act as a click does, on the row's own button.
    */
   #treeKey(event: KeyboardEvent, target: Element): boolean {
     const tree = target.closest<HTMLElement>('.changes-tree');
@@ -2650,6 +2656,21 @@ export class ChangesController {
 
     const rows = [...tree.querySelectorAll<HTMLElement>('.tree-row')];
     const at = rows.indexOf(target.closest<HTMLElement>('.tree-row')!);
+
+    if (this.tree.options && event.key === 'Escape') {
+      this.tree.options = false;
+      tree.querySelector<HTMLElement>('.tree-options-button')?.focus();
+      this.deps.draw();
+      return true;
+    }
+
+    if (this.tree.options && (event.key === 'ArrowDown' || event.key === 'ArrowUp') && target.closest('.tree-options') !== null) {
+      const items = [...tree.querySelectorAll<HTMLElement>('.tree-options-menu .menu-row')];
+      const now = items.indexOf(target as HTMLElement);
+
+      items[now === -1 ? (event.key === 'ArrowDown' ? 0 : items.length - 1) : Math.max(0, Math.min(items.length - 1, now + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+      return true;
+    }
 
     if (event.key === 'Escape' && !this.pinned && this.#flyout) {
       this.#flyout = false;
@@ -2753,13 +2774,18 @@ export class ChangesController {
     return false;
   }
 
-  /** Closes the Files menu, the `⋯` menu, the Compare picker, a row's menu or the tree's flyout on a press outside it and its button; true when one closed. */
+  /** Closes the Files menu, the `⋯` menu, the Compare picker, a row's menu, the search's options menu or the tree's flyout on a press outside it and its button; true when one closed. */
   pointerDown(target: EventTarget | null): boolean {
     const inside = (selector: string) => target instanceof Element && target.closest(selector) !== null;
     let closed = false;
 
     if (this.tree.menu !== null && !inside('.tree-more')) {
       this.tree.menu = null;
+      closed = true;
+    }
+
+    if (this.tree.options && !inside('.tree-options')) {
+      this.tree.options = false;
       closed = true;
     }
 
@@ -2783,8 +2809,13 @@ export class ChangesController {
     return true;
   }
 
-  /** Closes the Compare picker, the Files menu, the `⋯` menu or a row's menu on Escape: which button takes the focus back, or null. */
-  escape(): 'files' | 'more' | null {
+  /** Closes the search's options menu, the Compare picker, the Files menu, the `⋯` menu or a row's menu on Escape: which button takes the focus back, or null. */
+  escape(): 'files' | 'more' | 'options' | null {
+    if (this.tree.options) {
+      this.tree.options = false;
+      return 'options';
+    }
+
     if (this.view.compare !== null) {
       this.view.compare = null;
       return 'files';

@@ -501,7 +501,7 @@ function GroupHead({ group }: { group: Group }) {
 
 /**
  * The page's History tab (PRD R59, R98): the head (key, repository, links, the title as the page's `h1`, and one line with the status or
- * waiting-on-you pill, the playbook and the summary), the timeline's toolbar (chips, filter, Expand all, Collapse all), then the work items as
+ * waiting-on-you pill, the playbook and the summary), the timeline's toolbar (the filter, Expand all and Collapse all, then the chips under them), then the work items as
  * groups of one timeline, newest first, the open work item's first with the pinned state at the head of its rail. The head shows from what the
  * page holds before History loads, after a failed read and for a row with no ticket History.
  */
@@ -579,27 +579,8 @@ export function renderHistory(open: HistoryOpen | null, state: StateView | null,
               Timeline <span class="hist-order">Newest first</span>
             </h2>
             <div class={`hist-tools${ui.chips ? ' chips-open' : ''}`}>
-              {/* A narrow pane folds the chips behind Filters, so a phone's first screen still holds the pinned state. */}
-              <button
-                type="button"
-                class={`hist-chips-toggle${ui.hidden.length > 0 ? ' filtered' : ''}`}
-                data-action="history-chips"
-                aria-expanded={ui.chips}
-                title={ui.hidden.length > 0 ? `${ui.hidden.length} hidden` : 'Show the filter chips'}
-              >
-                <span class="codicon codicon-filter" aria-hidden="true"></span>
-                <span>{ui.hidden.length > 0 ? `Filters · ${ui.hidden.length} hidden` : 'Filters'}</span>
-              </button>
-              {open!.categories.map(({ key: category, label, icon }) => {
-                const on = !ui.hidden.includes(category);
-
-                return (
-                  <button type="button" class={`hist-chip${on ? ' on' : ''}`} data-action="history-chip" data-category={category} aria-pressed={on}>
-                    <span class={`codicon codicon-${icon}`} aria-hidden="true"></span>
-                    <span>{label}</span>
-                  </button>
-                );
-              })}
+              {/* The filter has a line of its own, and the chips wrap on the lines under it, so neither covers the other at any width (the operator's
+                  decision, 2026-11-26). A narrow pane folds the chips behind Filters, so a phone's first screen still holds the pinned state. */}
               <span class="hist-find">
                 <label class="hist-filter-box">
                   <span class="codicon codicon-search" aria-hidden="true"></span>
@@ -620,6 +601,26 @@ export function renderHistory(open: HistoryOpen | null, state: StateView | null,
                   <span class="codicon codicon-collapse-all" aria-hidden="true"></span>
                 </button>
               </span>
+              <button
+                type="button"
+                class={`hist-chips-toggle${ui.hidden.length > 0 ? ' filtered' : ''}`}
+                data-action="history-chips"
+                aria-expanded={ui.chips}
+                title={ui.hidden.length > 0 ? `${ui.hidden.length} hidden` : 'Show the filter chips'}
+              >
+                <span class="codicon codicon-filter" aria-hidden="true"></span>
+                <span>{ui.hidden.length > 0 ? `Filters · ${ui.hidden.length} hidden` : 'Filters'}</span>
+              </button>
+              {open!.categories.map(({ key: category, label, icon }) => {
+                const on = !ui.hidden.includes(category);
+
+                return (
+                  <button type="button" class={`hist-chip${on ? ' on' : ''}`} data-action="history-chip" data-category={category} aria-pressed={on}>
+                    <span class={`codicon codicon-${icon}`} aria-hidden="true"></span>
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
           {view.reconstructed && view.recordedSince !== null ? (

@@ -352,6 +352,7 @@ describe('the Changes tree', () => {
     expect(rows().map(([label]) => label)).toEqual(['FILES', 'COMMITS', '202-ui', '201-exact-scan', 'drop HNSW rebuild job', '200-match-table', 'main']);
 
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    tree().querySelector<HTMLElement>('[data-action="tree-options"]')!.click();
     tree().querySelector<HTMLElement>('[data-option="matchCase"]')!.click();
     tree().querySelector<HTMLElement>('[data-option="text"]')!.click();
     vi.useRealTimers();
@@ -366,6 +367,114 @@ describe('the Changes tree', () => {
     row('const pool = exact();').querySelector<HTMLElement>('.tree-row')!.click();
     await flush();
     expect(gets.filter((url) => url.startsWith('/v1/conversation/file?')).at(-1)).toBe('/v1/conversation/file?window=pk&path=src%2Fmatch%2Fpool.ts&side=disk&from=HEAD&to=worktree');
+  });
+
+  it('keeps the search options in one menu from a button at the box\'s right end, open while choosing, until Escape or a press outside', async () => {
+    start();
+    await openTab();
+
+    const search = () => tree().querySelector<HTMLElement>('.tree-search')!;
+    const button = () => search().querySelector<HTMLButtonElement>('[data-action="tree-options"]')!;
+    const menu = () => search().querySelector<HTMLElement>('.tree-options-menu');
+    const checked = () => [...menu()!.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((item) => [item.dataset['option'], item.getAttribute('aria-checked')]);
+
+    // The box holds the field and the one button, last; no option shows until the menu opens.
+    expect([...search().children].map((one) => one.tagName.toLowerCase() + (one.className ? '.' + one.className.split(' ').join('.') : ''))).toEqual(['span.codicon.codicon-search', 'input', 'div.menu-anchor.tree-options']);
+    expect(search().querySelector('[data-option]')).toBeNull();
+    expect(button().getAttribute('aria-expanded')).toBe('false');
+    expect(button().getAttribute('aria-label')).toBe('Search options');
+    expect(button().querySelector('.tree-options-count')).toBeNull();
+
+    button().click();
+    await flush();
+    expect(button().getAttribute('aria-expanded')).toBe('true');
+    expect(menu()!.getAttribute('role')).toBe('menu');
+    expect([...menu()!.querySelectorAll('.title')].map((one) => one.textContent)).toEqual(['Match case', 'Whole word', 'Regular expression', 'Search the text of every file']);
+    expect(checked()).toEqual([
+      ['matchCase', 'false'],
+      ['word', 'false'],
+      ['regex', 'false'],
+      ['text', 'false'],
+    ]);
+
+    // Choosing an option keeps the menu open, ticks it, and the button counts it without growing.
+    menu()!.querySelector<HTMLElement>('[data-option="word"]')!.click();
+    await flush();
+    menu()!.querySelector<HTMLElement>('[data-option="regex"]')!.click();
+    await flush();
+    expect(menu()).not.toBeNull();
+    expect(checked()).toEqual([
+      ['matchCase', 'false'],
+      ['word', 'true'],
+      ['regex', 'true'],
+      ['text', 'false'],
+    ]);
+    expect(button().classList.contains('active')).toBe(true);
+    expect(button().getAttribute('aria-label')).toBe('Search options, 2 on');
+    expect(button().querySelector('.tree-options-count')?.textContent).toBe('2');
+
+    // A press inside the menu keeps it; Escape closes it and gives the focus back to the button.
+    menu()!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await flush();
+    expect(menu()).not.toBeNull();
+    menu()!.querySelector<HTMLElement>('[data-option="word"]')!.focus();
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flush();
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(button());
+
+    // A press outside closes it too, keeping the options chosen.
+    button().click();
+    await flush();
+    expect(menu()).not.toBeNull();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await flush();
+    expect(menu()).toBeNull();
+    expect(button().getAttribute('aria-label')).toBe('Search options, 2 on');
+
+    // Up and Down move along the open menu's rows, from its button too.
+    const key = (name: string) => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+
+    button().click();
+    await flush();
+    button().focus();
+    key('ArrowDown');
+    expect((document.activeElement as HTMLElement).dataset['option']).toBe('matchCase');
+    key('ArrowDown');
+    key('ArrowDown');
+    expect((document.activeElement as HTMLElement).dataset['option']).toBe('regex');
+    key('ArrowUp');
+    expect((document.activeElement as HTMLElement).dataset['option']).toBe('word');
+
+    // In the unpinned tree, as on a phone, Escape closes the menu and leaves the tree open; a second closes the tree.
+    key('Escape');
+    await flush();
+    document.querySelector<HTMLElement>('[data-action="tree-pin"]')!.click();
+    await flush();
+    document.querySelector<HTMLElement>('[data-action="tree-flyout"]')!.click();
+    await flush();
+    button().click();
+    await flush();
+    menu()!.querySelector<HTMLElement>('[data-option="text"]')!.focus();
+    key('Escape');
+    await flush();
+    expect(menu()).toBeNull();
+    expect(document.querySelector('.diff-view')!.classList.contains('tree-open')).toBe(true);
+    expect(document.activeElement).toBe(button());
+    key('Escape');
+    await flush();
+    expect(document.querySelector('.diff-view')!.classList.contains('tree-open')).toBe(false);
+
+    // The menu left open when the tree closes does not come back with the tree.
+    document.querySelector<HTMLElement>('[data-action="tree-flyout"]')!.click();
+    await flush();
+    button().click();
+    await flush();
+    document.querySelector<HTMLElement>('[data-action="tree-flyout"]')!.click();
+    await flush();
+    document.querySelector<HTMLElement>('[data-action="tree-flyout"]')!.click();
+    await flush();
+    expect(menu()).toBeNull();
   });
 
   it("lists only an open commit's matching files when the commit is found by a path, and all of them when found by its subject", async () => {

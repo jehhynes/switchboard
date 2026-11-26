@@ -2962,12 +2962,39 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       cardMenu.classList.toggle('flip-y', place.flipY);
     }
   };
+  /**
+   * Fits the Changes search's options menu in the tree as far as the viewport shows it, since the tree clips it: above its button
+   * where the room below is short and the room above is longer, scrolling where neither holds it, as on a phone on its side, and no wider
+   * than the room from its button's right edge back to the tree's left, its labels cut where a narrow tree leaves less.
+   */
+  const placeTreeMenus = (): void => {
+    for (const treeMenu of root.querySelectorAll<HTMLElement>('.tree-options-menu')) {
+      const box = treeMenu.closest('.changes-tree')?.getBoundingClientRect();
+      const top = Math.max(box?.top ?? 0, 0);
+      const bottom = Math.min(box?.bottom ?? 0, document.documentElement.clientHeight);
+
+      if (box === undefined || bottom <= top || treeMenu.parentElement === null) {
+        continue;
+      }
+
+      treeMenu.classList.remove('flip-y');
+      treeMenu.style.maxHeight = '';
+
+      const inBox = (rect: DOMRect) => ({ left: rect.left - box.left, right: rect.right - box.left, top: rect.top - top, bottom: rect.bottom - top, width: rect.width, height: rect.height });
+      const place = menuPlace(inBox(treeMenu.parentElement.getBoundingClientRect()), inBox(treeMenu.getBoundingClientRect()), { width: box.width, height: bottom - top });
+
+      treeMenu.classList.toggle('flip-y', place.flipY);
+      treeMenu.style.maxHeight = `${place.maxHeight}px`;
+      treeMenu.style.maxWidth = `${Math.max(0, Math.floor(treeMenu.parentElement.getBoundingClientRect().right - box.left - 8))}px`;
+    }
+  };
   /** Opens each open menu down and to the right of its button, or the other way where the page has no room (`placeMenus`, architecture.md § Conversation view, Menus). */
   // A menu may set a wider max-width of its own, as the More menu does for its kind column.
   const fitMenus = (): void => {
     placeRowMenus();
     placeCardMenus();
     placeMenus(root, { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }, (menu) => parseFloat(getComputedStyle(menu as unknown as Element).maxWidth) || MENU_MAX_WIDTH);
+    placeTreeMenus();
   };
   /**
    * The shown strip's room for its tabs (`fitTabs` in tabs.ts), measured after a draw: its width less the maximize button's, More's width, and
@@ -5247,7 +5274,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    let changesClosed: 'files' | 'more' | null = null;
+    let changesClosed: 'files' | 'more' | 'options' | null = null;
     let cardMenu: HTMLElement | null = null;
     // A question card's open menu that holds the focus, or whose button does, for Up and Down.
     const cardAnchor = document.activeElement instanceof HTMLElement && document.activeElement.closest('.qc-menu-anchor')?.querySelector('.qc-menu') != null ? document.activeElement.closest<HTMLElement>('.qc-menu-anchor') : null;
@@ -5291,7 +5318,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && (changesClosed = changes.escape()) !== null) {
       draw();
-      root.querySelector<HTMLElement>(changesClosed === 'more' ? '.changes-more' : '.changes-files')?.focus();
+      root.querySelector<HTMLElement>(changesClosed === 'options' ? '.tree-options-button' : changesClosed === 'more' ? '.changes-more' : '.changes-files')?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.drawer !== null) {
       closeDrawer();

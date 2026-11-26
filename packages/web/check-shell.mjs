@@ -1,6 +1,7 @@
 // Checks the page's shell at iPhone sizes and an iPad's, and its tabs on a desktop, in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
 // app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History (its title first at 20 px, its
-// groups' headings at 14 px, and its pinned state on the first screen), Settings, the drawer, a sheet,
+// groups' headings at 14 px, and its pinned state on the first screen), History's filter and the Changes tree's search box (each at least 160 px
+// wide and covered by nothing else of its bar, with History's chips shown and the search's options menu open), Settings, the drawer, a sheet,
 // the persona dialog, a work item with more tabs than fit, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
 // a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, and the More menu lies above everything under it. Line 2 is one line, never wrapping and its items never
 // below one another, at several list widths down to 200 px; its playbook or host is cut, with an ellipsis and a tooltip naming it whole, only
@@ -46,11 +47,11 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'persona', 'tabs'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'persona', 'tabs', 'changes', 'changes-options', 'history-filters'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -190,7 +191,12 @@ const settingsRead = { settings: { path: 'C:/Users/someone/.switchboard/settings
 // Pair a device and Devices list more devices than the sheet shows at once, so its list scrolls, and a pairing address longer than a phone's line.
 const pairDevices = [{ id: 'a1', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true }, { id: 'b2', label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now, current: false, voice: true }, ...['Android · Chrome', 'iPad · Safari', 'Mac · Safari', 'Windows · Chrome', 'Linux · Firefox', 'Android · Firefox'].map((label, i) => ({ id: 'c' + i, label, host: 'some-long-computer-name.tail1234ab.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now - i * 86400000, current: false }))];
 const pairing = { url: 'https://some-long-computer-name.tail1234ab.ts.net/page?t=' + 'a'.repeat(64), code: 'ABCD-EFGH', host: 'some-long-computer-name.tail1234ab.ts.net', expiresAt: now + 5 * 60000 };
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
+// The Changes tab's routes: two changed files, a branch of one commit, and the worktree's files.
+const changeRow = (path) => ({ path, status: 'M', stages: ['unstaged'], additions: 3, deletions: 1, binary: false, hash: path });
+const changesList = { scopeGen: 3, base: 'b0', head: 'c1', from: 'base', to: 'worktree', commits: [{ sha: 'c1', parent: 'b0', subject: 'Renew the registration before it lapses', time: Math.floor(now / 1000) - 600 }], commitsMore: false, rows: [changeRow('src/dialer/registration.ts'), changeRow('src/dialer/monitor.ts')], stages: { staged: 0, unstaged: 2, untracked: 0 }, shown: 2, total: 2 };
+const stackData = { scopeGen: 3, repo: 'switchboard', root: 'D:/w', branch: 'fix/dialer-registration', head: 'c1', commitIds: ['c1'], more: false, incomplete: false, github: { state: 'none', observedAt: null }, links: [], main: { ref: 'origin/main', behind: 0, fetchedAt: now } };
+const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? { scopeGen: 3, paths: ['src/dialer/monitor.ts', 'src/dialer/registration.ts'], more: false } : null);
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {})), text: async () => '' });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -494,7 +500,38 @@ const OPEN = {
   persona: ['[data-action=view-menu]', '[data-action=persona]'],
   // An artifact chosen from More, so the strip keeps it beside the tabs it always keeps: the oldest, so the newest stays unread where it has room.
   tabs: ['.tab-more-button', '.tab-menu [data-action=artifact][data-path="chat/a0.md"]'],
+  // The Changes tab with its tree shown, as a phone shows it: over the diffs. A pinned tree has no flyout button, so that press finds none.
+  changes: ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search'],
+  // Its search's options menu open, Regular expression chosen, which keeps the menu open.
+  'changes-options': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-options]', '.tree-options-menu [data-option=regex]'],
+  // History's chips shown, one turned off, as a phone shows them behind Filters; a wider pane shows them without it.
+  'history-filters': ['[data-action=actions]', '[data-action=row-history]', '[data-action=history-chips]', '.hist-chip[data-category="you"]'],
 };
+
+/** The search views: the field, and the bar whose controls must not cover it. */
+const SEARCHES = {
+  changes: { field: '.tree-search input', bar: '.changes-tree-inner' },
+  'changes-options': { field: '.tree-search input', bar: '.changes-tree-inner' },
+  history: { field: '.hist-filter', bar: '.hist-toolbar' },
+  'history-filters': { field: '.hist-filter', bar: '.hist-toolbar' },
+};
+/** The least width a search field's text keeps, in CSS px. */
+const SEARCH_MIN = 160;
+
+/** The shown search field's visible width, and the controls of its bar, outside the field's own box, whose boxes cross it. */
+const searchFit = ({ field, bar }) => `(() => {
+  const shown = (node) => { for (let one = node; one; one = one.parentElement) { const style = getComputedStyle(one); if (style.display === 'none' || style.visibility === 'hidden') return false; } return true; };
+  const input = [...document.querySelectorAll(${JSON.stringify(field)})].find(shown);
+  if (!input) return null;
+  const box = input.getBoundingClientRect();
+  const host = input.closest(${JSON.stringify(bar)});
+  const name = (node) => node.tagName.toLowerCase() + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/ +/).join('.') : '') + (node.textContent.trim() ? ' "' + node.textContent.trim().slice(0, 20) + '"' : '');
+  const over = [...(host ?? document).querySelectorAll('button, input, label')].filter((node) => shown(node) && !node.contains(input)).filter((node) => {
+    const other = node.getBoundingClientRect();
+    return other.width > 0 && Math.min(box.right, other.right) - Math.max(box.left, other.left) > 1 && Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top) > 1;
+  }).map(name);
+  return { width: Math.round(box.width), over };
+})()`;
 
 /** Opens the More menu again and answers whether it lies above everything at the centres of its rows in view, and inside the viewport. */
 const moreOnTop = `(async () => {
@@ -770,6 +807,17 @@ try {
         }
         const found = missing.length > 0 ? ['could not open the view: no ' + missing.join(', ')] : failures(view, size, m);
 
+        // A search box's text keeps its width: nothing else in its bar covers it, and it is at least SEARCH_MIN px wide.
+        if (SEARCHES[view] !== undefined && missing.length === 0) {
+          const fit = await evaluate(searchFit(SEARCHES[view]));
+
+          if (fit === null) found.push('no search field shows');
+          else {
+            if (fit.width < SEARCH_MIN) found.push('the search field is ' + fit.width + ' px wide, under ' + SEARCH_MIN + ' px');
+            fit.over.forEach((one) => found.push(one + ' covers the search field'));
+          }
+        }
+
         if (view.startsWith('settings') && view !== 'settings-nav' && missing.length === 0) found.push(...settingsFailures(view, size, await evaluate(SETTINGS)));
 
         if (view === 'tabs' && missing.length === 0) {
@@ -916,8 +964,8 @@ try {
         }
 
         results.push({ name, ...m });
-        // History's screenshot shows its top too: the head and the pinned state.
-        if (shots !== null && view === 'history') {
+        // History's screenshots show its top too: the head, the pinned state and the filter.
+        if (shots !== null && view.startsWith('history')) {
           await evaluate('document.querySelectorAll(".hist-body").forEach((body) => { body.scrollTop = 0; })');
           await wait(150);
           mkdirSync(shots, { recursive: true });

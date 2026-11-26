@@ -132,9 +132,15 @@
 .tree-search { display: flex; align-items: center; gap: 4px; margin: 2px 8px 6px; padding: 2px 4px 2px 6px; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); border-radius: 4px; background: var(--vscode-input-background); }
 .tree-search:focus-within { border-color: var(--vscode-focusBorder); }
 .tree-search input { flex: 1; min-width: 0; height: 22px; border: none; outline: none; background: transparent; color: var(--vscode-input-foreground, var(--vscode-foreground)); font: inherit; }
-.tree-option { flex: none; height: 20px; padding: 0 3px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; font-size: 11px; cursor: pointer; }
-.tree-option[aria-pressed="true"] { border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder)); background: var(--vscode-inputOption-activeBackground, transparent); color: var(--vscode-foreground); }
-.tree-option.text { padding: 0 6px; border-color: var(--vscode-panel-border); }
+/* The search's options button at the box's right end, one fixed width whatever is on: its badge counts the options on over its corner. Its
+   menu lines up with the box's right edge, inside the tree, and lies over the rows under the box. */
+.tree-search { position: relative; z-index: 2; }
+.tree-options { flex: none; }
+.tree-options-button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; }
+.tree-options-button:hover, .tree-options-button[aria-expanded="true"] { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+.tree-options-button.active { border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder)); background: var(--vscode-inputOption-activeBackground, transparent); color: var(--vscode-foreground); }
+.tree-options-count { position: absolute; top: -5px; right: -5px; box-sizing: border-box; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: 10px; line-height: 14px; text-align: center; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
+.tree-options > .menu { left: auto; right: 0; min-width: 0; }
 .tree-item { position: relative; display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 8px 0 calc(8px + var(--depth, 0) * 14px); }
 .tree-item:hover { background: var(--vscode-list-hoverBackground); }
 .tree-item.selected { background: var(--vscode-list-inactiveSelectionBackground); }
@@ -214,7 +220,7 @@
 /* A touch screen's rows and targets are 44 px, each control a target of its own. */
 @media (hover: none), (pointer: coarse) {
   .tree-item, .tree-row, .tree-menu button { min-height: 44px; }
-  .tree-link, .tree-option, .tree-pin, .changes-tree-button, .tree-toggle button, .file-toggle button { min-width: 44px; min-height: 44px; }
+  .tree-link, .tree-options-button, .tree-pin, .changes-tree-button, .tree-toggle button, .file-toggle button { min-width: 44px; min-height: 44px; }
   .tree-viewed { min-width: 44px; min-height: 44px; justify-content: center; }
   .tree-viewed input { width: 20px; height: 20px; }
   .tree-item:not(:hover):not(:focus-within) .tree-link.icon { visibility: visible; }
@@ -234,4 +240,4 @@
 }
 /* The Changes tab draws no blue focus outline: a control reached by the keyboard shows its hover background instead. */
 .diff-view :is(button, a):focus-visible { outline: none; }
-.diff-view :is(.changes-bar button, .tree-link, .tree-option, .tree-toggle button, .tree-menu button):focus-visible { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+.diff-view :is(.changes-bar button, .tree-link, .tree-options-button, .tree-toggle button, .tree-menu button):focus-visible { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
