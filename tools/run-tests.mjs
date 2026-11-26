@@ -30,12 +30,15 @@ export async function runAll(jobs, { cwd = process.cwd(), env = process.env, wri
   return jobs.filter((_, n) => statuses[n] !== 0).map((job) => job.label);
 }
 
-/** The unit tests of `projects` (every workspace when omitted) in one vitest run, or of `files` alone, without coverage. */
+/**
+ * The unit tests of `projects` (every workspace when omitted) in one vitest run, or of `files` alone, without coverage. Passes when there are none,
+ * as for apps/hub, whose tests are all integration tests.
+ */
 export function unitTests({ projects, files = [], label = 'unit tests' } = {}) {
   return {
     label,
     command: 'npx',
-    args: ['vitest', 'run', '--coverage.enabled=false', '--exclude', '**/*.int.test.ts', '--exclude', '**/node_modules/**', ...(projects ?? []).flatMap((name) => ['--project', name]), ...files],
+    args: ['vitest', 'run', '--passWithNoTests', '--coverage.enabled=false', '--exclude', '**/*.int.test.ts', '--exclude', '**/node_modules/**', ...(projects ?? []).flatMap((name) => ['--project', name]), ...files],
   };
 }
 
