@@ -177,11 +177,19 @@ describe('Code Mode command', () => {
     expect(RULES).toMatch(/\n\n## Artifacts\n/);
     expect(RULES).toContain(`artifact folder, \`${ARTIFACTS}\` (also in the \`CLAUDE_ARTIFACTS_DIR\` environment variable)`);
     expect(RULES).toContain('they do not say when to write one');
-    expect(RULES).toContain('`<owner>/<kind>-<slug>.md`');
-    expect(RULES).toContain('kind: plan\n  title: ');
+    expect(RULES).toContain('`<owner>/<word>-<slug>.md`');
+    expect(RULES).toContain('---\n  title: ');
     expect(RULES).toContain('rewrite the same file');
     expect(RULES).toContain('```mermaid code block');
     expect(RULES).not.toMatch(/15 lines|three columns|when an answer/);
+  });
+
+  it('ArtifactRules_FrontMatterAndTag_AskForATitleAndNoKind', () => {
+    const artifacts = RULES.slice(RULES.indexOf('## Artifacts'));
+
+    expect(artifacts).toContain('front matter naming its title, which the view shows');
+    expect(artifacts).toContain('`[artifact: D:/research/speech/report.md | title: Speech engines]`');
+    expect(artifacts).not.toMatch(/\bkind\b/i);
   });
 
   it('makes the artifact folder with a .gitignore that ignores everything in it, and keeps one the session changed', () => {
