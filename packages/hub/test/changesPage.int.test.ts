@@ -168,6 +168,18 @@ describe('PageChanges reuses the list read', gitTimeout, () => {
     expect(reads()).toBe(before + 1);
   });
 
+  it('PageChangesDiff_ATagShadowingABaseRefSinceTheList_ReadsAgain', { timeout: 60_000 }, async () => {
+    const repo = busyRepo();
+    const { git, reads } = recording();
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root), git });
+
+    expect((await changes.changes('p1')).status).toBe(200);
+    // Git resolves origin/main to this tag before any remote ref, so the merge base may differ.
+    repo.git('tag', 'origin/main', 'HEAD');
+    expect((await changes.diff('p1', 'edited.md', '0')).status).toBe(200);
+    expect(reads()).toBe(2);
+  });
+
   it('PageChangesDiff_AListAtItsRowLimit_ReadsAgain', { timeout: 120_000 }, async () => {
     const repo = busyRepo();
 

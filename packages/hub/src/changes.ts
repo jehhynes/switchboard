@@ -340,8 +340,8 @@ async function readStamp(folder: string, git: Git): Promise<{ head: string | nul
   const lines = refs.stdout.toString('utf8').split('\n').filter((line) => line !== '');
   const listed = new Set(lines.map((line) => line.split(' ')[0]));
   const bases = refs.code === 0 ? BASE_REFS.filter((ref) => refsNamed(ref).some((name) => listed.has(name))) : BASE_REFS;
-  // The stamp holds the remote refs alone, as `stillHolds` reads them.
-  const remote = lines.filter((line) => BASE_REFS.some((ref) => line.startsWith(`refs/remotes/${ref} `) || line.startsWith(`refs/remotes/${ref}/`))).map((line) => `${line}\n`).join('');
+  // Every ref a base name could resolve to, as `stillHolds` reads them, so a local branch or tag that shadows a remote one counts.
+  const remote = lines.map((line) => `${line}\n`).join('');
 
   const indexed = ok ? await indexStamp(index) : null;
 
@@ -865,7 +865,7 @@ async function stillHolds(read: WorktreeChanges, paths: string[], git: Git): Pro
   const onDisk = read.to === null && paths.length > 0;
   const [head, refs, index] = await Promise.all([
     onDisk ? git(['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all', '--no-renames', '--', ...paths], read.root) : git(['rev-parse', '--verify', 'HEAD'], read.root),
-    git(['for-each-ref', '--format=%(refname) %(objectname)', ...BASE_REFS.map((ref) => `refs/remotes/${ref}`)], read.root),
+    git(['for-each-ref', '--format=%(refname) %(objectname)', ...BASE_REFS.flatMap(refsNamed)], read.root),
     indexStamp(read.index),
   ]);
 
