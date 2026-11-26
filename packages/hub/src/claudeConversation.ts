@@ -32,6 +32,8 @@ interface Reader {
   turnOffset?: number;
   /** The transcript read so far ends inside a turn. */
   inTurn?: boolean;
+  /** Why the conversation's last transcript read failed, logged once. */
+  readError?: string;
 }
 
 
@@ -189,7 +191,15 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
     }
 
     const path = this.#path(reader, session);
-    reader.conversation.readTranscript(path);
+    try {
+      reader.conversation.readTranscript(path);
+      delete reader.readError;
+    } catch (error) {
+      // A transcript the conversation cannot read, such as one too large for a string, still gives its title, and stops no other session's read.
+      const message = String(error);
+      if (reader.readError !== message) this.deps.log(`session ${session.id} conversation read failed: ${message}`);
+      reader.readError = message;
+    }
     if (path === null || this.deps.providerTitle === undefined) return;
     const item = this.deps.store.workItem(session.workItemId);
     const ticket = item === null ? null : this.deps.store.ticket(item.ticketId);
@@ -199,11 +209,9 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
       const version = `${stat.mtimeMs}:${stat.size}`;
       if (reader.titleVersion === version) return;
       reader.titleVersion = version;
-      const { lines, offset } = linesFrom(path, reader.titleOffset ?? 0);
-      reader.titleOffset = offset;
+      const lines = titleLines(path, reader.titleOffset ?? 0, (offset) => (reader.titleOffset = offset));
       let latest: { title: string; origin: 'provider-manual' | 'provider-auto' } | null = null;
       for (const line of lines) {
-        if (!line.includes('ai-title') && !line.includes('custom-title')) continue;
         let entry: Record<string, unknown>;
         try { entry = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
         const origin = entry['type'] === 'custom-title' ? 'provider-manual' : entry['type'] === 'ai-title' ? 'provider-auto' : null;
@@ -304,6 +312,74 @@ function linesFrom(path: string, offset: number): { lines: string[]; offset: num
   } finally { closeSync(handle); }
   const end = read === 0 ? 0 : buffer.lastIndexOf(10, read - 1) + 1;
   return { lines: end === 0 ? [] : buffer.toString('utf8', 0, end - 1).split('\n'), offset: start + end };
+}
+
+/** How much of a transcript one title read holds at once. */
+const TITLE_CHUNK = 4 << 20;
+/** Bytes every title line holds, its `type`. */
+const TITLE_KEYS = [Buffer.from('ai-title'), Buffer.from('custom-title')];
+
+/**
+ * The whole lines after `offset` that may name a title, found by their bytes before any is decoded, read `chunk` bytes at a time, so a
+ * transcript too large for one string still yields its titles (mechanics M165). A line longer than a chunk is no title line and is passed over;
+ * a file that shrank is read from its start. `advance` gets the offset after each chunk's last whole line, so the next read starts there even
+ * when a line does not parse or the read fails part way.
+ */
+export function titleLines(path: string, offset: number, advance: (offset: number) => void, chunk = TITLE_CHUNK): string[] {
+  const size = statSync(path).size;
+  let start = size < offset ? 0 : offset;
+  const lines: string[] = [];
+  const buffer = Buffer.alloc(Math.min(chunk, Math.max(size - start, 0)));
+  const handle = openSync(path, 'r');
+  // Inside a line longer than a chunk, which is passed over to its end.
+  let skipping = false;
+
+  try {
+    while (start < size) {
+      const count = readSync(handle, buffer, 0, Math.min(buffer.length, size - start), start);
+      if (count === 0) break;
+      const data = buffer.subarray(0, count);
+      const end = data.lastIndexOf(10) + 1;
+
+      if (end === 0) {
+        // No line ends in this chunk: a line longer than a chunk, unless the file ends here, when its last line is not written whole yet.
+        if (start + count >= size) break;
+        skipping = true;
+        start += count;
+        continue;
+      }
+
+      let from = 0;
+
+      if (skipping) {
+        from = data.indexOf(10) + 1;
+        skipping = false;
+      }
+
+      const whole = data.subarray(from, end);
+      const found = new Set<number>();
+
+      for (const key of TITLE_KEYS) {
+        for (let at = whole.indexOf(key); at >= 0; at = whole.indexOf(key, at + key.length)) {
+          found.add(whole.lastIndexOf(10, at) + 1);
+        }
+      }
+
+      for (const lineStart of [...found].sort((a, b) => a - b)) {
+        const lineEnd = whole.indexOf(10, lineStart);
+        lines.push(whole.toString('utf8', lineStart, lineEnd));
+      }
+
+      start += end;
+      advance(start);
+    }
+  } catch {
+    // The transcript may be replaced while it is read; the lines found so far stand, and the next change reads on from the last whole chunk.
+  } finally {
+    closeSync(handle);
+  }
+
+  return lines;
 }
 
 /** The transcript file of a session's current Claude session ID, from its reader's lookup when it has one. */

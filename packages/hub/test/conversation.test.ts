@@ -8,6 +8,7 @@ import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, refusal, sessionView, typedText } from '../src/conversation.js';
 import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
 import type { ConversationAdapter, ConversationChanged } from '../src/conversationAdapter.js';
+import { SessionConversation } from '@switchboard/conversation';
 import type { InputOutcome } from '@switchboard/conversation';
 import { dockView, windowOf } from '../src/dock.js';
 import { canonicalFolder } from '../src/folders.js';
@@ -43,8 +44,9 @@ describe('hosted conversations on the page (architecture.md § Window scope)', (
       now: () => NOW,
       newId: () => String(++id),
       providerTitle: (workItemId, title, origin) => titles.push({ workItemId, title, origin }),
-      log: () => {},
+      log: (line) => logs.push(line),
     });
+    const logs: string[] = [];
     const hosted: WorkItemView[] = [];
 
     stored(store, view);
@@ -73,7 +75,7 @@ describe('hosted conversations on the page (architecture.md § Window scope)', (
       writeFileSync(join(projects, projectSlug('D:/w12'), `${native}.jsonl`), lines.map((line) => `${line}\n`).join(''));
     };
 
-    return { store, view, scopes, service, host, open, transcript, titles };
+    return { store, view, scopes, service, host, open, transcript, titles, logs };
   }
 
   it('reads Claude automatic and manual titles from the transcript', async () => {
@@ -88,6 +90,35 @@ describe('hosted conversations on the page (architecture.md § Window scope)', (
     context.transcript('n-titles', [JSON.stringify({ type: 'ai-title', aiTitle: 'Investigate build failure' }), JSON.stringify({ type: 'custom-title', customTitle: 'Build regression' })]);
     await context.service.poll();
     expect(context.titles.at(-1)).toEqual({ workItemId: id, title: 'Build regression', origin: 'provider-manual' });
+  });
+
+  it('reads the title of a transcript the conversation cannot read, and the sessions after it, logging the failure once', async () => {
+    const context = setup();
+    const first = context.host(context.view.file, 'big');
+    const second = context.host(context.view.file, 'small');
+    context.transcript('n-big', [JSON.stringify({ type: 'ai-title', aiTitle: 'Too big to read' })]);
+    context.transcript('n-small', [JSON.stringify({ type: 'ai-title', aiTitle: 'Read after it' })]);
+    // As for a transcript over V8's string limit, which the conversation's read cannot decode (mechanics M165).
+    const read = SessionConversation.prototype.readTranscript;
+    const spy = vi.spyOn(SessionConversation.prototype, 'readTranscript').mockImplementation(function (this: SessionConversation, path) {
+      if (this.sessionId === 'big') throw new RangeError('Cannot create a string longer than 0x1fffffe8 characters');
+      read.call(this, path);
+    });
+
+    try {
+      await context.service.poll();
+      context.transcript('n-big', [JSON.stringify({ type: 'ai-title', aiTitle: 'Too big to read' }), JSON.stringify({ type: 'custom-title', customTitle: 'Renamed' })]);
+      await context.service.poll();
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(context.titles).toEqual([
+      { workItemId: first, title: 'Too big to read', origin: 'provider-auto' },
+      { workItemId: second, title: 'Read after it', origin: 'provider-auto' },
+      { workItemId: first, title: 'Renamed', origin: 'provider-manual' },
+    ]);
+    expect(context.logs.filter((line) => line.includes('conversation read failed'))).toEqual(['session big conversation read failed: RangeError: Cannot create a string longer than 0x1fffffe8 characters']);
   });
 
   it("lists a hosted conversation with its host's work item, and refuses another page's sessions and a stale scope generation", () => {
