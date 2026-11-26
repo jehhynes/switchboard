@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { basename, delimiter, join, resolve } from 'node:path';
 import { hubRecordPath, parseHubRecord } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { afterEach, beforeEach } from 'vitest';
@@ -43,11 +43,41 @@ export function startWith(extra: Record<string, string | undefined>, ...args: st
   return launch(main, extra, args);
 }
 
-export function launch(entry: string, extra: Record<string, string | undefined>, args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
-  // CLAUDE_CONFIG_DIR and CODEX_HOME keep hook installation inside the temporary home. PATH holds only Node and Windows, so the hub runs no
-  // real Claude or Codex: an orphaned Codex app-server from the hook trust exchange held <home>/.codex past the cleanup.
+/**
+ * A folder of this worker's own that holds Node.js alone, a hard link to it or else a copy. Node's own folder can hold a real `claude` or
+ * `codex` too, as npm's global installs do on Linux.
+ */
+function nodeOnly(): string {
+  const dir = join(tmpdir(), `node-only-${process.pid}`);
+  const node = join(dir, basename(process.execPath));
+
+  if (!existsSync(node)) {
+    mkdirSync(dir, { recursive: true });
+
+    try {
+      linkSync(process.execPath, node);
+    } catch {
+      // Another volume than Node's.
+      copyFileSync(process.execPath, node);
+    }
+  }
+
+  return dir;
+}
+
+/** This process's environment with a PATH of a folder holding Node.js alone and, on Windows, System32, whatever its spelling of PATH. */
+export function withoutRealAgents(): Record<string, string | undefined> {
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH'));
-  const env: Record<string, string | undefined> = { ...inherited, PATH: [dirname(process.execPath), join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')].join(delimiter), CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex'), ...extra };
+  const path = [nodeOnly(), ...(process.platform === 'win32' ? [join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')] : [])];
+
+  return { ...inherited, PATH: path.join(delimiter) };
+}
+
+export function launch(entry: string, extra: Record<string, string | undefined>, args: string[]): { child: ChildProcess; exited: Promise<{ code: number | null; stdout: string; stderr: string; pid: number | undefined }> } {
+  // CLAUDE_CONFIG_DIR and CODEX_HOME keep hook installation inside the temporary home. PATH holds only a folder with Node.js alone and, on
+  // Windows, System32, so the hub runs no real Claude or Codex: an orphaned Codex app-server from the hook trust exchange held <home>/.codex
+  // past the cleanup.
+  const env: Record<string, string | undefined> = { ...withoutRealAgents(), CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex'), ...extra };
 
   // A variable set to undefined is removed, such as the CLAUDE_CODE_SESSION_ID of a Claude session running the tests.
   for (const key of Object.keys(extra).filter((name) => extra[name] === undefined)) {

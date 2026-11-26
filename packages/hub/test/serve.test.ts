@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { request } from 'node:http';
+import { createServer as createHttpServer, request } from 'node:http';
+import type { Server as HttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { hubRecordPath, parseHubRecord, Store, switchboardHome } from '@switchboard/core';
 import type { Card } from '@switchboard/core';
@@ -19,6 +20,8 @@ import { openStream, tempHome, until } from './helpers.js';
 let home: string;
 let remove: () => void;
 const running: Served[] = [];
+/** Listeners a test started, closed after it. */
+const listeners: HttpServer[] = [];
 
 beforeEach(() => {
   ({ home, remove } = tempHome());
@@ -27,6 +30,11 @@ beforeEach(() => {
 afterEach(async () => {
   for (const served of running.splice(0)) {
     await served.stop('test ended');
+  }
+
+  for (const listener of listeners.splice(0)) {
+    listener.closeAllConnections();
+    await new Promise((done) => listener.close(done));
   }
 
   remove();
@@ -78,11 +86,16 @@ function served(result: ServeResult): Served {
   return result.served;
 }
 
-function writeStale(): void {
+/** A record of a hub that no longer answers: its port is this test's listener, which answers as something other than a hub. */
+async function writeStale(): Promise<void> {
+  const other = createHttpServer((_request, response) => response.writeHead(404).end('not a hub'));
+
+  await new Promise<void>((done) => other.listen(0, '127.0.0.1', done));
+  listeners.push(other);
   mkdirSync(switchboardHome(home), { recursive: true });
   writeFileSync(
     hubRecordPath(home),
-    JSON.stringify({ protocol: 1, version: '0.0.1', build: 'old', port: 1, token: 'stale', pid: 1, startedAt: '2026-01-01T00:00:00.000Z' }),
+    JSON.stringify({ protocol: 1, version: '0.0.1', build: 'old', port: (other.address() as { port: number }).port, token: 'stale', pid: 1, startedAt: '2026-01-01T00:00:00.000Z' }),
   );
 }
 
@@ -116,7 +129,7 @@ describe('serveHub', () => {
   });
 
   it('replaces a record whose hub no longer answers', async () => {
-    writeStale();
+    await writeStale();
 
     const { record } = served(await serve());
 
@@ -124,7 +137,7 @@ describe('serveHub', () => {
   });
 
   it('leaves exactly one hub when several start at once over a stale record', async () => {
-    writeStale();
+    await writeStale();
 
     const results = await Promise.all([serve(), serve(), serve()]);
     const winners = results.filter((result) => 'served' in result);
@@ -313,9 +326,47 @@ describe('serveHub', () => {
       return port;
     }
 
+    /**
+     * Serves a hub on a port the system just gave out, and on another when something took it before the hub bound it, which the hub logs
+     * as `not served`. `served` is the line the hub logs once it listens there, or null where it binds before `serve` resolves.
+     */
+    async function onFreePort(start: (port: number, log: (line: string) => void) => Promise<Served>, served: ((port: number) => string) | null): Promise<{ port: number; hub: Served }> {
+      for (let attempt = 1; ; attempt++) {
+        const port = await freePort();
+        const lines: string[] = [];
+        const hub = await start(port, (line) => lines.push(line));
+        const taken = (line: string) => line.includes(` not served on 127.0.0.1:${port}:`);
+        const outcome = served === null ? (lines.find(taken) ?? 'served') : await until(() => lines.find((line) => line === served(port) || taken(line)) ?? null);
+
+        if (!taken(outcome)) {
+          return { port, hub };
+        }
+
+        await hub.stop('test');
+
+        if (attempt === 3) {
+          throw new Error(outcome);
+        }
+      }
+    }
+
+    /** Whether nothing listens on `port` now: this test binds it, which only works once the hub let it go. */
+    async function released(port: number): Promise<boolean> {
+      const probe = createServer();
+      const bound = await new Promise<boolean>((done) => {
+        probe.once('error', () => done(false));
+        probe.listen(port, '127.0.0.1', () => done(true));
+      });
+
+      if (bound) {
+        await new Promise((done) => probe.close(done));
+      }
+
+      return bound;
+    }
+
     it('serves the app\'s snoozed URLs and cards on the browser port and stops serving them when stopped', async () => {
-      const browserPort = await freePort();
-      const hub = served(await serve({ browserPort, app: async () => app(['https://github.com/o/r/issues/1']) }));
+      const { port: browserPort, hub } = await onFreePort(async (port, log) => served(await serve({ browserPort: port, log, app: async () => app(['https://github.com/o/r/issues/1']) })), null);
       const reply = await call(browserPort, 'GET', '/snoozed', null);
 
       expect(reply?.status).toBe(200);
@@ -325,12 +376,15 @@ describe('serveHub', () => {
       });
 
       await hub.stop('test');
-      expect(await call(browserPort, 'GET', '/snoozed', null, 500)).toBeNull();
+      expect(await released(browserPort)).toBe(true);
     });
 
     it('passes a snooze and an unsnooze from the browser port to the app (PRD R66)', async () => {
-      const browserPort = await freePort();
       const calls: unknown[][] = [];
+      const { port: browserPort } = await onFreePort(
+        async (port, log) => served(await serve({ browserPort: port, log, app: async () => app([], (url, until) => (calls.push(['snooze', url, until]), { refused: null }), (url) => (calls.push(['unsnooze', url]), { refused: null })) })),
+        null,
+      );
       const post = (path: string, body: unknown) =>
         new Promise<number>((resolve, reject) => {
           const headers = { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc' };
@@ -343,8 +397,6 @@ describe('serveHub', () => {
           outbound.end(JSON.stringify(body));
         });
 
-      served(await serve({ browserPort, app: async () => app([], (url, until) => (calls.push(['snooze', url, until]), { refused: null }), (url) => (calls.push(['unsnooze', url]), { refused: null })) }));
-
       expect(await post('/snooze', { url: 'https://github.com/o/r/issues/1', until: null })).toBe(200);
       expect(await post('/unsnooze', { url: 'https://github.com/o/r/issues/1' })).toBe(200);
       expect(calls).toEqual([
@@ -354,21 +406,23 @@ describe('serveHub', () => {
     });
 
     it("serves the web page on the app's web.port unless the options name another port, and stops serving it when stopped", async () => {
-      const pagePort = await freePort();
-      const log = vi.fn();
       const store = Store.open(':memory:');
       const page = { access: new PageAccess(store), asset: () => null, opened: () => 'p', isPage: () => false, list: () => [], files: async () => null, artifact: () => null, upload: () => ({ status: 403, body: {} }) };
-      const hub = served(await serve({ browserPort: null, log, app: async () => ({ ...app([]), page, pagePort: () => pagePort }) }));
+      const pageServed = (port: number) => `web page on http://127.0.0.1:${port}/page/`;
+      const { port: pagePort, hub } = await onFreePort(async (port, log) => served(await serve({ browserPort: null, log, app: async () => ({ ...app([]), page, pagePort: () => port }) })), pageServed);
 
-      await until(() => (log.mock.calls.some(([line]) => line === `web page on http://127.0.0.1:${pagePort}/page/`) ? true : null));
       expect((await call(pagePort, 'GET', '/page/', null))?.status).toBe(401);
       await hub.stop('test');
-      expect(await call(pagePort, 'GET', '/page/', null, 500)).toBeNull();
+      expect(await released(pagePort)).toBe(true);
 
+      // pagePort 0 in the options serves the page on the hub's port alone, so it logs no web page port.
+      const log = vi.fn();
       const other = served(await serve({ browserPort: null, log, pagePort: 0, app: async () => ({ ...app([]), page, pagePort: () => pagePort }) }));
 
+      // A listen on the app's port would log within this window.
       await new Promise((done) => setTimeout(done, 100));
-      expect(await call(pagePort, 'GET', '/page/', null, 500)).toBeNull();
+      expect(log.mock.calls.filter(([line]) => String(line).startsWith('web page'))).toEqual([]);
+      expect(await released(pagePort)).toBe(true);
       await other.stop('test');
     });
 

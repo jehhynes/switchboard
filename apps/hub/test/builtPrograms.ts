@@ -2,12 +2,13 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Attachment, HolderClient, parseHolderRecord, recordPath } from '@switchboard/holder';
 import type { HolderRecord } from '@switchboard/holder';
 import { parseVoiceRecord, VoiceClient, voiceRecordPath } from '@switchboard/voice';
 import type { VoiceMessage } from '@switchboard/voice';
+import { withoutRealAgents } from './hubProcess.js';
 
 /**
  * The Built holder and Built voice process tests (docs/testing.md), on a build folder that `folder` names once it is ready: apps/hub's standalone
@@ -120,8 +121,7 @@ export function describeBuiltPrograms(folder: () => string, scratch: () => strin
       mkdirSync(home);
       // As the hub spawn tests do: its own Claude and Codex homes, and a PATH with no real Claude or Codex.
       run(join(folder(), 'hub.js'), [`--home=${home}`, '--browser-port=0', '--page-port=0'], {
-        ...process.env,
-        PATH: [dirname(process.execPath), join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32')].join(delimiter),
+        ...withoutRealAgents(),
         CLAUDE_CONFIG_DIR: join(home, '.claude'),
         CODEX_HOME: join(home, '.codex'),
       });
