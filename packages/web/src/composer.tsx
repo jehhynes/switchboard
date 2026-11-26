@@ -44,7 +44,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
 export function renderComposer(): VNode {
   return (
     <>
-      {/* While a card that can be answered is out of view, how many of its questions wait; the page fills it in (PRD R103). */}
+      {/* While a card that can be answered is out of view, how many of its questions wait, on its own line above the box; the page fills it in (PRD R103). */}
       <button class="question-waiting" type="button" data-action="goto-card" title="Go to the questions" hidden></button>
       <div class="composer-sent" role="status" hidden>
         <span class="codicon codicon-check" aria-hidden="true"></span>
@@ -131,7 +131,8 @@ export function renderShared(html: string): VNode {
 
 /**
  * The note above the composer while the session has ended, with Resume; a session the page cannot talk to at all
- * (`none`) gets only its reason.
+ * (`none`) gets only its reason. A session that still takes a message (`full`, a Codex app-server thread) resumes on one, so the note says
+ * either works; a read-only one resumes only by Resume.
  */
 export function renderEndedNote(session: PageState['session'], resuming: boolean, earlierOf: number | null = null): VNode | null {
   // An earlier session of work item `earlierOf` is only read, so it offers no Resume, ended or not, but a way back to the current one.
@@ -156,7 +157,7 @@ export function renderEndedNote(session: PageState['session'], resuming: boolean
   return (
     <div class="session-note" role="status">
       <span class="codicon codicon-stop-circle state-icon tone-muted" aria-hidden="true"></span>
-      <span class="session-note-text">{resumable ? 'The session has ended. Resume it to send a message.' : (session.reason ?? 'The session has ended.')}</span>
+      <span class="session-note-text">{session.conversation === 'full' ? 'The session has ended. Send a message or press Resume to continue it.' : resumable ? 'The session has ended. Resume it to send a message.' : (session.reason ?? 'The session has ended.')}</span>
       {resumable ? (
         <button type="button" class="session-resume" data-action="resume" disabled={resuming}>
           {resuming ? 'Resuming…' : 'Resume'}

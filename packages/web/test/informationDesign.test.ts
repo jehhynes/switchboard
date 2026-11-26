@@ -2,11 +2,20 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EMPTY, sessionEnd, timeline } from '../src/model.js';
-import { cardNote } from '../src/timeline.js';
+import { cardNote, renderPrompt } from '../src/timeline.js';
+import { renderEndedNote } from '../src/composer.js';
+import { html } from './html.js';
 import type { PageState } from '../src/model.js';
 import type { ArtifactView, MessageView, SessionView } from '@switchboard/protocol';
 
 const css = readFileSync(join(import.meta.dirname, '../src/page.css'), 'utf8');
+const cardCss = readFileSync(join(import.meta.dirname, '../../conversation/src/questionCard.css'), 'utf8');
+/** The declarations of the stylesheet's first rule whose selector list is exactly `selector`. */
+const rule = (sheet: string, selector: string): string => {
+  const start = sheet.indexOf(`\n${selector} {`);
+
+  return start === -1 ? '' : sheet.slice(sheet.indexOf('{', start) + 1, sheet.indexOf('}', start));
+};
 const message = (id: string, at: number): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at, ord: at, provisional: false, withdrawn: false, origin: 'typed', text: id, delivery: 'sent', error: null });
 const artifact = (path: string, updatedAt: number): ArtifactView => ({ path, owner: 'chat', kind: 'page', title: path, ext: 'md', type: 'markdown', updatedAt });
 const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, ...patch });
@@ -109,5 +118,54 @@ describe('the marks and buttons that compete', () => {
 
     expect(rule).toContain('background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);');
     expect(css).toMatch(/^\.header > button\.row-main \{[^}]*background: var\(--vscode-button-background\)/m);
+  });
+});
+
+describe('the conversation status row and question card', () => {
+  it('EndedNote_SessionThatTakesMessages_SaysSendOrResume', () => {
+    const note = document.createElement('div');
+
+    note.innerHTML = html(renderEndedNote(session({ state: 'ended', conversation: 'full' }), false));
+    expect(note.querySelector('.session-note-text')!.textContent).toBe('The session has ended. Send a message or press Resume to continue it.');
+    expect(note.querySelector('[data-action="resume"]')!.textContent).toBe('Resume');
+  });
+
+  it('EndedNote_ReadOnlySession_SaysResumeToSend', () => {
+    const note = document.createElement('div');
+
+    note.innerHTML = html(renderEndedNote(session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Resume it to send a message.' }), false));
+    expect(note.querySelector('.session-note-text')!.textContent).toBe('The session has ended. Resume it to send a message.');
+    expect(note.querySelector('[data-action="resume"]')).not.toBeNull();
+  });
+
+  it('PromptCard_WithOptions_SaysAnswerHereOrInTheTerminal', () => {
+    const card = document.createElement('div');
+
+    card.innerHTML = html(renderPrompt({ id: 'p1', lines: [' Do you want to proceed?', ' ❯ 1. Yes', '   2. No'], options: [{ key: '1', label: 'Yes', selected: true }, { key: '2', label: 'No', selected: false }], next: false }, 'permission', false));
+    expect(card.querySelectorAll('.prompt-option:not(.secondary)')).toHaveLength(2);
+    expect(card.querySelector('.prompt-note')!.textContent).toBe('Answer here or in the terminal.');
+  });
+
+  it('PromptCard_NoOptions_SaysAnswerInTheTerminal', () => {
+    const card = document.createElement('div');
+
+    card.innerHTML = html(renderPrompt({ id: 'p2', lines: [' Type your answer:'], options: [], next: false }, 'question', false));
+    expect(card.querySelectorAll('.prompt-option:not(.secondary)')).toHaveLength(0);
+    expect(card.querySelector('.prompt-note')!.textContent).toBe('Answer it in the terminal.');
+  });
+
+  it('QuestionsChip_Stylesheet_TakesItsOwnLineAtTheRightRatherThanFloat', () => {
+    const chip = rule(css, '.question-waiting');
+
+    expect(chip).not.toBe('');
+    expect(chip).not.toMatch(/position:\s*(absolute|fixed)/);
+    expect(chip).toMatch(/margin: 0 0 8px auto/);
+    expect(css).not.toMatch(/\.question-waiting[^{]*\{[^}]*position:\s*(absolute|fixed)/);
+  });
+
+  it('QuestionCard_Stylesheet_TopicIsNoLinkAndDisabledButtonsLoseTheAccentBorder', () => {
+    expect(rule(cardCss, '.qc-topic')).toMatch(/color: var\(--vscode-descriptionForeground\)/);
+    expect(rule(cardCss, '.qc-topic')).not.toMatch(/textLink/);
+    expect(rule(cardCss, '.qc-primary:disabled, .qc-secondary:disabled')).toMatch(/border-color: transparent/);
   });
 });

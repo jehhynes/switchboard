@@ -24,7 +24,8 @@
 .qc-menu.flip-y { top: auto; bottom: 100%; margin: 0 0 4px; }
 .qc-menu button { display: block; width: 100%; padding: 4px 10px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-menu-foreground, var(--vscode-foreground)); font: inherit; text-align: left; cursor: pointer; }
 .qc-menu button:hover, .qc-menu button:focus-visible { outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, var(--vscode-foreground)); }
-.qc-topic { color: var(--vscode-textLink-foreground, var(--qc-accent)); font-size: 0.85em; font-weight: 600; }
+/* The topic is a label, not a link: the description colour at full strength, 4.5:1 or more on the card in both themes. */
+.qc-topic { color: var(--vscode-descriptionForeground); font-size: 0.85em; font-weight: 600; }
 .qc-question { font-size: 1.08em; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 .qc-context { color: var(--vscode-descriptionForeground); line-height: 1.5; overflow-wrap: anywhere; }
 .qc-question p { margin: 0; }
@@ -66,7 +67,8 @@
 .qc-primary:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
 .qc-secondary { padding: 5px 14px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); font: inherit; cursor: pointer; touch-action: manipulation; }
 .qc-secondary:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); }
-.qc-primary:disabled, .qc-secondary:disabled { opacity: 0.5; cursor: default; }
+/* A disabled button loses the accent border too, so the first question's Back looks as disabled as Next before a pick. */
+.qc-primary:disabled, .qc-secondary:disabled { opacity: 0.5; border-color: transparent; cursor: default; }
 .qc-error + .qc-primary { margin-left: 0; }
 .qc-link { padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground, var(--qc-accent)); font: inherit; cursor: pointer; }
 .qc-link:hover, .qc-link:focus-visible { outline: none; text-decoration: underline; }

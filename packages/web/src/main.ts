@@ -2263,7 +2263,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
 
   /**
-   * Shows the questions-waiting chip over the composer while the newest card that can be answered is not in view, as when the asides after it
+   * Shows the questions-waiting chip above the composer's box while the newest card that can be answered is not in view, as when the asides after it
    * pushed it up or another tab is shown (PRD R103).
    */
   const showWaiting = (): void => {

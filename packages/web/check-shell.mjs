@@ -2,13 +2,16 @@
 // app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History (its title first at 20 px, its
 // groups' headings at 14 px, and its pinned state on the first screen), History's filter and the Changes tree's search box (each at least 160 px
 // wide and covered by nothing else of its bar, with History's chips shown and the search's options menu open), Settings, the drawer, a sheet,
-// the persona dialog, a work item with more tabs than fit, the composer under each other tab and a maximized column with the mic on, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
+// the persona dialog, a work item with more tabs than fit, the composer under each other tab and a maximized column with the mic on, a conversation with questions waiting, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
 // a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, and the More menu lies above everything under it. Line 2 is one line, never wrapping and its items never
 // below one another, at several list widths down to 200 px; its playbook or host is cut, with an ellipsis and a tooltip naming it whole, only
 // where it does not fit beside the comment icon and the key; a key shows its source's logo, GitHub's, Zoho's or a plugin's, in place of its source's label; every pill, the key included, shows its text where line 2 is 300 px wide or more and its icon alone under that,
 // its text kept for screen readers; the key never drops out; a link pill is whole, its icon alone or left out whole, never cut, the last
 // first; a pill left out is no keyboard stop, and a pill shown is one only in the list's Tab stop row; the pills change with the list's width alone, without a redraw; and line 2 paints the same while
 // the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them. Every control shown is a touch target of at least 44 px each way.
+// The questions waiting chip takes its own room above the composer, under the session's note: it covers no part of the conversation, the note or
+// the composer, at the conversation's end and halfway up, and the conversation's last row shows whole at its end. The card's topic is 4.5:1 on
+// the card, and its first question's disabled Back has no border.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -47,7 +50,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
@@ -56,7 +59,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'persona', 'tabs', 'changes', 'changes-options', 'history-filters', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'persona', 'tabs', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -135,6 +138,13 @@ for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
   items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : i === 28 ? '\\n\\n~~~\\nnpm run build\\n~~~' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
 }
+// The questions views: the first reply asks two questions, so their card is far above the end, where the session waits on a permission in its
+// terminal (questions) or has ended and takes a message, which resumes it (questions-ended, a Codex app-server session).
+// Asides follow it and no message, which would answer it.
+if (open && view?.startsWith('questions')) items.splice(0, items.length, ...items.filter((item, index) => index < 2 || item.type === 'reply').map((item, index) => (index < 2 ? item : { ...item, kind: 'aside' })));
+if (open && view?.startsWith('questions')) items[1].opening = 'I need two decisions.\\n\\n1. **Renewal lead.** How early should the registration renew? {#renew}\\n   - A) 30 s before expiry\\n   - B) At half the lifetime\\n2. Keep the old route? {#keep-route}\\n   - A) Keep\\n   - B) Remove';
+if (view === 'questions') Object.assign(session, { state: 'waiting', waitingFor: 'permission' });
+if (view === 'questions-ended') Object.assign(session, { state: 'ended', provider: 'codex' });
 // The conversation ends with a message the transcript did not show, so its Send again is measured as a touch target.
 if (open && view === 'conversation') items.push({ type: 'message', id: 'm-lost', sessionId: 's', workItemId: 1, at: now - 30000, ord: 100, provisional: false, withdrawn: false, origin: 'typed', text: 'Can we make these notices bigger?', delivery: 'unconfirmed', error: 'The transcript does not show this message.' });
 // The Changes views open it by the route, which leaves its tab in the strip.
@@ -555,6 +565,51 @@ const searchFit = ({ field, bar }) => `(() => {
   return { width: Math.round(box.width), over };
 })()`;
 
+/**
+ * Scrolls the conversation to its end or halfway, and answers whether the questions chip shows, what it covers (the conversation's visible
+ * area, the session's note, the composer's box, or whatever the page draws at its centre) and, at the end, how much of the last row is cut.
+ */
+const chipClear = (at) => `(async () => {
+  const panel = document.getElementById('panel');
+  panel.scrollTop = ${at === 'end' ? 'panel.scrollHeight' : '(panel.scrollHeight - panel.clientHeight) / 2'};
+  await new Promise((done) => setTimeout(done, 200));
+  const chip = document.querySelector('#composer .question-waiting');
+  if (!chip || chip.hidden || chip.getBoundingClientRect().height === 0) return { shown: false, covers: [], cut: null };
+  const box = chip.getBoundingClientRect();
+  const over = (selector, one) => { const r = one.getBoundingClientRect(); return r.height > 0 && Math.min(r.bottom, box.bottom) - Math.max(r.top, box.top) > 0.5 && Math.min(r.right, box.right) - Math.max(r.left, box.left) > 0.5 ? [selector] : []; };
+  const covers = [...over('#panel', panel), ...[...document.querySelectorAll('#note > *')].flatMap((one) => over('#note .' + one.className.split(' ')[0], one)), ...over('.composer', document.querySelector('#composer .composer'))];
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  if (!hit || !chip.contains(hit)) covers.push('its centre, under ' + (hit ? hit.tagName.toLowerCase() + '.' + hit.className : 'nothing'));
+  const last = [...panel.querySelectorAll('.timeline > li')].at(-1)?.getBoundingClientRect();
+  const end = panel.getBoundingClientRect().bottom;
+  return { shown: true, covers, cut: last && last.bottom > end + 0.5 ? Math.round(last.bottom - end) + ' px' : null };
+})()`;
+
+/**
+ * The open card's look, at the conversation's top: the contrast of its topic on the card, the card's background laid over the pane's, and
+ * whether the first question's disabled Back keeps a border of its own.
+ */
+const CARD_LOOK = `(async () => {
+  const panel = document.getElementById('panel');
+  panel.scrollTop = 0;
+  await new Promise((done) => setTimeout(done, 150));
+  const card = document.querySelector('#panel .question-card.qc');
+  const topic = card?.querySelector('.qc-topic');
+  const back = card?.querySelector('.qc-secondary[data-action="card-back"]');
+  if (!topic || !back) return null;
+  const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  // A computed colour as RGBA, through a canvas, which reads every syntax the page's colour-mix gives.
+  const rgba = (css) => { probe.clearRect(0, 0, 1, 1); probe.fillStyle = css; probe.fillRect(0, 0, 1, 1); const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data; return [r, g, b, a / 255]; };
+  const over = (top, under) => top.slice(0, 3).map((one, index) => one * top[3] + under[index] * (1 - top[3])).concat(1);
+  const luminance = (rgb) => { const [r, g, b] = rgb.slice(0, 3).map((one) => { const c = one / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (one, two) => { const [high, low] = [luminance(one), luminance(two)].sort((a, b) => b - a); return (high + 0.05) / (low + 0.05); };
+  const page = over(rgba(getComputedStyle(document.body).backgroundColor), [255, 255, 255]);
+  const pane = over(rgba(getComputedStyle(panel).backgroundColor), page);
+  const ground = over(rgba(getComputedStyle(card).backgroundColor), pane);
+  const style = getComputedStyle(back);
+  return { contrast: Math.round(ratio(over(rgba(getComputedStyle(topic).color), ground), ground) * 100) / 100, disabled: back.disabled, border: style.borderTopColor, borderAlpha: rgba(style.borderTopColor)[3] };
+})()`;
+
 /** Opens the More menu again and answers whether it lies above everything at the centres of its rows in view, and inside the viewport. */
 const moreOnTop = `(async () => {
   document.querySelector('.tab-more-button').click();
@@ -899,6 +954,27 @@ try {
         if (view.startsWith('settings') && view !== 'settings-nav' && missing.length === 0) found.push(...settingsFailures(view, size, await evaluate(SETTINGS)));
 
         if (view.startsWith('mic-') && missing.length === 0) found.push(...micFailures(view, size, await evaluate(MIC)));
+
+        // The questions chip covers nothing, at the conversation's end and halfway up.
+        if (view.startsWith('questions')) {
+          for (const at of ['middle', 'end']) {
+            const chip = await evaluate(chipClear(at));
+
+            if (!chip.shown) found.push('no questions chip with the card out of view at the ' + at);
+            else if (chip.covers.length > 0) found.push('at the ' + at + ' the questions chip covers ' + chip.covers.join(', '));
+            if (at === 'end' && chip.cut !== null) found.push("the conversation's last row is cut at its end: " + chip.cut);
+          }
+          // The card's topic is a label at 4.5:1 or more, and its first question's Back, disabled, has no border of its own.
+          const look = await evaluate(CARD_LOOK);
+
+          if (report) console.log(name + ' card: ' + JSON.stringify(look));
+          if (look === null) found.push('no card with a topic and Back at the top of the conversation');
+          else {
+            if (look.contrast < 4.5) found.push("the card's topic is " + look.contrast + ':1 on the card');
+            if (!look.disabled || look.borderAlpha > 0) found.push("the first question's Back is " + (look.disabled ? 'disabled with the border ' + look.border : 'enabled'));
+          }
+          await evaluate('(() => { const panel = document.getElementById("panel"); panel.scrollTop = panel.scrollHeight; })()');
+        }
 
         if (view === 'tabs' && missing.length === 0) {
           const more = await evaluate(moreOnTop);

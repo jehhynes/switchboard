@@ -524,7 +524,7 @@ export function backgroundRow(session: PageState['session']): VNode | null {
 /**
  * A permission prompt or question form a Claude session waits on in its terminal, as its screen shows it (architecture.md § Web page): the
  * prompt's lines, a button per numbered option, which presses its digit, Next (→) on a question form, and Cancel (Esc). Typed answers stay in the
- * terminal.
+ * terminal, so the note says to answer there only when no option shows.
  */
 export function renderPrompt(prompt: ScreenPrompt, waitingFor: string | null, sending: boolean): VNode {
   const title = waitingFor === 'permission' ? 'Claude asks for permission' : 'Claude asks you';
@@ -551,7 +551,7 @@ export function renderPrompt(prompt: ScreenPrompt, waitingFor: string | null, se
         <button type="button" class="prompt-option secondary" data-action="prompt-key" data-prompt-key="escape" disabled={sending}>
           Cancel (Esc)
         </button>
-        <span class="prompt-note">Answer it in the terminal.</span>
+        <span class="prompt-note">{prompt.options.length === 0 ? 'Answer it in the terminal.' : 'Answer here or in the terminal.'}</span>
       </div>
     </div>
   );

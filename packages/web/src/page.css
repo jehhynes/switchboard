@@ -412,9 +412,8 @@ button.icon, a.icon { display: inline-flex; align-items: center; border: none; b
 .header button.icon { justify-content: center; min-width: 26px; height: 26px; }
 /* Floating layers that overlap content (menus, the @ and / lists, the New messages pill) share one glass, as VS Code's own context menu: the
    menu colour mostly opaque over a blur of what is behind, a hairline border and a soft shadow; fully opaque where backdrop-filter is missing. */
-/* The questions-waiting chip shares the glass without its class, since an open .glass layer hides embedded website frames. */
-.glass, .question-waiting { --glass-fill: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-sideBar-background))); background: color-mix(in srgb, var(--glass-fill) 88%, transparent); color: var(--vscode-menu-foreground, var(--vscode-foreground)); -webkit-backdrop-filter: blur(8px) saturate(1.2); backdrop-filter: blur(8px) saturate(1.2); border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .glass, .question-waiting { background: var(--glass-fill); } }
+.glass { --glass-fill: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-sideBar-background))); background: color-mix(in srgb, var(--glass-fill) 88%, transparent); color: var(--vscode-menu-foreground, var(--vscode-foreground)); -webkit-backdrop-filter: blur(8px) saturate(1.2); backdrop-filter: blur(8px) saturate(1.2); border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .glass { background: var(--glass-fill); } }
 /* Menus (architecture.md § Conversation view), drawn as VS Code's context menus from its menu colours: a panel as wide as its content, at least
    160 px and never wider than the view, anchored under the button that opens it and overlapping what is below; 13 px single-line rows in normal
    weight with a gutter for a check mark, a muted note at the right, a rounded highlight inset from the edges, and separators inset from both. */
@@ -545,10 +544,12 @@ button.picker > .codicon-chevron-down { order: 2; }
 /* The timeline. */
 /* The conversation is as wide as the width set on its sash (--chat-width), 940 px by default, less the pane's padding. */
 .timeline { list-style: none; margin: 0 auto; padding: 0; max-width: calc(var(--chat-width, 940px) - 40px); }
-/* While the card that can be answered is out of view: how many of its questions wait, 8 px over the composer and any line above it, in the
-   shared glass, taking no room; a click goes to the card (PRD R103). */
+/* While the card that can be answered is out of view: how many of its questions wait, on a line of its own at the right above the composer's
+   box, under the session's note. It takes its room rather than float, so it never covers the conversation, the Thinking… or Waiting… row, a
+   note or the box; a click goes to the card (PRD R103). */
 #composer { position: relative; }
-.question-waiting { position: absolute; z-index: 2; bottom: 100%; margin-bottom: 8px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font: inherit; font-size: 12px; cursor: pointer; border-radius: 10px; padding: 4px 12px; }
+.question-waiting { display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: fit-content; max-width: 100%; margin: 0 0 8px auto; padding: 4px 12px; border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 14px; background: var(--vscode-input-background); color: var(--vscode-foreground); white-space: nowrap; font: inherit; font-size: 12px; cursor: pointer; }
+.question-waiting:hover { background: var(--vscode-list-hoverBackground); }
 .question-waiting .codicon { font-size: 14px; color: var(--vscode-editorWarning-foreground, var(--vscode-focusBorder)); }
 .question-waiting[hidden] { display: none; }
 .timeline > li { --pad-top: 8px; position: relative; padding-top: var(--pad-top); padding-bottom: 8px; }
@@ -833,8 +834,9 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (hover: none), (pointer: coarse) {
   .code-block > .copy { opacity: 1; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
   .meta .copy { display: none; }
-  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .artifact-open, .toast .dismiss, .conn-update button.conn-reload { min-height: 44px; }
+  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .question-waiting, .artifact-open, .toast .dismiss, .conn-update button.conn-reload { min-height: 44px; }
   .qc-menu-button { min-width: 44px; }
+  .question-waiting { border-radius: 22px; font-size: 13px; }
   /* A card's options are 56 px rows on touch (design § 6, Phone). */
   .qc-option { min-height: 56px; }
   .composer-tool, .send, .voice-controls .ghost.icon, .toast .dismiss, .conn-update button.conn-reload { min-width: 44px; }
@@ -874,6 +876,7 @@ body.artifact-window > .artifact-view { height: 100%; }
   .draft-note .session-note-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .draft-note .session-resume { margin-left: auto; }
   .composer-sent { padding: 0 12px; }
+  .question-waiting { margin-right: 12px; }
 }
 /* A conversation under 600 px wide, on a phone or in a narrow column, gives its text the width: 8 px at its sides, a 20 px gutter for the
    replies' dots, a shallower list indent, and our messages' bubbles that stop 24 px short of the left side. A wider one keeps the room messaging
