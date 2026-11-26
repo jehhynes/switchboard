@@ -751,7 +751,7 @@ describe('createHubApp', () => {
     await until(() => (pageFrames.some((frame) => frame.includes('\nevent: config\n')) ? true : null));
   });
 
-  it('answers Listening\'s Enroll my voice with how enrolment stands, refusing a start while voice is off (architecture.md § Voice check and barge-in)', async () => {
+  it('answers Talk and dictate\'s Enroll my voice with how enrolment stands, refusing a start while voice is off (architecture.md § Voice check and barge-in)', async () => {
     writeSettings({ sessions: { installHooks: false } });
     mkdirSync(join(temp.home, '.switchboard', 'voice'), { recursive: true });
     writeFileSync(join(temp.home, '.switchboard', 'voice', 'voiceprint.json'), JSON.stringify({ at: '2026-11-20T10:00:00.000Z', windows: 20, vector: [1, 0], pitch: null }));

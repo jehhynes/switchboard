@@ -50,7 +50,7 @@ interface View {
   /** The text typed in each field since the page was drawn, so a field shows what was typed, not the value read from it. */
   typing: Map<string, string>;
   ask: Ask | null;
-  /** Voiceprint enrolment as the hub last said, or null before Listening asked. */
+  /** Voiceprint enrolment as the hub last said, or null before Talk and dictate asked. */
   enrollment: Enrollment | null;
   /** Why the last enrolment request was refused or failed, or null. */
   enrollError: string | null;
@@ -213,8 +213,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       void devices();
     }
 
-    // Listening reads how enrolment stands when it first shows.
-    if (state?.page === 'listening' && !asked) {
+    // Talk and dictate reads how enrolment stands when it first shows.
+    if (state?.page === 'talk' && !asked) {
       asked = true;
       void enroll('status');
     }
@@ -857,7 +857,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     editCell,
     enroll: (action) => void enroll(action),
     voiceSwitch: () => {
-      navigate('speaking');
+      navigate('read-aloud');
       host.querySelector<HTMLElement>('[data-path="voice.enabled"] input')?.focus();
     },
     pair: () => void devices({ pair: true }),
@@ -977,7 +977,7 @@ interface Handlers {
   discard(): void;
   answer(choice: 'save' | 'discard' | 'keep' | 'delete'): void;
   editCell(name: string, path: string, checked: boolean): void;
-  /** Opens Speaking with the focus on the voice's switch. */
+  /** Opens Read aloud with the focus on the voice's switch. */
   voiceSwitch(): void;
   enroll(action: string): void;
   pair(): void;
@@ -1406,7 +1406,7 @@ function FileBlock({ state }: { state: EditorState }) {
   );
 }
 
-/** Listening's voice enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read. */
+/** Talk and dictate's voice enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read. */
 function EnrollRow({ view, on }: { view: View; on: Handlers }) {
   const row = enrollmentRow(view.enrollment, view.enrollError, Date.now());
 
@@ -1455,7 +1455,7 @@ function UsedBy({ playbooks, on }: { playbooks: readonly string[]; on: Handlers 
   );
 }
 
-/** Says the voice is off, above settings that need it, with a link to its switch on Speaking. */
+/** Says the voice is off, above settings that need it, with a link to its switch on Read aloud. */
 function VoiceOff({ on }: { on: Handlers }) {
   return (
     <p class="settings-voice-off">

@@ -31,8 +31,8 @@ const SETTINGS_PAGES = {
   'settings-display': ['display'],
   'settings-devices': ['devices'],
   'settings-advanced': ['advanced'],
-  'settings-speaking': ['speaking'],
-  'settings-listening': ['listening'],
+  'settings-read-aloud': ['read-aloud'],
+  'settings-talk': ['talk'],
   'settings-personas': ['personas', 'personas/page'],
   'settings-persona': ['personas', 'persona:0'],
 };
@@ -48,7 +48,7 @@ const SIZES = [
   { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-table'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
-const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-speaking', 'settings-listening'];
+const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-read-aloud', 'settings-talk'];
 const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */

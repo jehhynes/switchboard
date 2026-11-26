@@ -51,7 +51,7 @@ export interface Section {
   usedBy?: string[];
   /** Whether its settings do nothing while the voice is off, so it is dimmed then. */
   needsVoice?: boolean;
-  /** A line in its card that leads to another page, such as Speaking for the spoken alerts. */
+  /** A line in its card that leads to another page, such as Read aloud for the spoken alerts. */
   link?: { text: string; label: string; page: string };
 }
 
@@ -257,8 +257,8 @@ const PAGES: Readonly<Record<string, { title: string; lede: string; sections: (s
   display: { title: 'Alerts and display', lede: 'How the pages on this computer tell you that work needs you, and how they show diffs.', sections: () => displayFields() },
   devices: { title: 'Devices', lede: 'Phones and other computers that open this page through your tailnet.', sections: () => devicesFields() },
   advanced: { title: 'Advanced', lede: 'Experiments, the programs Switchboard runs, and where settings.json is.', sections: () => advancedFields() },
-  speaking: { title: 'Speaking', lede: 'What the voice says: replies read aloud and spoken alerts.', sections: (state) => speakingFields(state) },
-  listening: { title: 'Listening', lede: 'Dictation from the microphone. It needs the voice on, on Speaking.', sections: () => listeningFields(), needsVoice: true },
+  'read-aloud': { title: 'Read aloud', lede: 'Switchboard reads replies and alerts to you.', sections: (state) => readAloudFields(state) },
+  talk: { title: 'Talk and dictate', lede: 'You talk to Switchboard: the microphone, dictation and your voice.', sections: () => talkFields(), needsVoice: true },
   personas: { title: 'Personas', lede: 'The persona each playbook’s sessions take, unless one is pinned to the session.', sections: (state) => personasFields(state), needsVoice: true },
 };
 
@@ -610,10 +610,10 @@ export function personaField(state: EditorState, playbook: string, label: string
 }
 
 /**
- * The Speaking page (PRD R105): the voice process's switch and the speaker, how replies are read, and the spoken alerts, which need the voice
+ * The Read aloud page (PRD R105): the voice process's switch and the speaker, how replies are read, and the spoken alerts, which need the voice
  * on. Needs-you sound is on Alerts and display, since the page and system notifications play it too.
  */
-export function speakingFields(state: EditorState): Section[] {
+export function readAloudFields(state: EditorState): Section[] {
   const value = state.value ?? undefined;
 
   return [
@@ -650,11 +650,11 @@ export function speakingFields(state: EditorState): Section[] {
 }
 
 /**
- * The Listening page (architecture.md § Dictation, § Voice check and barge-in): the microphone with the voice enrolment, dictation, talking
+ * The Talk and dictate page (architecture.md § Dictation, § Voice check and barge-in): the microphone with the voice enrolment, dictation, talking
  * over replies, holding dictation while someone else speaks, and under Advanced the voice match threshold. The pitch check's two factors are
  * settings.json only (operator decision 2026-11-25).
  */
-export function listeningFields(): Section[] {
+export function talkFields(): Section[] {
   return [
     { heading: 'Microphone', block: 'enroll', needsVoice: true, fields: [{ path: 'voice.inputDevice', label: 'Microphone', kind: 'text', help: 'Part of the capture device’s name, such as Headset.', hint: 'System default' }] },
     {
@@ -732,8 +732,8 @@ export function personaFields(state: EditorState, index: number): Section[] {
       heading: '',
       fields: [
         { path: `${path}.name`, label: 'Name', kind: 'text', help: '1 to 40 characters, shown in the conversation’s View options.' },
-        { path: `${path}.voice`, label: 'Voice', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Speaking: ${capitalized(voice)}` }, ...choices(TTS_VOICES)], getAt(value, `${path}.voice`)) },
-        { path: `${path}.style`, label: 'Style', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Speaking: ${capitalized(style)}` }, ...choices(SPEECH_STYLES)], getAt(value, `${path}.style`)) },
+        { path: `${path}.voice`, label: 'Voice', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Read aloud: ${capitalized(voice)}` }, ...choices(TTS_VOICES)], getAt(value, `${path}.voice`)) },
+        { path: `${path}.style`, label: 'Style', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Read aloud: ${capitalized(style)}` }, ...choices(SPEECH_STYLES)], getAt(value, `${path}.style`)) },
         { path: `${path}.personality`, label: 'Personality', kind: 'prompt', help: 'At most 600 characters. How its spoken replies sound; it never changes how its sessions work.' },
       ],
     },
@@ -1301,7 +1301,7 @@ export function displayFields(): Section[] {
   return [
     {
       heading: 'Notifications',
-      link: { text: 'Spoken alerts, which the voice says, are on Speaking.', label: 'Open Speaking', page: 'speaking' },
+      link: { text: 'Spoken alerts, which the voice says, are on Read aloud.', label: 'Open Read aloud', page: 'read-aloud' },
       fields: [
         {
           path: 'alerts.surface',
@@ -1619,7 +1619,7 @@ export function fieldOfError(error: string, paths: readonly string[]): string | 
 function sectionPage(error: string): string | null {
   const section = /^([a-z]+)\b/i.exec(error)?.[1];
 
-  return section === 'voice' ? (/^voice\.pitch/.test(error) ? 'listening' : 'speaking') : section === 'sessions' ? HOME : section === 'triage' ? 'triage' : section === 'alerts' ? 'display' : section === 'web' ? 'advanced' : null;
+  return section === 'voice' ? (/^voice\.pitch/.test(error) ? 'talk' : 'read-aloud') : section === 'sessions' ? HOME : section === 'triage' ? 'triage' : section === 'alerts' ? 'display' : section === 'web' ? 'advanced' : null;
 }
 
 /** The page that holds each error's field; an error with no field, or whose page the navigation does not offer, maps to null and shows on every page. */
@@ -1782,8 +1782,8 @@ export function nav(state: EditorState): NavCategory[] {
     {
       label: 'Voice',
       entries: [
-        item(state, 'speaking', 'Speaking'),
-        item(state, 'listening', 'Listening'),
+        item(state, 'read-aloud', 'Read aloud'),
+        item(state, 'talk', 'Talk and dictate'),
         group(state, 'personas', 'Personas', [...state.personas.map((_, index) => item(state, `persona:${index}`, state.personaLabel(index))), add(state, 'New persona', 'new-persona')], { page: 'personas', label: 'Playbook personas' }, 'voice.personas'),
       ],
     },
