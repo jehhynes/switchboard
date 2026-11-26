@@ -1028,10 +1028,12 @@ describe('view limits', () => {
 
     raw.socket.pause();
     raw.send({ type: 'view', session: 's1' });
-    // The replay has started to arrive, so the output below queues behind it.
-    await until(() => expect(raw.socket.readableLength).toBeGreaterThan(0));
-    state.ptys[0]!.emit('y'.repeat(3000));
-    state.ptys[0]!.emit('z'.repeat(3000));
+    expect(state.host.connections()).toBe(2);
+    // Output before the host reads the view joins the replay; output after it queues behind the replay until the queue passes the limit.
+    await until(() => {
+      state.ptys[0]!.emit('y'.repeat(3000));
+      expect(state.host.connections()).toBe(1);
+    });
     raw.socket.resume();
     await raw.untilClosed();
     expect(raw.messages.some((m) => m.type === 'replayed')).toBe(false);
