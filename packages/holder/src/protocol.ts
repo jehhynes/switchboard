@@ -81,7 +81,8 @@ export type HostMessage =
   | { type: 'screen'; re: number; session: string; head: string; text: string }
   /**
    * The screen and `scrollback` lines above it serialized with their attributes; `rev` rises on every output, resize and input. `keyAt` is when
-   * an attached client last typed, which a `write` does not change; absent from a holder from before it.
+   * an attached client last typed, which a `write` does not change; absent from a holder from before it. For an exited session it can hold
+   * more scrollback than asked, never less: the holder keeps only a few sizes once the program has exited.
    */
   | { type: 'snapshot'; re: number; session: string; data: string; cols: number; rows: number; rev: number; keyAt?: number | null }
   /** The input of a `write` reached the program; `rev` is the revision after it. */

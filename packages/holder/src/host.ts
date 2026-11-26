@@ -87,8 +87,12 @@ interface Held {
   pty: Pty;
   /** The `onData` and `onExit` registrations, removed when the session is forgotten so the pseudo-terminal cannot keep it. */
   listeners: Disposable[];
-  term: InstanceType<typeof headless.Terminal>;
-  serializer: InstanceType<typeof serializeAddon.SerializeAddon>;
+  /** The screen and scrollback, until the program's last output is parsed after its exit; then `ended` keeps what it still serves. */
+  term: InstanceType<typeof headless.Terminal> | null;
+  serializer: InstanceType<typeof serializeAddon.SerializeAddon> | null;
+  /** Set once the terminal is being disposed, which waits for the writes queued before it. */
+  disposing: boolean;
+  ended: Ended | null;
   head: string;
   /** The size last given to the pseudo-terminal; the headless screen follows once the output before it is parsed. */
   cols: number;
@@ -101,6 +105,39 @@ interface Held {
   exitWaiters: Set<() => void>;
   removal: NodeJS.Timeout | null;
 }
+
+/**
+ * What an exited session still serves, serialized once the program's last output is parsed, so the terminal and its scrollback are freed at
+ * the exit rather than when the session is forgotten (mechanics M168).
+ */
+interface Ended {
+  /** The visible screen as plain text, as `screen` answers it. */
+  text: string;
+  /** The screen and all its scrollback serialized, as a replay sends it. */
+  data: string;
+  /** What a replay needs after `data` to leave mouse reporting as the program set it. */
+  mouse: string;
+  cols: number;
+  rows: number;
+  /** Snapshots by the scrollback they hold, fewest first, the last of them `data` with all of it. */
+  snapshots: Array<{ scrollback: number; data: string }>;
+}
+
+/**
+ * The string as one flat copy. The serializer builds its result by concatenation, which V8 keeps as a tree of pieces, about ten times the
+ * size of the text, until something reads the characters (mechanics M168); reading one makes V8 flatten it.
+ */
+function flat(text: string): string {
+  text.charCodeAt(0);
+
+  return text;
+}
+
+/**
+ * The scrollbacks an exited session keeps a snapshot of besides all of it: the sizes the hub reads, the screen alone and the conversation's
+ * 400 lines (`SNAPSHOT_SCROLLBACK` in packages/conversation). A snapshot of another size gets the next larger one kept.
+ */
+const KEPT_SCROLLBACKS = [0, 400];
 
 interface Connection {
   socket: Socket;
@@ -428,6 +465,8 @@ export class Host {
       listeners: [],
       term,
       serializer,
+      disposing: false,
+      ended: null,
       head: '',
       cols: request.cols,
       rows: request.rows,
@@ -448,7 +487,10 @@ export class Host {
   }
 
   #output(held: Held, data: string): void {
-    held.term.write(data);
+    if (held.ended === null) {
+      held.term?.write(data);
+    }
+
     held.lastOutputAt = this.#now();
     held.rev++;
 
@@ -492,7 +534,9 @@ export class Host {
     // A client still waiting for its replay is told after it; the others once the output still being parsed is on the last screen.
     const ready = [...held.clients, ...held.viewers].filter((client) => client.pending === null);
 
-    held.term.write('', () => {
+    this.#parsed(held, () => {
+      this.#keepEnded(held);
+
       for (const client of ready) {
         this.#send(client, { type: 'exited', exitCode });
         this.#end(client);
@@ -522,7 +566,91 @@ export class Host {
       listener.dispose();
     }
 
-    held.term.dispose();
+    this.#dispose(held);
+  }
+
+  /** Runs `read` once the output already received is parsed; at once for an exited session, whose screen no longer changes. */
+  #parsed(held: Held, read: () => void): void {
+    if (held.ended !== null || held.term === null) {
+      read();
+      return;
+    }
+
+    held.term.write('', read);
+  }
+
+  /** Keeps what an exited session serves as text and disposes its terminal. */
+  #keepEnded(held: Held): void {
+    const term = held.term;
+
+    if (held.ended !== null || term === null || held.disposing) {
+      return;
+    }
+
+    const serializer = held.serializer!;
+    const data = flat(serializer.serialize({ scrollback: SCROLLBACK_LINES }));
+    // A smaller snapshot is kept only when the buffer has more scrollback than it, since it would be `data` otherwise.
+    const above = term.buffer.normal.length - term.rows;
+
+    held.ended = {
+      text: flat(this.#screenText(held)),
+      data,
+      mouse: mouseEncoding(term),
+      cols: term.cols,
+      rows: term.rows,
+      snapshots: [
+        ...KEPT_SCROLLBACKS.filter((scrollback) => scrollback < above).map((scrollback) => ({ scrollback, data: flat(serializer.serialize({ scrollback })) })),
+        { scrollback: SCROLLBACK_LINES, data },
+      ],
+    };
+    this.#dispose(held);
+  }
+
+  /** Disposes the terminal after the writes and reads already queued on it. */
+  #dispose(held: Held): void {
+    const term = held.term;
+
+    if (term === null || held.disposing) {
+      return;
+    }
+
+    held.disposing = true;
+    // Outside xterm's write loop, which runs this callback.
+    term.write('', () =>
+      setImmediate(() => {
+        held.term = null;
+        held.serializer = null;
+        term.dispose();
+      }),
+    );
+  }
+
+  #screenText(held: Held): string {
+    if (held.ended !== null) {
+      return held.ended.text;
+    }
+
+    const term = held.term!;
+    const buffer = term.buffer.active;
+    const lines: string[] = [];
+
+    for (let row = buffer.baseY; row < buffer.baseY + term.rows; row++) {
+      lines.push(buffer.getLine(row)?.translateToString(true) ?? '');
+    }
+
+    return lines.join('\n');
+  }
+
+  /** The size the screen is drawn at. */
+  #drawn(held: Held): { cols: number; rows: number } {
+    const { cols, rows } = held.ended ?? held.term!;
+
+    return { cols, rows };
+  }
+
+  /** An exited session's snapshot of at least `scrollback` lines: the smallest it kept, which can hold more scrollback than asked. */
+  #endedSnapshot(ended: Ended, scrollback: number): string {
+    return (ended.snapshots.find((kept) => kept.scrollback >= scrollback) ?? ended.snapshots.at(-1)!).data;
   }
 
   async #kill(connection: Connection, id: number, session: string): Promise<void> {
@@ -637,16 +765,7 @@ export class Host {
       return;
     }
 
-    held.term.write('', () => {
-      const buffer = held.term.buffer.active;
-      const lines: string[] = [];
-
-      for (let row = buffer.baseY; row < buffer.baseY + held.term.rows; row++) {
-        lines.push(buffer.getLine(row)?.translateToString(true) ?? '');
-      }
-
-      this.#send(connection, { type: 'screen', re: id, session, head: held.head, text: lines.join('\n') });
-    });
+    this.#parsed(held, () => this.#send(connection, { type: 'screen', re: id, session, head: held.head, text: this.#screenText(held) }));
   }
 
   /** The screen and `scrollback` lines above it with their attributes, once the output already received is parsed. */
@@ -660,9 +779,11 @@ export class Host {
 
     const rev = held.rev;
 
-    held.term.write('', () =>
-      this.#send(connection, { type: 'snapshot', re: id, session, data: held.serializer.serialize({ scrollback }), cols: held.term.cols, rows: held.term.rows, rev, keyAt: held.keyAt }),
-    );
+    this.#parsed(held, () => {
+      const data = held.ended === null ? held.serializer!.serialize({ scrollback }) : this.#endedSnapshot(held.ended, scrollback);
+
+      this.#send(connection, { type: 'snapshot', re: id, session, data, ...this.#drawn(held), rev, keyAt: held.keyAt });
+    });
   }
 
   /**
@@ -731,7 +852,7 @@ export class Host {
       held.viewers.add(connection);
     }
 
-    held.term.write('', () => void this.#replay(connection, held));
+    this.#parsed(held, () => void this.#replay(connection, held));
   }
 
   #shutdown(connection: Connection, id: number): void {
@@ -768,7 +889,7 @@ export class Host {
     }
 
     // Output queued before this point is in the replay; output after it goes to pending.
-    held.term.write('', () => void this.#replay(connection, held));
+    this.#parsed(held, () => void this.#replay(connection, held));
   }
 
   /** Writes the replay at the pace the client reads it, then the output that arrived meanwhile. */
@@ -777,10 +898,12 @@ export class Host {
 
     // A viewer draws at the program's size, which is the screen's once the output and resizes queued before it are parsed.
     if (connection.state === 'view') {
-      this.#send(connection, { type: 'resized', cols: held.term.cols, rows: held.term.rows });
+      this.#send(connection, { type: 'resized', ...this.#drawn(held) });
     }
 
-    for (const part of chunkData(REPORTS_OFF + held.serializer.serialize({ scrollback: SCROLLBACK_LINES }) + mouseEncoding(held.term))) {
+    const screen = held.ended === null ? held.serializer!.serialize({ scrollback: SCROLLBACK_LINES }) + mouseEncoding(held.term!) : held.ended.data + held.ended.mouse;
+
+    for (const part of chunkData(REPORTS_OFF + screen)) {
       if (connection.state === 'closed' || connection.socket.destroyed) {
         return;
       }
@@ -859,6 +982,6 @@ export class Host {
     }
 
     // Output already queued was drawn at the old size, so the screen resizes after it is parsed.
-    held.term.write('', () => held.term.resize(cols, rows));
+    held.term?.write('', () => held.term?.resize(cols, rows));
   }
 }
