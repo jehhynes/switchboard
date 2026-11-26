@@ -2015,6 +2015,11 @@ export class Store {
       .run(hash, at, at, device.label, device.host, device.login);
   }
 
+  /** Renames a sign-in's device from `from` to `to`; false when it has another name by then, or no sign-in has the hash. */
+  renamePageSession(hash: string, from: string, to: string): boolean {
+    return Number(this.#db.prepare('UPDATE pageSessions SET label = ? WHERE hash = ? AND label = ?').run(to, hash, from).changes) === 1;
+  }
+
   /** Forgets one sign-in, or every one without a hash; answers how many. */
   deletePageSessions(hash?: string): number {
     const result = hash === undefined ? this.#db.prepare('DELETE FROM pageSessions').run() : this.#db.prepare('DELETE FROM pageSessions WHERE hash = ?').run(hash);

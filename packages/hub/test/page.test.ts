@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { Store } from '@switchboard/core';
 import { PAGE_CSP } from '../src/page.js';
-import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pageReportOf, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
+import { artifactFile, cookieValue, deviceLabel, knownDevice, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pageReportOf, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { PAGE_ASSETS } from '@switchboard/web';
@@ -183,6 +183,48 @@ describe('PageAccess', () => {
     expect(pageCookie('ab')).toBe(`sb_page=ab; HttpOnly; SameSite=Strict; Path=/; Max-Age=${PAGE_SESSION_MS / 1000}`);
   });
 
+  it('Allows_SignInWithoutFullName_TakesAFullNameOnceAndKeepsIt', () => {
+    let now = 1_000;
+    const access = new PageAccess(store, () => now);
+    const hashOf = (cookie: string) => createHash('sha256').update(cookie).digest('hex');
+    // A sign-in made before names were kept has none; one made without a User-Agent has the fallback.
+    const unnamed = access.exchange(access.token())!;
+    const fallback = access.exchange(access.token(), undefined, undefined, deviceLabel(undefined))!;
+    const named = access.exchange(access.token(), undefined, undefined, 'Mac · Safari')!;
+
+    expect([unnamed, fallback, named].map((one) => store.pageSession(hashOf(one))?.label)).toEqual(['', 'Unknown device · browser', 'Mac · Safari']);
+    // A name that is not full names nothing.
+    for (const label of [undefined, '', 'Unknown device · browser', 'Windows · browser', 'Unknown device · Edge']) {
+      expect(access.allows(`sb_page=${unnamed}`, undefined, label)).toBe(true);
+    }
+
+    expect(store.pageSession(hashOf(unnamed))?.label).toBe('');
+
+    for (const one of [unnamed, fallback, named]) {
+      expect(access.allows(`sb_page=${one}`, undefined, 'Windows · Edge')).toBe(true);
+    }
+
+    expect([unnamed, fallback, named].map((one) => store.pageSession(hashOf(one))?.label)).toEqual(['Windows · Edge', 'Windows · Edge', 'Mac · Safari']);
+    // Once named, it keeps the name.
+    expect(access.allows(`sb_page=${unnamed}`, undefined, 'Linux · Firefox')).toBe(true);
+    expect(store.pageSession(hashOf(unnamed))?.label).toBe('Windows · Edge');
+
+    // A refused request names nothing: from another origin, or after the sign-in expired.
+    const remote = access.exchange(access.token(), undefined, undefined, '')!;
+    const elsewhere = { host: 'pc.tail.ts.net', login: 'alex@example.com', origin: 'https://pc.tail.ts.net' };
+
+    expect(access.allows(`sb_page=${remote}`, elsewhere, 'Windows · Edge')).toBe(false);
+    expect(store.pageSession(hashOf(remote))?.label).toBe('');
+    now += PAGE_SESSION_MS + 1;
+    expect(access.allows(`sb_page=${remote}`, undefined, 'Windows · Edge')).toBe(false);
+    expect(store.pageSession(hashOf(remote))).toBeNull();
+  });
+
+  it('KnownDevice_FallbackOrEmptyName_IsFalse', () => {
+    expect(['Windows · Edge', 'iPhone · Safari', 'Android · Samsung Internet'].map(knownDevice)).toEqual([true, true, true]);
+    expect(['', 'Unknown device · browser', 'Unknown device · Chrome', 'Linux · browser'].map(knownDevice)).toEqual([false, false, false, false]);
+  });
+
   it('reads a cookie by its name and answers the loopback names only', () => {
     expect(cookieValue('x=1; sb_page=abc=; y=2', 'sb_page')).toBe('abc=');
     expect(cookieValue('x=1', 'sb_page')).toBeNull();
@@ -302,6 +344,17 @@ describe('remote access', () => {
     // A new code after that works.
     expect(access.exchangeCode(access.pair('pc.tail.ts.net').code, undefined, at, 'x')).toMatch(/^[0-9a-f]{64}$/);
     expect(pageCookie('ab', true)).toBe(`sb_page=ab; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${PAGE_SESSION_MS / 1000}`);
+  });
+
+  it('DeviceLabel_ReducedUserAgents_NamesSystemAndBrowser', () => {
+    // User-Agent strings as current browsers send them, Chrome's and Edge's reduced to a fixed system and version.
+    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0')).toBe('Windows · Edge');
+    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36')).toBe('Windows · Chrome');
+    expect(deviceLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36')).toBe('Mac · Chrome');
+    expect(deviceLabel('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36')).toBe('Android · Chrome');
+    expect(deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1')).toBe('iPhone · Safari');
+    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0')).toBe('Windows · Firefox');
+    expect(deviceLabel('Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0')).toBe('Linux · Firefox');
   });
 
   it('names a device by its system and browser', () => {
@@ -1132,6 +1185,31 @@ describe('the web page routes', () => {
     // Any signed-in request renews it, as a page left open makes no page loads; a file anyone may fetch does not.
     expect(String((await send(server.port, 'GET', '/v1/page/list', { Cookie: cookie })).headers['set-cookie'])).toBe(pageCookie(cookie.slice('sb_page='.length)));
     expect((await send(server.port, 'GET', '/page/manifest.webmanifest', { Cookie: cookie })).headers['set-cookie']).toBeUndefined();
+  });
+
+  it('PageRequest_SignInWithoutName_TakesItsUserAgentsName', async () => {
+    const edge = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0';
+    await serve();
+    // A sign-in made before names were kept, as this computer's browser had: stored without a name.
+    const old = 'ab'.repeat(32);
+    const named = 'cd'.repeat(32);
+    const hashOf = (cookie: string) => createHash('sha256').update(cookie).digest('hex');
+    const labels = async () => (JSON.parse((await send(server.port, 'POST', '/page/devices', { Authorization: `Bearer ${server.token}` })).body) as { devices: Array<{ id: string; label: string }> }).devices.map((one) => [one.id, one.label]);
+
+    store.savePageSession(hashOf(old), Date.now());
+    store.savePageSession(hashOf(named), Date.now(), { label: 'Mac · Safari', host: null, login: null });
+    // A request without a User-Agent leaves it unnamed; a refused one names nothing.
+    expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: `sb_page=${old}` })).status).toBe(200);
+    expect(store.pageSession(hashOf(old))?.label).toBe('');
+    expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: `sb_page=${'ef'.repeat(32)}`, 'User-Agent': edge })).status).toBe(401);
+    expect(store.pageSessions()).toHaveLength(2);
+
+    for (const cookie of [old, named]) {
+      expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: `sb_page=${cookie}`, 'User-Agent': edge })).status).toBe(200);
+    }
+
+    // The unnamed one takes the browser's name; a named one keeps its own.
+    expect(Object.fromEntries(await labels())).toEqual({ [hashOf(old).slice(0, 8)]: 'Windows · Edge', [hashOf(named).slice(0, 8)]: 'Mac · Safari' });
   });
 
   it("answers ping with the build and whether the browser is signed in, and ticks on a page's stream in place of the heartbeat comment", async () => {

@@ -630,7 +630,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
-    if (!page.access.allows(request.headers.cookie, origin)) {
+    if (!page.access.allows(request.headers.cookie, origin, deviceLabel(request.headers['user-agent']))) {
       if (isUpload) logUpload('401', remote ? 'remote' : 'local', 0);
 
       if (request.method === 'GET' && path === '/page/') {

@@ -904,6 +904,19 @@ describe('Store', () => {
     store.close();
   });
 
+  it('RenamePageSession_FromItsCurrentName_RenamesOnlyThen', () => {
+    const store = Store.open(join(dir, 'rename.db'));
+
+    store.savePageSession('p', 100);
+    expect(store.renamePageSession('p', 'Windows · Edge', 'Mac · Safari')).toBe(false);
+    expect(store.renamePageSession('p', '', 'Windows · Edge')).toBe(true);
+    // A second rename from the name it had loses to the first.
+    expect(store.renamePageSession('p', '', 'Linux · Firefox')).toBe(false);
+    expect(store.renamePageSession('missing', '', 'Windows · Edge')).toBe(false);
+    expect(store.pageSession('p')).toMatchObject({ label: 'Windows · Edge', usedAt: 100 });
+    store.close();
+  });
+
   it('allows voice on one sign-in, keeps it across a later use, and forgets it with the sign-in', () => {
     const store = Store.open(join(dir, 'voice.db'));
 

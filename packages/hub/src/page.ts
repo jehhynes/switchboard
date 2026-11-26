@@ -35,7 +35,7 @@ export const PAIR_CODE_TRIES = 10;
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /** Where the page's sign-ins are kept: the hub's store, by each cookie's SHA-256. */
-export type PageSessions = Pick<Store, 'pageSession' | 'pageSessions' | 'savePageSession' | 'deletePageSessions' | 'trimPageSessions' | 'setPageSessionVoice'>;
+export type PageSessions = Pick<Store, 'pageSession' | 'pageSessions' | 'savePageSession' | 'renamePageSession' | 'deletePageSessions' | 'trimPageSessions' | 'setPageSessionVoice'>;
 
 /**
  * The Set-Cookie value that signs a browser in with a cookie value (architecture.md § Web page); `Secure` for a device that reaches the page
@@ -115,6 +115,11 @@ export function deviceLabel(agent: string | undefined): string {
   const browser = /Edg(A|iOS)?\//.test(text) ? 'Edge' : /SamsungBrowser/.test(text) ? 'Samsung Internet' : /Firefox\/|FxiOS/.test(text) ? 'Firefox' : /Chrome\/|CriOS/.test(text) ? 'Chrome' : /Safari\//.test(text) ? 'Safari' : 'browser';
 
   return `${system} · ${browser}`;
+}
+
+/** Whether `deviceLabel` recognised both the system and the browser in a name: false for none, as a sign-in made before names were kept has. */
+export function knownDevice(label: string): boolean {
+  return label !== '' && !label.startsWith('Unknown device') && !label.endsWith(' · browser');
 }
 
 /** A remembered sign-in as the device list shows it: its ID, the start of its hash, its device, when it was made and last used, and whether voice is allowed on it. */
@@ -250,9 +255,10 @@ export class PageAccess {
 
   /**
    * Whether a request's Cookie header carries a sign-in this hub gave out, not revoked and used within `PAGE_SESSION_MS`, made where the request
-   * comes from, which counts as a use.
+   * comes from, which counts as a use. A sign-in whose name does not say its system and browser, as one made before names were kept, takes
+   * `label` when that one does; a full name stays.
    */
-  allows(header: string | undefined, origin: PageOrigin = LOCAL_ORIGIN): boolean {
+  allows(header: string | undefined, origin: PageOrigin = LOCAL_ORIGIN, label?: string): boolean {
     const given = cookieValue(header, PAGE_COOKIE);
 
     if (given === null || !/^[0-9a-f]{64}$/.test(given)) {
@@ -274,6 +280,10 @@ export class PageAccess {
 
     if (now - session.usedAt >= PAGE_SESSION_TOUCH_MS) {
       this.sessions.savePageSession(hash, now);
+    }
+
+    if (label !== undefined && !knownDevice(session.label) && knownDevice(label)) {
+      this.sessions.renamePageSession(hash, session.label, label);
     }
 
     return true;
