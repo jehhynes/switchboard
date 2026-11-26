@@ -2,12 +2,12 @@
 // `packages/conversation`, which escape what they draw. It becomes Preact nodes, so it is patched with the rest of the page.
 import { h } from 'preact';
 import type { ComponentChild } from 'preact';
+import { KEPT_CHARS, KEPT_ENTRIES, KEPT_LONGEST, textCache } from './lru.js';
 
 /** Attributes whose presence alone sets them, given to Preact as true so it sets the property. */
 const BOOLEANS = new Set(['disabled', 'checked', 'selected', 'open', 'hidden', 'multiple', 'required', 'autofocus', 'reversed']);
-/** Parsed HTML by its text, so a redraw does not parse it again. */
-const parsed = new Map<string, DocumentFragment>();
-const KEPT = 500;
+/** Parsed HTML by its text, so a redraw does not parse it again (`textCache`); HTML longer than `KEPT_LONGEST`, such as an artifact's document, is parsed each time. */
+const parsed = textCache<DocumentFragment>(KEPT_ENTRIES, KEPT_CHARS, KEPT_LONGEST);
 
 function node(from: Node): ComponentChild {
   if (from.nodeType === 3) {
@@ -51,14 +51,8 @@ export function trusted(html: string): ComponentChild {
 
     template.innerHTML = html;
     fragment = template.content;
-
-    if (parsed.size >= KEPT) {
-      parsed.delete(parsed.keys().next().value!);
-    }
-
     parsed.set(html, fragment);
   }
-
   const nodes = [...fragment.childNodes].map(node);
 
   return nodes.length === 1 ? nodes[0] : nodes;
