@@ -69,6 +69,7 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
   let card: (text: string) => { say: string } | null = () => null;
   const cardHeard: string[] = [];
   const logs: string[] = [];
+  const levels = new Map<string, string>();
   const control = new VoiceControl({
     link: { find: async () => connection, connected: () => connection, stop: () => undefined },
     settings: () => settings,
@@ -93,7 +94,10 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
     notify: (key, type, payload) => void notified.push({ key, type, payload }),
     dockChanged: () => undefined,
     now: () => t,
-    log: (line) => void logs.push(line),
+    log: (line, level) => {
+      logs.push(line);
+      levels.set(line, level ?? 'info');
+    },
     setTimer: (run, ms) => {
       const timer = { run, at: t + ms, cleared: false, every: null };
 
@@ -147,7 +151,7 @@ async function setup(patch: Partial<VoiceSettings> = {}) {
       .filter(Boolean)
       .map((line) => JSON.parse(line) as Record<string, unknown>);
 
-  return { control, connection, windows, notified, dictated, busy, advance, settle, piece, end, fragments, logs, cardHeard, setCard: (run: typeof card) => (card = run), refuse: (why: string | null) => (refuse = why), focus: (key: string | null) => (focused = key), setLastReply: (text: string) => (lastReply = text) };
+  return { control, connection, windows, notified, dictated, busy, advance, settle, piece, end, fragments, logs, levels, cardHeard, setCard: (run: typeof card) => (card = run), refuse: (why: string | null) => (refuse = why), focus: (key: string | null) => (focused = key), setLastReply: (text: string) => (lastReply = text) };
 }
 
 // A draft's `added` piece and its number are left out here; the tests of a focused page's composer read them.
@@ -191,7 +195,7 @@ describe('VoiceControl dictation', () => {
   });
 
   it('logs how long Mic on took from the command to the voice process listening, and a page\'s own steps', async () => {
-    const { control, connection, advance, logs } = await setup();
+    const { control, connection, advance, logs, levels } = await setup();
     const audio = (mic: string): void => connection.receive({ type: 'audio', mic, recognizer: 'gpu', error: null } as unknown as VoiceMessage);
 
     expect(control.mic('k1', true)).toBeNull();
@@ -202,13 +206,17 @@ describe('VoiceControl dictation', () => {
     // Once: later states are not the start's.
     audio('hearing');
     expect(logs.filter((line) => line.startsWith('voice: mic on'))).toEqual(['voice: mic on from this computer → listening in 5500 ms']);
+    expect(levels.get('voice: mic on from this computer → listening in 5500 ms')).toBe('debug');
     // On again while it listens times nothing.
     expect(control.mic('k1', true)).toBeNull();
     audio('typing');
     expect(logs.filter((line) => line.startsWith('voice: mic on'))).toHaveLength(1);
 
     control.micTiming('k1', [{ step: 'hub answered', ms: 40 }, { step: 'voice confirmed', ms: 5_540 }], 'listening');
-    expect(logs.at(-1)).toBe("voice: mic on tap on this computer's page → listening: hub answered at 40 ms, voice confirmed at 5540 ms");
+    expect(logs.slice(-2)).toEqual(["voice: mic on from this computer's page; listening after 5.5 s", 'voice: mic on steps from the tap: hub answered at 40 ms, voice confirmed at 5540 ms']);
+    expect(levels.get("voice: mic on from this computer's page; listening after 5.5 s")).toBe('info');
+    control.micTiming('k1', [{ step: 'hub answered', ms: 40 }], 'unavailable');
+    expect(levels.get("voice: mic on from this computer's page; unavailable after 0.0 s")).toBe('warn');
   });
 
   it('keeps the mic off once the voice process turned it off for a locked computer, also for a process started again', async () => {

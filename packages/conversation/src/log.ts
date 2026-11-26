@@ -189,7 +189,7 @@ export class ConversationLog {
     }
 
     this.deps.store.updateReply(id, { withdrawn: true, replaces: null });
-    this.deps.log(`session ${this.sessionId} reply ${id} withdrawn: no transcript copy came`, 'debug');
+    this.deps.log(`session ${this.sessionId}: removed a reply read from the screen, because Claude Code's transcript did not confirm it`, 'debug');
     this.deps.onChange({ type: 'reply', reply: this.deps.store.reply(id)! });
 
     if (reply.replaces !== null) {

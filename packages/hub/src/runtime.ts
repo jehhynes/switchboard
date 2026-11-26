@@ -1,4 +1,5 @@
 import type { LogLevel } from '@switchboard/core';
+import { RepeatedLog } from '@switchboard/core';
 import type { SourceIcon } from '@switchboard/core';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
@@ -86,6 +87,9 @@ export type AttachResult = { port: number; token: string; session: string } | { 
 /** A runner per agent, and the Code Mode runner for Claude sessions held in the terminal holder (PRD R93). */
 export type RunnerKey = Provider | 'codeMode' | 'codexAppServer';
 const RUNNER_KEYS: readonly RunnerKey[] = [...PROVIDERS, 'codeMode', 'codexAppServer'];
+/** Each runner's sessions as the hub log names them. */
+const RUNNER_NAMES: Record<RunnerKey, string> = { claude: 'Claude', codex: 'Codex', codeMode: 'Code Mode', codexAppServer: 'Codex app-server' };
+const PROVIDER_NAMES: Record<Provider, string> = { claude: 'Claude', codex: 'Codex' };
 
 function runnerKey(session: { provider: Provider; codeMode?: boolean; execution?: 'app-server' | null }): RunnerKey {
   return session.execution === 'app-server' ? 'codexAppServer' : session.codeMode === true ? 'codeMode' : session.provider;
@@ -175,6 +179,10 @@ export class Runtime {
   private stopped = false;
   /** Session ID and token of each done report with a second read scheduled, so a startup scan and a report do not schedule two. */
   private readonly rechecks = new Set<string>();
+  /** Repeated warnings, such as a roster that cannot be read on each poll, logged at most once an hour. */
+  private readonly repeated = new RepeatedLog((line, level) => this.deps.log(line, level), () => this.deps.now());
+  /** Triage model mismatches already logged since this hub started. */
+  private readonly triageModelWarned = new Set<string>();
   private markerWatcher: FSWatcher | null = null;
   private markerRead: NodeJS.Timeout | null = null;
   private markerWatchRetry: NodeJS.Timeout | null = null;
@@ -999,7 +1007,7 @@ export class Runtime {
     const tickets = await Promise.race([this.readAfter(ticket.source, source).catch(() => null), this.deps.sleep(REPORT_CHECK_MS).then(() => 'late' as const)]);
 
     if (tickets === 'late') {
-      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the ${ticket.source} read took over ${REPORT_CHECK_MS / 1000} seconds`, 'warn');
+      this.deps.log(`session ${sessionId}: accepted its done report for ${ticket.ref} without checking ${ticket.source}, which took over ${REPORT_CHECK_MS / 1000} s to answer`, 'warn');
       return false;
     }
 
@@ -1039,7 +1047,7 @@ export class Runtime {
     const tickets = await Promise.race([read, this.deps.sleep(REPORT_CHECK_MS).then(() => 'late' as const)]);
 
     if (tickets === 'late') {
-      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the second ${ticket.source} read took over ${REPORT_CHECK_MS / 1000} seconds`, 'warn');
+      this.deps.log(`session ${sessionId}: accepted its done report for ${ticket.ref} without a second check of ${ticket.source}, which took over ${REPORT_CHECK_MS / 1000} s to answer`, 'warn');
     }
 
     if (!this.stopped) {
@@ -1147,9 +1155,11 @@ export class Runtime {
 
       // A failed read changes none of the provider's sessions.
       if ('error' in roster) {
-        this.deps.log(`${key} roster read failed: ${roster.error}`, 'warn');
+        this.repeated.warn(`roster-${key}`, `sessions: could not list running ${RUNNER_NAMES[key]} sessions: ${roster.error.replace(/\.$/, '')}; trying again`);
         continue;
       }
+
+      this.repeated.recovered(`roster-${key}`, `sessions: ${RUNNER_NAMES[key]} sessions can be listed again`);
 
       // Interrupted work ends with the cause, not through the roster's end path (PRD R94).
       if (roster.gone === true) {
@@ -1504,12 +1514,12 @@ export class Runtime {
     }
 
     if (source === 'resume') {
-      this.deps.log(`gave session ${session.id} the conversation rules on resume`, 'debug');
+      this.deps.log(`session ${session.id}: resumed; the session hook supplied Switchboard's conversation rules`, 'debug');
 
       return session.execution === 'app-server' ? `${sessionContract(session.id, this.reportCommand, session.reports, session.provider)}\n\n${rules()}` : rules();
     }
 
-    this.deps.log(`restored the report contract of session ${session.id} after compaction`, 'debug');
+    this.deps.log(`session ${session.id}: context compacted; the session hook supplied the report instructions again`, 'debug');
 
     const contract = sessionContract(session.id, this.reportCommand, session.reports, session.provider);
 
@@ -2752,8 +2762,10 @@ export class Runtime {
         const stale = nothingNew(action.handled, context.activityAt);
         const text = triageText(context.context, this.deps.now(), action.handled, stale);
         const model = triageModel(provider, action.model);
-        if (model !== action.model) {
-          this.deps.log(`Triage model ${action.model} does not match ${provider}; using its default model.`, 'warn');
+        if (model !== action.model && !this.triageModelWarned.has(`${provider} ${action.model}`)) {
+          // Once per hub start: the setting does not change between triages.
+          this.triageModelWarned.add(`${provider} ${action.model}`);
+          this.deps.log(`triage: the model ${action.model} is not a ${PROVIDER_NAMES[provider]} model, so triage uses ${PROVIDER_NAMES[provider]}'s default. Change Settings › Triage › Model.`, 'warn');
         }
         const input = {
           systemPrompt: action.systemPrompt,

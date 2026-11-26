@@ -7,6 +7,9 @@ import { home, useTestHome, start, record, recorded, status, until, stopAndWait 
 
 useTestHome();
 
+/** One whole hub log line: its UTC timestamp, its level padded to five characters, and `text`. */
+const stamped = (level: string, text: string): RegExp => new RegExp(`^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z ${level.padEnd(5)} ${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n$`);
+
 describe('hub entry point', () => {
   it('serves, refuses a second hub, and stops on --stop', async () => {
     const first = start('--idle-ms=60000');
@@ -19,7 +22,7 @@ describe('hub entry point', () => {
     const second = await start().exited;
 
     expect(second.code).toBe(0);
-    expect(second.stdout).toBe(`A hub is already running for this home on port ${found.port}; pid ${second.pid} exiting.\n`);
+    expect(second.stdout).toMatch(stamped('debug', `hub: a second start found the hub already running on port ${found.port}; it exited`));
 
     const stop = await start('--stop').exited;
 
@@ -69,7 +72,7 @@ describe('hub entry point', () => {
     const refused = await start('--idle-ms=60000').exited;
 
     expect(refused.code).toBe(1);
-    expect(refused.stderr).toBe(`Not starting: ${join(switchboardHome(home), 'config.json')} is not valid JSON; fix it, or run hub.js config set configDir <folder>; pid ${refused.pid} exiting.\n`);
+    expect(refused.stderr).toMatch(stamped('error', `hub: did not start: ${join(switchboardHome(home), 'config.json')} is not valid JSON; fix it, or run hub.js config set configDir <folder>`));
     expect(record()).toBeNull();
   }, 60_000);
 
@@ -90,7 +93,7 @@ describe('hub entry point', () => {
       const refused = await start('--wait-ms=200').exited;
 
       expect(refused.code).toBe(1);
-      expect(refused.stderr).toBe(`Not starting: another process holds the hub lock but no hub answers; pid ${refused.pid} exiting.\n`);
+      expect(refused.stderr).toMatch(stamped('warn', "hub: did not start: another process holds the hub's lock but does not answer. It usually clears when that process exits; if it repeats, the lines above say which hub holds it."));
       expect(record()).toBeNull();
     } finally {
       await releaseLock(lock!);

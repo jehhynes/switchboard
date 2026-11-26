@@ -55,11 +55,11 @@ describe('hub entry point', () => {
       expect(old.code).toBe(0);
       expect(after.build).toBe(buildOf(bundle));
       expect(after.build).not.toBe(before.build);
-      expect(old.stdout).toContain(`restarting the hub from build ${before.build} onto build ${after.build}, which is installed`);
-      expect(old.stdout).toContain(`hub restart: pid ${after.pid} took over with build ${after.build}`);
-      expect(readFileSync(hubLogPath(home), 'utf8')).toContain(`listening on 127.0.0.1:${after.port} as pid ${after.pid}, build ${after.build}`);
+      expect(old.stdout).toContain(`info  hub: restarting from build ${before.build} onto build ${after.build} (it is installed)`);
+      expect(old.stdout).toContain(`debug hub: pid ${after.pid} took over with build ${after.build}`);
+      expect(readFileSync(hubLogPath(home), 'utf8')).toContain(`hub: started on build ${after.build}, listening on 127.0.0.1:${after.port} as pid ${after.pid}`);
       // The successor took the lock: a hub started meanwhile waited for it instead.
-      expect(readFileSync(hubLogPath(home), 'utf8')).not.toContain('A hub is already running');
+      expect(readFileSync(hubLogPath(home), 'utf8')).not.toContain('a second start found the hub already running');
 
       // The page's stream ended and a new one opens on the new record with the same sign-in; a page's ping names the new build.
       await pageEnded;
@@ -106,7 +106,7 @@ describe('hub entry point', () => {
       browserPort: null,
       pagePort: 0,
       exit: () => oldExited(),
-      log: (line) => line === 'stopping: restarting onto the installed build' && handingOver(),
+      log: (line) => line === 'hub: stopping: restarting onto the installed build' && handingOver(),
       restart: { bundle, checkMs: 10, takeoverWaitMs: 5000, successor: async () => ({ pid: process.pid, cancel: () => undefined }) },
     });
 

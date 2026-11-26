@@ -123,7 +123,7 @@ describe('Runtime', () => {
     await vi.waitFor(() => expect(source.polls).toBe(3));
     late.resolve();
     await vi.waitFor(() => expect(store.workItem(1)).toMatchObject({ status: 'done', doneReason: 'session' }));
-    expect(logs).toContain('done report for #8 accepted unchecked: the second github read took over 6 seconds');
+    expect(logs).toContain('session s1: accepted its done report for #8 without a second check of github, which took over 6 s to answer');
     expect(source.polls).toBe(3);
   });
   it('queues the recheck behind a read in flight, and skips it after the hub stops', async () => {
@@ -309,7 +309,7 @@ describe('Runtime', () => {
 
     expect(await report).toEqual({ refused: null });
     expect(store.workItem(1)).toMatchObject({ status: 'done', doneReason: 'session' });
-    expect(logs).toContain('done report for #8 accepted unchecked: the github read took over 6 seconds');
+    expect(logs).toContain('session s1: accepted its done report for #8 without checking github, which took over 6 s to answer');
 
     // The scheduled poll, read before the ticket left, applies before the done check's read, so the ticket ends unassigned.
     slow.resolve();

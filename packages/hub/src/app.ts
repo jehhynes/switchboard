@@ -192,6 +192,9 @@ export function parseAction(body: unknown): FlowEvent | null {
   return body as unknown as FlowEvent;
 }
 
+/** A settings warning for a setting no longer used, which names its path. */
+const UNUSED = /^(\S+) is no longer used and can be removed\.$/;
+
 export interface AppOptions {
   home: string;
   /** The folder holding settings.json; the Switchboard home when left out. */
@@ -248,9 +251,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     deps.log(`Code Mode idle limit: ${deps.codeModeIdleMs} ms`);
   }
 
+  // One line for the retired settings, so each start or reload says it once (architecture.md § Hub log).
   const logWarnings = (loaded: Config): void => {
-    for (const warning of loaded.settingsWarnings) {
-      deps.log(`settings.json: ${warning}`, 'warn');
+    const unused = loaded.settingsWarnings.map((warning) => UNUSED.exec(warning)?.[1]).filter((path): path is string => path !== undefined);
+
+    if (unused.length > 0) {
+      deps.log(`settings: settings.json has settings no longer used: ${unused.join(', ')}. Remove ${unused.length === 1 ? 'it' : 'them'}.`, 'warn');
+    }
+
+    for (const warning of loaded.settingsWarnings.filter((one) => !UNUSED.test(one))) {
+      deps.log(`settings: settings.json: ${warning}`, 'warn');
     }
   };
 
@@ -291,10 +301,10 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
 
         if ('error' in found) {
-          deps.log(`web page: Tailscale not used: ${found.error}`, 'warn');
+          deps.log(`page: Tailscale not used: ${found.error}`, 'warn');
           tailscaleFound = null;
         } else {
-          deps.log(`web page: served as https://${found.host} to the Tailscale login ${found.login} through tailscale serve`);
+          deps.log(`page: served to other devices as https://${found.host} through tailscale serve`);
           tailscaleFound = found;
         }
 
@@ -302,9 +312,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         remoteChanged();
       });
     } else if (remote.hosts.length > 0) {
-      deps.log(remote.logins.length > 0 ? `web page: served as ${remote.hosts.map((host) => `https://${host}`).join(', ')} through tailscale serve` : 'web page: web.remoteHosts is set but web.remoteLogins is empty, so no remote device is let in');
+      deps.log(remote.logins.length > 0 ? `page: served to other devices as ${remote.hosts.map((host) => `https://${host}`).join(', ')} through tailscale serve` : 'page: web.remoteHosts is set but web.remoteLogins is empty, so no other device is let in', remote.logins.length > 0 ? 'info' : 'warn');
     } else if (!first) {
-      deps.log('web page: not served to other devices');
+      deps.log('page: not served to other devices');
     }
   };
 

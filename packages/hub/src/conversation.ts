@@ -1,4 +1,5 @@
 import type { LogLevel } from '@switchboard/core';
+import { plainError, RepeatedLog, seconds } from '@switchboard/core';
 import { countsUnread, inTranscript, stateStale, summarizeMessage } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationState, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
@@ -422,6 +423,27 @@ export interface ConversationVoice {
 /** The most IDs one `seen` command marks. */
 export const SEEN_MAX_IDS = 200;
 /** The most steps a page's Mic on timing names, and the longest a step may take, since a start that long has failed. */
+/** A sent message slower than this, from its queueing to its outcome, gets a warning in the hub log. */
+export const SLOW_SEND_MS = 3_000;
+
+/**
+ * The hub log's line for a sent message (operator decision 2026-11-25): a warning when it took over `SLOW_SEND_MS` or its text was not seen in
+ * the input box, else a debug line, since the conversation already shows each message.
+ */
+export function sentLine(steps: InputSteps, now: number): { line: string; level: LogLevel } {
+  const total = now - steps.queuedAt;
+  const recorded = steps.enterAt === null || steps.confirmedAt === null ? null : steps.confirmedAt - steps.enterAt;
+
+  if (total > SLOW_SEND_MS) {
+    return { line: `message sent, but slowly (${seconds(total)}; ${recorded === null ? "Claude Code's transcript has not shown it yet" : `Claude Code took ${seconds(recorded)} to record it`})`, level: 'warn' };
+  }
+
+  if (steps.echoAt === null) {
+    return { line: 'message sent, but its text was not seen in the input box', level: 'warn' };
+  }
+
+  return { line: `message sent in ${seconds(total)}`, level: 'debug' };
+}
 export const MIC_TIMING_STEPS = 12;
 export const MIC_TIMING_MAX_MS = 120_000;
 
@@ -539,11 +561,15 @@ export class ConversationService {
 
   /** Polls each provider independently; an unfinished poll skips its next tick. */
   async poll(): Promise<void> {
-    await Promise.all(this.#adapters.map(async adapter => {
+    await Promise.all(this.#adapters.map(async (adapter, index) => {
       if (this.#polling.has(adapter)) return;
       this.#polling.add(adapter);
-      try { await adapter.poll(this.deps.store.activeSessions()); }
-      catch (error) { this.deps.log(`conversation read failed: ${String(error)}`, 'warn'); }
+      // Each provider's reads fail and recover on their own.
+      const key = `conversation-read-${index}`;
+      try {
+        await adapter.poll(this.deps.store.activeSessions());
+        this.#repeated.recovered(key, 'sessions: conversations readable again');
+      } catch (error) { this.#repeated.warn(key, `sessions: could not read conversations: ${plainError(error)}`); }
       finally { this.#polling.delete(adapter); }
     }));
     this.#contextChanged();
@@ -2894,6 +2920,7 @@ export class ConversationService {
 
   /** Each typed message's input steps, from its typing's end until its outcome is logged. */
   readonly #steps = new Map<string, InputSteps>();
+  readonly #repeated = new RepeatedLog((line, level) => this.deps.log(line, level), () => this.deps.now());
 
   /**
    * One hub log line per typed message with the duration of each step (architecture.md § Typing a message): the voice's, for a dictated message,
@@ -2909,7 +2936,16 @@ export class ConversationService {
       return;
     }
 
-    this.deps.log(`session ${message.sessionId}: message ${id} ${message.delivery === 'sent' ? 'sent' : outcome.delivery}: ${voice === null ? '' : `${voice}, `}${stepsText(steps, this.deps.now())}`, 'debug');
+    const now = this.deps.now();
+    const session = `session ${message.sessionId}`;
+
+    if (message.delivery === 'sent') {
+      const sent = sentLine(steps, now);
+
+      this.deps.log(`${session}: ${sent.line}`, sent.level);
+    }
+
+    this.deps.log(`${session}: message ${id} ${message.delivery === 'sent' ? 'sent' : outcome.delivery}, steps: ${voice === null ? '' : `${voice}, `}${stepsText(steps, now)}`, 'debug');
   }
 
   /**

@@ -24,6 +24,21 @@ import { dir, stored, pageOn, FakeHeld, settled, setupSend, fakeVoice } from './
 
 describe('ConversationService send', { timeout: 20_000 }, () => {
 
+  it("logs one provider's failing reads once and its recovery, whatever another provider's reads do", async () => {
+    let failing = true;
+    const adapter = { supports: () => false, poll: async () => { if (failing) throw new Error('The connection to Codex closed.'); }, readEnded: () => undefined, close: () => undefined } as unknown as ConversationAdapter;
+    const { service, logs } = setupSend(new FakeHeld(), undefined, undefined, { adapters: () => [adapter] });
+    const read = (): string[] => logs.filter((line) => line.startsWith('sessions: '));
+
+    await service.poll();
+    await service.poll();
+    expect(read()).toEqual(['sessions: could not read conversations: The connection to Codex closed.']);
+    failing = false;
+    await service.poll();
+    expect(read()).toEqual(['sessions: could not read conversations: The connection to Codex closed.', 'sessions: conversations readable again']);
+    service.stop();
+  });
+
   it("types a message into the window's session, answers at once with it open, and shows it sent once the transcript has it, in its own window only", async () => {
     const { service, held, open, body, view, store } = setupSend();
     const mine = open(2);
@@ -190,13 +205,15 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     dictatedId = 'message' in sent ? sent.message.id : '';
     await vi.waitFor(() => expect(calls).toContain(`delivered ${dictatedId} sent`));
     expect(logs.filter((line) => line.includes(`message ${dictatedId}`))).toEqual([
-      expect.stringMatching(new RegExp(`^session s2: message ${dictatedId} sent: last word → turn model decision 600 ms, decision → voice sent 200 ms, voice → hub 2 ms, queue 0 ms, guards \\d+ ms, paste→echo \\d+ ms, paste→Enter \\d+ ms, Enter→transcript \\d+ ms, \\d+ screen reads in \\d+ ms, \\d+ ms in all$`)),
+      expect.stringMatching(new RegExp(`^session s2: message ${dictatedId} sent, steps: last word → turn model decision 600 ms, decision → voice sent 200 ms, voice → hub 2 ms, queue 0 ms, guards \\d+ ms, paste→echo \\d+ ms, paste→Enter \\d+ ms, Enter→transcript \\d+ ms, \\d+ screen reads in \\d+ ms, \\d+ ms in all$`)),
     ]);
 
     // A typed message's line has the input steps only.
     dictatedId = '';
     expect(service.send(body(mine.key, { text: 'Typed', opId: 'op-typed' }))).toMatchObject({ status: 200 });
-    await vi.waitFor(() => expect(logs.some((line) => /^session s2: message m-\d+ sent: queue \d+ ms, guards/.test(line))).toBe(true));
+    await vi.waitFor(() => expect(logs.some((line) => /^session s2: message m-\d+ sent, steps: queue \d+ ms, guards/.test(line))).toBe(true));
+    // A message sent quickly gets only a short debug line besides its steps (operator decision 2026-11-25).
+    expect(logs.filter((line) => /^session s2: message sent/.test(line)).every((line) => /^session s2: message sent in \d+\.\d s$/.test(line))).toBe(true);
   });
 
   it('types a draft that holds dictation as a [voice] message with its pieces, and the voice\'s turns and [partial] parts with their tags (architecture.md § Dictation)', async () => {
@@ -467,7 +484,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
 
     held.menu = true;
     service.send(body(key));
-    await settled(() => expect(logs).toContain('session s2: a message waits, a menu is open'));
+    await settled(() => expect(logs).toContain('session s2: your message waits: a menu is open'));
     store.updateSession('s2', { state: 'ended' });
     await settled(() => expect(store.message('m-1')).toBeNull());
 

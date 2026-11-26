@@ -388,7 +388,7 @@ export class ArtifactFolder {
 
   #publish({ stamp: _stamp, digest: _digest, ...artifact }: Artifact & Stamped): void {
     if (!this.#quiet) {
-      this.deps.log(`artifact changed: ${artifact.path}`);
+      this.deps.log(`artifact updated: ${artifact.path}`);
       this.deps.onChange({ artifact });
     }
   }
@@ -684,7 +684,7 @@ export class ExternalArtifacts {
     if (!this.#quiet) {
       const { stamp: _stamp, digest: _digest, meta: _meta, ...view } = artifact;
 
-      this.deps.log(`artifact changed: ${entry.path}`);
+      this.deps.log(`artifact updated: ${entry.path}`);
       this.deps.onChange({ artifact: view });
     }
   }

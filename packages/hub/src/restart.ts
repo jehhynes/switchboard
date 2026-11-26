@@ -68,7 +68,7 @@ export class HubRestart {
     }
 
     this.#asked = true;
-    this.deps.log('hub restart asked by hub.js restart');
+    this.deps.log('hub: restart asked by hub.js restart', 'debug');
 
     const waiting = this.#running ? null : this.deps.quiet();
 
@@ -98,7 +98,7 @@ export class HubRestart {
 
     if (blocker !== null) {
       if (blocker !== this.#waiting) {
-        this.deps.log(`hub restart onto build ${installed} waits: ${blocker}`);
+        this.deps.log(`hub: restart onto build ${installed} waits: ${blocker}`);
         this.#waiting = blocker;
       }
 
@@ -110,12 +110,12 @@ export class HubRestart {
     let handedTo: Successor;
 
     try {
-      this.deps.log(`restarting the hub from build ${this.deps.build} onto build ${installed}${this.#asked ? ', asked by hub.js restart' : ', which is installed'}`);
+      this.deps.log(`hub: restarting from build ${this.deps.build} onto build ${installed} (${this.#asked ? 'asked by hub.js restart' : 'it is installed'})`);
 
       const successor = await this.deps.successor();
 
       if ('error' in successor) {
-        this.deps.log(`hub restart failed: ${successor.error}; this hub keeps running`, 'warn');
+        this.deps.log(`hub: restart failed: ${successor.error}; this hub keeps running`, 'warn');
         this.#failed = installed;
         this.#asked = false;
         this.#waiting = null;
@@ -127,7 +127,7 @@ export class HubRestart {
 
       if (late !== null) {
         successor.cancel();
-        this.deps.log(`hub restart onto build ${installed} waits: ${late}`);
+        this.deps.log(`hub: restart onto build ${installed} waits: ${late}`);
         this.#waiting = late;
         return;
       }
@@ -142,7 +142,7 @@ export class HubRestart {
 
     // Nothing was handed over: this hub keeps running its own build.
     if (refused !== undefined) {
-      this.deps.log(`hub restart failed: ${refused.error}; this hub keeps running`, 'warn');
+      this.deps.log(`hub: restart failed: ${refused.error}; this hub keeps running`, 'warn');
       this.#handedOver = false;
       this.#failed = installed;
       this.#asked = false;

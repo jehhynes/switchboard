@@ -741,7 +741,7 @@ async function main(argv: readonly string[]): Promise<number> {
   const loaded = loadConfigFolder(configDeps(home), flag(argv, 'config'));
 
   if ('error' in loaded) {
-    process.stderr.write(logLine(new Date(), 'error', `Not starting: ${loaded.error}; pid ${process.pid} exiting.`));
+    process.stderr.write(logLine(new Date(), 'error', `hub: did not start: ${loaded.error}`));
 
     return 1;
   }
@@ -754,13 +754,13 @@ async function main(argv: readonly string[]): Promise<number> {
   const result = await serveHub({ home, version: VERSION, build, configDir, log, app: (carried) => createHubApp({ home, configDir, log, handover: carried, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(wait > 0 ? { waitMs: wait } : {}), ...(takeover === null ? {} : { takeover: Number(takeover) }), restart: { bundle: hubBundlePath(home), successor: () => startSuccessor({ execPath: process.execPath, bundle: hubBundlePath(home), args: argv, env: process.env, logPath: hubLogPath(home) }) }, ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }), ...(pagePort === null ? {} : { pagePort: Number(pagePort) }) });
 
   if ('existing' in result) {
-    log(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.`, 'debug');
+    log(`hub: a second start found the hub already running on port ${result.existing.port}; it exited`, 'debug');
 
     return 0;
   }
 
   if ('refused' in result) {
-    process.stderr.write(logLine(new Date(), 'warn', `Not starting: ${result.refused}; pid ${process.pid} exiting.`));
+    process.stderr.write(logLine(new Date(), 'warn', `hub: did not start: ${result.refused}.`));
 
     return 1;
   }
@@ -771,6 +771,15 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   return -1;
+}
+
+/** Why the hub did not start, with what to do where Switchboard knows it. */
+function failedStart(error: unknown): string {
+  const newer = /schema version (\d+), newer than this hub supports \((\d+)\)/.exec(String(error));
+
+  return newer === null
+    ? (error instanceof Error && error.stack !== undefined ? error.stack.replace(/^Error: /, '') : String(error))
+    : `the database was made by a newer Switchboard (schema ${newer[1]}; this build reads up to ${newer[2]}). Install the newest build: run npm run install-local in the newest checkout. Keep switchboard.db: it holds every work item.`;
 }
 
 // node:sqlite prints an ExperimentalWarning when the store opens (mechanics M1); it is expected, so keep it out of the log.
@@ -784,12 +793,12 @@ process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
 }) as typeof process.emitWarning;
 
 process.on('uncaughtException', (error) => {
-  process.stderr.write(logLine(new Date(), 'error', `uncaughtException: ${error instanceof Error && error.stack !== undefined ? error.stack : String(error)}`));
+  process.stderr.write(logLine(new Date(), 'error', `hub: unexpected error: ${error instanceof Error && error.stack !== undefined ? error.stack.replace(/^Error: /, '') : String(error)}`));
   process.exit(1);
 });
 
 process.on('unhandledRejection', (error) => {
-  process.stderr.write(logLine(new Date(), 'error', `unhandledRejection: ${String(error)}`));
+  process.stderr.write(logLine(new Date(), 'error', `hub: unexpected error in a promise nothing awaited: ${error instanceof Error && error.stack !== undefined ? error.stack.replace(/^Error: /, '') : String(error)}`));
 });
 
 // Every hub.js command, the supervisor and `start` included, so nothing it starts inherits them (mechanics M149).
@@ -806,7 +815,7 @@ if (isSnapshotWorker()) {
       }
     })
     .catch((error: unknown) => {
-      process.stderr.write(logLine(new Date(), 'error', `Hub failed: ${String(error)}`));
+      process.stderr.write(logLine(new Date(), 'error', `hub: did not start: ${failedStart(error)}`));
       process.exit(1);
     });
 }

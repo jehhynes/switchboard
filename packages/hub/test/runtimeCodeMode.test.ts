@@ -401,7 +401,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(claude.stops).toEqual([]);
     expect(store.session('s1')).toMatchObject({ state: 'idle' });
     expect(store.session('s2')).toMatchObject({ state: 'running', released: false });
-    expect(logs).toContain('codeMode roster read failed: The terminal holder did not answer.');
+    expect(logs).toContain('sessions: could not list running Code Mode sessions: The terminal holder did not answer; trying again');
     runtime.stop();
   });
 

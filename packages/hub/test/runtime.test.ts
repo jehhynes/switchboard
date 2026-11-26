@@ -148,7 +148,7 @@ describe('Runtime', () => {
     expect(codexCall).not.toContain('--model');
     expect(cli.calls.some((call) => call.includes('-p'))).toBe(false);
     expect(store.triage(1)).toMatchObject({ playbook: 'dev:develop', model: null, error: null });
-    expect(logs).toContain('Triage model claude-sonnet-5-5 does not match codex; using its default model.');
+    expect(logs).toContain("triage: the model claude-sonnet-5-5 is not a Codex model, so triage uses Codex's default. Change Settings › Triage › Model.");
 
     runtime.reload({ ...cfg, settings: { ...cfg.settings, sessions: { ...cfg.settings.sessions, provider: 'claude' } } });
     source.result = { tickets: [issue('7'), issue('8')] };
@@ -616,7 +616,7 @@ describe('Runtime', () => {
     await runtime.readRoster();
 
     expect(store.session('s1')?.state).toBe('running');
-    expect(logs).toEqual(['codeMode roster read failed: claude agents returned an unexpected response.']);
+    expect(logs).toEqual(['sessions: could not list running Code Mode sessions: claude agents returned an unexpected response; trying again']);
   });
 
   it('records reports, validating a worktree with git', async () => {

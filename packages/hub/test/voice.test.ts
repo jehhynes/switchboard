@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core';
 import type { ConversationReply, Persona, VoiceSettings } from '@switchboard/core';
 import type { HubMessage, VoiceMessage } from '@switchboard/voice';
-import { ALERT_DELAY_MS, SPEAKER_GLYPH, VOICE_GLYPH, VOICE_LINGER_MS, VOICE_RESTART_MS, VoiceControl, alertDetail, alertKind, speechOf, voiceMark } from '../src/voice.js';
+import { ALERT_DELAY_MS, SPEAKER_GLYPH, TARGET_LOG_MS, VOICE_GLYPH, VOICE_LINGER_MS, VOICE_RESTART_MS, VoiceControl, alertDetail, alertKind, speechOf, voiceMark } from '../src/voice.js';
 import type { VoiceConnection } from '../src/voiceLink.js';
 import type { WindowScope } from '../src/windows.js';
 
@@ -264,6 +264,43 @@ describe('VoiceControl', () => {
     expect(failing.control.dockError()).toBeNull();
   });
 
+  it('logs the voice target only when its session changes, merging changes within TARGET_LOG_MS into one line with a count, never its generation', async () => {
+    const { control, connections, windows, logs, advance, settle } = setup();
+    const target = (): string[] => logs.filter((line) => line.startsWith('voice: now for') || line.startsWith('voice: no session'));
+
+    windows.set('k1', scope('k1', 1, 's1'));
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' });
+    expect(target()).toEqual(['voice: now for session s1 (focused window)']);
+    connections[0]!.receive({ type: 'active', gen: 2, sessionId: 's2', reason: 'focus' });
+    // A new generation of the same session is no change.
+    connections[0]!.receive({ type: 'active', gen: 3, sessionId: 's2', reason: 'focus' });
+    connections[0]!.receive({ type: 'active', gen: 4, sessionId: 's1', reason: 'focus' });
+    connections[0]!.receive({ type: 'active', gen: 5, sessionId: 's2', reason: 'talk-here' });
+    expect(target()).toHaveLength(1);
+    advance(TARGET_LOG_MS);
+    expect(target().at(-1)).toBe('voice: now for session s2 (Talk here), after 3 changes in 10 s');
+    advance(TARGET_LOG_MS);
+    // The same session again is no change.
+    connections[0]!.receive({ type: 'active', gen: 6, sessionId: 's2', reason: 'focus' });
+    expect(target()).toHaveLength(2);
+    // Flips that end where they began write nothing more.
+    connections[0]!.receive({ type: 'active', gen: 7, sessionId: null, reason: 'gone' });
+    expect(target().at(-1)).toBe('voice: no session to send speech to (its session is gone or away)');
+    connections[0]!.receive({ type: 'active', gen: 8, sessionId: 's1', reason: 'focus' });
+    connections[0]!.receive({ type: 'active', gen: 9, sessionId: null, reason: 'gone' });
+    advance(TARGET_LOG_MS);
+    expect(target()).toHaveLength(3);
+    // No target, then a session and back to none and to the session again: the last is what the line names.
+    connections[0]!.receive({ type: 'active', gen: 10, sessionId: 's1', reason: 'focus' });
+    connections[0]!.receive({ type: 'active', gen: 11, sessionId: null, reason: 'gone' });
+    connections[0]!.receive({ type: 'active', gen: 12, sessionId: 's1', reason: 'focus' });
+    advance(TARGET_LOG_MS);
+    expect(target().slice(3)).toEqual(['voice: now for session s1 (focused window)']);
+    expect(logs.join('\n')).not.toMatch(/generation/);
+  });
+
   it("mirrors the voice target, tells only the window it is in that it is here, and asks for spoken replies only for the target's session", async () => {
     const { control, connections, windows, notified, settle } = setup();
 
@@ -332,7 +369,7 @@ describe('VoiceControl', () => {
 
   it("logs what became of each offered reply's speech, with its session, voice and duration", async () => {
     const { control, connections, windows, reply, settle, logs } = setup();
-    const speech = (): string[] => logs.filter((line) => line.startsWith('voice: reply '));
+    const speech = (): string[] => logs.filter((line) => / a reply of session /.test(line));
 
     windows.set('k1', scope('k1', 1, 's1'));
     control.update();
@@ -356,10 +393,10 @@ describe('VoiceControl', () => {
     control.replyChanged(reply('r4'));
     connections[0]!.drop();
     expect(speech()).toEqual([
-      'voice: reply r1 of session s1 played, voice marin, 1200 ms played, 5 characters said',
-      'voice: reply r2 of session s1 skipped (cancelled by the hub), voice marin, 450 ms played, 3 characters said',
-      'voice: reply r3 of session s1 stopped: voice moved, voice marin, 300 ms played, 2 characters said',
-      'voice: reply r4 of session s1 failed: the voice process stopped, voice marin, 0 ms played, 0 characters said',
+      'voice: read out a reply of session s1: 5 characters in 1.2 s',
+      'voice: a reply of session s1 skipped (cancelled by the hub) after 3 characters in 0.5 s',
+      'voice: a reply of session s1 stopped: voice moved after 2 characters in 0.3 s',
+      'voice: could not read out a reply of session s1 (failed: the voice process stopped) after 0 characters in 0.0 s',
     ]);
   });
 
@@ -388,7 +425,7 @@ describe('VoiceControl', () => {
     // The reply it skips says why.
     control.replyChanged(reply('r1'));
     connections[0]!.receive({ type: 'speech', gen: 1, replyId: 'r1', sessionId: 's1', state: 'skipped', atMs: null, said: null, reason: 'no device: the phone that had the voice left' });
-    expect(logs).toContain('voice: reply r1 of session s1 skipped (no device: the phone that had the voice left), voice marin, 0 ms played, 0 characters said');
+    expect(logs).toContain('voice: a reply of session s1 skipped (no device: the phone that had the voice left) after 0 characters in 0.0 s');
 
     // A message typed with no window, or to a session that is not the target, leaves it off.
     expect(control.spokenFor('s1', false, null).spoken).toBe(true);
@@ -752,7 +789,7 @@ describe('spoken alerts in the hub', () => {
     const second = (alerts().at(-1) as { alertId: string }).alertId;
 
     connections[0]!.receive({ type: 'alert-done', alertId: second, sessionId: 's2', outcome: 'unanswered' });
-    expect(logs).toContain(`voice: alert ${second} for session s2 unanswered`);
+    expect(logs).toContain('voice: no spoken answer to the alert for session s2 (it asks for permission)');
     run({ s1: 'idle', s2: 'running', s3: 'question' });
     expect(alerts().at(-1)).toMatchObject({ type: 'alert', alertId: second });
 

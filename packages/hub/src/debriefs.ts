@@ -428,7 +428,7 @@ export class Debriefs {
     const held = state.sessions[thread];
     const through = candidate.range.throughTurnId;
 
-    this.deps.log(`debrief: Codex session ${thread}, ${candidate.range.toolCalls} tool calls since ${held?.throughMessageUuid ?? 'the start'}`);
+    this.deps.log(`debrief: session ${candidate.session.id}, Codex thread ${thread}: ${candidate.range.toolCalls} tool calls since ${held?.throughMessageUuid ?? 'the start'}`, 'debug');
 
     const rendered = prompt.replaceAll('{{scope}}', () => codexScopeOf(candidate.range)).replaceAll('{{subagents}}', 'none');
     const result = await (candidate.session.execution === 'app-server' && this.deps.appServer !== undefined
@@ -459,7 +459,7 @@ export class Debriefs {
     const error = 'error' in result ? result.error : friction === null ? `the answer was not the friction JSON: ${result.text.slice(0, 200)}` : null;
 
     if (error !== null || friction === null) {
-      this.deps.log(`debrief: Codex session ${thread} failed: ${error}`, 'warn');
+      this.deps.log(`debrief: session ${candidate.session.id} not debriefed: ${error}; it is not retried, and its later work is asked about with it`, 'warn');
       this.save(
         {
           sessions: {
@@ -471,7 +471,7 @@ export class Debriefs {
       return;
     }
 
-    this.deps.log(`debrief: Codex session ${thread}, ${friction.length} friction reports`);
+    this.deps.log(`debrief: session ${candidate.session.id} debriefed: ${friction.length} friction reports`);
     this.save(
       { sessions: { [thread]: { throughMessageUuid: through, debriefedAt: at, attempts: 0, lastError: null, attemptedAt: null, attemptedThrough: null } } },
       [
@@ -501,7 +501,7 @@ export class Debriefs {
     const startedMs = this.deps.now();
     const startedAt = new Date(startedMs).toISOString();
 
-    this.deps.log(`debrief: ${sessionId}, ${candidate.range.toolCalls} tool calls since ${held?.throughMessageUuid ?? 'the start'}`);
+    this.deps.log(`debrief: session ${candidate.session.id}, Claude session ${sessionId}: ${candidate.range.toolCalls} tool calls since ${held?.throughMessageUuid ?? 'the start'}`, 'debug');
 
     const result: DebriefResult = await runDebrief(
       {
@@ -520,7 +520,7 @@ export class Debriefs {
     const at = new Date(this.deps.now()).toISOString();
 
     if ('error' in result) {
-      this.deps.log(`debrief: ${sessionId} failed: ${result.error}`, 'warn');
+      this.deps.log(`debrief: session ${candidate.session.id} not debriefed: ${result.error}; it is not retried, and its later work is asked about with it`, 'warn');
       this.save(
         {
           codex: this.pending(state, candidate),
@@ -538,7 +538,7 @@ export class Debriefs {
         [],
       );
     } else {
-      this.deps.log(`debrief: ${sessionId}, ${result.friction.length} friction reports`);
+      this.deps.log(`debrief: session ${candidate.session.id} debriefed: ${result.friction.length} friction reports`);
       this.save(
         {
           codex: this.pending(state, candidate),
@@ -629,9 +629,9 @@ export class Debriefs {
     const error = result.code === NOTHING_TO_DEBRIEF || friction !== null ? null : result.code === 0 ? `the answer was not the friction JSON: ${result.stdout.slice(0, 200)}` : failureOf(this.deps.nodePath, result, DEBRIEF_TIMEOUT_MS, { notFound: `${this.deps.nodePath} was not found.` });
 
     if (error !== null) {
-      this.deps.log(`debrief: Codex thread ${thread} failed: ${error}`, 'warn');
+      this.deps.log(`debrief: delegated Codex thread ${thread} of session ${parentSessionId} not debriefed: ${error}; it is not retried, and its later work is asked about with it`, 'warn');
     } else if (friction !== null) {
-      this.deps.log(`debrief: Codex thread ${thread}, ${friction.length} friction reports`);
+      this.deps.log(`debrief: delegated Codex thread ${thread} of session ${parentSessionId} debriefed: ${friction.length} friction reports`);
     }
 
     this.save(

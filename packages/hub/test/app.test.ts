@@ -278,7 +278,9 @@ describe('createHubApp', () => {
 
     await until(() => (app.page!.remote!().hosts.length === 2 ? true : null));
     expect(app.page!.remote!()).toEqual({ hosts: ['pc.tail1.ts.net', 'extra.example.net'], logins: ['a@example.com', 'alex@example.com'] });
-    expect(lines).toContain('web page: served as https://pc.tail1.ts.net to the Tailscale login alex@example.com through tailscale serve');
+    expect(lines).toContain('page: served to other devices as https://pc.tail1.ts.net through tailscale serve');
+    // The Tailscale login is personal, so the log leaves it out.
+    expect(lines.join('\n')).not.toContain('alex@example.com');
     await app.close();
 
     writeSettings({ sessions: { installHooks: false }, web: { remoteHosts: ['extra.example.net'] } });
@@ -288,7 +290,7 @@ describe('createHubApp', () => {
 
     closers.push(() => plain.close());
     expect(plain.page!.remote!()).toEqual({ hosts: ['extra.example.net'], logins: [] });
-    expect(unset).toContain('web page: web.remoteHosts is set but web.remoteLogins is empty, so no remote device is let in');
+    expect(unset).toContain('page: web.remoteHosts is set but web.remoteLogins is empty, so no other device is let in');
   });
 
   it('reads the remote hosts, logins and web.tailscale again when settings.json changes, and has the server end the remote pages they no longer allow (PRD R115)', async () => {
@@ -314,7 +316,9 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false }, web: { remoteHosts: ['extra.example.net'], remoteLogins: ['a@example.com'], tailscale: true } });
     await until(() => (app.page!.remote!().hosts.length === 2 ? true : null));
     expect(app.page!.remote!()).toEqual({ hosts: ['pc.tail1.ts.net', 'extra.example.net'], logins: ['a@example.com', 'alex@example.com'] });
-    expect(lines).toContain('web page: served as https://pc.tail1.ts.net to the Tailscale login alex@example.com through tailscale serve');
+    expect(lines).toContain('page: served to other devices as https://pc.tail1.ts.net through tailscale serve');
+    // The Tailscale login is personal, so the log leaves it out.
+    expect(lines.join('\n')).not.toContain('alex@example.com');
 
     // A change of the lists with web.tailscale still on keeps Tailscale's name and owner while it asks again.
     writeSettings({ sessions: { installHooks: false }, web: { remoteLogins: ['a@example.com'], tailscale: true } });
@@ -334,7 +338,7 @@ describe('createHubApp', () => {
     writeSettings({ sessions: { installHooks: false } });
     await until(() => (app.page!.remote!().hosts.length === 0 ? true : null));
     expect(app.page!.remote!()).toEqual({ hosts: [], logins: [] });
-    expect(lines).toContain('web page: not served to other devices');
+    expect(lines).toContain('page: not served to other devices');
     expect(changed).toBeGreaterThan(before);
   });
 
@@ -359,7 +363,8 @@ describe('createHubApp', () => {
     const logs: string[] = [];
     const app = await start((line) => logs.push(line));
 
-    expect(logs.filter((line) => line.startsWith('settings.json: '))).toEqual(warnings.map((warning) => `settings.json: ${warning}`));
+    // One line for the settings no longer used, so a start says it once; others keep their own line.
+    expect(logs.filter((line) => line.startsWith('settings: '))).toEqual(['settings: settings.json has settings no longer used: dock.openVSCode, dock.openTerminal, dock.openIn, web.chromePane. Remove them.', `settings: settings.json: ${warnings[4]}`]);
     expect((app.snapshot() as { errors: { settings: string | null } }).errors.settings).toBeNull();
     expect(await app.post['/v1/conversation/page-settings-check']!({ settings: retired })).toEqual({ status: 200, body: { errors: [], warnings } });
     expect(await app.post['/v1/conversation/page-settings-check']!({ settings: { sessions: { installHooks: false } } })).toEqual({ status: 200, body: { errors: [], warnings: [] } });

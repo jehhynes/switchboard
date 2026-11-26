@@ -195,7 +195,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   if (lock === null) {
     const existing = await waitForHub(home, options.waitMs ?? DEFAULT_WAIT_MS);
 
-    return existing === null ? { refused: 'another process holds the hub lock but no hub answers' } : { existing };
+    return existing === null ? { refused: "another process holds the hub's lock but does not answer. It usually clears when that process exits; if it repeats, the lines above say which hub holds it" } : { existing };
   }
 
   const hubLock = lock;
@@ -234,7 +234,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   if (app?.page !== undefined && pagePort > 0) {
     // A taken port leaves the page on the hub's own port, whose links then say so.
     void server.listenPage(pagePort).then((error) =>
-      log(error === null ? `web page on http://127.0.0.1:${pagePort}/page/` : `web page not served on 127.0.0.1:${pagePort}: ${error}; it is on the hub's port ${server.port}, which changes at each start`, error === null ? 'info' : 'warn'),
+      log(error === null ? `page: served on http://127.0.0.1:${pagePort}/page/` : `page: not served on 127.0.0.1:${pagePort}: ${error}; it is on the hub's port ${server.port}, which changes at each start`, error === null ? 'debug' : 'warn'),
     );
   }
 
@@ -247,7 +247,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       const origin = new URL(await server.pageUrl()).origin;
       return { enabled: app.page?.browser?.iframeEnabled?.() === true, origins: [origin, origin.replace('127.0.0.1', 'localhost')] };
     }).catch((error: unknown) => {
-      log(`browser endpoint not served on 127.0.0.1:${browserPort}: ${String(error)}`, 'warn');
+      log(`hub: browser endpoint not served on 127.0.0.1:${browserPort}: ${String(error)}`, 'warn');
 
       return null;
     });
@@ -318,7 +318,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
             const successor = await waitForHub(home, restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS, (found) => found.token !== record.token);
 
-            log(successor === null ? `hub restart: no hub took over within ${(restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} seconds; hub.js start or its supervisor starts one` : `hub restart: pid ${successor.pid} took over with build ${successor.build}`, successor === null ? 'warn' : 'info');
+            log(successor === null ? `hub: no hub took over within ${(restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} s of the restart; hub.js start or its supervisor starts one` : `hub: pid ${successor.pid} took over with build ${successor.build}`, successor === null ? 'warn' : 'debug');
             exit(0);
           },
           log,
@@ -330,14 +330,14 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   /** `deliberate`: a stop the supervisor leaves stopped, which a restart onto a new build is not. */
   const stop = (reason: string, deliberate = true): Promise<void> => {
     stopping ??= (async () => {
-      log(`stopping: ${reason}`);
+      log(`hub: stopping: ${reason}`, deliberate ? 'info' : 'debug');
 
       // Written while this hub still holds the lock, so the supervisor never sees the lock free without it.
       if (deliberate) {
         try {
           writeStopped(home, reason);
         } catch (error) {
-          log(`hub-stopped.json could not be written: ${(error as Error).message}`, 'warn');
+          log(`hub: hub-stopped.json could not be written: ${(error as Error).message}`, 'warn');
         }
       }
 
@@ -365,7 +365,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
     return stopping;
   };
 
-  log(`listening on 127.0.0.1:${server.port} as pid ${process.pid}, build ${build}`);
+  log(`hub: started on build ${build}, listening on 127.0.0.1:${server.port} as pid ${process.pid}`);
 
   return { served: { record, stop } };
 }

@@ -152,7 +152,7 @@ describe('hub entry point', () => {
       expect(restarted.code).toBe(0);
       await fiveChecks();
       expect(starts()).toBe(before);
-      expect(log()).not.toContain('A hub is already running');
+      expect(log()).not.toContain('a second start found the hub already running');
 
       // A deliberate stop stays stopped.
       await stopAndWait();

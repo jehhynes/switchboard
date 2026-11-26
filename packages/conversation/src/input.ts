@@ -764,7 +764,7 @@ export class SessionInput {
     const typedSince = (keyAt: number | null): boolean => keyAt !== null && keyAt >= since;
 
     if (draft === '' || !boxHolds(draft, pasted)) {
-      this.deps.log(`session ${this.sessionId}: a typed message is not in the transcript yet and not in the input box; counted as sent`, 'warn');
+      this.deps.log(`session ${this.sessionId}: message counted as sent, but Claude Code's transcript does not show it yet`, 'warn');
       return { delivery: 'sent' };
     }
 
@@ -872,7 +872,8 @@ export class SessionInput {
       } else if (blocked !== logged) {
         logged = blocked;
         steps.waited ??= blocked;
-        this.deps.log(`session ${this.sessionId}: a message waits, ${blocked}${screen.draft !== '' && !screen.menu ? `: ${draftExcerpt(screen.draft)}` : ''}`);
+        // Never the draft's text: it is the operator's, and the log is readable from a paired device.
+        this.deps.log(`session ${this.sessionId}: your message waits: ${blocked}`);
       }
 
       await this.deps.sleep(GUARD_POLL_MS);

@@ -820,7 +820,7 @@ it('confirms messages typed as one by their shared line, each in order with its 
     conversation.tick(false);
 
     expect(items()).toMatchObject([{ type: 'reply', withdrawn: true }]);
-    expect(logs).toEqual([expect.stringMatching(/^session s1 reply r-1 withdrawn/)]);
+    expect(logs).toEqual([expect.stringMatching(/^session s1: removed a reply read from the screen/)]);
   });
 
   it('shows an aside as an aside, and a rewrite in place of the reply before it', () => {
@@ -972,7 +972,7 @@ it('confirms messages typed as one by their shared line, each in order with its 
     restarted.tick(false);
     expect(items().find((item) => (item as { id: string }).id === never)).toMatchObject({ withdrawn: true });
     expect(items().find((item) => (item as { id: string }).id === later)).toMatchObject({ withdrawn: false });
-    expect(logs).toContain(`session s1 reply ${never} withdrawn: no transcript copy came`);
+    expect(logs).toContain("session s1: removed a reply read from the screen, because Claude Code's transcript did not confirm it");
   });
 
   it('grows the newest screen copy a stopped hub left in place, and lets a tagged transcript copy replace one by its opening', () => {
@@ -1135,7 +1135,7 @@ describe('a typed message no transcript line confirms', () => {
     // It keeps the place where it was sent, before the terminal message and the reply that came after it.
     expect(items().map((item) => [item.type, item.type === 'message' ? item.origin : null])).toEqual([['message', 'typed'], ['message', 'terminal'], ['reply', null]]);
     expect(changes.filter((change) => change.type === 'message' && change.message.id === 'm-shots').at(-1)).toMatchObject({ message: { delivery: 'unconfirmed' } });
-    expect(logs.some((line) => line.includes('m-shots is unconfirmed'))).toBe(true);
+    expect(logs.some((line) => line.startsWith("session s1: message counted as sent, but Claude Code's transcript does not show it"))).toBe(true);
   });
 
   it('waits however long once its queue line is read, also after a hub restart, and is unconfirmed when the session ends without it', () => {

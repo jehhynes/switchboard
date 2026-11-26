@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { closeSync, createReadStream } from 'node:fs';
 import { createServer, STATUS_CODES } from 'node:http';
@@ -31,7 +32,7 @@ export interface Reply {
 export interface HubServerOptions {
   identity: HubIdentity;
   onShutdown(): void;
-  log?(line: string): void;
+  log?(line: string, level?: LogLevel): void;
   /** `POST /restart`, from `hub.js restart`: restarts the hub onto the installed build once it is quiet (architecture.md § Hub lifecycle). */
   onRestart?(): Reply;
   /** Handlers for authorized `POST` paths, given the parsed JSON body and what only the server knows. */
@@ -476,7 +477,17 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
   const servePage = (request: IncomingMessage, response: ServerResponse, url: URL): boolean => {
     const path = url.pathname;
     const isUpload = request.method === 'POST' && path === '/v1/conversation/upload';
-    const logUpload = (outcome: string, location: string, bytes: number): void => options.log?.(`web upload: ${outcome}, ${location}${url.searchParams.get('retry') === '1' ? ', retry' : ''}, declared ${request.headers['content-length'] ?? 'none'}, transfer ${request.headers['transfer-encoding'] ?? 'none'}, received ${bytes > MAX_UPLOAD_BYTES ? '>10 MB' : bytes}`);
+    const logUpload = (outcome: string, location: string, bytes: number): void => {
+      const from = location === 'remote' ? 'a paired device' : location === 'local' ? 'this computer' : 'an unknown page';
+      const retry = url.searchParams.get('retry') === '1' ? ', a retry' : '';
+      const size = bytes > MAX_UPLOAD_BYTES ? 'over 10 MB' : `${Math.ceil(bytes / 1024)} KB`;
+      const declared = request.headers['content-length'];
+      const mismatch = outcome === '200' && declared !== undefined && Number(declared) !== bytes;
+
+      options.log?.(outcome === '200'
+        ? `page: received an upload of ${size} from ${from}${retry}${mismatch ? `, though it declared ${declared} bytes` : ''}`
+        : `page: refused an upload from ${from}${retry} (${outcome})${bytes > 0 ? ` after ${size}` : ''}`, outcome === '200' && !mismatch ? 'debug' : 'warn');
+    };
     const isPageRoute = path === '/' || path === '/page' || path.startsWith('/page/') || path === '/v1/page/list' || path === '/v1/page/hub-log' || path.startsWith('/v1/browser/') || path.startsWith('/v1/conversation/artifact/') || (path === '/v1/conversation/events' && url.searchParams.has('page')) || path === '/v1/conversation/files' || path === '/v1/conversation/console' || (path.startsWith('/v1/conversation/') && (CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length)) || LOCAL_FILE_ROUTES.has(path.slice('/v1/conversation/'.length))));
     const bearer = request.headers.authorization !== undefined;
     const cookiePost = request.method === 'POST' && !bearer && path.startsWith('/v1/conversation/') && (request.headers.cookie !== undefined || isUpload);

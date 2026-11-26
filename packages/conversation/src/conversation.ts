@@ -376,7 +376,7 @@ export class SessionConversation extends ConversationLog {
   }
 
   #logUnconfirmed(message: ConversationMessage, why: string): void {
-    this.deps.log(`session ${this.sessionId}: typed message ${message.id} is unconfirmed: ${why}`, 'warn');
+    this.deps.log(`session ${this.sessionId}: message counted as sent, but Claude Code's transcript does not show it: ${why}`, 'warn');
   }
 
   /**

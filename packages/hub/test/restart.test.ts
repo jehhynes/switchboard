@@ -84,9 +84,9 @@ describe('HubRestart', () => {
 
     expect(hub.calls).toEqual(['successor', 'handOver']);
     expect(hub.lines).toEqual([
-      'hub restart onto build b2 waits: a session is starting',
-      'hub restart onto build b2 waits: a request is being answered',
-      'restarting the hub from build b1 onto build b2, which is installed',
+      'hub: restart onto build b2 waits: a session is starting',
+      'hub: restart onto build b2 waits: a request is being answered',
+      'hub: restarting from build b1 onto build b2 (it is installed)',
     ]);
 
     // Handed over: later checks start nothing.
@@ -103,7 +103,7 @@ describe('HubRestart', () => {
     await restart.check();
 
     expect(hub.calls).toEqual(['successor']);
-    expect(hub.lines.at(-1)).toBe('hub restart failed: the new hub exited (code 1) before it was ready; this hub keeps running');
+    expect(hub.lines.at(-1)).toBe('hub: restart failed: the new hub exited (code 1) before it was ready; this hub keeps running');
 
     hub.set({ installed: 'b3' });
     await restart.check();
@@ -125,7 +125,7 @@ describe('HubRestart', () => {
     await restart.check();
 
     expect(hub.calls).toEqual(['successor', 'cancel']);
-    expect(hub.lines.at(-1)).toBe('hub restart onto build b2 waits: a message is being sent');
+    expect(hub.lines.at(-1)).toBe('hub: restart onto build b2 waits: a message is being sent');
 
     hub.set({ quiet: null, successor: async () => (hub.calls.push('successor'), { pid: 42, cancel: () => hub.calls.push('cancel') }) });
     await restart.check();
@@ -149,7 +149,7 @@ describe('HubRestart', () => {
     await restart.check();
 
     expect(hub.calls).toEqual(['successor', 'handOver']);
-    expect(hub.lines).toEqual(['hub restart asked by hub.js restart', 'hub restart onto build b1 waits: a triage is running', 'restarting the hub from build b1 onto build b1, asked by hub.js restart']);
+    expect(hub.lines).toEqual(['hub: restart asked by hub.js restart', 'hub: restart onto build b1 waits: a triage is running', 'hub: restarting from build b1 onto build b1 (asked by hub.js restart)']);
     expect(restart.request()).toEqual({ refused: 'The hub is already restarting.' });
   });
 

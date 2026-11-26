@@ -325,7 +325,7 @@ describe('Debriefs', () => {
     }
 
     expect(forks).toHaveLength(1);
-    expect(logs).toContain(`debrief: ${NATIVE} failed: Claude could not run the debrief: Session not found`);
+    expect(logs).toContain('debrief: session s1 not debriefed: Claude could not run the debrief: Session not found; it is not retried, and its later work is asked about with it');
     expect(readDebriefState(dir)?.sessions[NATIVE]).toEqual({
       throughMessageUuid: null,
       debriefedAt: null,
@@ -455,7 +455,7 @@ describe('Debriefs', () => {
     await debriefs().scan();
 
     expect(forks).toHaveLength(1);
-    expect(logs).toContain(`debrief: ${NATIVE} failed: The debrief failed: Error: spawn broke`);
+    expect(logs).toContain('debrief: session s1 not debriefed: The debrief failed: Error: spawn broke; it is not retried, and its later work is asked about with it');
     expect(readDebriefState(dir)?.sessions[NATIVE]?.lastError).toBe('The debrief failed: Error: spawn broke');
 
     const broken = new Debriefs({
@@ -523,7 +523,7 @@ describe('Debriefs', () => {
     await debriefs().scan();
 
     expect(codexCalls).toHaveLength(2);
-    expect(logs).toContain('debrief: Codex thread thread-1 failed: A delegated turn is running on this thread');
+    expect(logs.find((line) => line.startsWith('debrief: delegated Codex thread thread-1 of session '))).toMatch(/ not debriefed: A delegated turn is running on this thread; it is not retried/);
     expect(readDebriefState(dir)?.codex['thread-1']).toMatchObject({ lastError: 'A delegated turn is running on this thread', attempts: 1 });
   });
 
@@ -704,7 +704,7 @@ describe('Debriefs', () => {
       await debriefs().scan();
 
       expect(codexForks).toHaveLength(1);
-      expect(logs).toContain(`debrief: Codex session ${THREAD} failed: quota exceeded`);
+      expect(logs.find((line) => line.includes(' not debriefed: '))).toMatch(/^debrief: session \S+ not debriefed: quota exceeded; it is not retried/);
       expect(readDebriefState(dir)?.sessions[THREAD]).toMatchObject({ throughMessageUuid: null, attempts: 1, lastError: 'quota exceeded', attemptedThrough: 'turn-1' });
 
       codexForkReply = () => ok(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Nothing slowed me down.' } }));

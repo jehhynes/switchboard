@@ -77,7 +77,7 @@ describe('serveHub', () => {
     const lock = await holdLock(home);
 
     try {
-      expect(await serve({ waitMs: 200 })).toEqual({ refused: 'another process holds the hub lock but no hub answers' });
+      expect(await serve({ waitMs: 200 })).toEqual({ refused: "another process holds the hub's lock but does not answer. It usually clears when that process exits; if it repeats, the lines above say which hub holds it" });
       expect(recordOnDisk()).toBeNull();
     } finally {
       await releaseLock(lock!);
@@ -330,7 +330,7 @@ describe('serveHub', () => {
     it("serves the web page on the app's web.port unless the options name another port, and stops serving it when stopped", async () => {
       const store = Store.open(':memory:');
       const page = { access: new PageAccess(store), asset: () => null, opened: () => 'p', isPage: () => false, list: () => [], files: async () => null, artifact: () => null, upload: () => ({ status: 403, body: {} }) };
-      const pageServed = (port: number) => `web page on http://127.0.0.1:${port}/page/`;
+      const pageServed = (port: number) => `page: served on http://127.0.0.1:${port}/page/`;
       const { port: pagePort, hub } = await onFreePort(async (port, log) => served(await serve({ browserPort: null, log, app: async () => ({ ...app([]), page, pagePort: () => port }) })), pageServed);
 
       expect((await call(pagePort, 'GET', '/page/', null))?.status).toBe(401);
@@ -358,7 +358,7 @@ describe('serveHub', () => {
       const hub = served(await serve({ browserPort, log, app: async () => app([]) }));
 
       expect(await findHub(home)).toEqual(hub.record);
-      expect(log).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^browser endpoint not served on 127\\.0\\.0\\.1:${browserPort}: .*EADDRINUSE`)), 'warn');
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^hub: browser endpoint not served on 127\\.0\\.0\\.1:${browserPort}: .*EADDRINUSE`)), 'warn');
       await new Promise((done) => holder.close(done));
     });
   });

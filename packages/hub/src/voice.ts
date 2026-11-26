@@ -1,4 +1,5 @@
 import type { LogLevel } from '@switchboard/core';
+import { seconds } from '@switchboard/core';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ConversationMessage, ConversationReply, Interruption, Persona, Piece, Session, SpokenState, ViewSettings, VoiceSettings } from '@switchboard/core';
@@ -6,7 +7,7 @@ import { PERMISSION_PROMPT, QUESTION_CARD, START_PROMPT } from '@switchboard/cor
 import { speechPart, spokenText, stripQuestionMarkup } from '@switchboard/conversation';
 import type { HeardTag } from '@switchboard/conversation';
 import { ENROLL_SECONDS } from '@switchboard/voice';
-import type { AlertCause, AwayReason, EnrollmentState, HubMessage, MicState, UtteranceTiming, VoiceDevice, VoiceMessage, VoiceTarget } from '@switchboard/voice';
+import type { AlertCause, AlertOutcome, AwayReason, EnrollmentState, HubMessage, MicState, UtteranceTiming, VoiceDevice, VoiceMessage, VoiceTarget } from '@switchboard/voice';
 import type { VoiceConnection } from './voiceLink.js';
 import { REPLY_NOT_SHOWN } from './windows.js';
 import type { WindowScope } from './windows.js';
@@ -42,6 +43,13 @@ export interface VoiceView {
 }
 
 /** Why the voice process turned the mic off, as the hub's log says it. */
+/** Voice target changes within this time of the line that named one merge into one line at its end. */
+export const TARGET_LOG_MS = 10_000;
+/** Why the voice target changed, as the hub log says it. */
+const TARGET_REASON: Record<string, string> = { focus: 'focused window', 'talk-here': 'Talk here', gone: 'its session is gone or away' };
+const ALERT_CAUSE: Record<AlertCause, string> = { 'turn-finished': 'its turn finished', question: 'it asks a question', permission: 'it asks for permission' };
+const ALERT_OUTCOME: Record<AlertOutcome, string> = { announced: 'read out', unanswered: 'no spoken answer to', declined: 'you declined', cancelled: 'cancelled' };
+type TargetLogged = { sessionId: string | null; at: number; changes: number; latest: { sessionId: string | null; reason: string } | null };
 const MIC_OFF_TEXT: Record<AwayReason, string> = { locked: 'computer locked', asleep: 'computer going to sleep', disconnected: 'session disconnected' };
 
 /** What the composer shows when a dictated turn is held, while the room hold runs and after it. */
@@ -571,7 +579,7 @@ export class VoiceControl {
     this.#stopFlush();
     this.#clear('linger');
     this.#clear('restart');
-    this.deps.log(`voice: handed over: device ${state.device}, target ${state.target.sessionId ?? 'none'}, generation ${state.target.gen}, mic ${state.micOn ? 'on' : 'off'}`, 'debug');
+    this.deps.log(`voice: handed over to the new hub: device ${state.device}, target ${state.target.sessionId === null ? 'none' : `session ${state.target.sessionId}`}, mic ${state.micOn ? 'on' : 'off'}`, 'debug');
     return state;
   }
 
@@ -1187,7 +1195,11 @@ export class VoiceControl {
   micTiming(key: string, steps: Array<{ step: string; ms: number }>, outcome: string): void {
     const from = this.deps.remotePage?.(key) === true ? "a paired device's page" : "this computer's page";
 
-    this.deps.log(`voice: mic on tap on ${from} → ${outcome}: ${steps.map((one) => `${one.step} at ${Math.round(one.ms)} ms`).join(', ')}`, 'debug');
+    const total = steps.at(-1)?.ms ?? null;
+    const ok = outcome === 'listening' || outcome === 'hearing';
+
+    this.deps.log(`voice: mic on from ${from}; ${outcome}${total === null ? '' : ` after ${seconds(total)}`}`, ok ? 'info' : 'warn');
+    this.deps.log(`voice: mic on steps from the tap: ${steps.map((one) => `${one.step} at ${Math.round(one.ms)} ms`).join(', ')}`, 'debug');
   }
 
   /**
@@ -1801,7 +1813,8 @@ export class VoiceControl {
       style: persona?.style ?? settings.style,
       personality: persona === null || persona.personality === '' ? null : persona.personality,
     });
-    this.deps.log(`voice: alert ${alertId} for session ${sessionId}: ${cause}`);
+    this.#alertCauses.set(alertId, cause);
+    this.deps.log(`voice: alert for session ${sessionId}: ${ALERT_CAUSE[cause]}`, 'debug');
   }
 
   /** Drops a session's alert not sent yet, or tells the process to cancel one sent. */
@@ -1982,7 +1995,7 @@ export class VoiceControl {
           }
         }
 
-        this.deps.log(`voice target ${message.sessionId ?? 'none'} (${message.reason}), generation ${message.gen}`, 'debug');
+        this.#logTarget(message.sessionId, message.reason);
         this.viewsChanged();
         this.deps.dockChanged();
         this.#syncTyping();
@@ -2089,11 +2102,14 @@ export class VoiceControl {
           this.#alerts.delete(message.sessionId);
         }
 
-        this.deps.log(`voice: alert ${message.alertId} for session ${message.sessionId} ${message.outcome}`);
+        const cause = this.#alertCauses.get(message.alertId);
+
+        this.#alertCauses.delete(message.alertId);
+        this.deps.log(`voice: ${ALERT_OUTCOME[message.outcome]} the alert for session ${message.sessionId}${cause === undefined ? '' : ` (${ALERT_CAUSE[cause]})`}`, message.outcome === 'cancelled' ? 'debug' : 'info');
         return;
       case 'command':
         // A spoken command goes to no session: it is only logged (architecture.md § Dictation).
-        this.deps.log(`voice: spoken command ${message.command} ("${message.text}")`);
+        this.deps.log(`voice: heard the spoken command ${message.command}`);
         this.#fragment({ event: 'command', sessionId: message.sessionId ?? '', utteranceId: message.utteranceId, pieceId: null, messageId: null, text: message.text, score: message.score, f0: message.f0 });
         return;
       case 'phone-play':
@@ -2145,7 +2161,7 @@ export class VoiceControl {
 
         // Mic on as the hub saw it: from the command to the voice process's first state past starting.
         if (this.#micAsked !== null && message.mic !== 'off' && message.mic !== 'starting') {
-          this.deps.log(`voice: mic on from ${this.#micAsked.from} → ${message.mic} in ${Math.round(this.deps.now() - this.#micAsked.at)} ms`);
+          this.deps.log(`voice: mic on from ${this.#micAsked.from} → ${message.mic} in ${Math.round(this.deps.now() - this.#micAsked.at)} ms`, 'debug');
           this.#micAsked = null;
         }
 
@@ -2315,9 +2331,60 @@ export class VoiceControl {
     this.viewsChanged();
   }
 
+  /** The cause of each alert sent, for its outcome's line. */
+  readonly #alertCauses = new Map<string, AlertCause>();
+  /** The session the hub log last named as the voice target, and the changes since that line within `TARGET_LOG_MS`. */
+  #targetLogged: TargetLogged | null = null;
+
+  /**
+   * Logs a voice target change only when its session changes; changes within `TARGET_LOG_MS` of a line merge into one line at its end, with a
+   * count. Info while the mic is on, when the target decides where dictation goes; debug otherwise.
+   */
+  #logTarget(sessionId: string | null, reason: string): void {
+    const logged = this.#targetLogged;
+    const now = this.deps.now();
+
+    if (logged !== null && now - logged.at < TARGET_LOG_MS) {
+      // A report of the same session, such as a new generation, is no change.
+      if (sessionId !== (logged.latest === null ? logged.sessionId : logged.latest.sessionId)) {
+        logged.changes += 1;
+        logged.latest = { sessionId, reason };
+      }
+      return;
+    }
+
+    if (logged !== null && logged.sessionId === sessionId) {
+      return;
+    }
+
+    this.#writeTarget(sessionId, reason, 0, now);
+  }
+
+  #writeTarget(sessionId: string | null, reason: string, changes: number, now: number): void {
+    const entry: TargetLogged = { sessionId, at: now, changes: 0, latest: null };
+
+    this.#targetLogged = entry;
+    this.deps.log(`${sessionId === null ? `voice: no session to send speech to (${TARGET_REASON[reason] ?? reason})` : `voice: now for session ${sessionId} (${TARGET_REASON[reason] ?? reason})`}${changes > 1 ? `, after ${changes} changes in ${TARGET_LOG_MS / 1000} s` : ''}`, this.#mic === 'off' || this.#mic === 'unavailable' ? 'debug' : 'info');
+    this.#timer(() => {
+      const latest = entry.latest;
+
+      if (this.#targetLogged === entry && latest !== null && latest.sessionId !== entry.sessionId) {
+        this.#writeTarget(latest.sessionId, latest.reason, entry.changes, this.deps.now());
+      }
+    }, TARGET_LOG_MS);
+  }
+
   /** What became of an offered reply's speech, in the hub log beside the voice process's own line in voice.log. */
   #logSpeech(replyId: string, offered: Offered, outcome: string, atMs: number | null, said: number | null): void {
-    this.deps.log(`voice: reply ${replyId} of session ${offered.sessionId} ${outcome}, voice ${offered.voice}, ${atMs ?? 0} ms played, ${said ?? 0} characters said`, 'debug');
+    const spoken = `${said ?? 0} characters in ${seconds(atMs ?? 0)}`;
+
+    if (outcome === 'played') {
+      this.deps.log(`voice: read out a reply of session ${offered.sessionId}: ${spoken}`, 'debug');
+    } else if (outcome.startsWith('failed')) {
+      this.deps.log(`voice: could not read out a reply of session ${offered.sessionId} (${outcome}) after ${spoken}`, 'warn');
+    } else {
+      this.deps.log(`voice: a reply of session ${offered.sessionId} ${outcome} after ${spoken}`, 'debug');
+    }
   }
 
   #timer(run: () => void, ms: number): unknown {

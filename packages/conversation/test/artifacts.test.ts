@@ -105,7 +105,7 @@ describe('ArtifactFolder', () => {
     rmSync(join(dir, 'chat', 'report.md'));
     await vi.waitFor(() => expect(changes.at(-1)).toEqual({ path: 'chat/report.md', removed: true }));
     expect(folder.list()).toEqual([]);
-    expect(logged).toContain('artifact changed: chat/report.md');
+    expect(logged).toContain('artifact updated: chat/report.md');
   });
 
   it('counts a rewrite that keeps the file\'s older time as a change at the time it was read', () => {

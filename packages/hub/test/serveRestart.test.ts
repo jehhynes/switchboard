@@ -78,7 +78,7 @@ describe('serveHub restart onto a new build', () => {
     writeFileSync(bundle, 'the new build');
     await until(() => (cancelled.length > 0 ? true : null));
 
-    expect(lines.filter((line) => line.startsWith('stopping') || line.startsWith('hub restart'))).toEqual(['stopping: a client asked it to stop', `hub restart onto build ${buildOf(bundle)} waits: the hub is stopping`]);
+    expect(lines.filter((line) => line.startsWith('hub: stopping') || line.startsWith('hub: restart '))).toEqual(['hub: stopping: a client asked it to stop', `hub: restart onto build ${buildOf(bundle)} waits: the hub is stopping`]);
   });
 
   it('makes a hub started during a handover wait for the successor the handover names, rather than take the lock first', async () => {
@@ -159,10 +159,10 @@ describe('serveHub restart onto a new build', () => {
     expect(old.record.restarts).toBe(true);
     expect(taken.record.restarts).toBeUndefined();
     expect(await call(old.record.port, 'GET', '/hub', null, 300)).toBeNull();
-    expect(lines.filter((line) => line.startsWith('restarting the hub') || line.startsWith('hub restart:') || line.startsWith('stopping'))).toEqual([
-      `restarting the hub from build b1 onto build ${buildOf(bundle)}, which is installed`,
-      'stopping: restarting onto the installed build',
-      `hub restart: pid ${process.pid} took over with build b2`,
+    expect(lines.filter((line) => line.startsWith('hub: restarting') || line.startsWith('hub: pid') || line.startsWith('hub: stopping'))).toEqual([
+      `hub: restarting from build b1 onto build ${buildOf(bundle)} (it is installed)`,
+      'hub: stopping: restarting onto the installed build',
+      `hub: pid ${process.pid} took over with build b2`,
     ]);
   });
 
@@ -201,10 +201,10 @@ describe('serveHub restart onto a new build', () => {
       }),
     );
     writeFileSync(bundle, 'the new build');
-    await until(() => (lines.some((line) => line.startsWith('hub restart failed')) ? true : null));
-    expect(lines.find((line) => line.startsWith('hub restart failed'))).toMatch(/^hub restart failed: the handover could not be written: .+; this hub keeps running$/);
+    await until(() => (lines.some((line) => line.startsWith('hub: restart failed')) ? true : null));
+    expect(lines.find((line) => line.startsWith('hub: restart failed'))).toMatch(/^hub: restart failed: the handover could not be written: .+; this hub keeps running$/);
     expect([exit.mock.calls.length, handedOver.mock.calls.length, cancel.mock.calls.length]).toEqual([0, 0, 1]);
-    expect(lines.some((line) => line.startsWith('stopping'))).toBe(false);
+    expect(lines.some((line) => line.startsWith('hub: stopping'))).toBe(false);
   });
 
   it('carries what the app hands over to the successor\'s app, which a hub started anew never gets', async () => {

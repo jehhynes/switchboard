@@ -356,7 +356,7 @@ describe('SessionInput', () => {
     expect(outcomes).toEqual([{ delivery: 'sent' }]);
     expect(session.writes).toEqual(['\u001b[200~Fix the build\u001b[201~', '\r']);
     expect(session.clock).toBeGreaterThanOrEqual(T0 + 1_000);
-    expect(logs).toEqual(['session s1: a message waits, a key was typed in a terminal']);
+    expect(logs).toEqual(['session s1: your message waits: a key was typed in a terminal']);
     expect(reservations).toEqual({ taken: 1, released: 1 });
   });
 
@@ -383,7 +383,7 @@ describe('SessionInput', () => {
     expect(outcomes).toEqual([{ delivery: 'sent' }]);
     expect(session.writes).toEqual(['\u001b[200~Hello\u001b[201~', '\r']);
     expect(reservations).toEqual({ taken: 1, released: 1 });
-    expect(logs.at(-1)).toBe('session s1: a typed message is not in the transcript yet and not in the input box; counted as sent');
+    expect(logs.at(-1)).toBe("session s1: message counted as sent, but Claude Code's transcript does not show it yet");
 
     // Enters that never take leave the text in the box, which is cleared one Ctrl+U at a time, three for two lines, under the reservation.
     const stuck = new FakeSession();
@@ -523,14 +523,14 @@ describe('SessionInput', () => {
     const sending = new SessionInput('s1', deps).send('Hello', (outcome) => outcomes.push(outcome));
 
     // Waiting on the menu, as it logs, with nothing typed.
-    await vi.waitFor(() => expect(logs).toEqual(['session s1: a message waits, a menu is open']));
+    await vi.waitFor(() => expect(logs).toEqual(['session s1: your message waits: a menu is open']));
     expect(session.writes).toEqual([]);
     why = 'The session has ended. Open it in the terminal to resume it.';
     await sending;
     expect(outcomes).toEqual([{ delivery: 'not-sent', error: 'The session has ended. Open it in the terminal to resume it.' }]);
     expect(session.writes).toEqual([]);
     expect(reservations.taken).toBe(0);
-    expect(logs).toEqual(['session s1: a message waits, a menu is open']);
+    expect(logs).toEqual(['session s1: your message waits: a menu is open']);
 
     const drafted = new FakeSession();
     const draftOutcomes: InputOutcome[] = [];
@@ -541,7 +541,9 @@ describe('SessionInput', () => {
     const waiting = new SessionInput('s1', draftDeps.deps).send('Hello', (outcome) => draftOutcomes.push(outcome));
 
     // The log comes after the first screen read, which replays the screen on a real timer.
-    await vi.waitFor(() => expect(draftDeps.logs).toEqual(['session s1: a message waits, the input box holds a draft: "typed by hand"']), { timeout: 4_000 });
+    await vi.waitFor(() => expect(draftDeps.logs).toEqual(['session s1: your message waits: the input box holds a draft']), { timeout: 4_000 });
+    // The draft is the operator's text, so the log never holds it.
+    expect(draftDeps.logs.join('\n')).not.toContain('typed by hand');
     expect(drafted.writes).toEqual([]);
     drafted.box = '';
     await waiting;
@@ -639,7 +641,7 @@ describe('SessionInput joining queued messages', () => {
     });
 
     expect(input.pending).toBe(3);
-    await vi.waitFor(() => expect(logs).toContain('session s1: a message waits, the input box holds a draft: "typed by hand"'), { timeout: 4_000 });
+    await vi.waitFor(() => expect(logs).toContain('session s1: your message waits: the input box holds a draft'), { timeout: 4_000 });
     session.box = '';
     await Promise.all(sending);
 
@@ -696,7 +698,7 @@ describe('SessionInput joining queued messages', () => {
       ['joins this one'],
     ]);
 
-    await vi.waitFor(() => expect(logs).toContain('session s1: a message waits, the input box holds a draft: "typed by hand"'), { timeout: 4_000 });
+    await vi.waitFor(() => expect(logs).toContain('session s1: your message waits: the input box holds a draft'), { timeout: 4_000 });
     session.box = '';
     await Promise.all(sending);
 
