@@ -522,7 +522,8 @@ describe('SessionInput', () => {
 
     const sending = new SessionInput('s1', deps).send('Hello', (outcome) => outcomes.push(outcome));
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Waiting on the menu, as it logs, with nothing typed.
+    await vi.waitFor(() => expect(logs).toEqual(['session s1: a message waits, a menu is open']));
     expect(session.writes).toEqual([]);
     why = 'The session has ended. Open it in the terminal to resume it.';
     await sending;

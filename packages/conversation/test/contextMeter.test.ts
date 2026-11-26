@@ -102,7 +102,7 @@ describe('renderContextMeter', () => {
     const open = renderContextMeter(view, 'open', true);
 
     expect(attr(open, 'aria-expanded')).toBe('true');
-    expect([...open.matchAll(/<div class="context-line">([^<]*)<\/div>/g)].map((match) => match[1])).toEqual(contextLines(view));
+    expect([...open.matchAll(/<div class="context-line">([^<]*)<\/div>/g)].map((match) => match[1])).toEqual(['Context: 62% · 124k / 200k tokens', '26% left until auto-compact at about 167k.']);
     expect(actions(open)).toEqual(['toggle', 'compact']);
     expect(actions(renderContextMeter(view, 'confirm', true))).toEqual(['toggle', 'compact-confirm', 'cancel']);
     expect(actions(renderContextMeter(view, 'open', false))).toEqual(['toggle']);
