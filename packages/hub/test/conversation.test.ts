@@ -215,7 +215,7 @@ describe('canonicalFolder', () => {
 });
 
 describe('ConversationService', () => {
-  function setup(held = new FakeHeld()) {
+  function setup(held = new FakeHeld(), extra: Partial<ConversationServiceDeps> = {}) {
     const store = Store.open(':memory:');
     const view = world();
     let keys = 0;
@@ -238,6 +238,7 @@ describe('ConversationService', () => {
       },
       newId: () => String(++id),
       log: (line) => logs.push(line),
+      ...extra,
     });
 
     held.transcript = (session) => (session === 's2' ? join(projects, projectSlug('D:/w12'), 'n2.jsonl') : null);
@@ -461,6 +462,45 @@ describe('ConversationService', () => {
     const theirs = service.states({ window: other, scopeGen: 1, opId: 'o7', sessionId: 's3', before: null }) as { body: { states: Array<{ id: string }> } };
 
     expect(service.states({ window: key, scopeGen: 1, opId: 'o8', sessionId: 's2', before: theirs.body.states[0]!.id })).toEqual({ status: 200, body: { states: [], more: false } });
+  });
+
+  describe('a transcript more than one bounded read behind (mechanics M165)', () => {
+    const replies = (reply: (uuid: string, text: string) => string, count: number, from = 0) => Array.from({ length: count }, (_, n) => reply(`r${from + n}`, `Reply ${from + n}, ${'padding '.repeat(10)}`));
+
+    it('ReadNow_BacklogPastOneRead_ReadsToTheEndSoTheLastQuestionCounts', () => {
+      const { service, transcript, reply, store } = setup(new FakeHeld(), { transcriptReadBytes: 256 });
+
+      transcript('D:/w12', 'n2', [...replies(reply, 20), reply('q', 'Which one?\n\n- A) This\n- B) That')]);
+      service.readNow(['s2']);
+
+      const items = store.conversation('s2', null, 50).items;
+      expect(items).toHaveLength(21);
+      expect(items.at(-1)).toMatchObject({ type: 'reply', opening: 'Which one?\n\n- A) This\n- B) That' });
+    });
+
+    it('Poll_SessionEndedWithBacklog_ReadsItAllBeforeDroppingItsReader', async () => {
+      const { service, transcript, reply, store } = setup(new FakeHeld(), { transcriptReadBytes: 256 });
+
+      transcript('D:/w12', 'n2', [reply('first', 'First.')]);
+      await service.poll();
+      transcript('D:/w12', 'n2', [reply('first', 'First.'), ...replies(reply, 20), reply('last', 'Last.')]);
+      store.updateSession('s2', { state: 'ended' });
+      await service.poll();
+
+      const items = store.conversation('s2', null, 50).items;
+      expect(items).toHaveLength(22);
+      expect(items.at(-1)).toMatchObject({ type: 'reply', opening: 'Last.' });
+    });
+
+    it('Commands_SkillsPastOneRead_ListedInOneRequest', async () => {
+      const { service, transcript, reply, open } = setup(new FakeHeld(), { transcriptReadBytes: 256 });
+      const listing = JSON.stringify({ type: 'attachment', attachment: { type: 'skill_listing', content: '- late: Listed late', isInitial: true, names: ['late'] } });
+
+      transcript('D:/w12', 'n2', [...replies(reply, 20), listing]);
+      const { key } = open(2);
+
+      expect(service.commands({ window: key, scopeGen: 1, opId: 'o1', sessionId: 's2' })).toMatchObject({ status: 200, body: { commands: [{ name: 'clear' }, { name: 'compact' }, { name: 'late', description: 'Listed late' }] } });
+    });
   });
 
   it("lists its session's slash commands from the transcript for the window's composer, and refuses another window's session, a forged key or a stale scope generation", async () => {

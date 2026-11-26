@@ -59,6 +59,8 @@ export interface ConversationDeps {
   onChange(change: ConversationChange): void;
   log(line: string, level?: LogLevel): void;
   hold?: HoldOptions;
+  /** The most one transcript read holds at once; `READ_LINES_BYTES` by default. */
+  readBytes?: number;
 }
 
 /** After a resize, the screen is read again only after this long, and then whatever it shows counts as read (claude-collab findings). */
@@ -199,10 +201,18 @@ export class SessionConversation extends ConversationLog {
       }
     }
 
-    const read = readLines(path, checkpoint.offset);
+    // Each segment is bounded, so a transcript far behind is read to its end in pieces rather than in one string (mechanics M165).
+    for (let next: TranscriptCheckpoint | null = checkpoint; next !== null; ) {
+      next = this.#readSegment(path, next);
+    }
+  }
+
+  /** Reads and imports one segment of the lines after the checkpoint and returns the checkpoint past them, or null once nothing was read. */
+  #readSegment(path: string, checkpoint: TranscriptCheckpoint): TranscriptCheckpoint | null {
+    const read = readLines(path, checkpoint.offset, this.deps.readBytes);
 
     if (read === null || (read.lines.length === 0 && read.offset === checkpoint.offset)) {
-      return;
+      return null;
     }
 
     let { lastUuid, lastAt } = checkpoint;
@@ -235,7 +245,11 @@ export class SessionConversation extends ConversationLog {
       }
     }
 
-    this.deps.store.setCheckpoint({ sessionId: this.sessionId, transcript: path, offset: read.offset, lastUuid, lastAt });
+    const next = { sessionId: this.sessionId, transcript: path, offset: read.offset, lastUuid, lastAt };
+
+    this.deps.store.setCheckpoint(next);
+
+    return next;
   }
 
   /**

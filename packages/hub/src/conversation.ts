@@ -296,6 +296,8 @@ export interface ConversationServiceDeps {
   codexHome?: string;
   /** Claude's global config, whose theme says whether inline code is palette blue. */
   claudeConfig: string;
+  /** The most one read of a Claude transcript holds at once; `READ_LINES_BYTES` by default, smaller in tests. */
+  transcriptReadBytes?: number;
   screen: ReadHeldScreen;
   input: HeldInput;
   hooks(): boolean;

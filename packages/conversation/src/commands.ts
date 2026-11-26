@@ -19,6 +19,9 @@ export class SessionCommands {
   #offset = 0;
   readonly #skills = new Map<string, string>();
 
+  /** `readBytes`: the most one transcript read holds at once; `READ_LINES_BYTES` by default. */
+  constructor(private readonly readBytes?: number) {}
+
   list(path: string | null): SlashCommand[] {
     if (path !== this.#path) {
       this.#path = path;
@@ -26,9 +29,14 @@ export class SessionCommands {
       this.#skills.clear();
     }
 
-    const read = path === null ? null : readLines(path, this.#offset);
+    // Read to the transcript's end, a bounded segment at a time (mechanics M165).
+    while (path !== null) {
+      const read = readLines(path, this.#offset, this.readBytes);
 
-    if (read !== null) {
+      if (read === null || (read.lines.length === 0 && read.offset === this.#offset)) {
+        break;
+      }
+
       // A shorter file than the one read so far is read again from its start.
       if (read.offset < this.#offset) {
         this.#skills.clear();

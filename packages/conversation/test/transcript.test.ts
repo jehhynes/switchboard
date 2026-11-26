@@ -85,6 +85,50 @@ describe('parseLine on messages', () => {
 });
 
 describe('readLines', () => {
+  it('ReadLines_MoreThanMost_ReadsWholeLinesOverSeveralCalls', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'transcript-'));
+    const path = join(dir, 't.jsonl');
+    const lines = Array.from({ length: 20 }, (_, n) => `line ${n}`);
+
+    try {
+      writeFileSync(path, lines.map((line) => `${line}\n`).join(''));
+      const read: string[] = [];
+      let offset = 0;
+
+      for (let calls = 1; ; calls++) {
+        const next = readLines(path, offset, 32)!;
+        // Each call stops at a line end within 32 bytes of where it started.
+        expect(next.offset - offset).toBeLessThanOrEqual(32);
+        read.push(...next.lines);
+        if (next.offset === offset) break;
+        offset = next.offset;
+        expect(calls).toBeLessThan(20);
+      }
+
+      expect(read).toEqual(lines);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('ReadLines_LineLongerThanMost_ReadWholeOnceWritten', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'transcript-'));
+    const path = join(dir, 't.jsonl');
+    const long = 'x'.repeat(100);
+
+    try {
+      writeFileSync(path, `a\n${long}`);
+      expect(readLines(path, 0, 8)).toEqual({ lines: ['a'], offset: 2 });
+      // Not written whole: it waits for its newline.
+      expect(readLines(path, 2, 8)).toEqual({ lines: [], offset: 2 });
+      writeFileSync(path, `a\n${long}\nb\n`);
+      // The window that first holds its end holds what follows too.
+      expect(readLines(path, 2, 8)).toEqual({ lines: [long, 'b'], offset: 105 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reads a file that was replaced by a shorter one again from its start', () => {
     const dir = mkdtempSync(join(tmpdir(), 'transcript-'));
     const path = join(dir, 't.jsonl');

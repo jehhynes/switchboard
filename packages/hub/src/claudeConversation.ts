@@ -141,7 +141,7 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
   }
   commands(session: Session): SlashCommand[] {
     let commands = this.#commands.get(session.id);
-    if (commands === undefined) { commands = new SessionCommands(); this.#commands.set(session.id, commands); }
+    if (commands === undefined) { commands = new SessionCommands(this.deps.transcriptReadBytes); this.#commands.set(session.id, commands); }
     return commands.list(transcriptOf(this.#readers.get(session.id), this.deps.projectsDir, session));
   }
   #reader(session: Session): Reader {
@@ -155,6 +155,7 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
           newId: this.deps.newId,
           onChange: (change) => this.changed(session.id, change),
           log: this.deps.log,
+          ...(this.deps.transcriptReadBytes === undefined ? {} : { readBytes: this.deps.transcriptReadBytes }),
         }),
         workItemId: session.workItemId,
         lastBusy: 0,

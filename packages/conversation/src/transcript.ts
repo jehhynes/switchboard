@@ -202,8 +202,15 @@ export function parseLine(line: string): { entry: TranscriptEntry | null; assist
   return { ...none, ...line_, at };
 }
 
-/** Reads the complete lines appended to a transcript since `offset`; a line still being written waits for its newline. */
-export function readLines(path: string, offset: number): { lines: string[]; offset: number } | null {
+/** The most `readLines` reads at once, unless a single line is longer; callers read segment after segment to the end of the file. */
+export const READ_LINES_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Reads the complete lines appended to a transcript since `offset`, up to about `most` bytes of them, so a transcript of hundreds of megabytes
+ * is read over several calls rather than into one buffer and one string, which V8 refuses past about 512 MB (mechanics M165). A line longer
+ * than `most` is read whole. A line still being written waits for its newline.
+ */
+export function readLines(path: string, offset: number, most = READ_LINES_BYTES): { lines: string[]; offset: number } | null {
   let size: number;
 
   try {
@@ -219,16 +226,31 @@ export function readLines(path: string, offset: number): { lines: string[]; offs
     return { lines: [], offset: from };
   }
 
-  const buffer = Buffer.alloc(size - from);
   const fd = openSync(path, 'r');
+  let buffer: Buffer;
+  let end: number;
 
   try {
-    readSync(fd, buffer, 0, buffer.length, from);
+    // A window with no line end, short of the file's end, holds part of one long line: read a window twice as long.
+    for (let length = Math.min(size - from, most); ; length = Math.min(size - from, length * 2)) {
+      buffer = Buffer.alloc(length);
+      let read = 0;
+
+      while (read < length) {
+        const count = readSync(fd, buffer, read, length - read, from + read);
+
+        if (count === 0) break;
+        read += count;
+      }
+
+      buffer = buffer.subarray(0, read);
+      end = buffer.lastIndexOf(10);
+
+      if (end !== -1 || read < length || from + length >= size) break;
+    }
   } finally {
     closeSync(fd);
   }
-
-  const end = buffer.lastIndexOf(10);
 
   if (end === -1) {
     return { lines: [], offset: from };
