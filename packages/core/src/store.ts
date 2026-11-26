@@ -872,7 +872,9 @@ export class Store {
     }
 
     // A table rebuild drops a parent table, which fails with foreign keys on; each migration checks them before it commits.
-    db.exec('PRAGMA foreign_keys = OFF');
+    // Migrations commit without syncing the WAL, which a new database's 70-odd commits otherwise pay for one by one; a crash keeps
+    // each migration whole or absent, so the next open runs the rest, and the first synchronous commit after them syncs them all.
+    db.exec('PRAGMA foreign_keys = OFF; PRAGMA synchronous = NORMAL');
 
     for (let next = version; next < MIGRATIONS.length; next++) {
       db.exec('BEGIN');
@@ -893,7 +895,7 @@ export class Store {
       }
     }
 
-    db.exec('PRAGMA foreign_keys = ON');
+    db.exec('PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL');
 
     return new Store(db);
   }

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { legacyDb } from './legacyDb.js';
 import { CONVERSATION_RETENTION, MIGRATIONS, Store, TURN_SLACK_MS } from '../src/index.js';
 import type { ConversationReply } from '../src/index.js';
 
@@ -431,13 +432,12 @@ describe('conversation store', () => {
   });
 
   it('counts the replies and statuses from before unread was kept as seen', () => {
-    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
     const dir = mkdtempSync(join(tmpdir(), 'store-seen-'));
 
     dirs.push(dir);
 
     const path = join(dir, 'switchboard.db');
-    const db = new DatabaseSync(path);
+    const db = legacyDb(path);
 
     // The schema as it was before seenAt, with a reply and a status.
     const before = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN seenAt'));
@@ -461,13 +461,12 @@ describe('conversation store', () => {
   });
 
   it("turns statuses and work items' stages into states, keeping each session's order", () => {
-    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
     const dir = mkdtempSync(join(tmpdir(), 'store-states-'));
 
     dirs.push(dir);
 
     const path = join(dir, 'switchboard.db');
-    const db = new DatabaseSync(path);
+    const db = legacyDb(path);
     const before = MIGRATIONS.findIndex((migration) => migration.includes('CREATE TABLE states'));
 
     db.exec('BEGIN');
@@ -510,13 +509,12 @@ describe('conversation store', () => {
   });
 
   it('counts a typed message left uncertain by an earlier hub as sent, keeping its place', () => {
-    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
     const dir = mkdtempSync(join(tmpdir(), 'store-uncertain-'));
 
     dirs.push(dir);
 
     const path = join(dir, 'switchboard.db');
-    const db = new DatabaseSync(path);
+    const db = legacyDb(path);
     const before = MIGRATIONS.findIndex((migration) => migration.includes("WHERE delivery = 'uncertain'"));
 
     db.exec('BEGIN');

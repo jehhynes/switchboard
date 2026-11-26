@@ -2670,9 +2670,11 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       store.addReply({ id, sessionId: 's1', workItemId: 1, at: ++at, kind, answers: null, opening, source: 'transcript', replaces: null, rewrittenBy: null, withdrawn: false, transcriptUuid: id });
     const answer = (id: string, delivery: 'open' | 'not-sent') =>
       store.addMessage({ id, sessionId: 's1', workItemId: 1, at: ++at, origin: 'typed', text: '[answers]', transcriptUuid: null, provisional: true, withdrawn: false, delivery, error: null, opId: null, pastedAt: null, answers: [{ replyId: 'card', slug: 'port-choice', letters: ['A'], other: '', via: 'card' }] });
-    const asides = (count: number) => {
-      for (let index = 0; index < count; index++) reply(`a${at}`, 'Step.', 'aside');
-    };
+    // In one transaction, so the file store does not sync each of hundreds of writes to disk.
+    const asides = (count: number) =>
+      store.transaction(() => {
+        for (let index = 0; index < count; index++) reply(`a${at}`, 'Step.', 'aside');
+      });
 
     store.setPagePref(QUESTIONS_SINCE, String(T0));
     questionIndex(store, () => at);

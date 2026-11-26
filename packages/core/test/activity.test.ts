@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { legacyDb } from './legacyDb.js';
 import { recordRefusal } from '../src/flow.js';
 import { MIGRATIONS, Store } from '../src/store.js';
 import type { HistoryEvent } from '../src/store.js';
@@ -200,7 +200,7 @@ describe('activity log', () => {
 
     try {
       const path = join(dir, 'old.db');
-      const raw = new DatabaseSync(path);
+      const raw = legacyDb(path);
       const log = MIGRATIONS.findIndex((migration) => migration.includes('CREATE TABLE events'));
       raw.exec(MIGRATIONS.slice(0, log).join(';'));
       raw.exec(`PRAGMA user_version = ${log}`);

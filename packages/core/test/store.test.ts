@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { legacyDb } from './legacyDb.js';
 import { MIGRATIONS, RECENT_FOLDER_COUNT, Store } from '../src/store.js';
 
 describe('Store', () => {
@@ -19,7 +20,7 @@ describe('Store', () => {
   it('gives a work item whose triage could not start a failed triage when upgrading, so it counts as failed at triage', () => {
     const version = 32;
     const path = join(dir, 'failed.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
     raw.exec(`PRAGMA user_version = ${version};
       INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'One', '', 1, ''), (2, 'adhoc', '2', 'Two', '', 1, '');
@@ -55,7 +56,7 @@ describe('Store', () => {
   it("adds each ticket's repository as empty, the home repository, keeping keys and IDs, and lists the repositories polls record (PRD R44)", () => {
     const version = 37;
     const path = join(dir, `v${version}.db`);
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
     raw.exec(`PRAGMA user_version = ${version};
       INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (7, 'github', '18941', 'One', '', 1, ''), (8, 'zoho', '5', 'Two', '', 1, '');`);
@@ -93,7 +94,7 @@ describe('Store', () => {
   it('drops Support volume when upgrading: other engineers\' ticket-only triages, queue fields, volume facts and classifications (PRD R84)', () => {
     const version = MIGRATIONS.findIndex((migration) => migration.includes('DROP TABLE ticketClassifications'));
     const path = join(dir, 'volume.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
     raw.exec(`PRAGMA user_version = ${version};
       INSERT INTO tickets (id, source, sourceKey, title, url, assigned, pool, inQueue, assigneeId, repoRoot) VALUES
@@ -129,7 +130,7 @@ describe('Store', () => {
 
   it('marks a version 31 link mentioned only when triage added it to a queue source ticket and no accepted session report named it (PRD R61)', () => {
     const path = join(dir, 'v31.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 31).join(';'));
     raw.exec(`PRAGMA user_version = 31;
       INSERT INTO sourceStates (name, enabled, volumeStartedAt) VALUES ('zoho', 1, 1);
@@ -160,7 +161,7 @@ describe('Store', () => {
   it('marks the sessions the register event inserted as registered when upgrading, and no other (PRD R81)', () => {
     const version = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN registered'));
     const path = join(dir, 'registered.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
     raw.exec(`PRAGMA user_version = ${version};
       INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'adhoc', '1', 'One', '', 1, ''), (2, 'adhoc', '2', 'Two', '', 1, '');
@@ -180,7 +181,7 @@ describe('Store', () => {
   it("keeps a task report's prompt as its reported prompt when upgrading, and none for another work item (PRD R68, R77)", () => {
     const version = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN reportedPrompt'));
     const path = join(dir, 'reported.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
     raw.exec(`PRAGMA user_version = ${version};
       INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'One', '', 1, ''), (2, 'adhoc', '2', 'Two', '', 1, '');
@@ -233,7 +234,7 @@ describe('Store', () => {
 
   it('moves a version 1 database to the current schema, keeping each triage with its ticket, unrated, without its summary and with no focus', () => {
     const path = join(dir, 'v1.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS[0]!);
     raw.exec('PRAGMA user_version = 1');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (7, 'github', '1', 'One', 'u', 1, '')");
@@ -254,7 +255,7 @@ describe('Store', () => {
 
   it('moves a version 6 iceboxed ticket to an indefinite snooze, lists only timed snoozes that are due, and lists the snoozes in force', () => {
     const path = join(dir, 'v6.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 6).join(';'));
     raw.exec('PRAGMA user_version = 6');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, pool, iceboxed, repoRoot) VALUES (7, 'zoho', '1', 'Cold', 'u', 0, 1, 1, ''), (8, 'zoho', '2', 'Warm', 'u', 0, 1, 0, '')");
@@ -276,7 +277,7 @@ describe('Store', () => {
 
   it('ends a version 10 snooze on a ticket out of the source scope, and keeps one on an assigned or pool ticket', () => {
     const path = join(dir, 'v10.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 10).join(';'));
     raw.exec('PRAGMA user_version = 10');
     raw.exec(
@@ -296,7 +297,7 @@ describe('Store', () => {
 
   it('blocks a version 11 work item waiting on a pick session, keeping its error, points it at Triage again, and drops needsPick and failedStep', () => {
     const path = join(dir, 'v11.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 11).join(';'));
     raw.exec('PRAGMA user_version = 11');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, pool, repoRoot) VALUES (1, 'zoho', '1', 'a', 'u', 0, 1, '')");
@@ -320,7 +321,7 @@ describe('Store', () => {
 
   it('moves a version 3 work item waiting to be started to unstarted, and keeps one with an approval report', () => {
     const path = join(dir, 'v3.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 3).join(';'));
     raw.exec('PRAGMA user_version = 3');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'One', 'u', 1, '')");
@@ -336,7 +337,7 @@ describe('Store', () => {
 
   it('gives a version 4 ad-hoc ticket its #n reference and leaves polled ones for the next poll', () => {
     const path = join(dir, 'v4.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 4).join(';'));
     raw.exec('PRAGMA user_version = 4');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'adhoc', '3', 'a', '', 1, ''), (2, 'forum', '34295', 't', 'u', 0, '')");
@@ -350,7 +351,7 @@ describe('Store', () => {
 
   it('estimates version 5 in-queue times from the times already stored', () => {
     const path = join(dir, 'v5.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 5).join(';'));
     raw.exec('PRAGMA user_version = 5');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'adhoc', '1', 'a', '', 1, ''), (2, 'github', '2', 'b', 'u', 1, '')");
@@ -378,7 +379,7 @@ describe('Store', () => {
 
   it('gives a version 7 approval its newest linked file as its report, and drops every local-file link', () => {
     const path = join(dir, 'v7.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 7).join(';'));
     raw.exec('PRAGMA user_version = 7');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, ''), (2, 'github', '2', 'b', 'u', 1, '')");
@@ -397,7 +398,7 @@ describe('Store', () => {
 
   it('offers a version 8 session every report, as its prompt did', () => {
     const path = join(dir, 'v8.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 8).join(';'));
     raw.exec('PRAGMA user_version = 8');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
@@ -417,7 +418,7 @@ describe('Store', () => {
 
   it('gives a version 25 session no retired copies, no waiting fork and no external flag, and keeps them across a reopen (PRD R78, R81)', () => {
     const path = join(dir, 'v25.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 25).join(';'));
     raw.exec('PRAGMA user_version = 25');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
@@ -439,7 +440,7 @@ describe('Store', () => {
   it('drops the window bindings and keeps the host of every hosted conversation', () => {
     const version = MIGRATIONS.indexOf('DROP TABLE windowBindings;');
     const path = join(dir, 'window-bindings.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
     raw.exec(`PRAGMA user_version = ${version}`);
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot, hostWindow) VALUES (1, 'adhoc', '1', 'a', '', 1, 'D:/w', 'C:/sb/windows/gh-7-widgets-655280.code-workspace'), (2, 'adhoc', '2', 'b', '', 1, 'D:/git/support', 'D:/git/support'), (3, 'adhoc', '3', 'c', '', 1, 'D:/w', 'a3f9c0de11b2a3f9c0de11b2')");
@@ -460,7 +461,7 @@ describe('Store', () => {
   it('gives an existing session no Code Mode and no launch, keeps them across a reopen, and leaves them out of the activity log (PRD R93)', () => {
     const version = MIGRATIONS.findIndex((migration) => migration.includes('ADD COLUMN codeMode'));
     const path = join(dir, 'code-mode.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
     raw.exec(`PRAGMA user_version = ${version}`);
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
@@ -487,7 +488,7 @@ describe('Store', () => {
 
   it('clears the warning of a version 9 work item done because its ticket left the assigned state', () => {
     const path = join(dir, 'v9.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 9).join(';'));
     raw.exec('PRAGMA user_version = 9');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 0, '')");
@@ -506,7 +507,7 @@ describe('Store', () => {
 
   it('refuses a database from a newer schema', () => {
     const path = join(dir, 'newer.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec('PRAGMA user_version = 99');
     raw.close();
 
@@ -515,7 +516,7 @@ describe('Store', () => {
 
   it('gives a version 14 work item no parent, and lists the work items a parent created', () => {
     const path = join(dir, 'v14.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 14).join(';'));
     raw.exec('PRAGMA user_version = 14');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
@@ -535,7 +536,7 @@ describe('Store', () => {
 
   it('gives version 17 work items no held approval, and stores a held approval as a boolean', () => {
     const path = join(dir, 'v17.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 17).join(';'));
     raw.exec('PRAGMA user_version = 17');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
@@ -552,7 +553,7 @@ describe('Store', () => {
 
   it('makes a version 19 turn that finished without a done or approval report finished, and gives ready work items their readyAt', () => {
     const path = join(dir, 'v19.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 19).join(';'));
     raw.exec('PRAGMA user_version = 19');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
@@ -579,7 +580,7 @@ describe('Store', () => {
 
   it('keeps version 15 work items with their sessions, triages, pastes and parents, deletes sessionless childless ones done as unassigned, never reuses a deleted ID, and enforces foreign keys after', () => {
     const path = join(dir, 'v15.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
     raw.exec(MIGRATIONS.slice(0, 15).join(';'));
     raw.exec('PRAGMA user_version = 15');
     raw.exec("INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'github', '1', 'a', 'u', 1, '')");
@@ -813,7 +814,7 @@ describe('Store', () => {
   it('ViewedFilesMigration_ExistingTicks_KeepsThemForTheChangesToDisk', () => {
     const version = MIGRATIONS.findIndex((migration) => migration.includes('CREATE TABLE viewedFilesScoped'));
     const path = join(dir, 'viewed-scope.db');
-    const raw = new DatabaseSync(path);
+    const raw = legacyDb(path);
 
     raw.exec(MIGRATIONS.slice(0, version).join(';'));
     raw.exec(`PRAGMA user_version = ${version};

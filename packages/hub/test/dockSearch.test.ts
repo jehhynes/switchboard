@@ -1,25 +1,20 @@
-import { join } from 'node:path';
 import { DEFAULT_SETTINGS, Store } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DoneSearch, monthBand, SEARCH_LIMIT, searchWords } from '../src/dockSearch.js';
 import { doneSince } from '../src/rows.js';
 import { buildSnapshot } from '../src/snapshot.js';
 import type { SnapshotInputs } from '../src/snapshot.js';
-import { tempHome } from './helpers.js';
 
 const T0 = new Date(2026, 10, 20, 12).getTime();
 const DAY = 86_400_000;
-let temp: ReturnType<typeof tempHome>;
 let store: Store;
 
 beforeEach(() => {
-  temp = tempHome();
-  store = Store.open(join(temp.home, 'switchboard.db'));
+  store = Store.open(':memory:');
 });
 
 afterEach(() => {
   store.close();
-  temp.remove();
 });
 
 const inputs = (now = T0): SnapshotInputs => ({
