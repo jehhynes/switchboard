@@ -54,7 +54,7 @@ Read the document that covers the decision:
 
 [testing.md](docs/testing.md) is the full contract.
 
-- For executable changes, run only the checks the change affects while working: the pre-commit hook does, through `npm run verify:staged`, so commit without `--no-verify`. Run `npm run verify` (build, typecheck, tests, and coverage thresholds) once, before merging a branch into `main`; it runs nothing for a clean tree that already passed. Run the browser checks [testing.md](docs/testing.md#required-checks) requires once too, when the change is finished.
+- For executable changes, run only the checks the change affects while working: the pre-commit hook does, through `npm run verify:staged`, so commit without `--no-verify`. Run `npm run verify` (build, typechecks and unit tests) once, before merging a branch into `main`; it runs nothing for a clean tree that already passed. GitHub Actions runs the full suite, integration tests and coverage included, on every push; fix a failed run on `main` before other work. Run the browser checks [testing.md](docs/testing.md#required-checks) requires once too, when the change is finished.
 - Verify behavior directly instead of asking the developer to click through it.
 - Package logic and the web page's DOM belong in Vitest.
 - Use recorded, scrubbed fixtures and injected homes. No external network traffic, real Claude sessions, or developer services in tests; test-owned loopback listeners are allowed.
@@ -66,7 +66,8 @@ Run commands from the repository root:
 | Command | Purpose |
 |---|---|
 | `npm run verify:staged` | Build, typecheck and test the workspaces the staged files touch and their dependents; the pre-commit hook runs it |
-| `npm run verify` | Build, typecheck, tests and coverage; run before merging into `main` |
+| `npm run verify` | Build, typechecks and unit tests; run before merging into `main` |
+| `npm run verify:full` | Build, typechecks, unit and integration tests with coverage; GitHub Actions runs it on every push |
 
 ### Reinstalling after a change
 

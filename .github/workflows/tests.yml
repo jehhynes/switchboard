@@ -1,0 +1,50 @@
+# The full suite: every workspace's unit and integration tests with coverage
+# thresholds, on Linux and Windows, and the web page's browser checks on Linux.
+# It never gates a commit or a push; docs/testing.md says when each check runs.
+name: Tests
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:full
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SWITCHBOARD_CHROME: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check:console --workspace @switchboard/web
+      - run: npm run check:shell --workspace @switchboard/web
+      - run: npm run check:fade --workspace @switchboard/web
+      - run: npm run check:offline --workspace @switchboard/web
