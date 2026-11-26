@@ -176,6 +176,8 @@ function readStored(key: string): string | null {
 
 /** How long a message's send is tried again on a transient failure, with the same `opId`, and how long one try may take. */
 export const SEND_RETRY_MS = 30_000;
+/** How many opened artifacts' drawn HTML the page keeps for its current scope (`artifactDocs`). */
+export const ARTIFACT_DOCS_KEPT = 8;
 export const SEND_TRY_MS = 10_000;
 
 /** What the console's script, `console.js`, offers once loaded (architecture.md § Web page). */
@@ -2023,6 +2025,29 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** An open artifact's key in `artifactDocs`: the page key, the selection's work item and `scopeGen`, and the path, so another work item's artifact of the same path and time is never shown. */
   const docKey = (path: string): string => `${state.key ?? ''} ${state.scope?.workItemId ?? ''} ${state.scope?.scopeGen ?? ''} ${path}`;
   /**
+   * Keeps an artifact's entry, dropping those of another page key, work item or scope generation, which no draw shows again, and past
+   * `ARTIFACT_DOCS_KEPT` the oldest, which a draw that shows it again reads anew.
+   */
+  const keepDoc = (kept: string, entry: { updatedAt: number; html: string | null | undefined; top: number | null }): void => {
+    dropOtherDocs();
+    artifactDocs.delete(kept);
+    artifactDocs.set(kept, entry);
+
+    while (artifactDocs.size > ARTIFACT_DOCS_KEPT) {
+      artifactDocs.delete(artifactDocs.keys().next().value!);
+    }
+  };
+  /** Drops the entries of `artifactDocs` that are not the current scope's. */
+  const dropOtherDocs = (): void => {
+    const scope = docKey('');
+
+    for (const key of artifactDocs.keys()) {
+      if (!key.startsWith(scope)) {
+        artifactDocs.delete(key);
+      }
+    }
+  };
+  /**
    * Draws an open Markdown artifact as claude-collab's viewer does: its text fetched by the page key, without its front matter, whose kind and
    * title the head shows; its pictures from its folder, or from elsewhere through the local file route (`artifactTarget`); a relative link to
    * another artifact opening that one in place, to another file in the folder in a new tab, and to a file elsewhere in a file tab; Mermaid included. Only an artifact's latest version is kept (`artifactDocs`), with `top`,
@@ -2038,7 +2063,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const kept = docKey(path);
     const entry = { updatedAt: artifact.updatedAt, html: undefined as string | null | undefined, top };
 
-    artifactDocs.set(kept, entry);
+    keepDoc(kept, entry);
     const response = await readFetch(artifactUrl(key, path), { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
     const text = response?.ok === true ? await response.text() : null;
     /** Where a relative target lies: in the artifact route, or a local file by its absolute path (`artifactTarget`). */
@@ -6106,6 +6131,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (keep) {
         state = { ...state, scope: before.scope, session: before.session, items: before.items, more: before.more, state: before.state, artifacts: before.artifacts, unread: before.unread, questions: before.questions };
+      }
+
+      // Another scope's artifact documents are never shown again.
+      if (state.scope !== before.scope) {
+        dropOtherDocs();
       }
 
       // The Changes tab kept through a reconnect reads its list again once the new stream shows the work item, as a new stream reads anew.

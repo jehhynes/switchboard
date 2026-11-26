@@ -1,7 +1,7 @@
 // Drawing cost: what a stream event draws again (architecture.md § Web page, Drawing; mechanics M167).
 import MarkdownIt from 'markdown-it';
 import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 'vitest';
-import { startPage } from '../src/main.js';
+import { ARTIFACT_DOCS_KEPT, startPage } from '../src/main.js';
 import type { MessageView, ReplyView } from '@switchboard/protocol';
 import { drawAtOnce } from './frame.js';
 import { message, reply, session, scope, listRow, listGroup, artifact, FakeSource } from './pageFixtures.js';
@@ -26,6 +26,7 @@ describe('drawing the page', () => {
 
     return { page, source: FakeSource.last! };
   };
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
 
   it('Draw_EventThatChangesNoItem_RendersNoMarkdownAndKeepsEachItemsNodes', () => {
     const { page, source } = start();
@@ -151,6 +152,55 @@ describe('drawing the page', () => {
     source.emit('reply', { reply: { ...heard, spoken: { state: 'interrupted', atMs: 400, saidChars: 5 } } });
     expect(drawn()).toBe(1);
     expect(root.querySelector('#panel li.reply[data-id="r1"] .unheard')).not.toBeNull();
+    page.close();
+  });
+
+  it('ArtifactDocs_WorkItemsSwitchedWithAnArtifactOpen_KeepsOnlyTheCurrentScopes', async () => {
+    const set = vi.spyOn(Map.prototype, 'set');
+    const fetch = vi.fn(async (url: string) => ({ status: 200, ok: true, json: async () => ({}), text: async () => (url.startsWith('/v1/conversation/artifact/') ? `# Plan of ${url.split('/').pop()}` : '') }) as unknown as Response);
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
+    const groups = [listGroup('progress', [1, 2, 3].map((w) => listRow(w)))];
+    const scopeOf = (w: number, gen: number) => ({ ...scope, title: `Item ${w}`, scopeGen: gen, workItemId: w, sessionId: `s${w}`, conversations: [{ ...scope.conversations[0]!, workItemId: w, sessionId: `s${w}` }] });
+    let gen = 3;
+
+    for (let round = 0; round < 12; round++) {
+      const w = (round % 3) + 1;
+
+      root.querySelector<HTMLElement>(`.row[data-row="item:${w}"]`)?.click();
+      await flush();
+      gen++;
+      FakeSource.last!.emit('scope', { scope: scopeOf(w, gen) });
+      FakeSource.last!.emit('hello', { key: 'pk', groups, scope: scopeOf(w, gen), sessions: [session({ id: `s${w}` })], items: [reply(`w${w}g${gen}`, 1, { sessionId: `s${w}` })], more: false, state: null, artifacts: [{ ...artifact(`chat/plan-${w}.md`, 'markdown', 'md'), updatedAt: 1_000 + gen }] });
+      root.querySelector<HTMLElement>(`[data-action="artifact"][data-path="chat/plan-${w}.md"]`)!.click();
+      await flush();
+    }
+
+    const docs = set.mock.contexts.find((map, at) => typeof set.mock.calls[at]![0] === 'string' && /^pk \d+ \d+ chat\/plan-\d\.md$/.test(set.mock.calls[at]![0] as string)) as Map<string, unknown> | undefined;
+
+    // Twelve opens, each in a new scope: only the last one's document is held, and it still shows.
+    expect(set.mock.calls.filter(([key]) => typeof key === 'string' && /^pk \d+ \d+ chat\/plan-\d\.md$/.test(key)).length).toBeGreaterThanOrEqual(12);
+    expect([...docs!.keys()]).toEqual([`pk 3 ${gen} chat/plan-3.md`]);
+    expect(root.querySelector('.artifact-doc h1')?.textContent).toBe('Plan of plan-3.md');
+    page.close();
+  });
+
+  it('ArtifactDocs_ManyArtifactsOpenedInOneScope_KeepsTheNewestUpToTheCap', async () => {
+    const set = vi.spyOn(Map.prototype, 'set');
+    const fetch = vi.fn(async (url: string) => ({ status: 200, ok: true, json: async () => ({}), text: async () => (url.startsWith('/v1/conversation/artifact/') ? `# ${url.split('/').pop()}` : '') }) as unknown as Response);
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
+    const count = ARTIFACT_DOCS_KEPT + 3;
+    const artifacts = Array.from({ length: count }, (_, i) => artifact(`chat/doc-${i}.md`, 'markdown', 'md'));
+
+    FakeSource.last!.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts });
+
+    for (let i = 0; i < count; i++) {
+      root.querySelector<HTMLElement>(`[data-action="artifact"][data-path="chat/doc-${i}.md"]`)!.click();
+      await flush();
+    }
+
+    const docs = set.mock.contexts.find((map, at) => typeof set.mock.calls[at]![0] === 'string' && /^pk 1 3 chat\/doc-\d+\.md$/.test(set.mock.calls[at]![0] as string)) as Map<string, unknown>;
+
+    expect([...docs.keys()]).toEqual(Array.from({ length: ARTIFACT_DOCS_KEPT }, (_, i) => `pk 1 3 chat/doc-${i + 3}.md`));
     page.close();
   });
 });
