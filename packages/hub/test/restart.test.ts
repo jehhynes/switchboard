@@ -1,8 +1,10 @@
+import type { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildOf } from '../src/bundle.js';
-import { clearHandover, handedOver, handoverPath, HubRestart, installedBuild, pendingHandover, TAKEOVER_WAIT_MS, writeHandover } from '../src/restart.js';
+import { clearHandover, handedOver, handoverPath, HubRestart, installedBuild, pendingHandover, READY_MESSAGE, reportReady, startSuccessor, TAKEOVER_WAIT_MS, writeHandover } from '../src/restart.js';
 import type { RestartDeps, Successor } from '../src/restart.js';
 import { tempHome, until } from './helpers.js';
 
@@ -222,5 +224,89 @@ describe('handover', () => {
     expect(handedOver(home, 4242, at + TAKEOVER_WAIT_MS)).toBeNull();
     writeHandover(home, 4242, at);
     expect(handedOver(home, 4242, at + 1000)).toBeNull();
+  });
+});
+
+/** A successor process as startSuccessor uses it; `disconnect` behaves as Node's does on a closed channel, emitting an error. */
+class FakeChild extends EventEmitter {
+  pid = 4321;
+  connected = true;
+  disconnects = 0;
+
+  disconnect(): void {
+    if (!this.connected) {
+      this.emit('error', new Error('IPC channel is already disconnected'));
+      return;
+    }
+
+    this.disconnects++;
+    this.connected = false;
+  }
+
+  unref(): void {}
+
+  kill(): void {}
+}
+
+describe('startSuccessor', () => {
+  const start = (child: FakeChild) =>
+    startSuccessor({ execPath: process.execPath, bundle: 'hub.js', args: [], env: {}, logPath: join(home, 'hub.log'), spawn: (() => child) as unknown as typeof spawn });
+
+  it('StartSuccessor_ChannelClosedByTheSuccessorBeforeItsMessageIsHandled_ResolvesReady', async () => {
+    const child = new FakeChild();
+    const started = start(child);
+
+    // The successor disconnects in its send callback, which can close the channel here before the message is handled.
+    child.connected = false;
+    child.emit('message', READY_MESSAGE);
+    expect(await started).toMatchObject({ pid: 4321 });
+    expect(child.disconnects).toBe(0);
+  });
+
+  it('StartSuccessor_ChannelStillOpen_DisconnectsItAndResolvesReady', async () => {
+    const child = new FakeChild();
+    const started = start(child);
+
+    child.emit('message', READY_MESSAGE);
+    expect(await started).toMatchObject({ pid: 4321 });
+    expect(child.disconnects).toBe(1);
+  });
+});
+
+describe('reportReady', () => {
+  /** A successor's IPC channel: `disconnect` throws on a closed channel, as Node's does in a child process. */
+  const channel = (connected: boolean) => {
+    const sent: unknown[] = [];
+    const port = {
+      connected,
+      disconnects: 0,
+      send: (message: unknown, done?: () => void) => (sent.push(message), done?.(), true),
+      disconnect: () => {
+        if (!port.connected) {
+          throw new Error('IPC channel is already disconnected');
+        }
+
+        port.disconnects++;
+        port.connected = false;
+      },
+    };
+
+    return { port, sent };
+  };
+
+  it('ReportReady_OldHubDisconnectedFirst_SendsWithoutThrowing', () => {
+    const { port, sent } = channel(false);
+
+    expect(() => reportReady(port as unknown as NodeJS.Process)).not.toThrow();
+    expect(sent).toEqual([READY_MESSAGE]);
+    expect(port.disconnects).toBe(0);
+  });
+
+  it('ReportReady_ChannelOpen_SendsAndDisconnects', () => {
+    const { port, sent } = channel(true);
+
+    reportReady(port as unknown as NodeJS.Process);
+    expect(sent).toEqual([READY_MESSAGE]);
+    expect(port.disconnects).toBe(1);
   });
 });

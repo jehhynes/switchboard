@@ -188,6 +188,8 @@ export interface SuccessorOptions {
   env: NodeJS.ProcessEnv;
   logPath: string;
   readyMs?: number;
+  /** Starts the process; tests pass a fake. */
+  spawn?: typeof spawn;
 }
 
 /**
@@ -216,7 +218,7 @@ export function startSuccessor(options: SuccessorOptions): Promise<Successor | {
         resolve(result);
       }
     };
-    const child = spawn(options.execPath, [options.bundle, ...options.args.filter((argument) => !argument.startsWith('--takeover')), `--takeover=${process.pid}`], {
+    const child = (options.spawn ?? spawn)(options.execPath, [options.bundle, ...options.args.filter((argument) => !argument.startsWith('--takeover')), `--takeover=${process.pid}`], {
       env: options.env,
       detached: true,
       stdio: ['ignore', log, log, 'ipc'],
@@ -237,17 +239,29 @@ export function startSuccessor(options: SuccessorOptions): Promise<Successor | {
         return;
       }
 
-      child.disconnect();
+      // The successor lets go of the channel once its message is sent, which can reach this side first; disconnecting a closed channel throws.
+      if (child.connected) {
+        child.disconnect();
+      }
+
       child.unref();
       settle({ pid: child.pid!, cancel: () => child.kill() });
     });
   });
 }
 
-/** In a successor started with `--takeover`: tells the old hub this bundle loaded, and lets go of the IPC channel so it does not hold this process. */
-export function reportReady(): void {
-  if (process.send !== undefined) {
-    process.send(READY_MESSAGE, () => process.disconnect());
+/**
+ * In a successor started with `--takeover`: tells the old hub this bundle loaded, and lets go of the IPC channel so it does not hold this
+ * process. The old hub disconnects once the message arrives, which can happen before the send completes here; disconnecting a closed channel
+ * throws ERR_IPC_DISCONNECTED, which would end this hub.
+ */
+export function reportReady(channel: Pick<NodeJS.Process, 'send' | 'connected' | 'disconnect'> = process): void {
+  if (channel.send !== undefined) {
+    channel.send(READY_MESSAGE, () => {
+      if (channel.connected) {
+        channel.disconnect();
+      }
+    });
   }
 }
 
