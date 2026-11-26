@@ -65,7 +65,7 @@ describe('contextLevel and contextLines', () => {
 
   it('says the size against the window, what is left until auto-compact, and to compact once it warns', () => {
     expect(contextLines(claudeContext(124_000, 'claude-sonnet-4-6'))).toEqual(['Context: 62% · 124k / 200k tokens', '26% left until auto-compact at about 167k.']);
-    expect(contextLines(claudeContext(150_000, 'claude-sonnet-4-6'))).toEqual(['Context: 75% · 150k / 200k tokens', '10% left until auto-compact at about 167k.', 'Consider compacting the conversation soon.']);
+    expect(contextLines(claudeContext(150_000, 'claude-sonnet-4-6'))).toEqual(['Context: 75% · 150k / 200k tokens', '10% left until auto-compact at about 167k.', 'Context is nearly full. Run /compact soon.']);
     expect(contextLines(codexContext(62_000, 258_400))).toEqual(['Context: 24% · 62k / 258k tokens']);
     expect(contextLines(claudeContext(5_000, 'claude-next-9'))).toEqual(['Context: 5k tokens; the context window of claude-next-9 is unknown.']);
     expect(contextLines(null)).toEqual(["Context size unknown: it shows after the session's next reply."]);
@@ -83,8 +83,8 @@ describe('renderContextMeter', () => {
     expect(html).toMatch(/^<button[^>]*><svg[^>]*>.*<\/svg><\/button>$/);
     expect(html.replace(/<[^>]*>/g, '')).toBe('');
     expect(attr(html, 'class')).toBe('composer-tool context-ring warn');
-    expect(attr(html, 'title')).toBe('Context: 75% · 150k / 200k tokens\n10% left until auto-compact at about 167k.\nConsider compacting the conversation soon.');
-    expect(attr(html, 'aria-label')).toBe('Context: 75% · 150k / 200k tokens 10% left until auto-compact at about 167k. Consider compacting the conversation soon.');
+    expect(attr(html, 'title')).toBe('Context: 75% · 150k / 200k tokens\n10% left until auto-compact at about 167k.\nContext is nearly full. Run /compact soon.');
+    expect(attr(html, 'aria-label')).toBe('Context: 75% · 150k / 200k tokens 10% left until auto-compact at about 167k. Context is nearly full. Run /compact soon.');
     expect(attr(html, 'aria-expanded')).toBe('false');
     expect(Number(/class="context-arc"[^>]*stroke-dasharray="([\d.]+) /.exec(html)![1])).toBeCloseTo(2 * Math.PI * 6 * (150_000 / 167_000), 1);
   });

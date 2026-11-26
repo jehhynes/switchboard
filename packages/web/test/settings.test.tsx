@@ -235,7 +235,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     await settle();
     // A number's unit follows it rather than sitting in its label.
     expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-unit')?.textContent).toBe('s');
-    expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Replies', 'Diffs'], labels: ['Show alerts in', 'Needs-you sound', 'Collapse details', 'Layout', 'Wrap long lines'] });
+    expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Replies', 'Diffs'], labels: ['Show alerts in', 'Needs-you sound', 'Fold reply details', 'Layout', 'Wrap long lines'] });
     // Spoken alerts are on Spoken replies, which a line in Notifications opens.
     expect(host.querySelector('.settings-link-row')?.textContent).toBe('Spoken alerts are on Spoken replies.Open Spoken replies');
     host.querySelector<HTMLButtonElement>('.settings-link-row button')!.click();
@@ -751,7 +751,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     const help = host.querySelector('[data-path="sessions.concurrency"] .settings-help')!;
 
-    expect(help.textContent).toBe('1 to 10. A start with no free slot waits as queued.');
+    expect(help.textContent).toBe('1 to 10. A start waits as queued while this many sessions run.');
     expect(help.closest('.settings-caption')?.querySelector('label')?.textContent).toBe('Sessions at once');
     expect(field<HTMLInputElement>('sessions.concurrency').getAttribute('aria-describedby')).toBe(help.id);
     await go('triage');

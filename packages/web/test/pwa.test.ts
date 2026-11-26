@@ -290,7 +290,7 @@ describe('the installable page', () => {
     expect(style).toContain(`html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; color-scheme: dark; background: ${sideBar}; }`);
     expect(style).toMatch(new RegExp(`@media \\(prefers-color-scheme: light\\) \\{\\n  html \\{ color-scheme: light; background: ${lightSideBar}; \\}`));
     expect(html.indexOf('<div id="boot"')).toBeLessThan(html.indexOf('<link rel="stylesheet"'));
-    expect(html).toContain("<h2>Can't reach Switchboard</h2>");
+    expect(html).toContain("<h2>Switchboard is not reachable</h2>");
     // The boot script comes first, so it sees page.js or a stylesheet fail.
     expect(html.indexOf('<script>')).toBeLessThan(html.indexOf('<link rel="stylesheet"'));
     expect(html).toMatch(/<link rel="stylesheet" href="codicon-[0-9a-f]{16}\.css">\n<link rel="stylesheet" href="theme-[0-9a-f]{16}\.css">\n<link rel="stylesheet" href="page-[0-9a-f]{16}\.css">\n<script src="page-[0-9a-f]{16}\.js"><\/script>/);

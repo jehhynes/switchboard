@@ -22,15 +22,15 @@ export type Failure = 'network' | 'timeout' | 'unavailable' | 'signedOut' | 'ref
  */
 const HUB_CONVERSATION_CHANGED = "The window's conversation changed.";
 /** What the page says for that refusal. */
-export const CONVERSATION_CHANGED = 'This page switched to another conversation or session, so that was not done. Try again.';
+export const CONVERSATION_CHANGED = 'You switched to another session, so that was not done. Try again.';
 
 /** What a failure says when the hub gave no reason of its own. */
 export const FAILURE_TEXT: Record<Failure, string> = {
-  network: "Can't reach Switchboard. Try again.",
+  network: 'Switchboard is not reachable. Try again.',
   timeout: 'That took too long. Try again.',
   unavailable: 'Switchboard is restarting. Try again in a moment.',
   signedOut: 'This device is signed out.',
-  refused: 'Switchboard refused that.',
+  refused: 'Switchboard did not allow that.',
   bad: 'That did not work. Try again.',
 };
 
@@ -190,8 +190,11 @@ async function once(fetcher: typeof fetch, url: string, init: RequestInit): Prom
   }
 
   // The hub's own reason stands for a refusal or a bad request; an unreachable or restarting hub, or a proxy's empty 502, reads plainly.
-  if (failure === 'unavailable' || failure === 'signedOut' || (failure !== null && typeof body['error'] !== 'string')) {
+  if (failure === 'unavailable' || failure === 'signedOut') {
     body = { ...body, error: FAILURE_TEXT[failure] };
+  } else if (failure !== null && typeof body['error'] !== 'string') {
+    // With no reason from the hub, the status is the only clue left (the operator's decision, 2026-11-25).
+    body = { ...body, error: FAILURE_TEXT[failure].replace(/^([^.]*)\./, `$1 (status ${response.status}).`) };
   } else if (body['error'] === HUB_CONVERSATION_CHANGED) {
     body = { ...body, error: CONVERSATION_CHANGED };
   }

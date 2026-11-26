@@ -38,7 +38,7 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
         const response = await read(`/v1/page/hub-log?lines=${lines}`, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
         const body = await response.json();
         if (closed || pending !== controller) return;
-        if (!response.ok) throw new Error(body.error ?? 'The hub log could not be read.');
+        if (!response.ok) throw new Error(body.error ?? 'The Switchboard log could not be read.');
         setTail(body as Tail);
         setError(null);
       } catch (error) {
@@ -89,16 +89,16 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
 
   return (
     <div class="hub-log">
-      <p class="sheet-detail">hub.log · timestamps as written in the file</p>
+      <p class="sheet-detail">Switchboard log · times as written</p>
       <div class="hub-log-tools">
-        <input class="sheet-input" type="search" aria-label="Filter hub log" placeholder="Filter log…" value={filter} onInput={(event) => setFilter(event.currentTarget.value)} />
+        <input class="sheet-input" type="search" aria-label="Filter Switchboard log" placeholder="Filter log…" value={filter} onInput={(event) => setFilter(event.currentTarget.value)} />
         <label><input type="checkbox" checked={wrap} onChange={(event) => setWrap(event.currentTarget.checked)} /> Wrap</label>
         <label><input type="checkbox" checked={live} onChange={(event) => { follow.current = true; setLive(event.currentTarget.checked); }} /> Live follow</label>
         <button type="button" class="sheet-button secondary" onClick={() => void copy()} disabled={tail === null}>Copy filtered log</button>
       </div>
-      <p class="hub-log-note" role="status">{error ?? (tail === null ? 'Loading…' : tail.missing ? 'No hub log yet. It appears when the hub writes its first line.' : tail.text === '' ? tail.limited ? 'No complete lines fit in the tail.' : 'The hub log is empty. Lines appear here as the hub writes them.' : shown === '' ? 'No matching lines. Change or clear the filter.' : `${(shown.match(/\n/g)?.length ?? 0) + (shown.endsWith('\n') ? 0 : 1)} lines shown`)}{copied === '' ? '' : ` · ${copied}`}</p>
-      {tail?.limited ? <p class="sheet-detail">The tail reached the 4 MiB read limit. Earlier or oversized lines are omitted.</p> : null}
-      <pre class={`hub-log-output${wrap ? ' wrap' : ''}`} ref={output} tabIndex={0} aria-label="Hub log text" onScroll={(event) => {
+      <p class="hub-log-note" role="status">{error ?? (tail === null ? 'Loading…' : tail.missing ? 'No Switchboard log yet. It appears when Switchboard writes its first line.' : tail.text === '' ? tail.limited ? 'No complete lines fit in the last 4 MiB.' : 'The Switchboard log is empty. Lines appear here as Switchboard writes them.' : shown === '' ? 'No matching lines. Change or clear the filter.' : `${(shown.match(/\n/g)?.length ?? 0) + (shown.endsWith('\n') ? 0 : 1)} lines shown`)}{copied === '' ? '' : ` · ${copied}`}</p>
+      {tail?.limited ? <p class="sheet-detail">Only the last 4 MiB is shown; earlier and very long lines are left out.</p> : null}
+      <pre class={`hub-log-output${wrap ? ' wrap' : ''}`} ref={output} tabIndex={0} aria-label="Switchboard log text" onScroll={(event) => {
         const node = event.currentTarget;
         follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
       }}>{shown}</pre>

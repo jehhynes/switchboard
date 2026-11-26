@@ -124,7 +124,7 @@ describe('question cards in replies', () => {
     expect(host.querySelector('.question-card.qc-collapsed .qc-progress')?.textContent).toBe('Question answered');
     // Before the cutover, the old rules: the next message skips it.
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView()));
-    expect(host.querySelector('.question-card .qc-state')?.getAttribute('title')).toBe('Skipped');
+    expect(host.querySelector('.question-card .qc-state')?.getAttribute('title')).toBe('Unanswered');
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B', delivery: 'open' })]), newView()));
     expect(host.querySelector('.question-card .qc-option')).not.toBeNull();
   });
@@ -565,7 +565,7 @@ describe('drawing', () => {
     expect(html(renderArtifactView('key', artifact('chat/v.mp4', 'video', 'mp4')))).toContain('<video');
     // Only a file of another kind is a download, in place of a preview.
     expect(html(renderArtifactView('key', artifact('chat/d.pdf', 'file', 'pdf')))).not.toContain('download');
-    expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).toContain('The page cannot show this kind of file.');
+    expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).toContain('This kind of file cannot be shown here.');
     expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).not.toContain('download');
 
     // The head: the kind as a badge, the title and Open in new window, and no Download; each version's file loads afresh.
@@ -654,11 +654,11 @@ describe('drawing', () => {
       { label: 'gh 18800', url: 'https://github.com/o/r/issues/18800', kind: 'issue', badge: '18800', glyph: null, mentioned: true },
     ];
     const details: PageRow['details'] = [
-      { text: 'Rate limited · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' },
+      { text: 'Usage limit · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' },
       { text: 'Setup <failed>', title: null, tone: 'error' },
       { text: 'Post the reply', title: null, tone: null },
     ];
-    const full = listRow(1, { priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/1', links, returned: 2, comment: { glyph: '\u{ea6b}', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: '\u{eba2}', title: 'Rate limited' }, details });
+    const full = listRow(1, { priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/1', links, returned: 2, comment: { glyph: '\u{ea6b}', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: '\u{eba2}', title: 'Usage limit' }, details });
 
     root.innerHTML = html(renderList([listGroup('progress', [full, listRow(2)])], null, new Set()));
 
@@ -692,7 +692,7 @@ describe('drawing', () => {
     expect(line3!.className).toBe('row-line row-details');
     expect(line3!.firstElementChild!.className).toBe('codicon codicon-watch mark');
     expect([...line3!.querySelectorAll('.row-detail')].map((one) => [one.className, one.textContent, one.getAttribute('title')])).toEqual([
-      ['row-detail warning', 'Rate limited · resumes 1:20 PM', 'Resets at 1:20 PM'],
+      ['row-detail warning', 'Usage limit · resumes 1:20 PM', 'Resets at 1:20 PM'],
       ['row-detail error', 'Setup <failed>', null],
       ['row-detail', 'Post the reply', null],
     ]);
@@ -742,7 +742,7 @@ describe('drawing', () => {
 
     const badge = root.querySelector<HTMLElement>('[data-work-item="1"] .questions')!;
 
-    expect([badge.getAttribute('role'), badge.getAttribute('aria-label'), badge.getAttribute('title'), badge.dataset['action'], badge.dataset['workItem'], badge.tabIndex]).toEqual(['button', '2 questions waiting', '2 questions waiting\nOpens the work item at its card', 'goto-questions', '1', -1]);
+    expect([badge.getAttribute('role'), badge.getAttribute('aria-label'), badge.getAttribute('title'), badge.dataset['action'], badge.dataset['workItem'], badge.tabIndex]).toEqual(['button', '2 questions waiting', '2 questions waiting\nOpens the work item at its questions', 'goto-questions', '1', -1]);
     // The icon alone shows (the operator's decision, 2026-11-25); the count is in its name and tooltip only.
     expect([...badge.children].map((child) => [child.className, child.getAttribute('aria-hidden')])).toEqual([['codicon codicon-question', 'true']]);
     expect(badge.textContent).toBe('');
@@ -1037,7 +1037,7 @@ describe('the page', () => {
     expect(root.classList.contains('off-conversation')).toBe(false);
 
     source.emit('session', { session: session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' }) });
-    expect(root.querySelector('#note .session-note-text')?.textContent).toBe('The session has ended. Resume continues it.');
+    expect(root.querySelector('#note .session-note-text')?.textContent).toBe('The session has ended. Resume it to send a message.');
     expect(input.placeholder).toBe('Resume the session to send a message.');
     root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     expect(root.querySelector('#panel .notice')).toBeNull();
@@ -2077,7 +2077,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     await flush();
     expect(root.classList.contains('listing')).toBe(false);
     expect(root.querySelector('#head .opening-title')?.textContent).toBe('Item 1');
-    expect(root.querySelector('#panel .opening-failed h3')?.textContent).toBe("Couldn't open this work item");
+    expect(root.querySelector('#panel .opening-failed h3')?.textContent).toBe("This work item did not open");
     expect(root.querySelector('#panel .opening-why')?.textContent).toBe('That work item is gone.');
     expect(location.hash).toBe('#w=1');
 
@@ -3311,7 +3311,7 @@ describe('the page in use', () => {
     expect(pdf.hasAttribute('sandbox')).toBe(false);
 
     click('#head .artifact-tab[data-path="chat/blob.bin"]');
-    expect(root.querySelector('.artifact-view .empty')!.textContent).toBe('The page cannot show this kind of file. Open it in a new window from the button above.');
+    expect(root.querySelector('.artifact-view .empty')!.textContent).toBe('This kind of file cannot be shown here. Open it in a new window.');
     expect(root.querySelector('.artifact-view a[download]')).toBeNull();
     page.close();
   });
@@ -3446,7 +3446,7 @@ describe('the page in use', () => {
     expect(root.querySelector('.view-options-menu')).toBeNull();
     click('.header button.view-options');
     expect(root.querySelector('.header button.view-options')!.getAttribute('title')).toBe('View options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Collapse details', 'Spoken repliesExperimental']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message times and notes', 'Fold reply details', 'Spoken repliesExperimental']);
     expect(root.querySelector('.view-options-menu .menu-separator')).toBeNull();
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.view-options-menu')).toBeNull();
@@ -3877,12 +3877,12 @@ describe('the page in use', () => {
     await flush();
     expect(posts).toEqual([]);
     expect(root.querySelector('.sheet-title')!.textContent).toBe('Delete gh 1?');
-    answers['/row-action'] = { status: 409, body: { error: 'The work item no longer offers this.' } };
+    answers['/row-action'] = { status: 409, body: { error: 'This work item can no longer do that.' } };
     click('.sheet [data-action="sheet-go"]');
     await flush();
     expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ label: 'Delete', workItemId: 1 });
     // A refusal shows in the toast, in the warning colours, rather than over the composer.
-    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The work item no longer offers this.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('This work item can no longer do that.');
     expect(root.querySelector('.toast')!.getAttribute('role')).toBe('alert');
     expect(root.querySelector('#composer .toast, #composer [role="alert"]')).toBeNull();
     expect(root.querySelector('.sheet')).toBeNull();
@@ -4834,7 +4834,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     hello(source);
     typed('The work item draft');
     click('[data-action="picker"]');
-    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New conversation…']);
+    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New session in this work item…']);
     click('[data-action="new-conversation"]');
     await flush();
 
@@ -4842,8 +4842,8 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.querySelector('.conversation-menu')).toBeNull();
     expect(root.querySelector('#panel .new-draft')!.textContent).toContain('It starts when you send its first message');
     expect(root.querySelector('button.picker .title')!.textContent).toBe('Fix it');
-    expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('New conversation');
-    expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('New conversation · Fix it');
+    expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('New session');
+    expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('New session · Fix it');
     expect(input.value).toBe('');
     expect(document.activeElement).toBe(input);
     expect([...root.querySelectorAll('.draft-note [data-action="draft-provider"]')].map((one) => [one.textContent, one.getAttribute('aria-pressed')])).toEqual([['Claude', 'true'], ['Codex', 'false']]);
@@ -5141,7 +5141,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     // The tab chosen selects, not the first one.
     click(`#detail [data-action="iframe-open"][data-url="${pr.url}"]`); await flush();
     expect(selected()).toBe(pr.url);
-    expect(root.querySelector('#detail')!.textContent).toContain('Load the experimental Switchboard Chrome/Edge extension in this browser, then select Retry.');
+    expect(root.querySelector('#detail')!.textContent).toContain('Install the Switchboard browser extension in this browser, then select Retry.');
     expect(button('Retry')).not.toBeUndefined();
     button('Open in a browser tab')!.click();
     expect(opened.mock.calls).toEqual([[pr.url]]);
@@ -5194,7 +5194,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const frame = root.querySelector<HTMLIFrameElement>('iframe[title="GitHub browser experiment"]')!;
     expect(root.textContent).toContain('Open with sign-in support');
     // With the extension, the pane offers neither a browser tab nor the extension.
-    expect(root.textContent).not.toContain('Open in a browser tab');
+    expect(root.querySelector('.iframe-actions')).toBeNull();
     expect(root.textContent).not.toContain('Get the browser extension');
     source.emit('reply', { reply: reply('r9', 9) }); expect(root.querySelector('iframe[title="GitHub browser experiment"]')).toBe(frame);
     click('[data-action="artifact"][data-path="chat/p.html"]');
@@ -5719,8 +5719,8 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     hello(source);
     // Pinned by default: a column, and the pin offers to unpin it.
     expect(root.classList.contains('drawers')).toBe(false);
-    expect(pin().getAttribute('aria-label')).toBe('Unpin sidebar');
-    expect(pin().title).toBe('Unpin sidebar');
+    expect(pin().getAttribute('aria-label')).toBe('Let list hide');
+    expect(pin().title).toBe('Let list hide');
     expect(pin().querySelector('.codicon-pinned')).not.toBeNull();
     // Unpinned, the list is a drawer at any width, hidden, with the focus on the button that shows it.
     pin().focus();
@@ -5729,7 +5729,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.classList.contains('drawer-open')).toBe(false);
     expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
     expect(document.activeElement).toBe(root.querySelector('.header > .list-toggle'));
-    expect(pin().getAttribute('aria-label')).toBe('Pin sidebar');
+    expect(pin().getAttribute('aria-label')).toBe('Keep list open');
     expect(pin().querySelector('.codicon-pin')).not.toBeNull();
     resizeTo(1920);
     expect(root.classList.contains('drawers')).toBe(true);
@@ -5771,13 +5771,13 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
     expect(root.classList.contains('drawers')).toBe(true);
-    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin sidebar');
+    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Keep list open');
     // History is a tab of the open work item, so the list stays the drawer and keeps its pin.
     click('[data-action="actions"]');
     click('.actions-menu [data-action="row-history"]');
     expect(root.querySelector('[data-tab="history"], [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(root.classList.contains('drawers')).toBe(true);
-    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin sidebar');
+    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Keep list open');
     page.close();
   });
 
@@ -5974,8 +5974,8 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     // Before the cutover, a later reply supersedes the card, which takes no answer.
     hello(source, { items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Ignore the question I asked.' })] });
-    expect(root.querySelector('.question-card .qc-state')!.getAttribute('title')).toBe('Superseded');
-    expect(root.querySelector('.question-card .qc-row-detail')!.textContent).toBe('Superseded: a later reply came after it.');
+    expect(root.querySelector('.question-card .qc-state')!.getAttribute('title')).toBe('Unanswered');
+    expect(root.querySelector('.question-card .qc-row-detail')!.textContent).toBe('Unanswered: a later reply came before you answered.');
     expect(root.querySelector('.qc-option, [data-action="card-send"]')).toBeNull();
 
     // After it, a reply with text leaves the question open, and an Answers message shows as its bubble.
@@ -6078,7 +6078,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       await flush();
       await flush();
       expect(posts.filter((post) => post.url.includes('/history'))).toHaveLength(2);
-      expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Switchboard could not read the conversation back to its question card.');
+      expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Switchboard could not find the reply that asked these questions.');
       expect(scrolled).toEqual(['reply:r1']);
     } finally {
       delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
@@ -6997,7 +6997,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' }), reply('n1', 3, { opening: 'Next.' })], settings: { briefReplies: false } });
     click('.header button.view-options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message details', 'Collapse details']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message times and notes', 'Fold reply details']);
     expect(briefRow()!.getAttribute('aria-checked')).toBe('false');
     expect(shownText()).toContain('Whole reply.');
     click('[data-action="toggle-brief-replies"]');
@@ -7057,7 +7057,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click('[data-action="more"]');
     expect(shownText()).toContain('Whole reply.');
     click('[data-action="picker"]');
-    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New conversation…']);
+    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New session in this work item…']);
     click('.conversation-menu [data-work-item="2"]');
     await flush();
     expect(posts.find((post) => post.url.endsWith('/select'))?.body['workItemId']).toBe(2);
@@ -7226,14 +7226,14 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const { page, source } = start();
 
     hello(source);
-    source.emit('message', { message: message('m7', 7, { delivery: 'unconfirmed', error: 'The transcript does not show this message.', text: 'lost words' }) });
+    source.emit('message', { message: message('m7', 7, { delivery: 'unconfirmed', error: "The session's record does not show this message.", text: 'lost words' }) });
     await flush();
     expect(root.querySelector('li[data-id="m7"] .delivery')!.textContent).toBe('not confirmed');
-    expect(root.querySelector('li[data-id="m7"] .delivery')!.getAttribute('title')).toBe('The transcript does not show this message.');
+    expect(root.querySelector('li[data-id="m7"] .delivery')!.getAttribute('title')).toBe("The session's record does not show this message.");
     click('li[data-id="m7"] [data-action="resend-message"]');
     await flush();
     expect(root.querySelector('textarea')!.value).toBe('lost words');
-    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('Check the terminal first: Claude may have this message already.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('Check the terminal first: the session may already have this message.');
     expect(posts.some((post) => post.url.endsWith('/send'))).toBe(false);
     page.close();
   });
@@ -7810,10 +7810,10 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     source.emit('scope', { scope: shown });
     hello(source, { scope: shown, sessions: [session({ id: 's1', title: 'Task session s1', state: 'ended', conversation: 'read-only', reason: 'This is an earlier session of the work item, shown read-only.' })], items: [reply('old', 1)] });
-    expect(root.querySelector('.session-note-text')!.textContent).toBe('An earlier session of this work item, shown read-only.');
+    expect(root.querySelector('.session-note-text')!.textContent).toBe('Earlier session, read-only.');
     expect(root.querySelector('[data-action="resume"]')).toBeNull();
     expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.disabled).toBe(true);
-    expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.placeholder).toBe('Show the current session to send a message.');
+    expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.placeholder).toBe('Switch to the current session to send a message.');
     // The button shows the work item's title over the earlier session's name, with its provider's mark, both in its tooltip.
     expect(root.querySelector('button.picker .title')!.textContent).toBe('Fix it');
     expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('Task session s1');
@@ -7955,7 +7955,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await vi.advanceTimersByTimeAsync(SEND_RETRY_MS);
     expect(sends().length).toBeGreaterThan(2);
     expect(new Set(sends().map((post) => post.body['opId'])).size).toBe(1);
-    expect(root.querySelector('#toast .toast-text')?.textContent).toBe('Not sent. Switchboard is restarting. Try again in a moment.');
+    expect(root.querySelector('#toast .toast-text')?.textContent).toBe('Your message was not sent. Switchboard is restarting. Try again in a moment.');
     expect(input.value).toBe('Ship it');
 
     const first = sends()[0]!.body['opId'];
@@ -8202,7 +8202,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click('button.send');
     await vi.waitFor(() => expect(sends().at(-1)!.body['text']).toBe('Next'));
     // The hub keeps its old text for this refusal, which the page says in its own words.
-    await vi.waitFor(() => expect(root.querySelector('#toast .toast-text')?.textContent).toBe('This page switched to another conversation or session, so that was not done. Try again.'));
+    await vi.waitFor(() => expect(root.querySelector('#toast .toast-text')?.textContent).toBe('You switched to another session, so that was not done. Try again.'));
     const stale = sends().at(-1)!.body['opId'];
 
     expect(JSON.parse(localStorage.getItem('switchboard.sendOps')!)).toEqual({ '1': { key: expect.stringContaining('Next'), opId: stale } });
@@ -8268,7 +8268,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect([...root.querySelectorAll('.conn-banner')].map((one) => one.textContent)).toEqual(Array(2).fill('Offline. Showing what was here at ' + new Date(10_000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '.Retry'));
     expect(root.classList.contains('stale')).toBe(true);
     expect(input.disabled).toBe(true);
-    expect(input.placeholder).toBe("Can't send while offline.");
+    expect(input.placeholder).toBe('Messages cannot be sent while offline.');
     expect(root.querySelector('.header .conn-dot')?.className).toBe('conn-dot waiting');
     hello(FakeSource.last!);
     expect(root.querySelector('.conn-banner')).toBeNull();
@@ -8311,7 +8311,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     const screen = root.querySelector('.conn-screen')!;
 
-    expect(screen.querySelector('h2')?.textContent).toBe("Can't reach Switchboard");
+    expect(screen.querySelector('h2')?.textContent).toBe("Switchboard is not reachable");
     expect(screen.querySelector('.conn-screen-status')?.textContent).toMatch(/^Trying again in \d+ s\.$/);
     // Only this computer can start the hub.
     expect(screen.querySelector('a[href="switchboard:start"]')?.textContent).toBe('Start Switchboard');

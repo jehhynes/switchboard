@@ -743,7 +743,7 @@ export function questionBrief(question: Question): string {
 /** What an answer chose, as the answered rows and the Answers bubble show it: the chosen labels without their letters, then "Comment: text". */
 export function answerBrief(question: Question, letters: readonly string[], other: string, dismissed = false): string {
   if (dismissed) {
-    return 'No answer (dismissed)';
+    return 'No answer (skipped)';
   }
 
   const picked = question.options.filter((option) => letters.includes(option.letter)).map((option) => plain(option.label));

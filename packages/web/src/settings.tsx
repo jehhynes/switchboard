@@ -1360,14 +1360,14 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
                   {one.voice === true ? 'Forbid voice' : 'Allow voice'}
                 </button>
               )}
-              <button type="button" class="sheet-button secondary" title="Sign this device out of the web page" disabled={remote.busy} onClick={() => on.signOut(one.id)}>
+              <button type="button" class="sheet-button secondary" title="Sign this device out of Switchboard" disabled={remote.busy} onClick={() => on.signOut(one.id)}>
                 Sign out
               </button>
             </li>
           ))}
         </ul>
       )}
-      <button type="button" class="sheet-button secondary" title="Show a one-time link and code to sign in a device to the web page." disabled={remote.busy} onClick={on.pair}>
+      <button type="button" class="sheet-button secondary" title="Show a one-time link and code to sign in a device to Switchboard." disabled={remote.busy} onClick={on.pair}>
         {pairing === null ? 'Pair a device…' : 'New code'}
       </button>
       {remote.error === null ? null : (
@@ -1745,7 +1745,7 @@ function AskSheet({ ask, on }: { ask: Ask; on: Handlers }) {
         <h2 id="settings-ask-title" class="sheet-title">
           Save changes to settings?
         </h2>
-        <p class="sheet-detail">Your changes are lost if you don't save them.</p>
+        <p class="sheet-detail">Your changes are lost if you do not save them.</p>
         <div class="sheet-buttons">
           <button type="button" class="sheet-button secondary" onClick={() => on.answer('discard')}>
             Discard

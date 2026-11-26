@@ -37,7 +37,7 @@ describe('embedded browser tabs', () => {
     r.browser.follow(row(), true); r.browser.draw(r.host, row(), true);
     expect(r.browser.selected).toBe('https://github.com/o/r/pull/3');
     expect(r.host.querySelector('iframe')).toBeNull();
-    expect(r.host.querySelector('.iframe-toolbar')?.textContent).toContain('Open outside');
+    expect(r.host.querySelector('.iframe-toolbar')?.textContent).toContain('Open in a browser tab');
     expect(r.host.querySelector('.iframe-browser')?.classList.contains('hosted')).toBe(false);
     Array.from(r.host.querySelectorAll('button')).find((button) => button.textContent === 'Open with sign-in support')!.click();
     expect(r.send).toHaveBeenLastCalledWith({ type: 'iframe-launch', workItemId: 1, url: 'https://github.com/o/r/pull/3' });
@@ -150,7 +150,7 @@ describe('embedded browser tabs', () => {
     expect(r.browser.select('https://not-a-tab.example.com/')).toBe(false);
     expect(r.browser.selected).toBe('https://example.com/');
     r.browser.draw(r.host, row(), false);
-    expect(r.host.textContent).toContain('Load the experimental');
+    expect(r.host.textContent).toContain('Install the Switchboard browser extension');
     const buttons = (): HTMLButtonElement[] => [...r.host.querySelectorAll('button')];
     expect(buttons().map((button) => button.textContent)).toEqual(['Open in a browser tab', 'Get the browser extension', 'Retry']);
     buttons()[0]!.click(); buttons()[1]!.click();
@@ -160,7 +160,7 @@ describe('embedded browser tabs', () => {
     r.browser.close('https://github.com/o/r/pull/3'); r.browser.select('https://github.com/o/r/pull/3');
     expect(r.browser.tabs.map((link) => link.url)).toContain('https://github.com/o/r/pull/3');
     r.browser.requireReload(); r.browser.draw(r.host, row(), false);
-    expect(buttons().map((button) => button.textContent)).toEqual(['Reload Switchboard']);
+    expect(buttons().map((button) => button.textContent)).toEqual(['Reload page']);
     r.browser.dispose(); r.host.remove();
   });
 });

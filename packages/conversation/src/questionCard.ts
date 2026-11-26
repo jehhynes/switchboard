@@ -40,9 +40,10 @@ const STATE: Record<LedgerQuestion['state'], [name: string, icon: string]> = {
   answered: ['Answered', 'check'],
   withdrawn: ['Withdrawn', 'close'],
   replaced: ['Replaced', 'arrow-swap'],
-  dismissed: ['Dismissed', 'dash'],
-  skipped: ['Skipped', 'debug-step-over'],
-  superseded: ['Superseded', 'history'],
+  // Unanswered covers both a message that did not answer it and a later reply that came first: the operator acts the same on either.
+  dismissed: ['Skipped', 'dash'],
+  skipped: ['Unanswered', 'debug-step-over'],
+  superseded: ['Unanswered', 'debug-step-over'],
 };
 
 /** A question's short form as an answer line starts it: "Port:", "The page has no menu:", or "Design first?" as it is. */
@@ -60,11 +61,11 @@ function rowDetail(one: LedgerQuestion): string {
     case 'replaced':
       return `Replaced by a newer version of this question. ${one.replacedBy === null ? '' : `<button type="button" class="qc-link" data-action="goto-card" data-target-card="${escape(one.replacedBy.split('#')[0]!)}">Go to it</button>`}`;
     case 'dismissed':
-      return one.answer === null ? 'You dismissed it; the session is told with your next answers.' : 'You dismissed it; the session was told.';
+      return one.answer === null ? 'You skipped it; the session is told with your next answers.' : 'You skipped it; the session was told.';
     case 'skipped':
-      return 'Skipped: your next message did not answer it.';
+      return 'Unanswered: your next message did not answer it.';
     case 'superseded':
-      return 'Superseded: a later reply came after it.';
+      return 'Unanswered: a later reply came before you answered.';
     default:
       return '';
   }
@@ -105,7 +106,7 @@ function doneHead(card: LedgerCard): string {
   const total = card.questions.length;
   const answered = card.questions.filter((one) => one.state === 'answered');
   const message = answered.at(-1)?.answer?.messageId ?? null;
-  const what = answered.length === total ? (total === 1 ? 'Question answered' : `All ${total} questions answered`) : total === 1 ? 'Question settled' : `All ${total} questions settled`;
+  const what = answered.length === total ? (total === 1 ? 'Question answered' : `All ${total} questions answered`) : total === 1 ? 'Question closed' : `All ${total} questions closed`;
   const link = message === null ? '' : `<button type="button" class="qc-link qc-cross-link" data-action="goto-message" data-target="${escape(message)}" title="Show your answer">Your answer</button>`;
 
   return `<div class="qc-head qc-done"><span class="qc-progress">${what}</span>${link}</div>`;
@@ -131,7 +132,7 @@ export function renderQuestionCard(card: LedgerCard, draft: CardDraft | undefine
   const note = render.note == null ? '' : `<p class="qc-note">${escape(render.note)}</p>`;
 
   if (steps.length === 0) {
-    return `<div class="question-card qc qc-settled-card${allAnswered(card) ? ' qc-collapsed' : ''}" data-card="${key}" data-card-key="${key}" role="group" aria-label="Questions, settled">${doneHead(card)}${allAnswered(card) ? '' : settledRows(card.questions, render)}</div>`;
+    return `<div class="question-card qc qc-settled-card${allAnswered(card) ? ' qc-collapsed' : ''}" data-card="${key}" data-card-key="${key}" role="group" aria-label="Questions, closed">${doneHead(card)}${allAnswered(card) ? '' : settledRows(card.questions, render)}</div>`;
   }
 
   const current = currentStep(card, draft)!;
@@ -150,7 +151,7 @@ export function renderQuestionCard(card: LedgerCard, draft: CardDraft | undefine
     .join('');
   const menu = render.canAnswer
     ? `<span class="qc-menu-anchor"><button type="button" class="qc-menu-button" data-action="card-menu" data-card="${key}" aria-haspopup="menu" aria-expanded="${render.menuOpen === true}" title="More actions"><span class="codicon codicon-ellipsis" aria-hidden="true"></span></button>${
-        render.menuOpen === true ? `<span class="qc-menu" role="menu"><button type="button" role="menuitem" data-action="card-dismiss" data-card="${key}" data-slug="${slug}" title="Leave this question unanswered; the session is told with your next answers">Dismiss this question</button></span>` : ''
+        render.menuOpen === true ? `<span class="qc-menu" role="menu"><button type="button" role="menuitem" data-action="card-dismiss" data-card="${key}" data-slug="${slug}" title="Skip this question; the session is told with your next answers">Skip this question</button></span>` : ''
       }</span>`
     : '';
   const head = `<div class="qc-head"><span class="qc-progress">Question ${at + 1} of ${steps.length}</span>${steps.length > 1 ? `<span class="qc-dots">${dots}</span>` : ''}${menu}</div>`;
@@ -244,7 +245,7 @@ export function renderAnswersBubble(text: string, answered: readonly LedgerQuest
       const question = one === undefined ? (split === -1 ? rest : rest.slice(0, split)) : plain(questionBrief(one.question));
       const other = said.search(/(?:^|; )(?:Comment|Other): /);
       const picks = other === -1 ? said : said.slice(0, other);
-      const answer = dismissed ? 'Dismissed' : one?.answer == null ? picks.replace(/(^|; )[A-H]\) /g, '$1') + (other === -1 ? '' : said.slice(other).replace(/^(; )?Other: /, '$1Comment: ')) : answerBrief(one.question, one.answer.letters, one.answer.other);
+      const answer = dismissed ? 'Skipped' : one?.answer == null ? picks.replace(/(^|; )[A-H]\) /g, '$1') + (other === -1 ? '' : said.slice(other).replace(/^(; )?Other: /, '$1Comment: ')) : answerBrief(one.question, one.answer.letters, one.answer.other);
       const shown = answer === '' ? '' : ` <span class="${dismissed ? 'answers-dismissed' : 'answers-answer'}">${escape(answer)}</span>`;
 
       return `<div class="answers-line"${asked === null ? '' : ` title="${escape(asked)}"`}><span class="answers-question">${escape(answer === '' ? question : briefLead(question))}</span>${shown}</div>`;

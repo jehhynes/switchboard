@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mount } from '../src/island.js';
 import { renderHeader, renderSideSwitch, renderTabs } from '../src/header.js';
 import { newChanges } from '../src/changes.js';
-import { EMPTY } from '../src/model.js';
+import { EMPTY, stateIcon } from '../src/model.js';
 import type { PageState } from '../src/model.js';
 import { newView, TABS } from '../src/render.js';
 import { PAGE_ASSETS } from '../dist/index.js';
@@ -227,5 +227,14 @@ describe("Claude's provider mark", () => {
     const markRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector]) => selector!.replace(/\/\*[\s\S]*?\*\//g, '').trim()).filter((selector) => /\.provider/.test(selector));
     expect(markRules.length).toBeGreaterThan(3);
     expect(markRules.filter((selector) => /:hover|:focus/.test(selector) && /\.provider(-option-mark)?\b/.test(selector.split(/[ >+~]/).pop() ?? ''))).toEqual([]);
+  });
+});
+
+describe('a session waiting at a limit', () => {
+  it('reads Usage limit for a quota and Rate limited for a provider throttle', () => {
+    const until = Date.now() + 3_600_000;
+
+    expect(stateIcon('idle', null, { until, retry: false }).text).toMatch(/^Usage limit · resumes /);
+    expect(stateIcon('idle', null, { until, retry: true, throttle: true }).text).toMatch(/^Rate limited · retries /);
   });
 });

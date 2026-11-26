@@ -682,7 +682,7 @@ describe('the short forms the answered rows and the Answers bubble show', () => 
 
     expect(answerBrief(question!, ['A', 'C'], '  my  own ')).toBe('Start now; Never; Comment: my own');
     expect(answerBrief(question!, [], 'my own')).toBe('Comment: my own');
-    expect(answerBrief(question!, [], '', true)).toBe('No answer (dismissed)');
+    expect(answerBrief(question!, [], '', true)).toBe('No answer (skipped)');
   });
 });
 

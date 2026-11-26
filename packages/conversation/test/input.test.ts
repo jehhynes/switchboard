@@ -767,10 +767,10 @@ describe('SessionInput.resolve', () => {
 
     held.box = 'Hello';
     await new SessionInput('s1', held.deps().deps).resolve('Hello', T0, (outcome) => outcomes.push(outcome), UNREADABLE, {
-      check: () => 'The session was resumed since the view showed it; send the message again.',
+      check: () => 'The session restarted while you typed. Send the message again.',
       reserve: async () => (reserved.push('launch-1'), { release: () => undefined }),
     });
-    expect(outcomes).toEqual([{ delivery: 'not-sent', error: 'The session was resumed since the view showed it; send the message again.' }]);
+    expect(outcomes).toEqual([{ delivery: 'not-sent', error: 'The session restarted while you typed. Send the message again.' }]);
     expect(held.writes).toEqual([]);
     expect(held.box).toBe('Hello');
     expect(reserved).toEqual(['launch-1']);
@@ -839,14 +839,14 @@ describe('SessionInput against a session that changes', () => {
     session.dropEnters = 99;
 
     const sending = new SessionInput('s1', deps).send('Hello', (outcome) => outcomes.push(outcome), {
-      check: () => (launch === 'launch-1' ? null : 'The session was resumed since the view showed it; send the message again.'),
+      check: () => (launch === 'launch-1' ? null : 'The session restarted while you typed. Send the message again.'),
       pasting: (at) => pastes.push(at),
     });
 
     await sending;
     expect(session.writes).toEqual(['\u001b[200~Hello\u001b[201~', '\r']);
     // The text it left in the box is not cleared from a session resumed under another launch.
-    expect(outcomes).toEqual([{ delivery: 'not-sent', error: 'The session was resumed since the view showed it; send the message again.' }]);
+    expect(outcomes).toEqual([{ delivery: 'not-sent', error: 'The session restarted while you typed. Send the message again.' }]);
     expect(session.writes).not.toContain(CLEAR_LINE);
     expect(pastes).toHaveLength(1);
   });

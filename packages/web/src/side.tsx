@@ -90,7 +90,7 @@ export function renderArtifactView(key: string, artifact: ArtifactView, doc?: st
   ) : show === 'markdown' || show === 'text' ? (
     <div class="artifact-doc md-doc body">{doc === undefined ? <p class="empty">Loading…</p> : doc === null ? <p class="empty">This artifact could not be read.</p> : trusted(doc)}</div>
   ) : (
-    <p class="empty">The page cannot show this kind of file. Open it in a new window from the button above.</p>
+    <p class="empty">This kind of file cannot be shown here. Open it in a new window.</p>
   );
 
   return (

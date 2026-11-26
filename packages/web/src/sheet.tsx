@@ -92,7 +92,7 @@ export function renderSheet(sheet: Sheet | null, acting: boolean): VNode | null 
   return (
     <Frame title={`Snooze ${sheet.title}`} buttons={go('Snooze', acting)}>
       <fieldset class="sheet-field">
-        <legend>Snooze ends</legend>
+        <legend>Wake on</legend>
         {sheet.choices.map((choice, index) => (
           <label class="sheet-choice">
             <input type="radio" name="snooze" value={String(index)} checked={sheet.picked === String(index)} />

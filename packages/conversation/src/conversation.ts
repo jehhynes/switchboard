@@ -76,7 +76,7 @@ function confirms(at: number, message: ConversationMessage): boolean {
 }
 
 /** Why a typed message is `unconfirmed`. */
-export const UNCONFIRMED = 'The transcript does not show this message. Check the terminal, and send it again if Claude did not get it.';
+export const UNCONFIRMED = "The session's record does not show this message. Check the terminal, and send it again if Claude did not get it.";
 
 /**
  * Whether `text` is these messages typed as one (`joinMessages`): each pasted alone, in order, a blank line between, a message after the first
@@ -270,7 +270,7 @@ export class SessionConversation extends ConversationLog {
 
       if (copied) {
         offset = transcriptEnd(path);
-        this.note('Conversation continued from another session.');
+        this.note('Continued from an earlier session.');
       }
 
       this.deps.log(`session ${this.sessionId} transcript moved to ${path}${copied ? ', after copied history' : ''}`);

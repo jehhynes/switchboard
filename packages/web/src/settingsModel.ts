@@ -851,7 +851,7 @@ export const REPORT_KINDS = ['done', 'approval', 'worktree', 'playbook', 'paste'
 
 /** The reports a task session can send, as checkbox labels and tooltips. */
 export const REPORT_FIELDS: ReadonlyArray<{ kind: string; label: string; help: string }> = [
-  { kind: 'done', label: 'Done', help: 'The session closes the work item. Off, its turn ends in Ready for review.' },
+  { kind: 'done', label: 'Done', help: 'The session closes the work item. Off, the work item moves to Ready for review when its turn ends.' },
   { kind: 'approval', label: 'Approval', help: 'The session can leave a prompt for you to approve, such as one that posts its draft.' },
   { kind: 'worktree', label: 'Worktree', help: 'The session can link a worktree it creates. Branch names link worktrees without it.' },
   { kind: 'playbook', label: 'Playbook', help: 'The session can change its work item\'s playbook to another in the same namespace, and then runs that playbook\'s skill.' },
@@ -1262,7 +1262,7 @@ export function sessionsFields(state: EditorState): Section[] {
       heading: 'All agents',
       fields: [
         { path: 'sessions.provider', label: 'Default agent', kind: 'select', help: 'The agent playbook and ad-hoc sessions run in.', placeholder: 'claude', options: providers },
-        { path: 'sessions.concurrency', label: 'Sessions at once', kind: 'integer', help: '1 to 10. A start with no free slot waits as queued.', placeholder: '2' },
+        { path: 'sessions.concurrency', label: 'Sessions at once', kind: 'integer', help: '1 to 10. A start waits as queued while this many sessions run.', placeholder: '2' },
       ],
     },
     {
@@ -1321,7 +1321,7 @@ export function displayFields(): Section[] {
     {
       heading: 'Replies',
       fields: [
-        { path: 'voice.briefReplies', label: 'Collapse details', kind: 'boolean', help: "Fold a reply's details under a fade until you open it; the newest reply shows in full. A paired device keeps its own choice.", fallback: false },
+        { path: 'voice.briefReplies', label: 'Fold reply details', kind: 'boolean', help: "Fold a reply's details under a fade until you open it; the newest reply shows in full. A paired device keeps its own choice.", fallback: false },
       ],
     },
     {

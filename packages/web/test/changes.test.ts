@@ -322,7 +322,7 @@ describe('the Changes list', () => {
     start();
     await openList();
     expect(scopeButton().textContent).toBe('All changes');
-    expect(scopeButton().title).toBe('Showing: All changes since the base, 0123456');
+    expect(scopeButton().title).toBe('Comparing: All changes since the base, 0123456');
     expect(root.querySelector('[data-action="changes-uncommitted"]')).toBeNull();
 
     scopeButton().click();
@@ -369,7 +369,7 @@ describe('the Changes list', () => {
     expect(scopeButton().querySelector('.codicon-diff-modified')).not.toBeNull();
     filesButton().click();
     expect(root.querySelectorAll('.change-row')).toHaveLength(2);
-    expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Uncommitted changes, against HEAD');
+    expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Uncommitted changes, against the last commit');
     expect(button().getAttribute('aria-label')).toBe('Changes, 1 of 2 uncommitted files viewed');
     expect(button().title).toBe("Every uncommitted file's diff");
 
@@ -413,7 +413,7 @@ describe('the Changes list', () => {
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
     filesButton().click();
-    expect(root.querySelector('.changes-empty')!.textContent).toBe('This commit changes no files. Choose another scope in the scope menu.');
+    expect(root.querySelector('.changes-empty')!.textContent).toBe('This commit changes no files. Choose other changes from Compare.');
   });
 
   it('ScopeMenu_CommitGoneAfterARebase_FallsBackToEveryChangeSinceTheBase', async () => {
@@ -495,7 +495,7 @@ describe('the Changes list', () => {
     expect(listGets().at(-1)).toBe(`/v1/conversation/changes?window=pk&from=base&to=${HEAD}`);
     expect(root.querySelector('.changes-scope-menu')).toBeNull();
     expect(scopeButton().textContent).toBe('Base → fedcba9');
-    expect(scopeButton().title).toBe('Showing: From Base to fedcba9');
+    expect(scopeButton().title).toBe('Comparing: From Base to fedcba9');
   });
 
   it("says why when the hub refuses, and says when the worktree matches its base", async () => {
@@ -1309,7 +1309,7 @@ describe('the Changes list', () => {
     await openRow(0);
     // A phone's width under auto: wrapped, so Wrap shows pressed.
     expect(wrapButton().getAttribute('aria-pressed')).toBe('true');
-    expect(wrapButton().title).toBe("Don't wrap long lines");
+    expect(wrapButton().title).toBe('Do not wrap long lines');
     expect(wrapButton().querySelector('.codicon-word-wrap')).not.toBeNull();
 
     const pane = root.querySelector<HTMLElement>('.diff-pane')!;
@@ -1483,11 +1483,11 @@ describe('the Changes list text', () => {
     expect(listNote({ ...LIST, from: FIRST, to: HEAD })).toBe('3 files · +3 −1');
     expect(listBase(LIST)).toBe('All changes since the base, 0123456');
     expect(listBase({ ...LIST, base: null, commits: [] })).toBe('Uncommitted changes only, no merge base');
-    expect(listBase({ ...LIST, from: 'HEAD' })).toBe('Uncommitted changes, against HEAD');
+    expect(listBase({ ...LIST, from: 'HEAD' })).toBe('Uncommitted changes, against the last commit');
     expect(listBase({ ...LIST, from: BASE, to: FIRST })).toBe('Commit 1111111: First change');
     expect(listBase({ ...LIST, from: 'base', to: HEAD })).toBe('From Base to fedcba9');
     expect(emptyNote({ ...LIST, from: 'HEAD' })).toBe('No uncommitted changes. They appear here when the session edits a file.');
-    expect(emptyNote({ ...LIST, from: BASE, to: HEAD })).toBe('No changes between these points. Choose another scope in the scope menu.');
+    expect(emptyNote({ ...LIST, from: BASE, to: HEAD })).toBe('No changes between these points. Choose other changes from Compare.');
     expect(emptyNote({ ...LIST, base: null })).toBe('No uncommitted changes, and no merge base was found. Changes appear here when the session edits a file.');
     expect(emptyNote(LIST)).toBe('No changes since the merge base. They appear here when the session edits a file.');
     // A held diff against HEAD is read again after a commit.

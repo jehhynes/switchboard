@@ -255,7 +255,7 @@ export class LocalFilesController {
       } else {
         const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
-        entry = response.ok ? { state: 'ok', data: body as unknown as LocalFileData, version: readVersion(), etag: response.headers?.get?.('ETag') ?? null } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
+        entry = response.ok ? { state: 'ok', data: body as unknown as LocalFileData, version: readVersion(), etag: response.headers?.get?.('ETag') ?? null } : { state: 'error', error: String(body['error'] ?? `Switchboard could not load this (status ${response.status}). Try again.`) };
       }
     } catch (failure) {
       entry = again ? null : { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };

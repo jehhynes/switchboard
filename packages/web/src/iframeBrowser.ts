@@ -181,7 +181,7 @@ export class IframeBrowser {
   #generation = 0;
   #ready = false;
   #available = false;
-  #note = 'Connecting to the experimental extension…';
+  #note = 'Connecting to the browser extension…';
   #root: HTMLElement | null = null;
   #item: number | null = null;
   #url = '';
@@ -291,7 +291,7 @@ export class IframeBrowser {
     this.#requestedSites = '';
     this.#ready = false;
     this.#available = false;
-    this.#note = 'Connecting to the experimental extension…';
+    this.#note = 'Connecting to the browser extension…';
     this.#reloadPage = false;
     this.#discard();
     if (enabled) void this.renew();
@@ -319,7 +319,7 @@ export class IframeBrowser {
     const wasReady = this.#ready;
     this.#ready = reply?.ok === true;
     this.#available = this.#ready;
-    this.#note = this.#ready ? '' : String(reply?.error ?? 'Load the experimental Switchboard Chrome/Edge extension in this browser, then select Retry.');
+    this.#note = this.#ready ? '' : String(reply?.error ?? 'Install the Switchboard browser extension in this browser, then select Retry.');
     this.deps.changed(this.#ready && !wasReady);
   }
   #discard(): void {
@@ -335,14 +335,14 @@ export class IframeBrowser {
   requireReload(): void {
     this.configure(false);
     this.#reloadPage = true;
-    this.#note = 'Reload Switchboard to apply the embedded browser setting.';
+    this.#note = 'Reload the page to use the Browser tab setting.';
   }
   async #launch(item: number | null, url: string): Promise<void> {
     this.#launchError = null;
     try {
       const result = await this.deps.send({ type: 'iframe-launch', workItemId: item, url }) as { ok?: unknown; error?: unknown } | null;
-      if (result?.ok !== true) this.#launchError = String(result?.error ?? 'Could not open embedded tabs. Use Open outside or retry.');
-    } catch { this.#launchError = 'Could not reach the extension. Use Open outside or retry.'; }
+      if (result?.ok !== true) this.#launchError = String(result?.error ?? 'Could not open embedded tabs. Open it in a browser tab, or retry.');
+    } catch { this.#launchError = 'Could not reach the extension. Open it in a browser tab, or retry.'; }
     if (this.#launchError !== null) this.deps.changed();
   }
   /** Opens a link in its tab, adding one named `name` (`frameLink`) for a link the work item has none for; false without the extension. */
@@ -375,7 +375,7 @@ export class IframeBrowser {
       actions.className = 'iframe-actions';
       if (!this.#reloadPage && frameUrl(url)) actions.append(button('Open in a browser tab', () => this.deps.external(url)));
       if (!this.#reloadPage) actions.append(button('Get the browser extension', () => this.deps.extension()));
-      actions.append(button(this.#reloadPage ? 'Reload Switchboard' : 'Retry', () => (this.#reloadPage ? location.reload() : void this.renew())));
+      actions.append(button(this.#reloadPage ? 'Reload page' : 'Retry', () => (this.#reloadPage ? location.reload() : void this.renew())));
       host.append(note, actions);
       return;
     }
@@ -399,7 +399,7 @@ export class IframeBrowser {
       toolbar.className = 'iframe-toolbar';
       const outside = document.createElement('button');
       outside.type = 'button';
-      outside.textContent = 'Open outside';
+      outside.textContent = 'Open in a browser tab';
       outside.onclick = () => this.deps.external(this.#url);
       const note = document.createElement('p');
       note.className = 'iframe-warning';

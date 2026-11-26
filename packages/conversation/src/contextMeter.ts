@@ -152,7 +152,7 @@ export function contextLines(view: ContextView | null | undefined): string[] {
   }
 
   if (contextLevel(view) === 'warn' || contextLevel(view) === 'full') {
-    lines.push('Consider compacting the conversation soon.');
+    lines.push('Context is nearly full. Run /compact soon.');
   }
 
   return lines;

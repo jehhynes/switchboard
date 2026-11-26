@@ -19,7 +19,7 @@ describe("the page's toast (toast.tsx)", () => {
   it('shows a refusal in the warning colours and anything else in neutral ones, one message at a time', () => {
     const box = toast(host, { open: () => undefined });
 
-    box.show('The work item no longer offers this.');
+    box.show('This work item can no longer do that.');
     expect(host.querySelector('.toast')!.className).toBe('toast warning');
     expect(host.querySelector('.toast')!.getAttribute('role')).toBe('alert');
     expect(host.querySelector('.toast > .codicon')!.className).toBe('codicon codicon-warning toast-icon');
@@ -108,8 +108,8 @@ describe("the page's toast (toast.tsx)", () => {
 
     const box = toast(host, { open: () => undefined });
 
-    showToast("Can't reach Switchboard. Try again.");
-    expect(box.current()).toEqual({ text: "Can't reach Switchboard. Try again.", tone: 'warning', workItemId: null });
+    showToast("Switchboard is not reachable. Try again.");
+    expect(box.current()).toEqual({ text: "Switchboard is not reachable. Try again.", tone: 'warning', workItemId: null });
     showToast('Copied Reply.', 'info');
     clearToast('warning');
     expect(text()).toBe('Copied Reply.');

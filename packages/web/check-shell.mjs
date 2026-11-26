@@ -431,7 +431,7 @@ const TOUCH = `(() => {
 
 /** A toast with its work item's link and Dismiss (toast.tsx), and the console's foot with Reconnect (console.ts). */
 const PROBES = `(() => {
-  document.getElementById('toast').insertAdjacentHTML('beforeend', '<div class="toast warning"><button type="button" class="toast-text toast-open">A failed thing</button><button type="button" class="icon dismiss" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>');
+  document.getElementById('toast').insertAdjacentHTML('beforeend', '<div class="toast warning"><button type="button" class="toast-text toast-open">This work item can no longer do that.</button><button type="button" class="icon dismiss" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>');
   document.body.insertAdjacentHTML('beforeend', '<div class="console" style="position: fixed; left: 0; bottom: 0; width: 300px"><div class="console-foot"><p class="console-note">Ended.</p><button type="button" class="console-reconnect">Reconnect</button></div></div>');
 })()`;
 

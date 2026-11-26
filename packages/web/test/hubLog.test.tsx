@@ -74,7 +74,7 @@ describe('the hub log sheet', () => {
     const read = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: '', more: false, limited: false, missing: true }) });
     await act(() => render(<HubLog fetch={read} />, host));
     await flush();
-    expect(host.textContent).toContain('No hub log yet. It appears when the hub writes its first line.');
+    expect(host.textContent).toContain('No Switchboard log yet. It appears when Switchboard writes its first line.');
     read.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Access to the hub log ended.' }) });
     await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS); });
     expect(host.textContent).toContain('Access to the hub log ended.');
@@ -82,7 +82,7 @@ describe('the hub log sheet', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(HUB_LOG_POLL_MS); });
     expect(host.querySelector('pre')!.textContent).toBe('new\n');
     expect(host.textContent).not.toContain('Access to the hub log ended.');
-    expect(host.textContent).toContain('4 MiB read limit');
+    expect(host.textContent).toContain('Only the last 4 MiB is shown');
     expect([...host.querySelectorAll('button')].find((node) => node.textContent === 'Load 500 more lines')!.disabled).toBe(true);
     const filter = host.querySelector<HTMLInputElement>('input[type=search]')!;
     await act(() => { filter.value = 'absent'; filter.dispatchEvent(new Event('input', { bubbles: true })); });

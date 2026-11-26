@@ -101,7 +101,7 @@ export function scopeTitle(range: ChangeRange, commits: readonly CommitInfo[], b
       ? 'Uncommitted changes only, no merge base'
       : `All changes since the base, ${short(base)}`
     : kind === 'uncommitted'
-      ? 'Uncommitted changes, against HEAD'
+      ? 'Uncommitted changes, against the last commit'
       : kind === 'commit'
         ? `Commit ${short(commit!.sha)}: ${commit!.subject}`
         : `From ${pointLabel(range.from, base)} to ${pointLabel(range.to, base)}`;
@@ -241,9 +241,9 @@ export function emptyNote(list: ChangesList): string {
   return kind === 'uncommitted'
     ? 'No uncommitted changes. They appear here when the session edits a file.'
     : kind === 'commit'
-      ? 'This commit changes no files. Choose another scope in the scope menu.'
+      ? 'This commit changes no files. Choose other changes from Compare.'
       : kind === 'compare'
-        ? 'No changes between these points. Choose another scope in the scope menu.'
+        ? 'No changes between these points. Choose other changes from Compare.'
         : list.base === null
           ? 'No uncommitted changes, and no merge base was found. Changes appear here when the session edits a file.'
           : 'No changes since the merge base. They appear here when the session edits a file.';
@@ -251,7 +251,7 @@ export function emptyNote(list: ChangesList): string {
 
 /** Wrap, pressed while long lines wrap: on the Changes tab's bar, and at the end of the file view's header, which covers the bar. */
 function WrapButton({ wrapped, disabled, className }: { wrapped: boolean; disabled?: boolean; className: string }): VNode {
-  const label = wrapped ? "Don't wrap long lines" : 'Wrap long lines';
+  const label = wrapped ? 'Do not wrap long lines' : 'Wrap long lines';
 
   return (
     <button class={className} type="button" data-action="changes-wrap" title={label} aria-label={label} aria-pressed={wrapped} disabled={disabled}>
@@ -416,7 +416,7 @@ export function renderChangesBar(changes: ChangesView, wrapped: boolean, now = D
       <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
     </button>,
     changes.menu ? <FilesMenu changes={changes} /> : null,
-    <button class={`changes-scope${changes.scopeMenu ? ' open' : ''}`} type="button" data-action="changes-scope" aria-expanded={changes.scopeMenu} title={`Showing: ${title}`} aria-label={`Changes to show: ${title}`}>
+    <button class={`changes-scope${changes.scopeMenu ? ' open' : ''}`} type="button" data-action="changes-scope" aria-expanded={changes.scopeMenu} title={`Comparing: ${title}`} aria-label={`Comparing: ${title}`}>
       <span class={`codicon codicon-${SCOPE_ICONS[scopeKind(changes.range, commits, base)]}`} aria-hidden="true"></span>
       <span class="changes-scope-label">{scopeLabel(changes.range, commits, base)}</span>
       <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
@@ -696,7 +696,7 @@ export class ChangesController {
 
         list = { ...(body as unknown as ChangesList), from: read.from ?? 'base', to: read.to ?? 'worktree', commits: Array.isArray(read.commits) ? read.commits : [], commitsMore: read.commitsMore === true };
       } else {
-        error = String(body['error'] ?? `Switchboard answered ${response.status}.`);
+        error = String(body['error'] ?? `Switchboard could not load this (status ${response.status}). Try again.`);
         stale = body['stale'] === true;
       }
     } catch (failure) {
@@ -1003,7 +1003,7 @@ export class ChangesController {
             return;
           }
 
-          next = { key, etag: null, content: { note: String(body['error'] ?? `Switchboard answered ${response.status}.`) }, chars: 0, hydrated: false };
+          next = { key, etag: null, content: { note: String(body['error'] ?? `Switchboard could not load this (status ${response.status}). Try again.`) }, chars: 0, hydrated: false };
           failed = true;
         }
       }
@@ -1162,7 +1162,7 @@ export class ChangesController {
         return;
       }
 
-      open.entry = response.ok ? { state: 'ok', data: body as unknown as FileData, version: response.headers?.get?.('ETag') ?? readVersion() } : { state: 'error', error: String(body['error'] ?? `Switchboard answered ${response.status}.`) };
+      open.entry = response.ok ? { state: 'ok', data: body as unknown as FileData, version: response.headers?.get?.('ETag') ?? readVersion() } : { state: 'error', error: String(body['error'] ?? `Switchboard could not load this (status ${response.status}). Try again.`) };
     } catch (failure) {
       open.entry = { state: 'error', error: `Switchboard did not answer: ${String(failure)}` };
     }
@@ -1206,7 +1206,7 @@ export class ChangesController {
         if (answer.status !== 200) {
           row.viewed = !sent;
           this.#setCollapsed(path, row.viewed, true);
-          this.view.error = String(answer.body['error'] ?? `Switchboard answered ${answer.status}.`);
+          this.view.error = String(answer.body['error'] ?? `Switchboard could not load this (status ${answer.status}). Try again.`);
           this.#viewedChanged();
           void this.refresh();
           return;
