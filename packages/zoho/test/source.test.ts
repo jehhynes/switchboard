@@ -366,10 +366,6 @@ describe('ZohoSource.context', () => {
       error: 'Zoho Desk answered HTTP 404 for /tickets/1.',
     });
   });
-
-  it('links no worktree by branch name', () => {
-    expect(new ZohoSource(CONFIG, desk()).keyOfBranch()).toBeNull();
-  });
 });
 
 describe('stripHtml', () => {

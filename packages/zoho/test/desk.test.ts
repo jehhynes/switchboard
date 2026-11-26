@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseZohoConfig } from '../src/config.js';
 import type { ZohoConfig } from '../src/config.js';
@@ -62,9 +64,19 @@ describe('deskClient', () => {
 
 describe('deskClient without a server', () => {
   it('reports an unreachable Desk', async () => {
-    const config = (parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', apiBase: 'http://127.0.0.1:1/api/v1' }) as { config: ZohoConfig }).config;
+    // A listener of the test's own that drops every connection unanswered, as an unreachable Desk would.
+    const dropping = createNetServer((socket) => socket.destroy());
 
-    expect(await deskClient(config, async () => ({ token: 't' }))('/teams')).toEqual({ error: expect.stringMatching(/^Zoho Desk could not be reached: /) });
+    await new Promise<void>((done) => dropping.listen(0, '127.0.0.1', done));
+
+    try {
+      const port = (dropping.address() as AddressInfo).port;
+      const config = (parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', apiBase: `http://127.0.0.1:${port}/api/v1` }) as { config: ZohoConfig }).config;
+
+      expect(await deskClient(config, async () => ({ token: 't' }))('/teams')).toEqual({ error: expect.stringMatching(/^Zoho Desk could not be reached: /) });
+    } finally {
+      await new Promise((done) => dropping.close(done));
+    }
   });
 });
 
