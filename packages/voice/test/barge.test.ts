@@ -106,7 +106,8 @@ describe('pcm24to16', () => {
   });
 });
 
-describe('BargeIn', () => {
+// Enrolling 13 s of audio takes 0.2 s here, but over 5 s on GitHub's Windows runner with coverage.
+describe('BargeIn', { timeout: 30_000 }, () => {
   it('fires on two words that are not the reply\'s echo without an enrolment, never on the echo, and checks nothing under the loudness gate', () => {
     expect(gate(0)).toBe(0.003);
     expect(play(new BargeIn(null, REPLY, 'marin'), tone(2, 200), 'the session token is').fired).toBeNull();
