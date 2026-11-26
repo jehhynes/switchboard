@@ -70,10 +70,10 @@ const open = (patch: Partial<HistoryOpen> = {}): HistoryOpen => ({ ticketId: 77,
 
 const HEAD: HistoryHead = { key: 'gh 77', title: 'Inbox badge from the row', sourceKind: 'github', playbook: 'dev:build', status: 'Running', needsYou: null, workItemId: 1, sessionId: 's1' };
 const pinned = (patch: Partial<StateView> = {}): StateView => ({ id: 'st-1', sessionId: 's1', at: T0 - 4 * MINUTE, headline: '2/5 fixing tests', body: 'Two **left**.', stale: null, unread: true, shortId: 'abc12345', endedAt: null, ...patch });
-const draw = (o: HistoryOpen | null, state: StateView | null = null, head: Partial<HistoryHead> = {}, now = T0 + 25 * 60 * MINUTE): HTMLElement => {
+const draw = (o: HistoryOpen | null, state: StateView | null = null, head: Partial<HistoryHead> = {}, now = T0 + 25 * 60 * MINUTE, local = true): HTMLElement => {
   const root = document.createElement('div');
 
-  root.innerHTML = html(renderHistory(o, state, now, { ...HEAD, ...head }));
+  root.innerHTML = html(renderHistory(o, state, now, { ...HEAD, ...head }, local));
   return root;
 };
 const texts = (root: HTMLElement, selector: string): string[] => [...root.querySelectorAll(selector)].map((one) => one.textContent ?? '');
@@ -277,6 +277,15 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(historyAction({ label: 's', icon: 'terminal', title: '', open: { type: 'open', sessionId: 'native-1', session: 's1', workItemId: 4 } })).toEqual({ 'data-action': 'history-session', 'data-work-item': '4', 'data-session': 's1' });
     expect(historyAction({ label: 's', icon: 'terminal', title: '', open: { type: 'open', sessionId: 'native-1' } })).toBeNull();
     expect(historyAction({ label: 'x', icon: 'x', title: '', open: { type: 'javascript' } })).toBeNull();
+  });
+
+  it("shows a folder link as text on a paired device's page, which cannot open VS Code", () => {
+    const root = draw(open(), null, {}, T0 + 25 * 60 * MINUTE, false);
+
+    expect(root.querySelector('[data-entry="b"] [data-action="history-folder"]')).toBeNull();
+    expect(root.querySelector('[data-entry="b"] .hist-link.off')?.textContent).toBe('Open');
+    expect(root.querySelector('[data-entry="b"] .hist-link.off')?.getAttribute('title')).toBe('D:/w1');
+    expect(historyAction({ label: 'Open', icon: 'folder-opened', title: '', open: { type: 'openFolder', path: 'D:/w' } }, false)).toBeNull();
   });
 });
 
@@ -611,6 +620,23 @@ describe("the page's History tab in use", () => {
     root.querySelector<HTMLElement>('[data-entry="l"] [data-action="history-folder"]')!.click();
     await flush();
     expect(posts.filter((one) => one.url === '/v1/conversation/row-command').at(-1)?.body).toMatchObject({ workItemId: 1, label: 'Open in VS Code' });
+    page.close();
+  });
+
+  it("shows a History folder link as text on a paired device's page", async () => {
+    vi.useFakeTimers();
+    const links = [{ label: 'Open', icon: 'folder-opened', title: 'D:/w', open: { type: 'openFolder', path: 'D:/w' } }];
+    const withLinks = view({ sections: [{ ...view().sections[0]!, entries: [entry('l', T0, { links })] }] });
+
+    answers['/page-history'] = { status: 200, body: { view: withLinks, categories: CATEGORIES } };
+    answers['/select'] = { status: 200, body: { scopeGen: 2 } };
+    const { page, source } = start({ local: false });
+
+    hello(source);
+    openFromMenu();
+    await flush();
+    expect(root.querySelector('[data-entry="l"] .hist-link.off')?.textContent).toBe('Open');
+    expect(root.querySelector('[data-action="history-folder"]')).toBeNull();
     page.close();
   });
 

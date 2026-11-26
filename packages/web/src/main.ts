@@ -1,4 +1,4 @@
-import { applyEvent, commandQuery, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedEntry, selectedRow, sentTexts, tabUrl, withEarlier } from './model.js';
+import { applyEvent, commandQuery, OPEN_IN_VSCODE, EMPTY, mentionOf, mentionQuery, pageTitle, rowLink, selectedEntry, selectedRow, sentTexts, tabUrl, withEarlier } from './model.js';
 import { snoozeChoices } from '@switchboard/core/snooze';
 import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 import type { PageState } from './model.js';
@@ -62,8 +62,6 @@ import { IframeBrowser, canInstallExtension, frameCover, frameUrl, frameLinks, I
 import type { FrameCover } from './iframeBrowser.js';
 import type { BrowserIdentity } from './iframeBrowser.js';
 
-/** The Actions menu's control that starts VS Code on the work item (`OPEN_IN_VSCODE` in the hub's page.ts); History's folder links run it too. */
-const OPEN_IN_VSCODE = 'Open in VS Code';
 
 /** The stream's event types the page reads. */
 /** How long typing in a card's Comment field pauses before the hub hears it. */
@@ -617,6 +615,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     command: (name, body) => command(name, body),
     workItemId: () => state.scope?.workItemId ?? null,
     diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
+    local: () => localPage(),
     inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (mainTab() === 'diff' || (wide() && sideTab() === 'diff')),
     drawDiagrams: (element) => drawDiagrams(element),
     // A quote of lines joins the end of the message being written, after a blank line, and the box takes the focus.
@@ -2804,7 +2803,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         drawConsole(pane);
       } else if (tab === 'history') {
         // The ticket's History only for a row that offers it (`followHistory`); the state always.
-        drawPane(pane, renderHistory(offersHistory() ? shownHistory : null, state.state, now, historyHead()));
+        drawPane(pane, renderHistory(offersHistory() ? shownHistory : null, state.state, now, historyHead(), localPage()));
         drawDiagrams(pane);
         placeHistory(pane);
       } else if (tab === 'diff') {
@@ -6150,7 +6149,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // What a spoken reply's progress can change: its spoken state, which only its first progress event changes to playing.
       const spokenBefore = type === 'progress' ? state.items.find((item): item is ReplyView => item.id === data['replyId'] && item.type === 'reply')?.spoken.state : undefined;
 
-      state = applyEvent(state, data);
+      state = applyEvent(state, data, localPage());
       // A state whose body changed is unread again under the same ID, so it is reported seen again once it shows.
       if (type === 'state' && state.state?.unread === true) reported.delete(state.state.id);
       // A pending choice ends with a scope that comes while no select is outstanding, its own or one the hub showed itself; a late scope of an

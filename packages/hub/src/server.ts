@@ -145,9 +145,9 @@ export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'pa
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
  * list, so a paired device cannot pair others or sign this computer out;
- * opening a held session's terminal app and restarting the terminal holder; and Settings' and Collapse details, which change settings.json, which the operator keeps to this computer.
+ * opening a held session's terminal app, a link in the browser or VS Code on this computer, and restarting the terminal holder; and Settings' and Collapse details, which change settings.json, which the operator keeps to this computer.
  */
-export const LOCAL_PAGE_COMMANDS = new Set(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'row-open', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+export const LOCAL_PAGE_COMMANDS = new Set(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'row-open', 'row-command', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
 
 /**
  * The page commands told whether they came through a remote host (`remote` in the body, which the server sets over any the page sent), since

@@ -26,7 +26,7 @@ describe('the page in use', () => {
     vi.useRealTimers();
   });
 
-  const start = (loadDiagrams: () => Promise<boolean> = async () => false) => {
+  const start = (loadDiagrams: () => Promise<boolean> = async () => false, deps: Partial<Parameters<typeof startPage>[1]> = {}) => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
 
@@ -39,7 +39,7 @@ describe('the page in use', () => {
     });
     const mermaid = vi.fn(loadDiagrams);
     const opened: string[] = [];
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadMermaid: mermaid, openUrl: (url) => opened.push(url), standalone: () => installed });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadMermaid: mermaid, openUrl: (url) => opened.push(url), standalone: () => installed, ...deps });
 
     return { page, source: FakeSource.last!, mermaid, opened };
   };
@@ -1009,6 +1009,30 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.querySelector('[data-tab="console"]')).not.toBeNull();
     click('button.actions');
     expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code']);
+    page.close();
+  });
+
+  it("offers no Open in VS Code on a paired device's page, in the Actions menu or the row's menu, and keeps Open report", async () => {
+    const opens = [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'symbol-file', file: 'D:/git/wt/1/reply.md' }];
+    const { page, source } = start(undefined, { local: false });
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', opens })])] });
+    click('button.actions');
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open report']);
+    click('button.actions');
+    // A list event drops it too, and the row's own menu shows the same rows.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', opens })])] });
+    root.querySelector('#list .row')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    expect([...root.querySelectorAll('#list .row-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open report']);
+    expect(root.querySelector('[data-action="row-command"]')).toBeNull();
+    page.close();
+  });
+
+  it("offers no menu on a paired device's row whose only control is Open in VS Code", async () => {
+    const { page, source } = start(undefined, { local: false });
+
+    hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })])] });
+    expect(root.querySelector('button.actions')).toBeNull();
     page.close();
   });
 

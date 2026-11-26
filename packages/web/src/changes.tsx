@@ -523,6 +523,8 @@ export interface ChangesDeps {
   command(name: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
   /** The diff viewer's layout and wrapping, from the settings (`web.diffLayout`, `web.diffWrap`). */
   diffSettings(): { layout: DiffLayout; wrap: DiffWrap };
+  /** Whether the page is this computer's, which can open VS Code; a paired device's notes do not offer it. */
+  local?(): boolean;
   /** Whether the Changes tab is in view: shown in its strip, on a page the operator can see; a file view on disk is read again only then. */
   inView?(): boolean;
   /** Draws the Mermaid diagrams in an element, after a Markdown file's preview is drawn. */
@@ -571,8 +573,11 @@ export function fileAt(list: ChangesList | null, side: 'disk' | 'base'): string 
   return point === 'worktree' ? null : point === 'base' && list.base === null ? ' at HEAD' : point === 'base' || point === list.base ? ' at the base' : point === 'HEAD' ? ' at HEAD' : ` at ${short(point)}`;
 }
 
-/** What the file view says in place of the file: a read on its way, why it failed, a binary file or one too large; a picture or PDF shows. */
-export function fileNote(entry: FileOpen['entry']): string | null {
+/**
+ * What the file view says in place of the file: a read on its way, why it failed, a binary file or one too large, pointing to VS Code on this
+ * computer's page (`local`) only; a picture or PDF shows.
+ */
+export function fileNote(entry: FileOpen['entry'], local = true): string | null {
   if (entry.state === 'loading') {
     return 'Reading the file…';
   }
@@ -587,7 +592,7 @@ export function fileNote(entry: FileOpen['entry']): string | null {
     return null;
   }
 
-  return entry.data.binary ? 'Binary file not shown.' : entry.data.tooLarge ? 'This file is too large to show here. Open it in VS Code.' : null;
+  return entry.data.binary ? 'Binary file not shown.' : entry.data.tooLarge ? `This file is too large to show here.${local ? ' Open it in VS Code.' : ''}` : null;
 }
 
 /** A point of a range as a quote names it: on disk, the base, HEAD or a commit, by short ID. */
@@ -635,8 +640,8 @@ export function patchLines(data: DiffData, side: 'old' | 'new', start: number, e
 /** A file's diff as read: on its way, read, or why not. */
 type DiffEntry = { state: 'loading' } | { state: 'ok'; data: DiffData; version: string } | { state: 'error'; error: string };
 
-/** What the Changes tab says in place of a file's diff: a binary file, one too large, a read on its way or why it failed. */
-export function diffNote(entry: DiffEntry | undefined): string | null {
+/** What the Changes tab says in place of a file's diff: a binary file, one too large, pointing to VS Code on this computer's page (`local`) only, a read on its way or why it failed. */
+export function diffNote(entry: DiffEntry | undefined, local = true): string | null {
   if (entry === undefined || entry.state === 'loading') {
     return 'Reading the diff…';
   }
@@ -653,7 +658,7 @@ export function diffNote(entry: DiffEntry | undefined): string | null {
     return 'No differences ignoring whitespace. Turn off Ignore whitespace in ⋯ to see them.';
   }
 
-  return entry.data.tooLarge === 'patch' || entry.data.patch === null ? 'This change is too large to show here. Open it in VS Code.' : null;
+  return entry.data.tooLarge === 'patch' || entry.data.patch === null ? `This change is too large to show here.${local ? ' Open it in VS Code.' : ''}` : null;
 }
 
 /** A file's diff the Changes tab holds: what it was read for, its ETag, how many characters it holds and whether its sides were read too. */
@@ -1748,7 +1753,7 @@ export class ChangesController {
 
         if (response.ok) {
           const data = body as unknown as DiffData;
-          const note = diffNote({ state: 'ok', data, version: '' });
+          const note = diffNote({ state: 'ok', data, version: '' }, this.deps.local?.() ?? true);
 
           next = { key, etag: response.headers?.get?.('ETag') ?? null, content: note === null ? { data } : { note }, chars: data.patch?.length ?? 0, hydrated: false };
         } else {
@@ -2463,7 +2468,7 @@ export class ChangesController {
     overlay.style.top = `${bar?.offsetHeight ?? 0}px`;
 
     const place = `${file.side} ${file.path} ${file.range.from} ${file.range.to} ${file.line ?? ''}`;
-    const note = fileNote(file.entry);
+    const note = fileNote(file.entry, this.deps.local?.() ?? true);
     const entry = file.entry;
     const wrap = this.#shownLayout(view.closest<HTMLElement>('.diff-pane') ?? view).wrap;
 

@@ -138,9 +138,10 @@ export function historyUrl(link: HistoryLink): string | null {
 
 /**
  * What a link's button carries, as its `data-` attributes: an http or https URL opens in a browser tab, another `openUrl` in a file tab, a folder
- * with Open in VS Code, and a session in the conversation by its work item and Switchboard session ID; null for a link the page cannot open.
+ * with Open in VS Code on this computer's page (`local`) only, since VS Code starts on this computer, and a session in the conversation by its
+ * work item and Switchboard session ID; null for a link the page cannot open.
  */
-export function historyAction(link: HistoryLink): Record<string, string> | null {
+export function historyAction(link: HistoryLink, local = true): Record<string, string> | null {
   const url = historyUrl(link);
   const { open } = link;
 
@@ -156,7 +157,7 @@ export function historyAction(link: HistoryLink): Record<string, string> | null 
     return { 'data-action': 'history-file', 'data-path': open.url };
   }
 
-  if (open.type === 'openFolder') {
+  if (open.type === 'openFolder' && local) {
     return { 'data-action': 'history-folder' };
   }
 
@@ -172,8 +173,8 @@ export function historyAction(link: HistoryLink): Record<string, string> | null 
 }
 
 /** A link: a button that opens it on the page, or, for one the page cannot open, its label with its target in the tooltip. */
-function Link({ link }: { link: HistoryLink }) {
-  const action = historyAction(link);
+function Link({ link, local }: { link: HistoryLink; local: boolean }) {
+  const action = historyAction(link, local);
   // A session shows in the conversation here, not in the terminal or the panel the hub's label names.
   const label = action?.['data-action'] === 'history-session' ? 'Show session' : link.label;
   const title =
@@ -305,7 +306,7 @@ function Markdown({ text, class: name }: { text: string; class: string }) {
   return <div class={`${name} md-doc body`}>{trusted(renderMarkdown(stripQuestionMarkup(text)))}</div>;
 }
 
-function Entry({ entry, body, pinned, ui }: { entry: HistoryEntry; body: 'open' | 'closed' | null; pinned: boolean; ui: HistoryUi }) {
+function Entry({ entry, body, pinned, ui, local }: { entry: HistoryEntry; body: 'open' | 'closed' | null; pinned: boolean; ui: HistoryUi; local: boolean }) {
   const classes = [
     'hist-entry',
     `cat-${entry.category}`,
@@ -363,7 +364,7 @@ function Entry({ entry, body, pinned, ui }: { entry: HistoryEntry; body: 'open' 
         {entry.links.length === 0 ? null : (
           <div class="hist-entry-links">
             {entry.links.map((link) => (
-              <Link link={link} />
+              <Link link={link} local={local} />
             ))}
           </div>
         )}
@@ -372,7 +373,7 @@ function Entry({ entry, body, pinned, ui }: { entry: HistoryEntry; body: 'open' 
   );
 }
 
-function Items({ items, ui, pinned }: { items: Item[]; ui: HistoryUi; pinned: string | null }) {
+function Items({ items, ui, pinned, local }: { items: Item[]; ui: HistoryUi; pinned: string | null; local: boolean }) {
   return (
     <>
       {items.map((item) =>
@@ -389,7 +390,7 @@ function Items({ items, ui, pinned }: { items: Item[]; ui: HistoryUi; pinned: st
               </summary>
               <ol class="hist-timeline">
                 {item.entries.map((entry) => (
-                  <Entry key={`entry:${entry.key}`} entry={entry} body={null} pinned={false} ui={ui} />
+                  <Entry key={`entry:${entry.key}`} entry={entry} body={null} pinned={false} ui={ui} local={local} />
                 ))}
               </ol>
             </details>
@@ -401,6 +402,7 @@ function Items({ items, ui, pinned }: { items: Item[]; ui: HistoryUi; pinned: st
             body={item.body}
             pinned={item.entry.stage && item.entry.stateId !== null && item.entry.stateId === pinned}
             ui={ui}
+            local={local}
           />
         ),
       )}
@@ -503,9 +505,10 @@ function GroupHead({ group }: { group: Group }) {
  * The page's History tab (PRD R59, R98): the head (key, repository, links, the title as the page's `h1`, and one line with the status or
  * waiting-on-you pill, the playbook and the summary), the timeline's toolbar (the filter, Expand all and Collapse all, then the chips under them), then the work items as
  * groups of one timeline, newest first, the open work item's first with the pinned state at the head of its rail. The head shows from what the
- * page holds before History loads, after a failed read and for a row with no ticket History.
+ * page holds before History loads, after a failed read and for a row with no ticket History. A folder link opens VS Code only on this computer's
+ * page (`local`).
  */
-export function renderHistory(open: HistoryOpen | null, state: StateView | null, now: number, head: HistoryHead): VNode {
+export function renderHistory(open: HistoryOpen | null, state: StateView | null, now: number, head: HistoryHead, local = true): VNode {
   const view = open?.view ?? null;
   const ui = open?.ui ?? EMPTY_HISTORY_UI;
   const pinnedId = state?.id ?? null;
@@ -543,7 +546,7 @@ export function renderHistory(open: HistoryOpen | null, state: StateView | null,
           {view === null || view.links.length === 0 ? null : (
             <span class="hist-head-links">
               {view.links.map((link) => (
-                <Link link={link} />
+                <Link link={link} local={local} />
               ))}
             </span>
           )}
@@ -642,7 +645,7 @@ export function renderHistory(open: HistoryOpen | null, state: StateView | null,
               {group.own || group.open ? (
                 <ol class="hist-timeline">
                   {group.own ? pinned : null}
-                  {group.open ? <Items items={group.items} ui={ui} pinned={pinnedId} /> : null}
+                  {group.open ? <Items items={group.items} ui={ui} pinned={pinnedId} local={local} /> : null}
                 </ol>
               ) : null}
               {group.open && group.shown === 0 ? (

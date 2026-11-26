@@ -68,15 +68,28 @@ const notSent = (item: ItemView): boolean => item.type === 'message' && item.del
 
 const newestFirst = (artifacts: ArtifactView[]): ArtifactView[] => [...artifacts].sort((a, b) => b.updatedAt - a.updatedAt || a.path.localeCompare(b.path));
 
-/** The state after one event of the stream; `hello` starts the conversation from empty. */
-export function applyEvent(state: PageState, event: Event): PageState {
+/** The label of the control that starts VS Code on the work item (`OPEN_IN_VSCODE` in the hub's page.ts). */
+export const OPEN_IN_VSCODE = 'Open in VS Code';
+
+/**
+ * The groups without Open in VS Code, for a paired device's page (PRD R126): VS Code starts on the computer that runs the hub, where the
+ * operator using the device is not, and a phone or tablet cannot run it.
+ */
+export function withoutVsCode(groups: PageGroup[]): PageGroup[] {
+  return groups.map((group) => ({ ...group, rows: group.rows.map((row) => (row.opens.some((one) => one.label === OPEN_IN_VSCODE) ? { ...row, opens: row.opens.filter((one) => one.label !== OPEN_IN_VSCODE) } : row)) }));
+}
+
+/** The state after one event of the stream; `hello` starts the conversation from empty. A paired device's page (`local` false) keeps no Open in VS Code. */
+export function applyEvent(state: PageState, event: Event, local = true): PageState {
+  const groups = (listed: PageGroup[] | undefined): PageGroup[] => (listed === undefined ? state.groups : local ? listed : withoutVsCode(listed));
+
   switch (event.type) {
     case 'hello':
       return {
         ...state,
         key: event['key'] ?? state.key,
         connected: true,
-        groups: event['groups'] ?? state.groups,
+        groups: groups(event['groups']),
         header: event['header'] ?? state.header,
         scope: event['scope'] ?? null,
         session: (event['sessions'] as SessionView[] | undefined)?.find((one) => one.current) ?? null,
@@ -93,7 +106,7 @@ export function applyEvent(state: PageState, event: Event): PageState {
         ...diffSettings(event['settings'], state),
       };
     case 'list':
-      return { ...state, groups: event['groups'], header: event['header'] ?? state.header };
+      return { ...state, groups: groups(event['groups']), header: event['header'] ?? state.header };
     case 'scope':
       return { ...state, scope: event['scope'] ?? null };
     case 'conversations':

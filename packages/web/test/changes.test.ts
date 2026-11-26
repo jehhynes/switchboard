@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { compareValid, emptyNote, fileAt, listBase, listNote, listRef, rowTitle, scopeKind, scopeLabel, tickScope } from '../src/changes.js';
 import type { ChangesList } from '../src/changes.js';
-import { diffLayout, diffNote } from '../src/changes.js';
+import { diffLayout, diffNote, fileNote } from '../src/changes.js';
 import type { DiffModule } from '../src/diff/types.js';
 import { startPage } from '../src/main.js';
 import type { PageRow } from '@switchboard/protocol';
@@ -581,6 +581,15 @@ describe('the Changes list text', () => {
     expect(diffNote({ state: 'ok', version: '1', data: { ...data, binary: true } })).toBe('Binary file not shown.');
     expect(diffNote({ state: 'ok', version: '1', data: { ...data, patch: null, tooLarge: 'patch' } })).toBe('This change is too large to show here. Open it in VS Code.');
     expect(diffNote({ state: 'ok', version: '1', data: { ...data, tooLarge: 'sides' } })).toBeNull();
+  });
+
+  it("points a change or file too large to show to VS Code only on this computer's page", () => {
+    const data = { path: 'a', status: 'M', patch: null, old: null, new: null, binary: false, tooLarge: 'patch' } as const;
+    const file = { path: 'a.ts', contents: null, binary: false, tooLarge: true } as never;
+
+    expect(diffNote({ state: 'ok', version: '1', data }, false)).toBe('This change is too large to show here.');
+    expect(fileNote({ state: 'ok', version: '1', etag: null, data: file }, true)).toBe('This file is too large to show here. Open it in VS Code.');
+    expect(fileNote({ state: 'ok', version: '1', etag: null, data: file }, false)).toBe('This file is too large to show here.');
   });
 
   it('says the file count, the lines changed and a cut list, leaving the viewed count to the tab, and the base in its tooltip', () => {

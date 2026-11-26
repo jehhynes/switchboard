@@ -182,7 +182,7 @@ describe('the Changes list', () => {
   let treeGets: string[] = [];
   let lastUrl = '';
 
-  const start = () => {
+  const start = (deps: Partial<Parameters<typeof startPage>[1]> = {}) => {
     treeGets = [];
     const fetch = vi.fn(async (url: string, init?: unknown) => {
       // The tree reads its uncommitted list right after the worktree's files, in one go; it answers with no rows here.
@@ -251,7 +251,7 @@ describe('the Changes list', () => {
 
       return { status: answer.status, ok: answer.status === 200, headers: new Headers(etag === undefined ? {} : { ETag: etag }), json: async () => answer.body } as unknown as Response;
     });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadDiff: async () => (await moduleGate, module) });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadDiff: async () => (await moduleGate, module), ...deps });
     const source = FakeSource.last!;
 
     pages.push(page);
@@ -346,6 +346,19 @@ describe('the Changes list', () => {
     expect(root.querySelector('.changes-tab')!.classList.contains('selected')).toBe(true);
     expect(changesMounts).toHaveLength(2);
     expect(listGets()).toHaveLength(reads);
+  });
+
+  it('ChangesTab_TooLargeOnPairedDevice_SaysSoWithoutVsCode', async () => {
+    diffAnswers['src/new.ts'] = { status: 200, body: { path: 'src/new.ts', status: 'M', patch: null, old: null, new: null, binary: false, tooLarge: 'patch' } };
+    const unread = () => ({ ...LIST, rows: LIST.rows.map((row) => ({ ...row, viewed: false, binary: false, additions: row.additions ?? 1, deletions: row.deletions ?? 0 })) });
+
+    answers.push({ status: 200, body: unread() }, { status: 200, body: unread() });
+    start({ local: false });
+    visible = { first: 0, last: 1 };
+    await openRow(0);
+    await flush();
+
+    expect(changesMounts[0]!.sets).toContainEqual(['src/new.ts', 'This change is too large to show here.']);
   });
 
   it('ChangesTab_ForTheFilesInView_ReadsEachPatchAloneAndDrawsItOrWhyNot', async () => {
