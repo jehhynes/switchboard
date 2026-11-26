@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core/log';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SherpaRuntime } from './sherpa.js';
@@ -201,7 +202,7 @@ export interface VoiceprintDeps {
   dir: string;
   /** Loads the speaker model on first use, or says why it cannot run. */
   embedder(): Embedder | { error: string };
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   now?(): number;
 }
 
@@ -406,7 +407,7 @@ export class Voiceprint {
         throw new Error(`The voiceprint could not be saved: ${(error as Error).message}`);
       }
 
-      this.deps.log(`${name} could not be written: ${(error as Error).message}`);
+      this.deps.log(`${name} could not be written: ${(error as Error).message}`, 'warn');
     }
   }
 }

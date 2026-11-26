@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core/log';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -99,7 +100,7 @@ export interface MicUseDeps {
   speakers?: string | null;
   /** Watching cannot run, as when PowerShell or `pactl` is missing: the voice then listens as if no other app recorded. */
   failed(): void;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   spawn?: typeof spawn;
   platform?: NodeJS.Platform;
 }
@@ -156,7 +157,7 @@ export function watchMicUse(deps: MicUseDeps): MicUse | null {
     const events = run('pactl', ['subscribe'], { stdio: ['ignore', 'pipe', 'ignore'] });
 
     events.on('error', (error) => {
-      deps.log(`watching other apps' recording failed: ${error.message}`);
+      deps.log(`watching other apps' recording failed: ${error.message}`, 'warn');
       deps.failed();
     });
     createInterface({ input: events.stdout! }).on('line', (line) => {
@@ -179,12 +180,12 @@ export function watchMicUse(deps: MicUseDeps): MicUse | null {
 
 function follow(child: ChildProcess, deps: MicUseDeps, parse: (line: string) => { busy: boolean; apps: string[] } | null): void {
   child.on('error', (error) => {
-    deps.log(`watching other apps' recording failed: ${error.message}`);
+    deps.log(`watching other apps' recording failed: ${error.message}`, 'warn');
     deps.failed();
   });
   child.on('exit', (code) => {
     if (code !== 0 && code !== null) {
-      deps.log(`watching other apps' recording stopped with exit code ${code}`);
+      deps.log(`watching other apps' recording stopped with exit code ${code}`, 'warn');
       deps.failed();
     }
   });

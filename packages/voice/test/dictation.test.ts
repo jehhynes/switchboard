@@ -214,7 +214,8 @@ describe('Dictation', () => {
     quiet(PHRASE_SILENCE_MS + 3_000);
     expect(answers).toEqual(['yes go ahead']);
     expect(sent).toEqual([]);
-    expect(logs).toContain('alert answer id1: "yes go ahead"');
+    expect(logs).toContain('alert answer id1: 3 words');
+    expect(logs.join('\n')).not.toContain('go ahead');
 
     // Stopping listening for an answer stops capture again: there is still no target.
     dictation.listen(null);
@@ -1105,7 +1106,8 @@ describe('Dictation', () => {
     expect(sent[1]).toMatchObject({ score: 0.9, f0: 110, dropped: false });
     expect(voiceprint.checks.map((one) => one.text)).toEqual(['fix it', 'someone else']);
     expect(voiceprint.checks[0]!.samples).toBeGreaterThan(0);
-    expect(logs).toContain('piece dropped by the voice check (score 0.31): someone else');
+    expect(logs).toContain('piece dropped by the voice check (score 0.31): 2 words');
+    expect(logs.filter((line) => line.startsWith('piece dropped')).join('\n')).not.toContain('someone else');
     expect(used).toEqual(['fix it']);
     quiet(2_000);
     expect(kinds(sent).at(-1)).toBe('utterance "fix it" final');
@@ -1228,7 +1230,8 @@ describe('Dictation', () => {
     expect(sent).toEqual([]);
     say('the session token is refreshed', 1_000);
     expect(sent).toEqual([]);
-    expect(logs).toContain('words heard over reply r1 dropped as its echo: the session token is refreshed');
+    expect(logs).toContain('5 words heard over reply r1 dropped as its echo');
+    expect(logs.join('\n')).not.toContain('session token');
     expect(speech.interrupts).toBe(0);
     say('fix it', 100);
     expect(kinds(sent)).toEqual(['words "fix it"']);
@@ -1245,7 +1248,7 @@ describe('Dictation', () => {
     loud('hold on wait', 200);
     expect(speech.interrupts).toBe(1);
     expect(engine.streams).toBe(2);
-    expect(logs).toContain('barge-in on reply r1 (strong, score none, reply voice none): hold on wait');
+    expect(logs).toContain('barge-in on reply r1 (strong, score none, reply voice none): 3 words');
     say('hold on wait', 100);
     quiet(PHRASE_SILENCE_MS + 3_000);
     expect(kinds(sent)).toEqual(['words "hold on wait"', 'piece "hold on wait"', 'words ""', 'utterance "hold on wait" final']);
@@ -1451,9 +1454,9 @@ describe('Dictation', () => {
     // Full duplex: a reply plays and its own words are heard over it, as when the headphones come off; half-duplex at once, and the words
     // that are not the reply's neither barge in nor reach the session, though no voiceprint is enrolled.
     playOver(t, echoWav('quiet.wav'), 'r3', () => (t.engine.text = 'tests passed and stop now'));
-    expect(t.logs).toContain('echo check: 3 of 5 words heard over the reply are its own (tests passed and stop now): half-duplex again');
+    expect(t.logs).toContain('echo check: 3 of 5 words heard over the reply are its own: half-duplex again');
     expect(t.logs).toContain('listening: half-duplex (no echo cancellation on Microphone; echo check: echo detected)');
-    expect(t.logs).toContain('listening paused while the voice plays (half-duplex): words heard over the reply dropped as its echo: tests passed and stop now');
+    expect(t.logs).toContain('listening paused while the voice plays (half-duplex): 5 words heard over the reply dropped as its echo');
     expect(t.speech.interrupts).toBe(0);
     expect(t.sent).toEqual([]);
     // Listening resumes after the reply, afresh.
@@ -1723,7 +1726,7 @@ describe('Dictation spoken commands', () => {
     expect(kinds(sent)).toEqual(['words "Stop listening."', 'words ""', 'command stop-listening', 'utterance "" cut']);
     expect(sent[2]).toMatchObject({ type: 'command', text: 'Stop listening.', sessionId: 's1', utteranceId: 'id1' });
     expect(dictation.state).toBe('paused-by-voice');
-    expect(logs).toContain('listening paused by voice ("Stop listening."): only "start listening" is heard until then');
+    expect(logs).toContain('listening paused by voice: only "start listening" is heard until then');
     // Capture keeps running for the command that resumes.
     expect(capture.open_).toBe(true);
 
@@ -1774,7 +1777,7 @@ describe('Dictation spoken commands', () => {
     say('start listening', 100);
     quiet(PHRASE_SILENCE_MS + 3_000);
     expect(dictation.state).toBe('paused-by-voice');
-    expect(logs.at(-1)).toBe('"start listening" not taken: its voice match 0.55 is under voice.matchThreshold');
+    expect(logs.at(-1)).toBe('start listening not taken: its voice match 0.55 is under voice.matchThreshold');
     say('resume listening', 100);
     quiet(PHRASE_SILENCE_MS + 3_000);
     expect(dictation.state).toBe('listening');

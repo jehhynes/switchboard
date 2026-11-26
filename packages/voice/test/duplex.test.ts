@@ -80,6 +80,6 @@ describe('AutoDuplex', () => {
     expect(auto.full).toBe(true);
     expect(auto.heardWhilePlaying('wait the session token', reply)).toBe(true);
     expect([auto.full, auto.reason]).toEqual([false, 'echo check: echo detected']);
-    expect(logs.at(-1)).toBe('echo check: 3 of 4 words heard over the reply are its own (wait the session token): half-duplex again');
+    expect(logs.at(-1)).toBe('echo check: 3 of 4 words heard over the reply are its own: half-duplex again');
   });
 });

@@ -1,8 +1,9 @@
 import type { LogLevel } from '@switchboard/core';
 import { spawn } from 'node:child_process';
-import { closeSync, openSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { answers } from '@switchboard/core';
+import { answers, rotateLog } from '@switchboard/core';
+import { VOICE_LOG_MARKER } from './hubLog.js';
 import { LOG_FILE, VoiceClient, parseVoiceRecord, voiceLockAddress, voiceRecordPath } from '@switchboard/voice';
 import type { HubMessage, VoiceConnectOptions, VoiceMessage } from '@switchboard/voice';
 import { currentHolderBuild, reserveHolderBuild, VOICE_INSTALL } from './holderInstall.js';
@@ -41,6 +42,30 @@ export interface VoiceLinkDeps {
 /** The voice process's environment: the hub's without VS Code's runtime and window variables. */
 function voiceEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([name]) => !/^(ELECTRON_|VSCODE_)/i.test(name) && name.toUpperCase() !== 'NODE_OPTIONS'));
+}
+
+/**
+ * Before a voice process starts: the first time, voice.log moves aside to voice.log.1, since lines older builds wrote can hold spoken, heard
+ * and alert text, and the marker lets the page read voice.log from then on (architecture.md § Hub log); later, voice.log rotates as hub.log
+ * does. A move that fails leaves the marker unwritten, so the page still gets nothing and the next start tries again.
+ */
+export function prepareVoiceLog(home: string, logPath: string): void {
+  const marker = join(home, VOICE_LOG_MARKER);
+
+  if (existsSync(marker)) {
+    rotateLog(logPath);
+    return;
+  }
+
+  try {
+    if (existsSync(logPath)) {
+      renameSync(logPath, `${logPath}.1`);
+    }
+
+    writeFileSync(marker, `${JSON.stringify({ movedAt: new Date().toISOString() })}\n`);
+  } catch {
+    // Tried again at the next start.
+  }
 }
 
 function launchDetached(nodePath: string, args: string[], logPath: string): void {
@@ -133,6 +158,7 @@ export class VoiceLink {
     }
 
     try {
+      prepareVoiceLog(this.deps.home, this.logPath);
       (this.deps.launch ?? launchDetached)(this.deps.nodePath(), [join(this.deps.home, 'voice', build, 'voice.js'), `--home=${this.deps.home}`, `--build=${build}`], this.logPath);
     } catch (error) {
       return { error: `The voice process could not start: ${(error as Error).message} Log: ${this.logPath}` };

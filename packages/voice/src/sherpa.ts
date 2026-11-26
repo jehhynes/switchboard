@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core/log';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -173,7 +174,7 @@ export interface SherpaDeps {
   load?: (from: string) => unknown;
   /** Puts a folder first on the process's PATH. */
   prependPath?: (dir: string) => void;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
 }
 
 const realMachine: GpuMachine = { platform: process.platform, systemRoot: process.env.SystemRoot, exists: existsSync };

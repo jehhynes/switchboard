@@ -10,7 +10,11 @@ export const HUB_LOG_MAX_LINES = 20_000;
 const MATCH = 5;
 const COPIED_MS = 3_000;
 /** `file` names the file read and `size` its length, so a rotated, replaced or cut file starts the view again. */
-type Tail = { text: string; more: boolean; limited: boolean; missing: boolean; file?: string; size?: number };
+type Tail = { text: string; more: boolean; limited: boolean; missing: boolean; file?: string; size?: number; withheld?: string; earlierWithheld?: boolean };
+
+/** The logs the view can show, each read through the same route. */
+export const LOG_SOURCES = [{ value: 'hub', label: 'Switchboard', writer: 'Switchboard' }, { value: 'voice', label: 'Voice', writer: 'the voice process' }, { value: 'holder', label: 'Terminal holder', writer: 'the terminal holder' }] as const;
+type Source = (typeof LOG_SOURCES)[number]['value'];
 
 /** A read's lines without their line endings, and whether the last one has no newline yet. */
 export function splitLines(text: string): { rows: string[]; partial: boolean } {
@@ -106,14 +110,19 @@ type Model = {
   note: string | null;
   file: string;
   size: number;
+  /** Why the hub gives this log no lines yet, such as voice.log before the voice process runs this build. */
+  withheld: string | null;
+  /** The hub leaves out the lines older builds wrote, which can hold draft and spoken text. */
+  earlierWithheld: boolean;
 };
 
-const EMPTY: Model = { drawn: [], latest: [], partial: false, waiting: 0, gap: false, atStart: false, limited: false, missing: false, loaded: false, note: null, file: '', size: 0 };
+const EMPTY: Model = { drawn: [], latest: [], partial: false, waiting: 0, gap: false, atStart: false, limited: false, missing: false, loaded: false, note: null, file: '', size: 0, withheld: null, earlierWithheld: false };
 
 export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
   const [, redraw] = useState(0);
   const model = useRef<Model>(EMPTY);
   const [filter, setFilter] = useState('');
+  const [source, setSource] = useState<Source>('hub');
   const [wrap, setWrap] = useState(false);
   const [paused, setPaused] = useState(false);
   const [scrolledUp, setScrolledUp] = useState(false);
@@ -158,7 +167,7 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
   const apply = (tail: Tail, earlier: boolean): void => {
     const now = model.current;
     const { rows, partial } = splitLines(tail.text);
-    const base = { ...now, limited: tail.limited, missing: tail.missing, loaded: true, file: tail.file ?? '', size: tail.size ?? 0 };
+    const base = { ...now, limited: tail.limited, missing: tail.missing, loaded: true, file: tail.file ?? '', size: tail.size ?? 0, withheld: tail.withheld ?? null, earlierWithheld: tail.earlierWithheld === true || (now.earlierWithheld && !tail.missing) };
     const replaced = now.loaded && !now.missing && !tail.missing && ((tail.file ?? '') !== now.file || (tail.size ?? 0) < now.size);
     if (tail.missing || (!now.loaded && !earlier) || replaced) {
       update({ ...base, drawn: rows, latest: rows, partial, waiting: 0, gap: false, atStart: !tail.more, note: replaced && !earlier ? 'The log was replaced or cut; showing the new file.' : null });
@@ -210,7 +219,7 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
       pending = controller;
       setBusy(true);
       try {
-        const response = await read(`/v1/page/hub-log?lines=${lines}`, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
+        const response = await read(`/v1/page/hub-log?lines=${lines}${source === 'hub' ? '' : `&log=${source}`}`, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
         const body = await response.json();
         if (closed || pending !== controller) return;
         if (!response.ok) throw new Error(body.error ?? 'The Switchboard log could not be read.');
@@ -245,7 +254,7 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
       pending?.abort();
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [read]);
+  }, [read, source]);
 
   useLayoutEffect(() => {
     const node = output.current;
@@ -285,7 +294,8 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
       : m.waiting > 0
         ? <span>Paused — {m.gap ? 'new lines, some skipped' : `${m.waiting.toLocaleString()} new line${m.waiting === 1 ? '' : 's'}`}</span>
         : <span>Paused — no new lines</span>;
-  const empty = !m.loaded ? 'Loading…' : m.missing ? 'No Switchboard log yet. It appears when Switchboard writes its first line.' : m.drawn.length === 0 ? m.limited ? 'No complete lines fit in the last 4 MiB.' : 'The Switchboard log is empty. Lines appear here as Switchboard writes them.' : null;
+  const writer = LOG_SOURCES.find((one) => one.value === source)!.writer;
+  const empty = !m.loaded ? 'Loading…' : m.withheld !== null ? m.withheld : m.missing ? `No log yet. It appears when ${writer} writes its first line.` : m.drawn.length === 0 ? m.limited ? 'No complete lines fit in the last 4 MiB.' : `The log is empty. Lines appear here as ${writer} writes them.` : null;
   const matches = empty !== null ? empty : !selecting ? `${m.drawn.length.toLocaleString()} lines` : shown.length === 0 ? 'No lines match in the loaded lines.' : `${shown.length.toLocaleString()} of ${m.drawn.length.toLocaleString()} lines match`;
   const further = selecting && canLoadEarlier ? ' · Load earlier lines to search further' : '';
   // From the latest set, so clicks between renders all count.
@@ -300,7 +310,20 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
   return (
     <div class="hub-log">
       <div class="hub-log-tools">
-        <input class="sheet-input" type="search" aria-label="Filter Switchboard log" placeholder="Filter log…" value={filter} onInput={(event) => setFilter(event.currentTarget.value)} />
+        <select class="sheet-input hub-log-source" aria-label="Log" value={source} onChange={(event) => {
+          wantEarlier.current = false;
+          anchor.current = null;
+          model.current = EMPTY;
+          setPaused(false);
+          setScrolledUp(false);
+          setError(null);
+          setCheckedAt(null);
+          setArea('');
+          setSource(event.currentTarget.value as Source);
+        }}>
+          {LOG_SOURCES.map((one) => <option value={one.value}>{one.label}</option>)}
+        </select>
+        <input class="sheet-input" type="search" aria-label="Filter log" placeholder="Filter log…" value={filter} onInput={(event) => setFilter(event.currentTarget.value)} />
         <label><input type="checkbox" checked={wrap} onChange={(event) => setWrap(event.currentTarget.checked)} /> Wrap</label>
         <button type="button" class="sheet-button secondary" onClick={() => void copy()} disabled={shown.length === 0}>Copy shown lines</button>
       </div>
@@ -319,6 +342,7 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
           : <button type="button" class="sheet-button secondary" onClick={toLatest}>{m.waiting > 0 ? 'Jump to latest' : 'Resume'}</button>}
       </div>
       {m.note === null ? null : <p class="sheet-detail">{m.note}</p>}
+      {m.earlierWithheld && m.atStart ? <p class="sheet-detail">Lines from before this build are not shown, since they can hold draft and spoken text.</p> : null}
       {m.limited ? <p class="sheet-detail">Only the last 4 MiB is shown; earlier and very long lines are left out.</p> : null}
       <div class={`hub-log-output${wrap ? ' wrap' : ''}`} ref={output} tabIndex={0} role="log" aria-label="Switchboard log text" onScroll={(event) => {
         const node = event.currentTarget;

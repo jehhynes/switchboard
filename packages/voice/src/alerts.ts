@@ -1,4 +1,6 @@
+import type { LogLevel } from '@switchboard/core/log';
 import type { VoiceSettings } from '@switchboard/core/settings';
+import { wordCount } from './logText.js';
 import type { AlertCause, AlertOutcome, SpeechState, VoiceMessage } from './protocol.js';
 import type { SpeechVoice } from './tts.js';
 
@@ -49,7 +51,7 @@ export interface AlertsDeps {
   settings(): VoiceSettings;
   send(message: Extract<VoiceMessage, { type: 'alert-done' }>): void;
   now(): number;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   every?(run: () => void, ms: number): { stop(): void };
 }
 
@@ -275,7 +277,7 @@ export class Alerts {
     const line = alertLine(alert, settings.operatorName);
 
     this.#active = active;
-    this.deps.log(`alert ${alert.alertId} for session ${alert.sessionId} (${alert.cause}): "${line}"${active.listening ? '' : ', with no answer: the mic is not listening'}`);
+    this.deps.log(`alert ${alert.alertId} for session ${alert.sessionId} (${alert.cause}): ${wordCount(line)} said${active.listening ? '' : ', with no answer: the mic is not listening'}`);
 
     if (active.listening) {
       this.deps.listen((text, cut) => this.#answered(active, text, cut));
@@ -310,7 +312,7 @@ export class Alerts {
     }
 
     if (declines(text)) {
-      this.#finish(active, 'declined', `"${text}"`);
+      this.#finish(active, 'declined', `the answer declined it (${wordCount(text)})`);
       return;
     }
 
@@ -322,7 +324,7 @@ export class Alerts {
 
     const moved = this.deps.talkHere(alert.sessionId);
 
-    this.deps.log(`alert ${alert.alertId} answered "${text}": ${moved ? 'the voice moves to its session' : 'its session cannot be the voice target, so the voice stays'}`);
+    this.deps.log(`alert ${alert.alertId} answered (${wordCount(text)}): ${moved ? 'the voice moves to its session' : 'its session cannot be the voice target, so the voice stays'}`);
     this.deps.say(`alert:${alert.alertId}:detail`, alert.detail, alert.as, (state) => {
       if (this.#active === active) {
         this.#finish(active, state === 'played' ? 'announced' : 'cancelled', state === 'played' ? 'read' : `its detail was ${state}`);

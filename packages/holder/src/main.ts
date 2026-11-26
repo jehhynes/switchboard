@@ -20,8 +20,9 @@ function option(name: string): string | undefined {
   return process.argv.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
 }
 
-function log(message: string): void {
-  console.log(`${new Date().toISOString()} ${message}`);
+/** One holder.log line in the hub log's format (logLine in @switchboard/core, which the holder does not depend on): time, level, text. */
+function log(message: string, level: 'error' | 'warn' | 'info' = 'info'): void {
+  process.stdout.write(`${new Date().toISOString()} ${level.padEnd(5)} ${message}\n`);
 }
 
 function listen(address: string): Promise<Server | null> {
@@ -193,10 +194,10 @@ async function main(): Promise<void> {
 }
 
 // A crash would end every held session, so an unexpected error is logged and the holder keeps running.
-process.on('uncaughtException', (error) => log(`Unexpected error: ${error.stack ?? error.message}`));
-process.on('unhandledRejection', (error) => log(`Unexpected rejection: ${String(error)}`));
+process.on('uncaughtException', (error) => log(`Unexpected error: ${error.stack ?? error.message}`, 'error'));
+process.on('unhandledRejection', (error) => log(`Unexpected rejection: ${String(error)}`, 'error'));
 
 main().catch((error: unknown) => {
-  log(`The terminal holder could not start: ${(error as Error).stack ?? String(error)}`);
+  log(`The terminal holder could not start: ${(error as Error).stack ?? String(error)}`, 'error');
   process.exit(1);
 });

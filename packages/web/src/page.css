@@ -936,7 +936,7 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .hub-log-day { margin: 6px 0 2px; color: var(--vscode-descriptionForeground); font-family: var(--vscode-font-family, sans-serif); border-bottom: 1px solid var(--vscode-panel-border); }
 .hub-log-chip { min-height: 28px; padding: 0 10px; border: 1px solid var(--vscode-panel-border); border-radius: 14px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
 .hub-log-chip[aria-pressed="true"] { background: var(--vscode-button-background); border-color: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-.hub-log-tools .hub-log-area { flex: 0 1 160px; }
+.hub-log-tools .hub-log-area, .hub-log-tools .hub-log-source { flex: 0 1 160px; }
 .hub-log-errors { border: none; background: none; padding: 0; color: var(--vscode-errorForeground); text-decoration: underline; cursor: pointer; }
 .hub-log-earlier { padding-bottom: 8px; font-family: var(--vscode-font-family, sans-serif); white-space: normal; }
 @media (hover: none), (pointer: coarse) { .hub-log-tools .sheet-input, .hub-log-tools label, .hub-log .sheet-button, .hub-log-chip { min-height: 44px; } }

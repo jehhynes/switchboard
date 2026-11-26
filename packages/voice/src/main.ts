@@ -1,3 +1,5 @@
+import { logLine } from '@switchboard/core/log';
+import type { LogLevel } from '@switchboard/core/log';
 import { createConnection, createServer } from 'node:net';
 import type { Server } from 'node:net';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -29,8 +31,8 @@ function option(name: string): string | undefined {
   return process.argv.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
 }
 
-function log(message: string): void {
-  console.log(`${new Date().toISOString()} ${message}`);
+function log(message: string, level: LogLevel = 'info'): void {
+  process.stdout.write(logLine(new Date(), level, message));
 }
 
 function listen(address: string): Promise<Server | null> {
@@ -191,10 +193,10 @@ async function main(): Promise<void> {
   log(`Listening on 127.0.0.1:${port} for ${home} (protocol ${PROTOCOL}, Node.js ${process.version}).`);
 }
 
-process.on('uncaughtException', (error) => log(`Unexpected error: ${error.stack ?? error.message}`));
-process.on('unhandledRejection', (error) => log(`Unexpected rejection: ${String(error)}`));
+process.on('uncaughtException', (error) => log(`Unexpected error: ${error.stack ?? error.message}`, 'error'));
+process.on('unhandledRejection', (error) => log(`Unexpected rejection: ${String(error)}`, 'error'));
 
 main().catch((error: unknown) => {
-  log(`The voice process could not start: ${(error as Error).stack ?? String(error)}`);
+  log(`The voice process could not start: ${(error as Error).stack ?? String(error)}`, 'error');
   process.exit(1);
 });

@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core/log';
 import { createServer } from 'node:net';
 import type { Server, Socket } from 'node:net';
 import { timingSafeEqual } from 'node:crypto';
@@ -13,7 +14,7 @@ export interface VoiceServerDeps {
   shutdown(): void;
   /** A hub connected, or the last one left. */
   connected?(connected: boolean): void;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
 }
 
 /**

@@ -19,7 +19,8 @@ import { isWebSocketUpgrade } from './webSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
 import { OTHER_SIGN_IN, PAGE_GONE } from './windows.js';
 import { HUB_LOG_LINES, HUB_LOG_MAX_LINES } from './hubLog.js';
-import type { LogTail } from './hubLog.js';
+import type { LogName, LogTail } from './hubLog.js';
+import { LOG_FILES } from './hubLog.js';
 import { appShortcut, linuxAppShortcut } from './appShortcut.js';
 import { zip } from './browserExtension.js';
 import type { VoiceDevice } from './voiceSocket.js';
@@ -61,7 +62,7 @@ export interface PageRoutes {
   /** The remote hosts and logins the page is served to through `tailscale serve` (architecture.md § Remote access); none without it. */
   remote?(): RemoteAccess;
   /** The fixed hub.log tail, read only from the hub's injected home. */
-  hubLog?(lines: number): Promise<LogTail>;
+  hubLog?(lines: number, name: LogName): Promise<LogTail>;
   /** A file of the page itself, by its name under `/page/`, `index.html` for the page; null for none. */
   asset(name: string): { mime: string; body: Buffer | string; immutable?: boolean; gzip?: Buffer } | null;
   /** Registers a page's conversation stream, `installed` when it runs as the installed app, `remote` from a paired device, and returns its page key. */
@@ -670,10 +671,13 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       } else {
         const value = url.searchParams.get('lines');
         const lines = value === null ? HUB_LOG_LINES : Number(value);
+        const name = url.searchParams.get('log') ?? 'hub';
         if ((value !== null && !/^[1-9]\d*$/.test(value)) || !Number.isSafeInteger(lines) || lines > HUB_LOG_MAX_LINES) {
           json(response, 400, { error: `Choose 1 to ${HUB_LOG_MAX_LINES} lines.` });
+        } else if (!Object.hasOwn(LOG_FILES, name)) {
+          json(response, 400, { error: 'Choose the hub, voice or holder log.' });
         } else {
-          void page.hubLog(lines).then((tail) => {
+          void page.hubLog(lines, name as LogName).then((tail) => {
             // A revoked sign-in or removed remote login must not receive a pending read.
             if (!stillAllowed() || !page.access.allows(request.headers.cookie, origin)) {
               json(response, 403, { error: 'Access to the hub log ended.' });

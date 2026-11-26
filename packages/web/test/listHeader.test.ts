@@ -368,7 +368,7 @@ describe('the list header (architecture.md § Web page)', () => {
     click('.more-actions');
     click('.more-menu [data-action="list-log"]');
     expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Switchboard log');
-    expect(root.querySelector('[aria-label="Filter Switchboard log"]')).not.toBeNull();
+    expect(root.querySelector('[aria-label="Filter log"]')).not.toBeNull();
     click('#list-sheet [data-action="list-sheet-cancel"].sheet-button');
 
     // Get the browser extension downloads this computer's copy and says how to load it unpacked (PRD R121).

@@ -34,7 +34,7 @@ import { SnapshotBuilder } from './snapshotBuilder.js';
 import type { Built } from './snapshotBuilder.js';
 import { liveScope, PAGE_GONE, WindowScopes } from './windows.js';
 import { tailscaleIdentity } from './tailscale.js';
-import { readHubLog } from './hubLog.js';
+import { markHubLog, readLog } from './hubLog.js';
 import { labelSessions } from './logLabels.js';
 import type { RemoteAccess } from './page.js';
 import { dockRowOf, PageAccess, pageActionEvent, pageCommandOf, pageHeader, pageReportOf, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
@@ -222,6 +222,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   mkdirSync(configDir, { recursive: true });
 
   const store = Store.open(join(home, 'switchboard.db'));
+
+  markHubLog(home, new Date());
   const plugins = new PluginRegistry(options.home);
   await plugins.use(filePluginPaths(configDir) ?? []);
   let config = loadConfig(configDir, undefined, store.homeRepos(), plugins.current);
@@ -1262,7 +1264,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     page: {
       access: new PageAccess(store, deps.now),
       remote: () => remote,
-      hubLog: (lines) => readHubLog(home, lines),
+      hubLog: (lines, name) => readLog(home, name, lines),
       asset: (name) => pageAsset(name, home),
       opened: (installed, remote) => {
         const key = scopes.openPage();

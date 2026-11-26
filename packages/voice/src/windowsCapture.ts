@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core/log';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -13,7 +14,7 @@ export interface WindowsCaptureDeps {
   script: string;
   /** The playback device setting, read at each open: the echo reference is the device the voice plays through. */
   speakers(): string | null;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   spawn?: typeof spawn;
   setTimer?(run: () => void, ms: number): unknown;
   clearTimer?(timer: unknown): void;

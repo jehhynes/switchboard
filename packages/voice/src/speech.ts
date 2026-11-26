@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core/log';
 import type { Output, Playback } from './output.js';
 import { needsYouChime } from './output.js';
 import type { SpeechState, VoiceMessage } from './protocol.js';
@@ -42,7 +43,7 @@ export interface SpeechDeps {
   /** Playback or speech failed with why, or worked again (null), for the `audio` report. */
   failed(error: string | null): void;
   now(): number;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   every?(run: () => void, ms: number): { stop(): void };
   /**
    * How long a reply about to start waits for the operator to stop speaking, in milliseconds, 0 or left out when it may start; `verified` when
@@ -327,7 +328,7 @@ export class Speech {
 
       playback.stop();
     } catch (error) {
-      this.deps.log(`the needs-you sound did not play: ${(error as Error).message}`);
+      this.deps.log(`the needs-you sound did not play: ${(error as Error).message}`, 'warn');
       this.deps.failed((error as Error).message);
     } finally {
       this.#chimePlayback = null;
@@ -407,7 +408,7 @@ export class Speech {
       return;
     }
 
-    this.deps.log(`reply ${current.item.replyId} was not spoken: ${error.message}`);
+    this.deps.log(`reply ${current.item.replyId} was not spoken: ${error.message}`, 'warn');
     this.deps.failed(error.message);
     this.#end(current, 'failed');
     this.#next();

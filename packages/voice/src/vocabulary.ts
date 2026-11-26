@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core/log';
 import { join } from 'node:path';
 import { glossaryFile, learnedTerms, loadGlossary, noteUsed, recordHeard, saveGlossary } from './glossary.js';
 import type { Glossary } from './glossary.js';
@@ -13,7 +14,7 @@ export class Vocabulary {
   constructor(
     private readonly voiceHome: string,
     private readonly now: () => number,
-    private readonly log: (line: string) => void,
+    private readonly log: (line: string, level?: LogLevel) => void,
   ) {}
 
   /** The hotwords for a session of the repository (`owner/name`, or null). */
@@ -28,14 +29,14 @@ export class Vocabulary {
     const pair = recordHeard(this.#loaded(), heard, meant, this.now(), this.#user());
 
     if (pair === null) {
-      this.log(`heard tag "${heard}" = "${meant}" not learnt: not a name or a technical term`);
+      this.log('a heard tag was not learnt: its term is not a name or a technical term');
       return false;
     }
 
     this.#save();
 
     if (pair.confirmed) {
-      this.log(`learnt "${pair.meant}" from "${heard}"`);
+      this.log('learnt a term from a heard tag');
     }
 
     return pair.confirmed;
@@ -62,7 +63,7 @@ export class Vocabulary {
     try {
       saveGlossary(glossaryFile(this.voiceHome), this.#loaded());
     } catch (error) {
-      this.log(`the glossary could not be saved: ${(error as Error).message}`);
+      this.log(`the glossary could not be saved: ${(error as Error).message}`, 'warn');
     }
   }
 }

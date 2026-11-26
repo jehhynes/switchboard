@@ -822,7 +822,7 @@ describe('the web page routes', () => {
   // The remote hosts and logins the served page reads, none until a test sets them.
   let remoteAccess: RemoteAccess = { hosts: [], logins: [] };
 
-  async function serve(hubLog: PageRoutes['hubLog'] = async (lines) => ({ text: `2026-11-22T12:00:00Z ${lines} lines\n`, more: lines < 1000, limited: false, missing: false, file: 'f', size: 1 }), heartbeatMs?: number) {
+  async function serve(hubLog: PageRoutes['hubLog'] = async (lines, name) => ({ text: `2026-11-22T12:00:00Z ${lines} lines${name === 'hub' ? '' : ` of ${name}`}\n`, more: lines < 1000, limited: false, missing: false, file: 'f', size: 1 }), heartbeatMs?: number) {
     const iframe = { enabled: false };
     const uploadLogs: string[] = [];
     remoteAccess = { hosts: [], logins: [] };
@@ -980,6 +980,14 @@ describe('the web page routes', () => {
     expect(JSON.parse(tail.body)).toEqual({ text: '2026-11-22T12:00:00Z 500 lines\n', more: true, limited: false, missing: false, file: 'f', size: 1 });
     expect(JSON.parse((await get('?lines=1000')).body).more).toBe(false);
     for (const count of ['0', '-1', '1.5', 'abc', '', '20001', 'Infinity']) expect((await get(`?lines=${count}`)).status).toBe(400);
+    // The picker's logs are fixed names, never a path.
+    expect(JSON.parse((await get('?lines=5&log=voice')).body).text).toBe('2026-11-22T12:00:00Z 5 lines of voice\n');
+    expect(JSON.parse((await get('?log=holder')).body).text).toBe('2026-11-22T12:00:00Z 500 lines of holder\n');
+    for (const name of ['', 'Hub', '../hub', 'C:/private/hub.log', 'toString', '__proto__']) {
+      const refused = await get(`?log=${encodeURIComponent(name)}`);
+      expect(refused.status).toBe(400);
+      expect(JSON.parse(refused.body)).toEqual({ error: 'Choose the hub, voice or holder log.' });
+    }
     expect((await send(server.port, 'POST', '/v1/page/hub-log', { Cookie: cookie })).status).toBe(405);
   });
 

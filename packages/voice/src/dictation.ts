@@ -1,4 +1,6 @@
+import type { LogLevel } from '@switchboard/core/log';
 import type { VoiceSettings } from '@switchboard/core/settings';
+import { wordCount } from './logText.js';
 import { ASR_RATE, pcmToSamples, Transcriber } from './asr.js';
 import { BargeIn, gate } from './barge.js';
 import { AutoDuplex } from './duplex.js';
@@ -103,7 +105,7 @@ export interface DictationDeps {
   spoke(): void;
   newId(): string;
   now(): number;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   setTimer?(run: () => void, ms: number): unknown;
   clearTimer?(timer: unknown): void;
   every?(run: () => void, ms: number): { stop(): void };
@@ -672,7 +674,7 @@ export class Dictation {
     const unavailable = this.deps.voiceprint == null ? 'The voice check is not available.' : this.deps.voiceprint.unavailable();
 
     if (unavailable !== null) {
-      this.deps.log(`voiceprint enrolment failed: ${unavailable}`);
+      this.deps.log(`voiceprint enrolment failed: ${unavailable}`, 'warn');
       this.deps.send({ type: 'enrollment', state: 'failed', error: unavailable });
       return;
     }
@@ -704,7 +706,7 @@ export class Dictation {
       this.deps.log(`voiceprint enrolled from ${result.windows} windows, median pitch ${result.f0 ?? 'unknown'} Hz`);
       this.deps.send({ type: 'enrollment', state: 'enrolled', error: null });
     } catch (error) {
-      this.deps.log(`voiceprint enrolment failed: ${(error as Error).message}`);
+      this.deps.log(`voiceprint enrolment failed: ${(error as Error).message}`, 'warn');
       this.deps.send({ type: 'enrollment', state: 'failed', error: (error as Error).message });
     }
   }
@@ -911,7 +913,7 @@ export class Dictation {
 
       if (this.#loggedRecognizerError !== engine.error) {
         this.#loggedRecognizerError = engine.error;
-        this.deps.log(engine.error);
+        this.deps.log(engine.error, 'warn');
       }
 
       this.#error = engine.error;
@@ -1188,7 +1190,7 @@ export class Dictation {
     this.#transcriber?.end(false);
     this.#playback = null;
     this.#deaf = true;
-    this.deps.log(`listening paused while the voice plays (half-duplex): words heard over the reply dropped as its echo: ${held}`);
+    this.deps.log(`listening paused while the voice plays (half-duplex): ${wordCount(held)} heard over the reply dropped as its echo`);
   }
 
   /**
@@ -1317,7 +1319,7 @@ export class Dictation {
       const dropped = [playback.held, rest?.text ?? ''].filter((text) => text !== '').join(' ');
 
       if (dropped !== '') {
-        this.deps.log(`words heard over reply ${playback.replyId} dropped as its echo: ${dropped}`);
+        this.deps.log(`${wordCount(dropped)} heard over reply ${playback.replyId} dropped as its echo`);
       }
 
       transcriber.end(false);
@@ -1343,7 +1345,7 @@ export class Dictation {
 
     const interrupted = this.deps.interrupt?.() ?? null;
 
-    this.deps.log(`barge-in on reply ${playback.replyId} (${barge.trigger}, score ${barge.score ?? 'none'}, reply voice ${barge.ttsScore ?? 'none'}): ${barge.words}`);
+    this.deps.log(`barge-in on reply ${playback.replyId} (${barge.trigger}, score ${barge.score ?? 'none'}, reply voice ${barge.ttsScore ?? 'none'}): ${wordCount(barge.words)}`);
     transcriber.restartFrom(barge.from - BARGE_PREROLL);
     this.#spoke();
 
@@ -1363,7 +1365,7 @@ export class Dictation {
   #failed(error: Error): void {
     this.#recognizerFailed = false;
     this.#error = `The microphone failed: ${error.message}`;
-    this.deps.log(this.#error);
+    this.deps.log(this.#error, 'warn');
 
     if (this.#enrollment !== null) {
       this.#clearTimer(this.#enrollment.timer);
@@ -1457,7 +1459,7 @@ export class Dictation {
     }
 
     if (check.dropped) {
-      this.deps.log(`piece dropped by the voice check (${check.reason === 'pitch' ? 'pitch' : 'score'} ${check.reason === 'pitch' ? `${check.f0} Hz` : check.score}): ${text}`);
+      this.deps.log(`piece dropped by the voice check (${check.reason === 'pitch' ? 'pitch' : 'score'} ${check.reason === 'pitch' ? `${check.f0} Hz` : check.score}): ${wordCount(text)}`);
       this.#roomVoice(audio);
       // Another voice's words hold no reply.
       this.#lastWordAt = this.#keptWordAt;
@@ -1525,7 +1527,7 @@ export class Dictation {
     if (command === 'start-listening' && !paused.checks.every((check) => this.#fullMatch(check.score))) {
       // Two words pass the voice check with its short-piece allowance even in other voices (0.54 to 0.59 for synthetic ones), so resuming,
       // which lets dictation through again, needs the full voice.matchThreshold.
-      this.deps.log(`"${text}" not taken: its voice match ${paused.checks.map((check) => check.score ?? 'unknown').join(', ')} is under voice.matchThreshold`);
+      this.deps.log(`start listening not taken: its voice match ${paused.checks.map((check) => check.score ?? 'unknown').join(', ')} is under voice.matchThreshold`);
     } else if (command !== null) {
       this.#command(command, text, null, paused.checks[0]!);
     }
@@ -1548,12 +1550,12 @@ export class Dictation {
   #command(command: SpokenCommand, text: string, utteranceId: string | null, check: { score: number | null; f0: number | null }): void {
     if (command === 'stop-listening' && !this.#pausedByVoice) {
       this.#pausedByVoice = true;
-      this.deps.log(`listening paused by voice ("${text}"): only "start listening" is heard until then`);
+      this.deps.log('listening paused by voice: only "start listening" is heard until then');
     } else if (command === 'start-listening' && this.#pausedByVoice) {
       this.#pausedByVoice = false;
-      this.deps.log(`listening resumed by voice ("${text}")`);
+      this.deps.log('listening resumed by voice');
     } else {
-      this.deps.log(`spoken command "${text}" heard: listening is already ${this.#pausedByVoice ? 'paused' : 'on'}`);
+      this.deps.log(`spoken command ${command} heard: listening is already ${this.#pausedByVoice ? 'paused' : 'on'}`);
     }
 
     this.deps.send({ type: 'command', command, text, sessionId: this.#target?.sessionId ?? null, utteranceId, score: check.score, f0: check.f0 });
@@ -1604,7 +1606,7 @@ export class Dictation {
         { role: 'user', content: words },
       ]);
     } catch (error) {
-      this.deps.log(`turn model: ${(error as Error).message}`);
+      this.deps.log(`turn model: ${(error as Error).message}`, 'warn');
       return;
     }
 
@@ -1734,7 +1736,7 @@ export class Dictation {
     if (answer !== null && utterance !== null) {
       const text = utterance.pieces.join(' ');
 
-      this.deps.log(`alert answer ${utterance.id}: ${final && text !== '' ? `"${text}"` : 'none'}`);
+      this.deps.log(`alert answer ${utterance.id}: ${final && text !== '' ? wordCount(text) : 'none'}`);
       answer(final && text !== '' ? text : null, !final);
     }
   }

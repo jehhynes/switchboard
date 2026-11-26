@@ -182,7 +182,7 @@ describe('the hub log sheet', () => {
     const read = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: '', more: false, limited: false, missing: true, file: '', size: 0 }) });
     await act(() => render(<HubLog fetch={read} />, host));
     await flush();
-    expect(status()).toContain('No Switchboard log yet. It appears when Switchboard writes its first line.');
+    expect(status()).toContain('No log yet. It appears when Switchboard writes its first line.');
     read.mockResolvedValueOnce(reply('kept\n'));
     await tick();
     read.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Access to the hub log ended.' }) });
@@ -347,6 +347,14 @@ describe('the hub log sheet', () => {
     expect(lines().at(-1)).toBe('two');
   });
 
+  it('says when the hub left out lines older builds wrote, and offers no earlier lines', async () => {
+    const read = vi.fn().mockResolvedValue(reply('2026-11-26T10:00:00.000Z info  hub: started\n', false, { earlierWithheld: true }));
+    await act(() => render(<HubLog fetch={read} />, host));
+    await flush();
+    expect(host.textContent).toContain('Lines from before this build are not shown, since they can hold draft and spoken text.');
+    expect(button('Load earlier lines')).toBeUndefined();
+  });
+
   it('reads a partial last line again once it is complete', async () => {
     const read = vi.fn().mockResolvedValue(reply('one\ntw'));
     await act(() => render(<HubLog fetch={read} />, host));
@@ -355,6 +363,31 @@ describe('the hub log sheet', () => {
     read.mockResolvedValue(reply('one\ntwo\nthree\n'));
     await tick();
     expect(lines()).toEqual(['one', 'two', 'three']);
+  });
+
+  it('picks the voice or terminal holder log, starting the view again, and says when the hub withholds the voice log', async () => {
+    const read = vi.fn().mockResolvedValue(reply('2026-11-26T01:00:00.000Z info  hub: started\n'));
+    await act(() => render(<HubLog fetch={read} />, host));
+    await flush();
+    const picker = host.querySelector<HTMLSelectElement>('select[aria-label=Log]')!;
+    expect([...picker.options].map((one) => one.textContent)).toEqual(['Switchboard', 'Voice', 'Terminal holder']);
+    read.mockResolvedValue({ ok: true, json: async () => ({ text: '', more: false, limited: false, missing: true, file: '', size: 0, withheld: 'The voice log shows once the voice process restarts on this build, which keeps no spoken or heard words in it.' }) });
+    await act(() => { picker.value = 'voice'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    expect(read.mock.calls.at(-1)![0]).toBe('/v1/page/hub-log?lines=500&log=voice');
+    expect(lines()).toEqual([]);
+    expect(status()).toContain('The voice log shows once the voice process restarts on this build');
+    read.mockResolvedValue(reply('2026-11-26T01:00:00.000Z info  Listening on 127.0.0.1:1\n', false, { file: 'h1' }));
+    await act(() => { picker.value = 'holder'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    expect(read.mock.calls.at(-1)![0]).toBe('/v1/page/hub-log?lines=500&log=holder');
+    expect(lines()).toEqual([expect.stringContaining('Listening on 127.0.0.1:1')]);
+    // A new file of another log is no replacement: no note says the log was cut.
+    expect(host.textContent).not.toContain('replaced or cut');
+    read.mockResolvedValue({ ok: true, json: async () => ({ text: '', more: false, limited: false, missing: true, file: '', size: 0 }) });
+    await act(() => { picker.value = 'voice'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
+    await flush();
+    expect(status()).toContain('No log yet. It appears when the voice process writes its first line.');
   });
 
   it('retries an interrupted Load earlier lines after returning', async () => {

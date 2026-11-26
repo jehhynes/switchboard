@@ -1,3 +1,4 @@
+import { rotateLog } from '@switchboard/core';
 import type { LogLevel } from '@switchboard/core';
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, readFileSync } from 'node:fs';
@@ -64,6 +65,8 @@ function holderEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 function launchDetached(nodePath: string, args: string[], logPath: string): void {
+  rotateLog(logPath);
+
   const log = openSync(logPath, 'a');
 
   try {

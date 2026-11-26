@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core/log';
 import type { VoiceSettings } from '@switchboard/core/settings';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import { Alerts } from './alerts.js';
@@ -48,7 +49,7 @@ export interface VoiceServiceDeps {
   watchLock?(changed: (event: LockEvent) => void): LockWatch | null;
   send(message: VoiceMessage): void;
   now(): number;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   setTimer?(run: () => void, ms: number): unknown;
   clearTimer?(timer: unknown): void;
   every?(run: () => void, ms: number): { stop(): void };
@@ -175,7 +176,6 @@ export class VoiceService {
     this.#router = new Router({
       changed: (gen, sessionId, reason) => {
         this.#speech.halt();
-        deps.log(`voice target ${sessionId ?? 'none'} (${reason}), generation ${gen}`);
         deps.send({ type: 'active', gen, sessionId, reason });
         this.#dictation?.target(gen, sessionId, sessionId === null ? null : (this.#targets.get(sessionId)?.repo ?? null));
 

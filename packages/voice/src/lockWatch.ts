@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core/log';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -87,7 +88,7 @@ export interface LockWatchDeps {
   /** `lockwatch.ps1` on Windows. */
   script: string;
   changed(event: LockEvent): void;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   spawn?: typeof spawn;
   platform?: NodeJS.Platform;
 }
@@ -176,10 +177,10 @@ export function watchLock(deps: LockWatchDeps): LockWatch | null {
 }
 
 function failures(child: ChildProcess, deps: LockWatchDeps): void {
-  child.on('error', (error) => deps.log(`watching the session's lock failed: ${error.message}`));
+  child.on('error', (error) => deps.log(`watching the session's lock failed: ${error.message}`, 'warn'));
   child.on('exit', (code) => {
     if (code !== 0 && code !== null) {
-      deps.log(`watching the session's lock stopped with exit code ${code}`);
+      deps.log(`watching the session's lock stopped with exit code ${code}`, 'warn');
     }
   });
 }

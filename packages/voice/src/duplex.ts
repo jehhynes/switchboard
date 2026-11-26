@@ -119,7 +119,7 @@ export class AutoDuplex {
     this.#full = false;
     this.#clears = 0;
     this.#heard = 'echo';
-    this.log(`echo check: ${echo} of ${heard.length} words heard over the reply are its own (${words}): half-duplex again`);
+    this.log(`echo check: ${echo} of ${heard.length} words heard over the reply are its own: half-duplex again`);
     return true;
   }
 }

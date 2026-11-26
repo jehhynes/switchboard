@@ -101,7 +101,7 @@ describe('glossary', () => {
     terms('user.txt', 'Switchboard\n');
     terms('repos/acme/app.txt', 'Acme\n');
     expect(vocabulary.heard('fix up', 'wait')).toBe(false);
-    expect(logs).toEqual(['heard tag "fix up" = "wait" not learnt: not a name or a technical term']);
+    expect(logs).toEqual(['a heard tag was not learnt: its term is not a name or a technical term']);
     vocabulary.heard('fix up', 'fixup');
     vocabulary.heard('fix up', 'fixup');
     expect(vocabulary.terms('acme/app')).toEqual(['Switchboard', 'Acme', 'fixup']);

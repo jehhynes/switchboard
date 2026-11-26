@@ -94,7 +94,7 @@ describe('Alerts', () => {
     expect(t.sent).toEqual([]);
     t.said[1]!.done('played');
     expect(t.sent).toEqual([{ type: 'alert-done', alertId: 'a1', sessionId: 's2', outcome: 'announced' }]);
-    expect(t.logs).toContain('alert a1 answered "yes": the voice moves to its session');
+    expect(t.logs).toContain('alert a1 answered (1 word): the voice moves to its session');
     expect(t.alerts.active).toBeNull();
   });
 
@@ -106,7 +106,9 @@ describe('Alerts', () => {
     t.answer('go ahead');
     t.said[1]!.done('played');
     expect(t.outcomes()).toEqual(['a1 announced']);
-    expect(t.logs).toContain('alert a1 answered "go ahead": its session cannot be the voice target, so the voice stays');
+    expect(t.logs).toContain('alert a1 answered (2 words): its session cannot be the voice target, so the voice stays');
+    // voice.log is readable from the page, so it keeps no answer or alert text.
+    expect(t.logs.join('\n')).not.toMatch(/go ahead|Fix the badge/);
   });
 
   it('ends unanswered after voice.alertAnswerSeconds of silence, and waits for an answer still being spoken up to a grace', () => {
@@ -155,7 +157,8 @@ describe('Alerts', () => {
     t.said[0]!.done('played');
     expect(t.outcomes()).toEqual(['a1 unanswered']);
     expect(t.calls).toEqual([]);
-    expect(t.logs[0]).toBe('alert a1 for session s2 (turn-finished): "Hey Alex? Tinker finished Fix the badge.", with no answer: the mic is not listening');
+    expect(t.logs[0]).toBe('alert a1 for session s2 (turn-finished): 7 words said, with no answer: the mic is not listening');
+    expect(t.logs.join('\n')).not.toMatch(/Alex|Tinker|Fix the badge/);
   });
 
   it('ends a handshake whose mic stops listening, as when the mic is turned off or another app records, also mid-answer', () => {
