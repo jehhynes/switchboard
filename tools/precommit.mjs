@@ -2,13 +2,17 @@
 // Pre-commit checks for the staged files. See docs/testing.md.
 //
 // Runs build, typecheck and tests, without coverage, only for the workspaces the
-// staged files touch and the workspaces that depend on them; dependencies of those are
-// built first, because tests run built bundles. A staged file outside every
+// staged files touch and the workspaces that depend on them, or only the test files
+// `narrow` lists for a dependent; dependencies of those are built first, because
+// tests run built bundles. It waits for a machine-wide check slot first
+// (tools/check-lock.mjs). A staged file outside every
 // workspace runs the full `npm run verify`. Markdown and text files need no
 // checks. The full suite runs before a merge into main, not here.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { takeSlot } from './check-lock.mjs';
+import { checkPlan } from './check-plan.mjs';
 import { cleanGitEnv, guardRepo } from './git-guard.mjs';
 
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
@@ -66,29 +70,30 @@ for (const file of staged) {
 
 if (full || outside.length > 0) {
   if (outside.length > 0) console.log(`pre-commit: ${outside.slice(0, 5).join(', ')}${outside.length > 5 ? ', ...' : ''} outside every workspace; running the full verify.`);
-  run(['run', 'verify']);
+  // SWITCHBOARD_VERIFY=full runs it even for a tree that already passed.
+  run(['run', 'verify', ...(full ? ['--', '--force'] : [])]);
   process.exit(0);
 }
 
-// Touched workspaces and everything that depends on them, transitively.
-const affected = new Set(touched);
-for (let grew = true; grew; ) {
-  grew = false;
-  for (const w of workspaces) {
-    if (!affected.has(w.name) && w.deps.some((d) => affected.has(d))) { affected.add(w.name); grew = true; }
-  }
-}
-// Affected workspaces and their dependencies, transitively, to build.
-const toBuild = new Set(affected);
-for (let grew = true; grew; ) {
-  grew = false;
-  for (const name of [...toBuild]) for (const d of byName.get(name).deps) if (!toBuild.has(d)) { toBuild.add(d); grew = true; }
-}
+// A dependent whose tests mostly do not use a dependency: a change to that
+// dependency runs only these test files of the dependent, and its own dependents
+// run no tests for it unless listed here too. The full verify runs the rest.
+const narrow = {
+  '@switchboard/hub': { '@switchboard/web': ['test/page.test.ts', 'test/pageAssets.test.ts'] },
+  '@switchboard/hub-app': { '@switchboard/web': ['test/install.test.ts'], '@switchboard/chrome': ['test/install.test.ts'] },
+};
+
+const { affected, partial, checked, toBuild } = checkPlan(workspaces, touched, narrow);
+
+// One session's checks at a time across the machine (tools/check-lock.mjs).
+takeSlot();
 
 const flags = (set, script) => workspaces.filter((w) => set.has(w.name) && w.scripts[script]).flatMap((w) => ['--workspace', w.name]);
-console.log(`pre-commit: checking ${[...affected].join(', ')}`);
+console.log(`pre-commit: checking ${[...affected].join(', ')}${partial.size > 0 ? `; for them, ${[...partial].map(([name, files]) => `${name} ${files.join(' ')}`).join('; ')}` : ''}`);
 // Tests run without coverage: its thresholds are checked by the full verify before a merge.
-for (const [script, set, extra] of [['build', toBuild, []], ['typecheck', affected, []], ['test', affected, ['--', '--coverage.enabled=false']]]) {
+const noCoverage = '--coverage.enabled=false';
+for (const [script, set, extra] of [['build', toBuild, []], ['typecheck', checked, []], ['test', affected, ['--', noCoverage]]]) {
   const f = flags(set, script);
   if (f.length > 0) run(['run', script, ...f, ...extra]);
 }
+for (const [name, files] of partial) run(['run', 'test', '--workspace', name, '--', noCoverage, ...files]);

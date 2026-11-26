@@ -8,8 +8,8 @@ Switchboard replaces Ground Control (`D:\git\ground-control`), which no longer r
 
 1. Read the relevant docs and implementation. Write a plan, including verification, before coding.
 2. Implement the change and, in the same task, update the documents it affects as [Documentation](#documentation) directs. Test new behavior according to [testing.md](docs/testing.md).
-3. Review the change with the `cross-check` skill, so the other provider reviews it, before you report the task as done or ask for acceptance. Cover requirements, correctness, regressions, and UI behavior where applicable. Fix or answer each finding before you report the task as done.
-4. Complete the required checks. For executable changes to the hub or the packages it carries, [rebuild and reinstall](#reinstalling-after-a-change).
+3. Complete the required checks. For executable changes to the hub or the packages it carries, [rebuild and reinstall](#reinstalling-after-a-change).
+4. Review a change to executable code with the `cross-check` skill, so the other provider reviews it, before you report the task as done or ask for acceptance. A change to documentation or CSS only, or of a few lines that adds no behavior, needs no review. Cover requirements, correctness, regressions, and UI behavior where applicable, and give the reviewer the check results from step 3 so it does not run them again. Review once: fix or answer each finding before you report the task as done, and ask for a second round only when you dispute a finding or a fix changed behavior the finding did not name.
 5. Commit each self-contained story or task after review, verification, and acceptance by the operator or the product manager session.
 
 Settle product questions with the Goals, Non-goals and Design rules in [prd.md](docs/prd.md#goals), and record each new decision in the document that owns it. Escalate only what those rules do not settle.
@@ -54,7 +54,7 @@ Read the document that covers the decision:
 
 [testing.md](docs/testing.md) is the full contract.
 
-- For executable changes, run only the checks the change affects while working: the pre-commit hook does, through `npm run verify:staged`, so commit without `--no-verify`. Run `npm run verify` (build, typecheck, tests, and coverage thresholds) before merging a branch into `main`.
+- For executable changes, run only the checks the change affects while working: the pre-commit hook does, through `npm run verify:staged`, so commit without `--no-verify`. Run `npm run verify` (build, typecheck, tests, and coverage thresholds) once, before merging a branch into `main`; it runs nothing for a clean tree that already passed. Run the browser checks [testing.md](docs/testing.md#required-checks) requires once too, when the change is finished.
 - Verify behavior directly instead of asking the developer to click through it.
 - Package logic and the web page's DOM belong in Vitest.
 - Use recorded, scrubbed fixtures and injected homes. No external network traffic, real Claude sessions, or developer services in tests; test-owned loopback listeners are allowed.
