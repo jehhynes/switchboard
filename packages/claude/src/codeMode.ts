@@ -22,7 +22,7 @@ export const DIRECT_API = 'https://api.anthropic.com';
 export const CODE_MODE_START_MS = 60_000;
 /** A live process with no marker of its launch after this long waits on a prompt in its terminal (mechanics M70). */
 export const START_PROMPT_MS = 20_000;
-/** A held session with no terminal attached and no input or output for this long is ended (PRD R95); opening it resumes it at once. */
+/** A held session with no terminal attached and no input for this long after its turn ended is ended (PRD R95); opening it resumes it at once. */
 export const CODE_MODE_IDLE_MS = 60 * 60_000;
 const POLL_MS = 1_000;
 const COLS = 120;
@@ -480,6 +480,18 @@ export function heldState(marker: Marker, promptless = false): { state: LiveStat
   return marker.source === 'startup' ? { state: promptless ? 'idle' : 'running', detail: null } : marker.source === 'compact' ? null : { state: 'idle', detail: null };
 }
 
+/**
+ * When a held session's idle time starts (PRD R95): its start, its last input, and the time of its marker when that marker is a turn end.
+ * Output counts only without such a marker, as with hooks off or after a compaction, because an idle Claude repaints its status line on its
+ * own, such as for its update check, often enough that no observed idle session reached the limit (mechanics M161).
+ */
+export function heldIdleSince(entry: Pick<SessionEntry, 'startedAt' | 'lastInputAt' | 'lastOutputAt'>, marker: Marker | undefined, promptless = false): number {
+  const state = marker === undefined ? null : heldState(marker, promptless)?.state;
+  const since = Math.max(entry.startedAt, entry.lastInputAt ?? 0);
+
+  return (state === 'idle' || state === 'failed') && marker?.at !== undefined ? Math.max(since, marker.at) : Math.max(since, entry.lastOutputAt ?? 0);
+}
+
 /** Code Mode sessions, held in the terminal holder (architecture.md § Code Mode sessions). */
 export class CodeModeRunner implements SessionRunner {
   constructor(private readonly deps: CodeModeRunnerDeps) {}
@@ -665,7 +677,7 @@ export class CodeModeRunner implements SessionRunner {
    * SessionStart with source clear, fork or resume under another session ID is the held process changing its ID (mechanics M73), reported as a
    * fork. A Code Mode session started waiting on a prompt is checked for Code Mode when its first marker arrives.
    */
-  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks: ObservedFork[]; gone?: true; idle: string[] } | { error: string }> {
+  async observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks: ObservedFork[]; gone?: true; idle: string[]; idleSince?: Record<string, number> } | { error: string }> {
     const found = await this.deps.holder(false);
 
     if ('gone' in found) {
@@ -688,6 +700,7 @@ export class CodeModeRunner implements SessionRunner {
     const observed: ObservedSession[] = [];
     const forks: ObservedFork[] = [];
     const idle: string[] = [];
+    const idleSinces: Record<string, number> = {};
     const now = this.deps.now();
 
     for (const session of sessions) {
@@ -699,11 +712,16 @@ export class CodeModeRunner implements SessionRunner {
 
       const tree = entry.tree === undefined ? {} : { tree: entry.tree };
 
-      if (entry.clients === 0 && now - Math.max(entry.startedAt, entry.lastInputAt ?? 0, entry.lastOutputAt ?? 0) >= (this.deps.idleMs ?? CODE_MODE_IDLE_MS)) {
+      const marker = ownMarker(markers, session);
+      // Read with this roster's markers, so a turn that ended during the read starts its idle time now rather than from an older state.
+      const idleSince = heldIdleSince(entry, marker, session.promptless === true);
+
+      idleSinces[session.id] = idleSince;
+
+      if (entry.clients === 0 && now - idleSince >= (this.deps.idleMs ?? CODE_MODE_IDLE_MS)) {
         idle.push(session.id);
       }
 
-      const marker = ownMarker(markers, session);
       // The old ID's marker goes with its SessionEnd; while it stays, another ID with the launch is a nested run, such as `claude -p --resume`.
       const candidates =
         marker === undefined
@@ -738,7 +756,7 @@ export class CodeModeRunner implements SessionRunner {
       observed.push({ sessionId: session.id, ...(state ?? { state: session.state === 'starting' || session.state === 'ended' ? 'running' : session.state, detail: session.stateDetail }), interactive: false, ...tree });
     }
 
-    return { sessions: observed, forks, idle };
+    return { sessions: observed, forks, idle, idleSince: idleSinces };
   }
 
   /**

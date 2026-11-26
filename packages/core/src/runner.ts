@@ -50,7 +50,7 @@ export interface SessionRunner {
    * Liveness and state of the given started sessions; a session left out has ended. `forks` holds live forks that may replace a session
    * (PRD R78). A failed read changes nothing.
    */
-  observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks?: ObservedFork[]; gone?: true; idle?: string[] } | { error: string }>;
+  observe(sessions: Session[]): Promise<{ sessions: ObservedSession[]; forks?: ObservedFork[]; gone?: true; idle?: string[]; idleSince?: Record<string, number> } | { error: string }>;
   /** How a native session relates to the session's current copy; a provider without forks leaves it out (PRD R78). */
   relation?(nativeSessionId: string, session: Session): CopyRelation;
   /** The session of which the native session is a newer fork, among the given sessions, or null. */
@@ -63,7 +63,7 @@ export interface SessionRunner {
   markers(sessions: Session[]): Map<string, MarkerReading>;
   /**
    * The Code Mode runner only: the terminals attached to a held session and its last input, which defer its end (PRD R95). Its observation adds `gone` when
-   * the terminal holder is gone, so its sessions end through `holder-lost` (PRD R94), and `idle` for held sessions past the idle limit.
+   * the terminal holder is gone, so its sessions end through `holder-lost` (PRD R94), `idle` for held sessions past the idle limit, and `idleSince`, when each live held session's idle time started.
    */
   heldActivity?(sessionId: string): Promise<{ clients: number; lastInputAt: number | null; lastOutputAt?: number | null } | { error: string }>;
   /**

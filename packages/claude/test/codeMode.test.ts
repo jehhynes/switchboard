@@ -586,7 +586,7 @@ describe('CodeModeRunner.observe', () => {
     holder.entries = [entry('sb-1'), entry('sb-2', true)];
     marker(NATIVE, { event: 'Stop', launch: LAUNCH });
 
-    expect(await runner().observe([session(), session({ id: 'sb-2' }), session({ id: 'sb-3' })])).toEqual({ sessions: [{ sessionId: 'sb-1', state: 'idle', detail: null, interactive: false }], forks: [], idle: [] });
+    expect(await runner().observe([session(), session({ id: 'sb-2' }), session({ id: 'sb-3' })])).toEqual({ sessions: [{ sessionId: 'sb-1', state: 'idle', detail: null, interactive: false }], forks: [], idle: [], idleSince: { 'sb-1': 1_000 } });
   });
 
   it('keeps the last state when no marker of the launch exists, and reads a promptless resume as idle (mechanics M68)', async () => {
@@ -692,6 +692,57 @@ describe('CodeModeRunner.observe', () => {
     const observed = await runner().observe(['sb-1', 'sb-2', 'sb-3', 'sb-4'].map((id) => session({ id, state: 'idle' })));
 
     expect(observed).toMatchObject({ idle: ['sb-1'] });
+  });
+
+  it('measures a held session idle from its turn-end marker, not the output Claude repaints after it (PRD R95, mechanics M161)', async () => {
+    clock = CODE_MODE_IDLE_MS + 10_000;
+    marker(NATIVE, { event: 'Stop', launch: LAUNCH, at: 5_000 });
+    // The update check's repaint, long after the turn ended.
+    holder.entries = [{ ...entry('sb-1'), lastOutputAt: clock - 1_000 }];
+
+    expect(await runner().observe([session({ state: 'idle' })])).toMatchObject({ idle: ['sb-1'], idleSince: { 'sb-1': 5_000 } });
+  });
+
+  it('starts the idle time at a turn end the roster read finds, though the stored state is older (PRD R95)', async () => {
+    clock = CODE_MODE_IDLE_MS + 10_000;
+    marker(NATIVE, { event: 'Stop', launch: LAUNCH, at: clock - 1_000 });
+    holder.entries = [entry('sb-1')];
+
+    expect(await runner().observe([session({ state: 'idle', stateAt: 0 })])).toMatchObject({ idle: [], idleSince: { 'sb-1': clock - 1_000 } });
+  });
+
+  it('counts input after the turn end, and a turn end only while it is the latest marker (PRD R95)', async () => {
+    clock = CODE_MODE_IDLE_MS + 10_000;
+    marker(NATIVE, { event: 'Stop', launch: LAUNCH, at: 1_000 });
+    holder.entries = [{ ...entry('sb-1'), lastInputAt: clock - 2_000 }];
+
+    expect(await runner().observe([session({ state: 'idle' })])).toMatchObject({ idle: [], idleSince: { 'sb-1': clock - 2_000 } });
+
+    // A failed turn is a turn end too.
+    marker(NATIVE, { event: 'StopFailure', launch: LAUNCH, at: 1_000, error: 'rate_limit' });
+    holder.entries = [{ ...entry('sb-1'), lastOutputAt: clock - 1_000 }];
+
+    expect(await runner().observe([session({ state: 'failed' })])).toMatchObject({ idle: ['sb-1'] });
+  });
+
+  it('counts output when the latest marker is no turn end: a turn running, a compaction or another launch (PRD R95)', async () => {
+    clock = CODE_MODE_IDLE_MS + 10_000;
+    holder.entries = [{ ...entry('sb-1'), lastOutputAt: clock - 1_000 }];
+
+    for (const fields of [{ event: 'PostToolBatch', launch: LAUNCH }, { event: 'SessionStart', source: 'compact', launch: LAUNCH }, { event: 'Stop', launch: 'other-launch' }, { event: 'Stop', launch: LAUNCH, backgroundTasks: 1 }]) {
+      marker(NATIVE, { ...fields, at: 1_000 });
+
+      expect(await runner().observe([session({ state: 'idle' })])).toMatchObject({ idle: [], idleSince: { 'sb-1': clock - 1_000 } });
+    }
+  });
+
+  it('counts output with hooks off, which leave no markers (PRD R95)', async () => {
+    hooks = false;
+    clock = CODE_MODE_IDLE_MS + 10_000;
+    marker(NATIVE, { event: 'Stop', launch: LAUNCH, at: 1_000 });
+    holder.entries = [{ ...entry('sb-1'), lastOutputAt: clock - 1_000 }];
+
+    expect(await runner().observe([session({ state: 'idle' })])).toMatchObject({ idle: [] });
   });
 
   it('finds the held session whose launch wrote a marker of another session ID, as after /clear (PRD R81)', () => {

@@ -1905,3 +1905,18 @@ The offline startup limitation below is superseded by M145's verified-origin she
 - **Result:** the app ID was `chrome-hlbibnhgkgnjkbfledhgjblacloneije__iframeHost.html-<profile>`, with each space in the profile directory replaced by `_` and other characters, such as `-` and `.`, kept: `…-Default`, `…-Profile_1`, `…-my-prof.x`. The query string does not change it, so two hubs in one profile share it, as they share a Windows app identity. GNOME matches a window to a launcher whose `StartupWMClass` equals its app ID. For comparison, the page installed as a Chrome web app opens with `--app-id=<id>` and gets the app ID `chrome-<id>-Default`.
 - **Not established:** Chrome under X11 (its `WM_CLASS`), Chromium, Edge, Flatpak or Snap builds of Chrome, a non-default `--user-data-dir` for the real profile, and desktops other than GNOME.
 - **Current use:** the Linux app launcher (architecture.md § Browser extension; PRD R125).
+
+## M161. What an idle held Claude session writes, and the markers of work that resumes on its own, 2026-11-25
+
+- **Versions:** Claude Code CLI 2.1.332 (native build) on Windows 11 Pro 10.0.26300; Node.js 24.14.0, node-pty 1.1.0; the operator's terminal holder (build b05d905b1cf34a61) and Switchboard's installed hook writer.
+- **Evidence:** the operator's terminal holder, read only (`list` and `view`), and their Switchboard store, at 16:50 to 17:01 local. 35 held Code Mode sessions were live, 32 of work items `done`, each `idle` in the store for 1.5 to 22 hours with no terminal attached; every one had `lastOutputAt` 2 to 29 minutes old.
+- **Method:** watched the raw output of 16 of the idle sessions through `view` for 4 minutes. Then started throwaway interactive Claude sessions (Haiku 5.5, `--dangerously-skip-permissions`) in node-pty in a scratch folder, read their hook markers every 50 ms, and asked them for `/loop 1m`, a self-paced `/loop` (`ScheduleWakeup`), a 60 s `sleep` run in the background with the Bash tool, and a subagent run in the background that slept 45 s.
+- **Result:**
+  - In 4 minutes the 16 idle sessions wrote one burst: one session drew `Checking for updates…` on its status line and erased it, leaving the screen text as it was. Every observed idle session had written output within the last 29 minutes, so a rule counting output let none of them reach the 1-hour limit; how often the update check runs was not measured.
+  - `/loop 1m` scheduled a cron job (`CronCreate`) and ended its turn with `Stop` with no background tasks; each run began with `UserPromptSubmit` and ended with `Stop`.
+  - A self-paced `/loop` ended each turn with `Stop` with no background tasks; each wakeup began with `UserPromptSubmit`, and a wakeup Claude skipped as a no-op wrote no marker and no turn.
+  - The background `sleep` ended its turn with `Stop` listing one `shell` task, so the session was `running`; when the command finished, Claude began a turn with `UserPromptSubmit` and ended it with `Stop`.
+  - The background subagent's turn ended with `Stop` listing one `subagent` task, and a later `Stop` listed its `shell` task; when the subagent finished, Claude began a turn with `UserPromptSubmit` and ended it with `Stop`.
+  - In each workflow tested, a turn that began on its own wrote `UserPromptSubmit` before any work, and the time of the last turn end was the marker's `at`.
+- **Not verified:** `Monitor` and other ways a turn can begin on its own; whether Claude exposes a session's pending cron jobs or wakeups (the idle limit does not wait for them, PRD R95); a compaction's turn; Linux.
+- **Current use:** the idle limit of a held session counts input and its turn-end marker, and counts output only when its latest marker is no turn end (architecture.md § Code Mode sessions, End rule).
