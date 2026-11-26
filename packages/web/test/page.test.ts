@@ -1071,44 +1071,28 @@ describe("the list's CSS", () => {
       return found[0]!;
     };
 
+    // How line 2 fits its width, cuts the playbook, drops links whole and hides pill texts under 300 px is checked in a browser by
+    // check:shell; this checks the sizes and colours that check does not.
     // 18 px lines in 13 px text, the first row in a band without the rule's pixel.
     expect(one('.row-head')).toContain('height: 18px');
     expect(one('.row-line')).toContain('height: 18px');
     expect(one('.row-line')).not.toMatch(/font-size/);
     expect(one('.row-time')).not.toMatch(/font-size/);
     expect(one('.rows > li:first-child > .row')).toContain('border-top: none');
-    // Pills 18 px tall with 14 px icons and 12 px text; a key's logo 14 px; GitHub's key in GitHub's colour, not the foreground.
-    expect(one('.row-line .pill')).toMatch(/height: 18px;.*font-size: 12px/);
-    expect(one('.row-line .pill .codicon')).toBe('flex: none; font-size: 14px;');
-    expect(one('.row-line .pill .source-logo')).toBe('flex: none; width: 14px; height: 14px;');
-    // A plugin's logo keeps its width's share at a pill's 14 px; a key's label is hidden from view only, so it stays in the key's accessible name.
-    expect(one('.row-line .pill svg.source-logo.custom')).toBe('width: calc(var(--source-icon-width) * 14 / 16);');
-    expect(one('.row-line .pill .key-label')).toBe('position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: pre;');
-    // A key takes at most 60% of the line, cut with an ellipsis past that, so the playbook keeps its room.
-    expect(one('.row-line .pill.ticket')).toBe('max-width: 60%;');
-    expect(one('.row-line .pill.ticket .pill-text')).toBe('min-width: 0; overflow: hidden; text-overflow: ellipsis;');
-    // Line 2 by CSS alone and by its width alone: one 18 px line, never wrapping, an inline-size container; the playbook or host cut with an
-    // ellipsis where it does not fit beside the key; the pills keep their width; the links' one-line box shrinks, its second line clipped, so a
-    // link that does not fit drops out whole.
-    expect(one('.row-line:not(.row-details)')).toBe('container: line2 / inline-size;');
-    expect(one('.row-line')).toMatch(/height: 18px;.*overflow: hidden;/);
-    expect(declarationsOf((each) => each.startsWith('.row-line')).join(' ')).not.toMatch(/flex-wrap: wrap; row-gap/);
-    expect(declarationsOf((each) => each === '.row-line .comment + .playbook')).toEqual([]);
-    expect(declarationsOf((each) => each === '.row-line .playbook')).toContain('flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;');
-    expect(declarationsOf((each) => each === '.row-line .playbook').join(' ')).not.toMatch(/overflow-wrap/);
-    expect(one('.row-line .pill')).toMatch(/^flex: none;/);
-    expect(one('.row-line .row-links')).toBe('flex: 1 1 0; min-width: 0; margin-left: -6px; display: flex; flex-wrap: wrap; height: 18px; overflow: hidden;');
-    // An empty first item, so even the first pill wraps away rather than being cut.
-    expect(one('.row-line .row-links::before')).toBe("content: ''; height: 18px;");
-    // Under 300 px every pill's text, the key's too, is hidden from view only, so it stays the pill's accessible name; never cut with an ellipsis.
-    expect(css).toContain('@container line2 (width < 300px) { .row-line .pill .pill-text { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); } }');
-    expect(css).not.toMatch(/\.pill-text \{[^}]*display: none/);
-    expect(css).not.toMatch(/row-links-(box|shown|fit)|@container row-links/);
-    expect(declarationsOf((each) => each.startsWith('.row-line .row-links')).join(' ')).not.toMatch(/ellipsis/);
-    expect(declarationsOf((each) => each === '.row-line .pill.ticket.source-github')).toEqual(['border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent);']);
-    // Marks in the foreground, Failed in the error colour; the muted texts in the list's grey, #717171 in Light Modern.
-    expect(one('.row-details .mark')).toBe('font-size: 14px;');
-    expect(declarationsOf((each) => each === '.row-details .mark.failed')).toEqual(['color: var(--vscode-testing-iconFailed);']);
+    // Pills 18 px tall with 14 px icons and 12 px text; a key's logo 14 px, a plugin's at its width's share of 14 px.
+    expect(one('.row-line .pill')).toContain('height: 18px');
+    expect(one('.row-line .pill')).toContain('font-size: 12px');
+    expect(one('.row-line .pill .codicon')).toContain('font-size: 14px');
+    expect(one('.row-line .pill .source-logo')).toContain('width: 14px');
+    expect(one('.row-line .pill .source-logo')).toContain('height: 14px');
+    expect(one('.row-line .pill svg.source-logo.custom')).toContain('width: calc(var(--source-icon-width) * 14 / 16)');
+    // A key takes at most 60% of the line, so the playbook keeps its room; GitHub's key in GitHub's colour, not the foreground.
+    expect(one('.row-line .pill.ticket')).toContain('max-width: 60%');
+    expect(one('.row-line .pill.ticket.source-github')).toContain('border-color: var(--sb-github)');
+    // Marks in the foreground at 14 px, Failed in the error colour; the muted texts in the list's grey, #717171 in Light Modern.
+    expect(one('.row-details .mark')).toContain('font-size: 14px');
+    expect(one('.row-details .mark')).not.toMatch(/(^|[ ;])color:/);
+    expect(one('.row-details .mark.failed')).toContain('color: var(--vscode-testing-iconFailed)');
     expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-muted: #717171;/);
     expect(one('.row-time')).toContain('color: var(--sb-row-muted)');
   });

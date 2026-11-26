@@ -36,7 +36,7 @@ describe('readSnoozed', () => {
     const url = 'chrome-extension://id/remote.json';
     const fetchUrl = vi.fn(reply(200, '{"origin":"https://PC.tail.ts.net"}'));
 
-    expect(await readRoutes(fetchUrl, url)).toEqual(remoteRoutes('https://pc.tail.ts.net'));
+    expect(await readRoutes(fetchUrl, url)).toEqual({ origin: 'https://pc.tail.ts.net', snoozed: 'https://pc.tail.ts.net/v1/browser/snoozed', cards: 'https://pc.tail.ts.net/v1/browser/cards', snooze: 'https://pc.tail.ts.net/v1/browser/snooze', unsnooze: 'https://pc.tail.ts.net/v1/browser/unsnooze' });
     expect(fetchUrl).toHaveBeenCalledExactlyOnceWith(url);
     // The build loaded from dist has no remote.json, which Chrome fails to fetch.
     expect(await readRoutes(async () => Promise.reject(new TypeError('Failed to fetch')), url)).toBe(LOCAL_ROUTES);

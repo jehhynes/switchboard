@@ -1,10 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { Card } from '@switchboard/core/group';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REFRESH_MS } from '../src/board.js';
-import { MARK_GLYPHS } from '@switchboard/core/group';
 import { applyPills, cardsByIssue, readCards, watchPills } from '../src/pills.js';
 import { remoteRoutes } from '../src/hub.js';
 
@@ -247,14 +245,6 @@ describe('applyPills', () => {
       ['SPAN', 'switchboard-mark', 'queued', 'true', '\u{ea82}dev:new-dev', 'Switchboard: Unstarted · Queued. Click to open in Switchboard.'],
       ['SPAN', 'switchboard-mark', 'blocked', 'true', '\u{ead1}dev:sb-plan', 'Switchboard: Snoozed · Blocked. Click to open in Switchboard.'],
     ]);
-  });
-
-  it('draws each mark with the codicon the panel shows for it', () => {
-    const css = readFileSync(createRequire(import.meta.url).resolve('@vscode/codicons/dist/codicon.css'), 'utf8');
-    const glyph = (name: string) => String.fromCodePoint(parseInt(new RegExp(`\\.codicon-${name}:before \\{ content: "\\\\(\\w+)" \\}`).exec(css)![1]!, 16));
-    const panel = { question: 'question', permission: 'shield', send: 'send', review: 'eye', finished: 'eye', blocked: 'debug-pause', failed: 'error', queued: 'clock', setup: 'tools', running: 'loading', limited: 'watch', idle: 'circle-large-outline', triaging: 'loading', 'done-session': 'check', 'done-operator': 'account', 'done-unassigned': 'sign-out' };
-
-    expect(MARK_GLYPHS).toEqual(Object.fromEntries(Object.entries(panel).map(([mark, name]) => [mark, glyph(name)])));
   });
 
   it('shows no mark for a null mark or a hub that sends none', () => {

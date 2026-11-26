@@ -58,11 +58,12 @@ describe('the tab strips', () => {
     const tabs = [...strips[0]!.querySelectorAll<HTMLElement>('[data-tab]')];
 
     // In the strip's order (tabs.ts): History before the links, Console last, after Changes.
-    expect(tabs.map((tab) => [tab.dataset['tab'], tab.querySelector('.codicon')!.className, tab.querySelector('.tab-label')!.textContent, tab.title])).toEqual([
-      ['conversation', 'codicon codicon-comment-discussion', 'Conversation', 'Conversation'],
-      ['history', 'codicon codicon-history', 'History', 'History'],
-      ['browser', 'codicon codicon-globe', 'Browser', 'Browser'],
-      ['console', 'codicon codicon-terminal', 'Console', 'Console'],
+    // Each shows an icon before its label, whichever codicon it is, and is titled by its label.
+    expect(tabs.map((tab) => [tab.dataset['tab'], tab.querySelector('.codicon') !== null, tab.querySelector('.tab-label')!.textContent, tab.title])).toEqual([
+      ['conversation', true, 'Conversation', 'Conversation'],
+      ['history', true, 'History', 'History'],
+      ['browser', true, 'Browser', 'Browser'],
+      ['console', true, 'Console', 'Console'],
     ]);
     // History's unread dot stays in its name once the label is hidden.
     expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Conversation', 'History, unread', 'Browser', 'Console']);

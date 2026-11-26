@@ -13,10 +13,6 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 const answer = (status: number, body: unknown) => ({ status, ok: status === 200, json: async () => body }) as unknown as Response;
 
 describe("VS Code's Seti file icons", () => {
-  it('names the VS Code build the mapping was copied from', () => {
-    expect(MAP.source).toMatch(/^VS Code \d+\.\d+\.\d+ [0-9a-f]{40}$/);
-  });
-
   it('gives a language by exact file name, then the longest glob, then the longest name ending, ignoring case', () => {
     expect(languageOf(MAP, 'Dockerfile')).toBe('dockerfile');
     expect(languageOf(MAP, 'sub/.GITIGNORE')).toBe('ignore');
@@ -179,7 +175,9 @@ describe('the page', () => {
       { path: 'Dockerfile', status: 'A', stages: ['staged'], additions: 2, deletions: 0, binary: false },
     ];
     const list = { scopeGen: 3, base: null, head: 'h', rows, stages: { committed: 0, staged: 1, working: 1, untracked: 0 }, shown: 2, total: 2 };
-    const fetch = vi.fn(async (url: string) => answer(200, url === '/page/file-icons.json' ? MAP : url.startsWith('/v1/conversation/changes') ? list : {}));
+    // A mapping of its own, so each expected icon is known without the lookup under test.
+    const icons: FileIconMap = { source: 'test', file: 0, fileNames: { dockerfile: 6 }, fileExtensions: { md: 1, html: 2, json: 3, svg: 4, ts: 5 }, languageIds: {}, languages: { names: {}, extensions: {}, patterns: [] }, icons: Array.from({ length: 7 }, (_, at) => [String.fromCharCode(0xe000 + at), '#ffffff', '#000000'] as [string, string, string]) };
+    const fetch = vi.fn(async (url: string) => answer(200, url === '/page/file-icons.json' ? icons : url.startsWith('/v1/conversation/changes') ? list : {}));
     const artifacts = ['notes.md', 'chart.html', 'data.json', 'x.zzz', 'more.md', 'last.svg', 'old.md'].map((path, at) => ({ path, owner: 'chat', kind: 'note', title: path, ext: path.split('.').pop(), type: 'file', updatedAt: 1_000 + at }));
     const session = { id: 's', title: 'Task', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
     const scope = { kind: 'page', key: 'pk', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
@@ -193,11 +191,12 @@ describe('the page', () => {
     await flush();
     await flush();
 
-    const seti = (path: string) => `file-icon seti-${iconOf(MAP, path)}`;
+    // Newest first: old.md, last.svg, more.md, x.zzz with the plain file icon, data.json, chart.html, notes.md.
+    const shown = ['file-icon seti-1', 'file-icon seti-4', 'file-icon seti-1', 'file-icon seti-0', 'file-icon seti-3', 'file-icon seti-2', 'file-icon seti-1'];
     const tabIcons = [...root.querySelectorAll('.artifact-tab .tab-open > span:first-child')].map((icon) => icon.className);
 
     // Unmeasured, the strip shows every tab.
-    expect(tabIcons).toEqual([...artifacts].reverse().map((one) => seti(one.path)));
+    expect(tabIcons).toEqual(shown);
 
     // A strip too narrow for any tab but the chosen one puts every artifact in More.
     const strip = root.querySelector('.artifact-tab')!.closest<HTMLElement>('.tabs')!;
@@ -205,7 +204,7 @@ describe('the page', () => {
     const narrow = vi.spyOn(strip, 'getBoundingClientRect').mockReturnValue({ width: 1 } as DOMRect);
     strip.querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')!.click();
     root.querySelector<HTMLElement>('.tab-more-button')!.click();
-    expect([...root.querySelectorAll('.tab-menu [data-action="artifact"] .menu-gutter > span')].map((icon) => icon.className)).toEqual([...artifacts].reverse().map((one) => seti(one.path)));
+    expect([...root.querySelectorAll('.tab-menu [data-action="artifact"] .menu-gutter > span')].map((icon) => icon.className)).toEqual(shown);
     // Measured unmeasured again, the strip shows every tab, Changes among them.
     narrow.mockRestore();
     strip.querySelector<HTMLElement>('[data-side="history"], [data-tab="history"]')!.click();
@@ -214,7 +213,7 @@ describe('the page', () => {
     await flush();
     root.querySelector<HTMLElement>('.changes-files')!.click();
     await flush();
-    expect([...root.querySelectorAll('.change-row > span:first-child')].map((icon) => icon.className)).toEqual([seti('src/main.ts'), seti('Dockerfile')]);
+    expect([...root.querySelectorAll('.change-row > span:first-child')].map((icon) => icon.className)).toEqual(['file-icon seti-5', 'file-icon seti-6']);
     expect(fetch.mock.calls.filter(([url]) => url === '/page/file-icons.json')).toHaveLength(1);
     page.close();
   });

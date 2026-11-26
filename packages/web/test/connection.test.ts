@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BACKOFF_MS, Connection, GRACE_MS, HELLO_MS, JITTER, PING_TIMEOUT_MS, WAKE_STALE_MS, WATCHDOG_MS } from '../src/connection.js';
+import { BACKOFF_MS, Connection, GRACE_MS, HELLO_MS, PING_TIMEOUT_MS, WAKE_STALE_MS, WATCHDOG_MS } from '../src/connection.js';
 import type { ConnectionDeps, Stream } from '../src/connection.js';
 
 class FakeStream implements Stream {
@@ -176,18 +176,19 @@ describe('the page connection', () => {
     low.connection.start();
     low.last().emit('error');
 
-    for (let attempt = 0; attempt < BACKOFF_MS.length + 1; attempt++) {
+    for (let attempt = 0; attempt < 8; attempt++) {
       waits.push(low.connection.nextAt! - low.now());
       await low.advance(low.connection.nextAt! - low.now());
       // The ping fails, which waits the next turn.
       await low.advance(0);
     }
 
-    expect(waits).toEqual([...BACKOFF_MS, BACKOFF_MS.at(-1)!].map((ms) => Math.round(ms * (1 - JITTER))));
+    // 0.5, 1, 2, 4, 8, 15 and 30 s less the 20 % jitter at its lowest, then 30 s again.
+    expect(waits).toEqual([400, 800, 1_600, 3_200, 6_400, 12_000, 24_000, 24_000]);
 
     low.connection.retryNow();
     await low.advance(0);
-    expect(low.connection.nextAt! - low.now()).toBe(Math.round(BACKOFF_MS[0]! * (1 - JITTER)));
+    expect(low.connection.nextAt! - low.now()).toBe(400);
   });
 
   it('opens a stream again that brought nothing, not even the tick, for the watchdog time, and one a hello never came on', async () => {

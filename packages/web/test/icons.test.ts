@@ -16,13 +16,14 @@ function glyphOf(name: string): string | null {
 
 describe('the shared mark icons', () => {
   it('name the codicon whose glyph MARK_GLYPHS gives each mark, so the page and the browser extension pills cannot drift', () => {
+    // The codicon the panel shows for each mark, which the extension's pills draw by its glyph.
+    expect(MARK_ICONS).toEqual({ question: 'question', permission: 'shield', send: 'send', review: 'eye', finished: 'eye', blocked: 'debug-pause', failed: 'error', queued: 'clock', setup: 'tools', running: 'loading', limited: 'watch', idle: 'circle-large-outline', triaging: 'loading', 'done-session': 'check', 'done-operator': 'account', 'done-unassigned': 'sign-out' });
+
     for (const mark of Object.keys(MARK_ICONS) as Mark[]) {
       expect([mark, glyphOf(MARK_ICONS[mark])]).toEqual([mark, MARK_GLYPHS[mark]]);
     }
-  });
 
-  it('finds no glyph for a name codicon.css lacks', () => {
-    expect(glyphOf('no-such-icon')).toBeNull();
+    expect(Object.keys(MARK_GLYPHS).sort()).toEqual(Object.keys(MARK_ICONS).sort());
   });
 });
 

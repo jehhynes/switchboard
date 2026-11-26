@@ -64,15 +64,6 @@ describe('isConversationPage', () => {
 });
 
 describe('readLayout', () => {
-  it('reads each saved setting, and off for one never saved or not "true"', () => {
-    const storage = new MemoryStorage();
-
-    expect(readLayout(storage)).toEqual({ sidebar: false, wide: false });
-    storage.setItem(LAYOUT_KEYS.sidebar, 'true');
-    storage.setItem(LAYOUT_KEYS.wide, 'yes');
-    expect(readLayout(storage)).toEqual({ sidebar: true, wide: false });
-  });
-
   it('reads off when the storage throws', () => {
     expect(readLayout({ getItem: () => { throw new DOMException('denied', 'SecurityError'); } })).toEqual({ sidebar: false, wide: false });
   });
@@ -252,11 +243,14 @@ describe('watchLayout', () => {
     let path = PULL_PATH;
 
     storage.setItem(LAYOUT_KEYS.wide, 'true');
+    // Only "true" turns a setting on.
+    storage.setItem(LAYOUT_KEYS.sidebar, 'yes');
     document.body.innerHTML = PULL;
     stop = watchLayout(document, storage, () => path).stop;
 
     expect(html().hasAttribute(LAYOUT_ATTRIBUTES.wide)).toBe(true);
     expect(html().hasAttribute(LAYOUT_ATTRIBUTES.sidebar)).toBe(false);
+    expect(buttonFor('sidebar').getAttribute('aria-pressed')).toBe('false');
 
     buttonFor('sidebar').querySelector('span')!.click();
 
