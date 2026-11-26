@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { renderInline, renderMarkdown, slug } from '../src/markdown.js';
+import { renderCardText, renderInline, renderMarkdown, slug } from '../src/markdown.js';
 
 /** The Markdown as the page would hold it: parsed into a detached host. */
 const dom = (text: string): HTMLElement => {
@@ -288,5 +288,44 @@ describe('GitHub-flavoured Markdown', () => {
     const names = new Set([...host.querySelectorAll('*')].flatMap((node) => [...node.attributes].map((one) => one.name)));
 
     expect([...names].sort()).toEqual(['aria-hidden', 'aria-label', 'checked', 'class', 'data-action', 'data-anchor', 'data-target', 'disabled', 'href', 'open', 'rel', 'role', 'style', 'tabindex', 'target', 'title', 'type']);
+  });
+});
+
+describe("a question card's Markdown (renderCardText)", () => {
+  const card = (text: string): HTMLElement => {
+    const host = document.createElement('div');
+
+    host.innerHTML = renderCardText(text);
+    return host;
+  };
+
+  it('draws paragraphs, bulleted, numbered and nested lists, emphasis, code and links', () => {
+    const host = card('They are:\n- **one**, *two* and `three`;\n- nested:\n  - deeper\n\nThen [the docs](https://example.com/docs) and [a file](D:/x/plan.md).\n\n3. third\n4. fourth');
+
+    expect([...host.children].map((one) => one.tagName)).toEqual(['P', 'UL', 'P', 'OL']);
+    expect(host.querySelector('ul > li > strong')?.textContent).toBe('one');
+    expect(host.querySelector('ul > li > em')?.textContent).toBe('two');
+    expect(host.querySelector('ul > li > code')?.textContent).toBe('three');
+    expect(host.querySelector('ul > li > ul > li')?.textContent).toBe('deeper');
+    expect(host.querySelector('ol')?.getAttribute('start')).toBe('3');
+    expect(host.querySelector('a[href="https://example.com/docs"]')?.getAttribute('target')).toBe('_blank');
+    expect(host.querySelector('a[href="https://example.com/docs"]')?.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(host.querySelector('a.path-link')?.getAttribute('data-target')).toBe('D:/x/plan.md');
+  });
+
+  it('joins a hard-wrapped paragraph and breaks a line at a backslash, as replies do', () => {
+    expect(renderCardText('one\ntwo')).toBe('<p>one\ntwo</p>');
+    expect(card('one\\\ntwo').querySelector('p > br')).not.toBeNull();
+  });
+
+  it('keeps raw HTML, headings, tables, quotes, code blocks, pictures and unsafe links as text', () => {
+    const host = card('<script>alert(1)</script> <img src=x onerror=alert(1)>\n\n# Heading\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> quote\n\n    indented\n\n![pic](https://example.com/a.png) [run](javascript:alert(1)) [run](JaVaScRiPt:alert(1)) <javascript:alert(1)>');
+
+    expect(host.querySelector('script, img, h1, table, blockquote, pre, code, iframe')).toBeNull();
+    // A picture shows as a link to it, opening in a new tab.
+    expect([...host.querySelectorAll('a')].map((one) => one.getAttribute('href'))).toEqual(['https://example.com/a.png']);
+    expect([...host.querySelectorAll('*')].flatMap((one) => one.getAttributeNames()).filter((name) => name.startsWith('on'))).toEqual([]);
+    expect(host.textContent).toContain('<script>alert(1)</script>');
+    expect(host.textContent).toContain('# Heading');
   });
 });

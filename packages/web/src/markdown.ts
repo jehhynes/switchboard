@@ -554,6 +554,20 @@ export function renderInline(text: string): string {
   return linkify(markdown.renderInline(text));
 }
 
+/**
+ * The Markdown a question card draws in a question's context and an option's description (architecture.md § Question cards): paragraphs,
+ * lists, hard line breaks, emphasis, strikethrough, code spans and links. Anything else, such as a heading, a table, a picture or raw HTML,
+ * stays text.
+ */
+const cardMarkdown = new MarkdownIt('zero', { html: false, linkify: true, breaks: false }).enable(['list', 'newline', 'escape', 'entity', 'backticks', 'emphasis', 'strikethrough', 'link', 'autolink', 'linkify']);
+
+cardMarkdown.validateLink = markdown.validateLink;
+
+/** A card's context or description as HTML, its links as `renderMarkdown` draws them. */
+export function renderCardText(text: string): string {
+  return linkify(cardMarkdown.render(text)).trimEnd();
+}
+
 /** The place a `#name` link names, as written before markdown-it escaped and encoded it. */
 function anchorTarget(href: string): string {
   const plain = href.slice(1).replace(/&(amp|quot|lt|gt|#39);/g, (_match, name: string) => ({ amp: '&', quot: '"', lt: '<', gt: '>', '#39': "'" })[name]!);

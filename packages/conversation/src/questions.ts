@@ -11,6 +11,7 @@
 export interface QuestionOption {
   letter: string;
   label: string;
+  /** Markdown: the text after the label, then the lines indented under the option, kept as the context's are. */
   description: string;
   recommended: boolean;
   /** The label, for callers written before options had descriptions. */
@@ -28,6 +29,7 @@ export interface Question {
   written: boolean;
   topic: string | null;
   text: string;
+  /** Markdown: the indented lines under the question, with their line breaks, blank lines and relative indentation, as lists need. */
   context: string;
   multi: boolean;
   options: QuestionOption[];
@@ -40,6 +42,8 @@ const QUESTION = /^\s{0,3}(?:[-*+]\s+)?(?:\*\*|__)?(\d{1,2})[.)](?:\*\*|__)?\s+(
  * initials such as "J. Smith" are not read as options (claude-collab's rule).
  */
 const OPTION = /^\s*(?:[-*+]\s+)?(?:\*\*|__)?(?:\(([A-Ha-h])\)|([A-Ha-h])\)|([A-H])[.:])(?:\*\*|__)?\s+(.*\S)\s*$/;
+/** A numbered question's marker and the space after it, up to its text. */
+const QUESTION_MARK = /^(?:[-*+]\s+)?(?:\*\*|__)?\d{1,2}[.)](?:\*\*|__)?\s+/;
 const FENCE = /^\s*(`{3,}|~{3,})/;
 /** A question that says it takes several options; the rules ask for "Select all that apply." (rules.ts). */
 const MULTI = /\b(?:all that apply|any that apply|one or more|(?:choose|pick|select) (?:any|all|several|multiple|more than one)|multiple choices?)\b/i;
@@ -67,6 +71,11 @@ interface Block {
   text: string;
   context: string;
   options: QuestionOption[];
+  /** Where the question's text starts on its line: a numbered line indented this far, before the first option, is a list in its context. */
+  offset: number;
+  /** The context's lines as written, and each option's lines after its own, until the block closes. */
+  lines: string[];
+  more: Map<QuestionOption, string[]>;
   /** The block's first and last lines in the Markdown: its question, or the line a lone run asks, to its last option or continuation. */
   first: number;
   last: number;
@@ -222,7 +231,19 @@ function parseBlocks(markdown: string): Array<Block & { multi: boolean }> {
 
   const close = (): void => {
     if (open !== null && open.options.length >= 2) {
-      blocks.push(open);
+      const block: Block = open;
+
+      block.context = markdownLines(block.lines);
+
+      for (const option of block.options) {
+        const more = block.more.get(option) ?? [];
+        // A blank line between the option's line and the lines under it starts a new paragraph.
+        const gap = more.findIndex((line) => line.trim() !== '') > 0 ? '\n\n' : '\n';
+
+        option.description = [option.description, markdownLines(more)].filter((part) => part !== '').join(gap).trimEnd();
+      }
+
+      blocks.push(block);
     }
 
     open = null;
@@ -267,10 +288,12 @@ function parseBlocks(markdown: string): Array<Block & { multi: boolean }> {
         // A run of options with no numbered question above it asks the line before it.
         const asked = questionHead(previous.replace(/^\s*(?:[-*+]\s+|#{1,6}\s+)?/, '').trim());
 
-        open = { number: null, ...asked, context: '', options: [], first: previousAt === -1 ? at : previousAt, last: at };
+        open = { number: null, ...asked, context: '', options: [], offset: 0, lines: [], more: new Map(), first: previousAt === -1 ? at : previousAt, last: at };
       }
 
       last = optionParts(letter, option[4]!);
+      // Two spaces at the end of a description's line break it from the lines under it.
+      last.description += last.description !== '' && / {2,}$/.test(line) ? '  ' : '';
       open!.options.push(last);
       open!.last = at;
       previous = line;
@@ -278,31 +301,36 @@ function parseBlocks(markdown: string): Array<Block & { multi: boolean }> {
       continue;
     }
 
-    const question = QUESTION.exec(line);
+    // A numbered line indented as far as its question's text, before the first option and without a slug of its own, is a numbered list in
+    // the context, as Markdown nests it.
+    const listed = open !== null && last === null && (open as Block).number !== null && indentOf(line) >= (open as Block).offset && !SLUG_MARK.test(line);
+    const question = listed ? null : QUESTION.exec(line);
 
     if (question !== null) {
       close();
-      open = { number: Number(question[1]), ...questionHead(question[2]!), context: '', options: [], first: at, last: at };
+      open = { number: Number(question[1]), ...questionHead(question[2]!), context: '', options: [], offset: indentOf(line.slice(0, line.length - line.trimStart().length)) + QUESTION_MARK.exec(line.trimStart())![0].length, lines: [], more: new Map(), first: at, last: at };
       previous = line;
       previousAt = at;
       continue;
     }
 
-    if (line.trim() === '') {
+    // An indented line continues the option or the question above it, as written; any other line ends the question. A blank line inside
+    // either is kept, as it separates paragraphs.
+    const blank = line.trim() === '';
+
+    if (blank && open === null) {
       continue;
     }
 
-    // An indented line continues the option or the question above it; any other line ends the question.
-    if (open !== null && /^\s/.test(line)) {
+    if (open !== null && (blank || /^\s/.test(line))) {
       const block: Block = open;
-      const more = line.trim();
+      const option: QuestionOption | null = last;
+      const lines = option === null ? block.lines : (block.more.get(option) ?? block.more.set(option, []).get(option)!);
 
-      if (last !== null) {
-        const option: QuestionOption = last;
+      lines.push(line);
 
-        option.description = option.description === '' ? more : `${option.description} ${more}`;
-      } else {
-        block.context = block.context === '' ? more : `${block.context} ${more}`;
+      if (blank) {
+        continue;
       }
 
       block.last = at;
@@ -322,7 +350,26 @@ function parseBlocks(markdown: string): Array<Block & { multi: boolean }> {
     return [];
   }
 
-  return blocks.map((block) => ({ ...block, multi: MULTI.test(`${block.text} ${block.context}`) }));
+  return blocks.map((block) => ({ ...block, multi: MULTI.test(`${block.text} ${block.context}`.replace(/\s+/g, ' ')) }));
+}
+
+/** How far a line is indented, a tab counting as four spaces. */
+function indentOf(line: string): number {
+  return /^[ \t]*/.exec(line)![0].replace(/\t/g, '    ').length;
+}
+
+/**
+ * Lines as Markdown: blank lines at either end dropped, runs of them kept as one, and the indentation they share removed. Trailing spaces stay,
+ * as two of them break the line.
+ */
+function markdownLines(lines: readonly string[]): string {
+  const kept = lines.map((line) => (line.trim() === '' ? '' : line.replace(/^[ \t]+/, (lead) => lead.replace(/\t/g, '    ')))).filter((line, index, all) => line !== '' || (index > 0 && all[index - 1] !== ''));
+  const shared = Math.min(...kept.filter((line) => line !== '').map(indentOf));
+
+  return kept
+    .map((line) => line.slice(Number.isFinite(shared) ? shared : 0))
+    .join('\n')
+    .replace(/\n+$/, '');
 }
 
 /** A reply's `[withdraw: …]` lines, outside fenced code: the slugs each names, or `all`, and its reason, or null. */
@@ -1336,21 +1383,39 @@ const SPOKEN_COUNT = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'sev
  */
 export function questionSpeech(question: Question, step: number, total: number): string {
   const sentence = (text: string): string => {
-    const clean = plain(text).replace(/\s+/g, ' ').trim();
+    const clean = plain(text).replace(/\s+/g, ' ').trim().replace(/\s*[;,]$/, '');
 
     return clean === '' ? '' : /[.?!:]$/.test(clean) ? clean : `${clean}.`;
   };
+  // Each paragraph and each list item its own sentence, without its marker; a paragraph's lines read as one.
+  const sentences = (markdown: string): string =>
+    markdown
+      .split('\n')
+      .reduce<string[]>((parts, line) => {
+        const item = /^\s*(?:[-*+]|\d{1,9}[.)])\s+(.*)$/.exec(line);
+
+        if (item !== null || line.trim() === '' || parts.length === 0 || parts.at(-1) === '') {
+          parts.push(item === null ? line.trim() : item[1]!);
+        } else {
+          parts[parts.length - 1] += ` ${line.trim()}`;
+        }
+
+        return parts;
+      }, [])
+      .map(sentence)
+      .filter((part) => part !== '')
+      .join(' ');
   const parts = [
     total > 1 ? `Question ${step} of ${total}.` : '',
     question.topic === null ? '' : sentence(question.topic.replace(/[?:.]$/, '')),
     sentence(question.text),
-    sentence(question.context),
+    sentences(question.context),
     question.multi && withoutMultiAsk(question) === question.text ? 'Select all that apply.' : '',
     ...question.options.map((option) => {
       const label = plain(option.label);
-      const description = plain(option.description);
+      const description = sentences(option.description);
 
-      return `${option.letter}: ${label}${option.recommended ? ', recommended' : ''}${description === '' ? '.' : `: ${sentence(description)}`}`;
+      return `${option.letter}: ${label}${option.recommended ? ', recommended' : ''}${description === '' ? '.' : `: ${description}`}`;
     }),
     'Or say Comment and your words.',
   ];

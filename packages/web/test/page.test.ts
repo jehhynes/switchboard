@@ -222,6 +222,33 @@ describe('question cards in replies', () => {
     // The shared styles reach the page's bundle.
     expect(readFileSync(join(__dirname, '../build.mjs'), 'utf8')).toContain("'@switchboard/conversation/questionCard.css'");
   });
+
+  it("draws a context's and a description's lists and paragraphs, and no markup a session wrote", () => {
+    const host = document.createElement('div');
+    const asked = [
+      "1. **State.** Merge fix 4's state work into `main`? {#state-merge}",
+      '   This also confirms:',
+      '   - mid-turn `[state]` is not relied on;',
+      '   - **n/total** is optional. <img src=x onerror=alert(1)>',
+      '',
+      '   Verify passes.',
+      '   - A) Accept and merge (recommended) — the data moves:',
+      '     1. statuses',
+      '     2. stages <script>alert(1)</script> [run](javascript:alert(1))',
+      '   - B) Change something first',
+    ].join('\n');
+
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: asked })]), newView()));
+    const context = host.querySelector('.qc-context')!;
+
+    expect([...context.children].map((one) => one.tagName)).toEqual(['P', 'UL', 'P']);
+    expect([...context.querySelectorAll('li')].map((one) => one.textContent)).toEqual(['mid-turn [state] is not relied on;', 'n/total is optional. <img src=x onerror=alert(1)>']);
+    expect(context.querySelector('li strong')?.textContent).toBe('n/total');
+    const description = host.querySelector('.qc-option .qc-desc')!;
+
+    expect([...description.querySelectorAll('ol > li')].map((one) => one.textContent)).toEqual(['statuses', 'stages <script>alert(1)</script> [run](javascript:alert(1))']);
+    expect(host.querySelector('.question-card img, .question-card script, .question-card [onerror], .question-card a[href^="javascript"]')).toBeNull();
+  });
 });
 
 describe('drawing', () => {

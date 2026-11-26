@@ -32,6 +32,8 @@ export interface CardRender {
   menuOpen?: boolean;
   /** Inline Markdown as HTML, the front end's own renderer. */
   inline(text: string): string;
+  /** A context's or a description's Markdown as HTML, with paragraphs and lists; without it, they are drawn inline. */
+  block?(text: string): string;
 }
 
 /** A settled state's name, which its icon's tooltip and an assistive reader give, and its codicon. */
@@ -157,10 +159,11 @@ export function renderQuestionCard(card: LedgerCard, draft: CardDraft | undefine
   const head = `<div class="qc-head"><span class="qc-progress">Question ${at + 1} of ${steps.length}</span>${steps.length > 1 ? `<span class="qc-dots">${dots}</span>` : ''}${menu}</div>`;
   const shown = withoutMultiAsk(question);
   const hintId = `qc-hint-${key}-${slug}`;
+  const block = (text: string): string => (render.block === undefined ? render.inline(text) : render.block(text));
   const body =
     (question.topic === null ? '' : `<div class="qc-topic">${escape(question.topic)}</div>`) +
     `<div class="qc-question">${render.inline(shown)}</div>` +
-    (question.context === '' ? '' : `<div class="qc-context">${render.inline(question.context)}</div>`) +
+    (question.context === '' ? '' : `<div class="qc-context">${block(question.context)}</div>`) +
     (question.multi ? `<div class="qc-hint" id="${escape(hintId)}">${MULTI_HINT}</div>` : '');
   const role = question.multi ? 'checkbox' : 'radio';
   // The letters stay in the data only: an option shows a radio or check mark, and the keys 1 to 8 pick by position.
@@ -171,7 +174,7 @@ export function renderQuestionCard(card: LedgerCard, draft: CardDraft | undefine
       return (
         `<button type="button" class="qc-option${on ? ' qc-selected' : ''}" role="${role}" aria-checked="${on}" data-action="card-pick" data-card="${key}" data-slug="${slug}" data-letter="${option.letter}"${disabled}>` +
         `<span class="qc-mark qc-mark-${role}" aria-hidden="true"></span><span class="qc-option-body"><span class="qc-label">${render.inline(option.label)}</span>${option.recommended ? '<span class="qc-recommended">Recommended</span>' : ''}${
-          option.description === '' ? '' : `<span class="qc-desc">${render.inline(sentenceCase(option.description))}</span>`
+          option.description === '' ? '' : `<span class="qc-desc">${block(sentenceCase(option.description))}</span>`
         }</span></button>`
       );
     })

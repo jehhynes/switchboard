@@ -1,6 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { answerBrief, answerMessage, answersIn, BATCH, cardLinks, carriedQuestions, cardSteps, cardUtterance, currentStep, deriveSlug, draftAnswers, moveStep, parseQuestions, pickLetter, questionBrief, questionLedger, questionLines, questionSegments, questionSpeech, resolveAnswers, sendLabel, setComment, stripQuestionMarkup, withdrawals, withoutEndingQuestions, withoutMultiAsk } from '../src/questions.js';
 import type { CardLinks, LedgerItem, LinkItem, QuestionLedger, StoredAnswer } from '../src/questions.js';
+
+/** A reply's questions as a session wrote them, from test/fixtures/questions. */
+const fixture = (name: string): string => readFileSync(join(__dirname, 'fixtures', 'questions', name), 'utf8');
 
 /** The shape the conversation rules show, with a second question. */
 const ASKED = 'Two things before I start:\n\n1. Which port?\n   - A) 8765 (recommended)\n   - B) 8799\n2. **Keep the old route?**\n   - A) Yes\n   - B) No, remove it\n   - C) Keep it behind a flag\n\nSay if neither fits.';
@@ -36,7 +41,7 @@ describe('parsing questions (PRD R103)', () => {
       multi: false,
       options: [
         { letter: 'A', label: 'Register on save', description: "keeps today's behaviour; a broken voice shows an error the first time it speaks.", recommended: true, text: 'Register on save' },
-        { letter: 'B', label: 'Register after the voice check', description: 'Save takes about 2 s longer. A new persona cannot be picked until its check plays.', recommended: false, text: 'Register after the voice check' },
+        { letter: 'B', label: 'Register after the voice check', description: 'Save takes about 2 s longer.\nA new persona cannot be picked until its check plays.', recommended: false, text: 'Register after the voice check' },
       ],
     });
     // A topic ending in ":" or "?", and an option split on " -- ".
@@ -101,6 +106,76 @@ describe('parsing questions (PRD R103)', () => {
       [1, 'Scope', 'for this run', ['A Only the inbox|', 'B Everything|including the dock', 'C Nothing|']],
       [2, 'Name?', '', ['A Short|', 'B Long|']],
     ]);
+  });
+
+  it('keeps a context written as Markdown, its list, blank line and paragraph, and the options after it (a session\'s reply)', () => {
+    const text = fixture('state-merge.md');
+    const [question] = parseQuestions(text);
+
+    expect(question!.context).toBe(
+      [
+        'This also confirms the four recommendations applied earlier:',
+        "- mid-turn `[state]` isn't relied on, and `report stage` handles updates between tool calls;",
+        '- a state is asked for at each change of phase and at the end of a turn that changed it;',
+        '- `n/total` is an optional prefix on the headline;',
+        '- only a body change marks a state unread.',
+        '',
+        "Verify passes and Codex's three review findings are fixed. Merging migrates stored statuses and stages into the new states table on your hub. I'll merge, reinstall and push.",
+      ].join('\n'),
+    );
+    expect(question!.options.map((option) => [option.letter, option.label, option.description, option.recommended])).toEqual([
+      ['A', 'Accept and merge', 'the stored data is migrated when the hub restarts.', true],
+      ['B', 'Change something first', 'tell me what to adjust.', false],
+    ]);
+    expect(questionLines(text)).toEqual({ first: 2, last: 11 });
+  });
+
+  it('ends a context list at the first lettered option on the same indent (a session\'s reply)', () => {
+    const [question] = parseQuestions(fixture('settings-rest.md'));
+
+    expect(question).toMatchObject({ number: 4, slug: 'settings-rest', topic: 'Other four' });
+    expect(question!.context.split('\n')).toEqual(['They are:', '- spoken alerts on the Speaking page, with a link from Alerts and display;', '- Collapse details moved to Alerts and display;', '- two pitch-tuning values only in the settings file;', '- no sidebar search for now.']);
+    expect(question!.options.map((option) => option.label)).toEqual(['Accept all four', 'Go through them']);
+  });
+
+  it('reads a numbered list indented under the question as context, keeps nested items and an option\'s own list, and starts the next question at its number', () => {
+    const questions = parseQuestions(
+      [
+        '1. **Order.** Which order should the fixes land in? {#fix-order}',
+        '   The plan has three steps:',
+        '   1. move the parser;',
+        '   2. draw the card;',
+        '      - desktop first',
+        '      - then the phone',
+        '   3. update the docs.',
+        '   - A) As listed (recommended) — docs last.',
+        '   - B) Docs first — the review reads them first.',
+        '     - costs a day',
+        '     - needs a second review',
+        '2. **Name.** Keep the name? {#keep-name}',
+        '   - A) Keep — nothing changes.',
+        '   - B) Rename — every link moves.',
+      ].join('\n'),
+    );
+
+    expect(questions.map((question) => question.slug)).toEqual(['fix-order', 'keep-name']);
+    expect(questions[0]!.context).toBe('The plan has three steps:\n1. move the parser;\n2. draw the card;\n   - desktop first\n   - then the phone\n3. update the docs.');
+    expect(questions[0]!.options.map((option) => option.description)).toEqual(['docs last.', 'the review reads them first.\n- costs a day\n- needs a second review']);
+    expect(questions[1]!.options.map((option) => option.label)).toEqual(['Keep', 'Rename']);
+    // Not indented to its question's text, or ending in a slug, a numbered line is a question of its own, as before.
+    expect(parseQuestions('1. Which? {#which-one}\n1. Other? {#other-one}\n   - A) One\n   - B) Two').map((question) => question.slug)).toEqual(['other-one']);
+    expect(parseQuestions('1. Intro\n  2. Which port?\n   - A) One\n   - B) Two').map((question) => [question.number, question.text, question.context])).toEqual([[2, 'Which port?', '']]);
+    expect(parseQuestions('1. Intro\n   2. Which port? {#port-choice}\n   - A) One\n   - B) Two').map((question) => [question.number, question.slug, question.context])).toEqual([[2, 'port-choice', '']]);
+    // A numbered list under an option stays its description.
+    expect(parseQuestions('1. Which? {#which-one}\n   - A) One — two steps:\n     1. build\n     2. ship\n   - B) Two')[0]!.options[0]!.description).toBe('two steps:\n1. build\n2. ship');
+    // Two trailing spaces still break a line, and a blank line under an option's own line starts a new paragraph.
+    expect(parseQuestions('1. Which? {#which-one}\n   First line  \n   second line\n   - A) Go — first paragraph\n\n     second paragraph\n   - B) Wait')[0]).toMatchObject({
+      context: 'First line  \nsecond line',
+      options: [{ description: 'first paragraph\n\nsecond paragraph' }, { description: '' }],
+    });
+    expect(parseQuestions('1. Which? {#which-one}\n   - A) Go — first line  \n     second line\n   - B) Wait — alone  ')[0]!.options.map((option) => option.description)).toEqual(['first line  \nsecond line', 'alone']);
+    // A request for several options split over the context's lines still counts.
+    expect(parseQuestions('1. Which checks? {#which-checks}\n   Select all that\n   apply.\n   - A) Lint\n   - B) Tests')[0]!.multi).toBe(true);
   });
 
   it('reads a lone question with lettered options and no number', () => {
@@ -503,6 +578,13 @@ describe('voice (design § 7)', () => {
 
     expect(questionSpeech(question, 1, 3)).toBe(
       "Question 1 of 3. Persona registration. Register a persona as soon as you save it, or only after its voice check passes? Today Save registers it at once. I keep building the phone layout whichever you pick. A: Register on save, recommended: keeps today's behaviour; a broken voice shows an error the first time it speaks. B: Register after the voice check: Save takes about 2 s longer. A new persona cannot be picked until its check plays. Or say Comment and your words.",
+    );
+    // A list item, or a paragraph, is a sentence of its own, without its marker.
+    expect(questionSpeech(parseQuestions(fixture('settings-rest.md'))[0]!, 1, 1)).toBe(
+      "Other four. Accept the plan's recommendations on the other four decisions? They are: spoken alerts on the Speaking page, with a link from Alerts and display. Collapse details moved to Alerts and display. two pitch-tuning values only in the settings file. no sidebar search for now. A: Accept all four, recommended: I start building after these answers. B: Go through them: I'll ask each one separately. Or say Comment and your words.",
+    );
+    expect(questionSpeech(parseQuestions('1. Which? {#which-one}\n   Two steps:\n   1. build,\n   2. ship\n\n   Then I stop\n   for the day.\n   - A) Go — both steps:\n     - build\n     - ship\n   - B) Wait')[0]!, 1, 1)).toBe(
+      'Which? Two steps: build. ship. Then I stop for the day. A: Go: both steps: build. ship. B: Wait. Or say Comment and your words.',
     );
     expect(questionSpeech(parseQuestions('1. **Port** in use? {#port-choice}\n   - A) `8765`\n   - B) 8799')[0]!, 1, 1)).toBe('Port in use? A: 8765. B: 8799. Or say Comment and your words.');
     // A multi-choice question says so, once.

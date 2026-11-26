@@ -31,6 +31,18 @@ describe('the question card (design § 6)', () => {
   const ledger = questionLedger([reply('r1', NEW)]);
   const card = ledger.cards.get('reply:r1')!;
 
+  it("draws the context and the descriptions with the front end's block renderer, and inline without one", () => {
+    const listed = questionLedger([reply('r2', '1. Merge it? {#merge-it}\n   It also confirms:\n   - one;\n   - two.\n   - A) Merge — the hub restarts:\n     - data moves\n   - B) Wait')]).cards.get('reply:r2')!;
+    const block = (text: string): string => `<div class="block">${inline(text)}</div>`;
+    const drawn = host(renderQuestionCard(listed, undefined, { canAnswer: true, inline, block }));
+
+    expect(drawn.querySelector('.qc-context > .block')?.textContent).toBe('It also confirms:\n- one;\n- two.');
+    expect([...drawn.querySelectorAll('.qc-desc > .block')].map((one) => one.textContent)).toEqual(['The hub restarts:\n- data moves']);
+    // The question and the labels stay inline.
+    expect(drawn.querySelector('.qc-question .block, .qc-label .block')).toBeNull();
+    expect(host(renderQuestionCard(listed, undefined, { canAnswer: true, inline })).querySelector('.qc-context')?.innerHTML).toBe('It also confirms:\n- one;\n- two.');
+  });
+
   it('shows one question at a time with its progress, topic, context, options without letters and a Comment field, no slug, and Next disabled until a pick', () => {
     const view = host(renderQuestionCard(card, undefined, { canAnswer: true, inline }));
 

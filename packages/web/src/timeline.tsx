@@ -8,7 +8,7 @@ import type { LedgerItem, LedgerQuestion, QuestionLedger } from '@switchboard/co
 import { isAnswerMessage, renderAnswersBubble, renderQuestionCard } from '@switchboard/conversation/questionCard';
 import { artifactIcon, awaitingReply, inTurn, sessionEnd, timeline } from './model.js';
 import type { PageState } from './model.js';
-import { copyButton, renderInline, renderMarkdown } from './markdown.js';
+import { copyButton, renderCardText, renderInline, renderMarkdown } from './markdown.js';
 import { dayLabel, deliveryMark, replyRender, withoutQuestions } from './render.js';
 import type { CardDraft, View } from './render.js';
 import { trusted } from './trusted.js';
@@ -308,6 +308,7 @@ export function cardOf(key: string, ledger: QuestionLedger, view: View, state: P
       error: ui?.error ?? null,
       menuOpen: ui?.menuOpen === true,
       inline: renderInline,
+      block: renderCardText,
     }),
   )}</>;
 }

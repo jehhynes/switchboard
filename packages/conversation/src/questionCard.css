@@ -27,7 +27,13 @@
 .qc-topic { color: var(--vscode-textLink-foreground, var(--qc-accent)); font-size: 0.85em; font-weight: 600; }
 .qc-question { font-size: 1.08em; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 .qc-context { color: var(--vscode-descriptionForeground); line-height: 1.5; overflow-wrap: anywhere; }
-.qc-question p, .qc-context p { margin: 0; }
+.qc-question p { margin: 0; }
+/* A context's and a description's paragraphs and lists (renderCardText): no outer margins, a small gap between blocks, lists indented for the card's width. */
+:is(.qc-context, .qc-desc) :is(p, ul, ol) { margin: 0; }
+:is(.qc-context, .qc-desc) :is(p, ul, ol) + :is(p, ul, ol) { margin-top: 4px; }
+:is(.qc-context, .qc-desc) :is(ul, ol) { padding-left: 1.4em; }
+:is(.qc-context, .qc-desc) li + li, :is(.qc-context, .qc-desc) li > :is(ul, ol) { margin-top: 2px; }
+:is(.qc-context, .qc-desc) li > p { margin: 0; }
 .qc-options { display: flex; flex-direction: column; gap: 6px; }
 .qc-option { display: flex; align-items: flex-start; gap: 12px; box-sizing: border-box; width: 100%; margin: 0; padding: 10px 12px; border: 1px solid var(--qc-border); border-radius: 6px; background: color-mix(in srgb, var(--vscode-editor-background, transparent) 60%, transparent); color: var(--vscode-foreground); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
 .qc-option:hover:not(:disabled) { border-color: color-mix(in srgb, var(--qc-accent) 50%, var(--qc-border)); }
@@ -45,7 +51,7 @@
 .qc-hint { color: var(--qc-muted); font-size: 0.85em; }
 .qc-option-body { display: flex; flex: 1; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px; min-width: 0; }
 .qc-label { font-weight: 600; overflow-wrap: anywhere; }
-.qc-label p, .qc-desc p { margin: 0; display: inline; }
+.qc-label p { margin: 0; display: inline; }
 .qc-recommended { padding: 0 6px; border-radius: 8px; background: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 22%, transparent); color: color-mix(in srgb, var(--vscode-testing-iconPassed, #388a34) 70%, var(--vscode-foreground)); font-size: 0.78em; font-weight: 500; }
 .qc-desc { flex-basis: 100%; color: var(--vscode-descriptionForeground); font-size: 0.9em; line-height: 1.45; overflow-wrap: anywhere; }
 .qc-comment-box { display: flex; flex-direction: column; gap: 4px; }
