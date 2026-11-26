@@ -273,7 +273,7 @@ describe('the page in use', () => {
     again.page.close();
   });
 
-  it("shows History as a tab of the column after Changes only once the Actions menu opens it, with Console last, and an artifact's tab replaces it", () => {
+  it("shows History as a tab of the column after Changes, opened from its tab and not the header's actions menu, with Console last, and an artifact's tab replaces it", () => {
     window.innerWidth = 1920;
     history.replaceState(null, '', '#w=1');
     onTestFinished(() => {
@@ -286,18 +286,20 @@ describe('the page in use', () => {
     // History is in the strip whether or not the row offers the ticket's History.
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
     expect(tabs()).toEqual(['Changes', 'History', 'Console']);
-    hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
+    hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' }, actions: [{ label: 'Mark done', action: 'done', icon: 'check', group: 'state', confirm: null, input: null }] })])] });
     source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
     // Console comes last, before the maximize button.
     expect(tabs()).toEqual(['Changes', 'History', 'Console']);
     expect(root.querySelector('#detail .side-switch > :last-child')?.classList.contains('panel-max')).toBe(true);
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/new.md"]')).not.toBeNull();
+    // The header's actions menu has no History, which its tab beside it opens (operator decision 2026-11-26).
     click('[data-action="actions"]');
-    click('.actions-menu [data-action="row-history"]');
+    expect(root.querySelector('.actions-menu .menu-row')).not.toBeNull();
+    expect(root.querySelector('.actions-menu [data-action="row-history"]')).toBeNull();
+    click('[data-action="actions"]');
+    click('#detail [data-side="history"]');
     expect(tabs()).toEqual(['Changes', 'History', 'Console']);
-    expect(root.querySelector('.actions-menu')).toBeNull();
     expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
-    expect(document.activeElement).toBe(root.querySelector('#detail [data-side="history"]'));
     expect(root.querySelector('#detail .detail-body .history-view')).not.toBeNull();
     // History lies in its tab, not over the conversation: the conversation and its column stay.
     expect(root.classList.contains('history')).toBe(false);

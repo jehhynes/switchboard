@@ -381,8 +381,7 @@ describe('the page in use', () => {
     expect(root.classList.contains('drawers')).toBe(true);
     expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Keep list open');
     // History is a tab of the open work item, so the list stays the drawer and keeps its pin.
-    click('[data-action="actions"]');
-    click('.actions-menu [data-action="row-history"]');
+    click('[data-tab="history"], [data-side="history"]');
     expect(root.querySelector('[data-tab="history"], [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(root.classList.contains('drawers')).toBe(true);
     expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Keep list open');

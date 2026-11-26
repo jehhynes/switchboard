@@ -340,10 +340,7 @@ describe("the page's History tab in use", () => {
     root.querySelector<HTMLElement>(`#list [data-action="select"][data-work-item="${workItemId}"]`)!.click();
     hello(source, workItemId);
   };
-  const openFromMenu = () => {
-    root.querySelector<HTMLElement>('.header [data-action="actions"]')!.click();
-    root.querySelector<HTMLElement>('.actions-menu [data-action="row-history"]')!.click();
-  };
+  const openTab = () => historyTab()!.click();
 
   it('drops an answer that a later read overtook', async () => {
     const releases: Array<(body: unknown) => void> = [];
@@ -357,7 +354,7 @@ describe("the page's History tab in use", () => {
 
     vi.useFakeTimers();
     hello(source);
-    openFromMenu();
+    openTab();
     source.emit('list', { groups: groups(rows) });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(releases).toHaveLength(2);
@@ -369,7 +366,7 @@ describe("the page's History tab in use", () => {
     page.close();
   });
 
-  it("selects the open work item's History tab from the header's actions menu, follows its chips and filter, and reads it again only while it shows", async () => {
+  it("selects the open work item's History tab, follows its chips and filter, and reads it again only while it shows", async () => {
     vi.useFakeTimers();
     answers['/page-history'] = { status: 200, body: { view: view(), categories: CATEGORIES } };
     const { page, source } = start();
@@ -379,11 +376,9 @@ describe("the page's History tab in use", () => {
     expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
     await flush();
     expect(histories()).toEqual([]);
-    openFromMenu();
-    expect(root.querySelector('.actions-menu')).toBeNull();
+    openTab();
     expect(historyTab()?.textContent).toBe('History');
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
-    expect(document.activeElement).toBe(historyTab());
     // The head and the state stand at its top while the ticket's History loads.
     expect(root.querySelector('.history-pane .history-view h1')?.textContent).toBe('Item 1');
     expect(root.querySelector('.history-pane .history-view .hist-now.empty')).not.toBeNull();
@@ -456,7 +451,7 @@ describe("the page's History tab in use", () => {
     const { page, source } = start();
 
     hello(source);
-    openFromMenu();
+    openTab();
     await flush();
     expect(histories()).toEqual([77]);
     source.emit('state', { state: pinned({ id: 'st-9' }) });
@@ -490,7 +485,7 @@ describe("the page's History tab in use", () => {
     const kept = () => JSON.parse(localStorage.getItem('switchboard.tabs') ?? '{}') as Record<string, { history?: boolean; tab?: string }>;
 
     hello(source);
-    openFromMenu();
+    openTab();
     await flush();
     // History cannot close, so a work item's kept tabs no longer say whether it is open.
     expect(kept()['w1']).not.toHaveProperty('history');
@@ -549,7 +544,7 @@ describe("the page's History tab in use", () => {
     const { page, source } = start();
 
     hello(source);
-    openFromMenu();
+    openTab();
     await flush();
     root.querySelector<HTMLElement>('.hist-chip[data-category="you"]')!.click();
     expect(histories()).toEqual([77]);
@@ -557,7 +552,7 @@ describe("the page's History tab in use", () => {
     // Another work item's conversation opens on its own tabs; History chosen there reads that work item's ticket, at Loading… first.
     openItem(source, 2);
     expect(historyTab()?.getAttribute('aria-selected')).toBe('false');
-    openFromMenu();
+    openTab();
     expect(root.querySelector('.history-view > .hist-empty')?.textContent).toBe('Loading…');
     await flush();
     expect(histories()).toEqual([77, 78]);
@@ -604,7 +599,7 @@ describe("the page's History tab in use", () => {
     const { page, source } = start();
 
     hello(source);
-    openFromMenu();
+    openTab();
     await flush();
     expect(root.querySelector('[data-entry="l"] [data-action="history-session"]')?.textContent).toBe('Show session');
     root.querySelector<HTMLElement>('[data-entry="l"] [data-action="history-file"]')!.click();
@@ -633,7 +628,7 @@ describe("the page's History tab in use", () => {
     const { page, source } = start({ local: false });
 
     hello(source);
-    openFromMenu();
+    openTab();
     await flush();
     expect(root.querySelector('[data-entry="l"] .hist-link.off')?.textContent).toBe('Open');
     expect(root.querySelector('[data-action="history-folder"]')).toBeNull();
@@ -656,7 +651,7 @@ describe("the page's History tab in use", () => {
 
       source.emit('hello', { key: 'pk', groups: groups(rows), scope: scopeOf(1), sessions: [], items: [], more: false, status: null, artifacts: [], settings: { iframeBrowser: embedded } });
       await flush();
-      openFromMenu();
+      openTab();
       await flush();
       root.querySelector<HTMLElement>('.hist-head-links [data-action="history-open"]')!.click();
       await flush();
@@ -687,7 +682,7 @@ describe("the page's History tab in use", () => {
     const tabs = () => [...root.querySelectorAll('#head .tabs > .tab')].map((one) => one.textContent);
 
     expect(tabs()).toEqual(['Conversation', 'Changes', 'History']);
-    openFromMenu();
+    openTab();
     expect(tabs()).toEqual(['Conversation', 'Changes', 'History']);
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     await flush();

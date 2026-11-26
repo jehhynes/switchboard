@@ -40,7 +40,7 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
 
 /**
  * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped: the main control, the work controls, the
- * state controls, Add comment…, the order controls, what the row opens (Copy, several drafts in a Copy submenu, Open in VS Code and Open report, History for a work item, Open ticket and its
+ * state controls, Add comment…, the order controls, what the row opens (Copy, several drafts in a Copy submenu, Open in VS Code and Open report, History for a work item's row in the list, Open ticket and its
  * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
  * row, so a pool ticket's menu in the list runs as the header's does.
  */
@@ -50,7 +50,7 @@ const waiting = (view: Pick<View, 'acting' | 'connection'>): boolean => view.act
 /** Why a row's action waits while offline, as its tooltip. */
 const offlineTitle = (view: Pick<View, 'connection'>): string | undefined => (view.connection != null && view.connection.tone !== 'live' ? 'This cannot be done while offline.' : undefined);
 
-export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 'copyMenu' | 'connection'>): VNode[] {
+export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 'copyMenu' | 'connection'>, { history = true }: { history?: boolean } = {}): VNode[] {
   const actions = row.actions;
   const pastes = row.pastes;
   const commands = row.opens;
@@ -87,8 +87,9 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 
     ...copy,
     // Open report opens its draft in a file tab of the page; Open in VS Code asks the hub to start VS Code.
     ...commands.map((one) => item(one.file === undefined ? { 'data-action': 'row-command', 'data-label': one.label } : { 'data-action': 'row-report', 'data-file': one.file, title: one.file }, one.icon, one.label)),
-    // History, which selects the work item's History tab; a pool ticket has no work item open, so no tab to show it in.
-    ...(row.history === null || row.workItemId === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
+    // History, which opens the work item on its History tab; a pool ticket has no work item open, so no tab to show it in, and the header, beside
+    // the tab itself, leaves it out (operator decision 2026-11-26).
+    ...(!history || row.history === null || row.workItemId === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? submenu : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
   ];
@@ -102,7 +103,7 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 
  * ellipsis; nothing when the row offers none.
  */
 function Actions({ row, view }: { row: PageRow | null; view: View }) {
-  const rows = row === null ? [] : menuRows(row, view);
+  const rows = row === null ? [] : menuRows(row, view, { history: false });
 
   if (row === null || rows.length === 0) {
     return null;

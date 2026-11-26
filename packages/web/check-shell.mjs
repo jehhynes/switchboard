@@ -507,7 +507,7 @@ function openTab(selector) {
 }
 
 const OPEN = {
-  history: ['[data-action=actions]', '[data-action=row-history]'],
+  history: ['[data-side=history], [data-tab=history]'],
   // Settings as it opens: on a phone its navigation's categories alone.
   'settings-nav': ['[data-action=list-more]', '[data-action=list-settings]'],
   ...Object.fromEntries(Object.entries(SETTINGS_PAGES).map(([view, keys]) => [view, ['[data-action=list-more]', '[data-action=list-settings]', ...keys.map((key) => (key.endsWith('/page') ? '.settings-nav-entry[data-key="' + key + '"], .settings-page-title h2' : '.settings-nav-entry[data-key="' + key + '"]'))]])),
@@ -527,7 +527,7 @@ const OPEN = {
   // Its search's options menu open, Regular expression chosen, which keeps the menu open.
   'changes-options': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-options]', '.tree-options-menu [data-option=regex]'],
   // History's chips shown, one turned off, as a phone shows them behind Filters; a wider pane shows them without it.
-  'history-filters': ['[data-action=actions]', '[data-action=row-history]', '[data-action=history-chips]', '.hist-chip[data-category="you"]'],
+  'history-filters': ['[data-side=history], [data-tab=history]', '[data-action=history-chips]', '.hist-chip[data-category="you"]'],
   // The mic views' tab, from the strip or from More where the strip has no room for it; the desktop's in its column, then maximized.
   'mic-history': [openTab('[data-tab="history"]')],
   'mic-changes': [openTab('[data-action="diff-tab"]')],
