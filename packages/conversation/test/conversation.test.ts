@@ -496,6 +496,77 @@ it('confirms messages typed as one by their shared line, each in order with its 
     });
   });
 
+  describe('a reply with a nested ordered list, which the screen numbers with letters', () => {
+    // Session bfd12580's replies of 2026-11-26, which showed twice until their screen copies were withdrawn (mechanics M171).
+    const raw = 'Two left:\n- **Queue:**\n  1. phone layout;\n  2. GitHub button.';
+    const drawn = ['● Two left:', '  - Queue:', '    a. phone layout;', '    b. GitHub button.'];
+
+    it('publishes only its transcript copy when that comes while the screen copy is held', () => {
+      const { conversation, path, append, items, advance, changes, logs } = setup();
+
+      conversation.readScreen(screen(...drawn));
+      advance(100);
+      append(assistant('a1', T0 + 100, raw));
+      conversation.readTranscript(path);
+      advance(25_000);
+      conversation.tick(false);
+
+      expect(items()).toMatchObject([{ type: 'reply', source: 'transcript', opening: raw, withdrawn: false }]);
+      expect(items()).toHaveLength(1);
+      expect(changes).toHaveLength(1);
+      expect(logs.filter((line) => line.includes('withdrawn'))).toEqual([]);
+    });
+
+    it('replaces its published screen copy in place with its transcript copy', () => {
+      const { conversation, path, append, items, advance, changes, logs } = setup();
+
+      conversation.readScreen(screen(...drawn));
+      advance(300);
+      expect(items()).toMatchObject([{ type: 'reply', source: 'screen' }]);
+
+      const id = (items()[0] as { id: string }).id;
+
+      advance(500);
+      append(assistant('a1', T0 + 800, raw));
+      conversation.readTranscript(path);
+      advance(25_000);
+      conversation.tick(false);
+
+      expect(items()).toMatchObject([{ id, source: 'transcript', opening: raw, withdrawn: false }]);
+      expect(items()).toHaveLength(1);
+      expect(changes.map((change) => (change.type === 'reply' ? change.reply.id : null))).toEqual([id, id]);
+      expect(logs.filter((line) => line.includes('withdrawn'))).toEqual([]);
+    });
+
+    it('publishes no screen copy read after its transcript copy', () => {
+      const { conversation, path, append, items, advance, changes } = setup();
+
+      append(assistant('a1', T0, raw));
+      conversation.readTranscript(path);
+      advance(300);
+      conversation.readScreen(screen(...drawn));
+      advance(1000);
+
+      expect(items()).toMatchObject([{ type: 'reply', source: 'transcript', opening: raw }]);
+      expect(items()).toHaveLength(1);
+      expect(changes).toHaveLength(1);
+    });
+
+    it('still publishes a different reply with the same opening', () => {
+      const { conversation, path, append, items, advance } = setup();
+
+      conversation.readScreen(screen('● Two left:', '  - Queue:', '    a. phone layout;', '    b. touch targets.'));
+      advance(300);
+      append(assistant('a1', T0 + 300, raw));
+      conversation.readTranscript(path);
+
+      expect(items()).toMatchObject([
+        { type: 'reply', source: 'transcript', opening: raw },
+        { type: 'reply', source: 'screen', opening: 'Two left:\n- Queue:\n  a. phone layout;\n  b. touch targets.' },
+      ]);
+    });
+  });
+
   it('orders by transcript line, not timestamp, and moves a message sent mid-turn from the bottom to where Claude received it', () => {
     const { conversation, path, append, items, changes } = setup();
     const shown = () => items().map((item) => `${item.type === 'message' ? `${item.text}${item.provisional ? ' (sent)' : ''}` : item.opening}`);

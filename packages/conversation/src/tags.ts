@@ -515,12 +515,19 @@ export function interruptNote(interrupted: { said: string; rest: string }): stri
 }
 
 /**
+ * An ordered list item's number at the start of its line. Claude Code numbers a list nested in another "a.", "b.", … and one nested deeper "i.",
+ * "ii.", …, whatever the Markdown's numbers (mechanics M171), so no list number counts toward a key.
+ */
+const LIST_NUMBER = /^[ \t]*\d{1,9}[.)](?=[ \t])|^[ \t]+(?:[a-z]{1,2}|[ivxlcdm]{1,8})[.)](?=[ \t])/gm;
+
+/**
  * Letters and digits only, by which a screen copy and a transcript copy of one reply compare: the screen shows Markdown rendered, with no
- * backticks or asterisks and links as their text, the transcript raw.
+ * backticks or asterisks, links as their text and nested list numbers as letters, the transcript raw.
  */
 export const squash = (text: string): string =>
   text
     .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(LIST_NUMBER, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     // The screen draws a bare "www." link with the scheme its target gets.
     .replace(/\bhttps?:\/\/(?=www\.)/gi, '')

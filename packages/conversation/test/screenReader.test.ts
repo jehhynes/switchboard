@@ -88,6 +88,12 @@ describe('screen blocks', () => {
     expect(unwrap(['Done. And', 'more', '[status]', 'next line', 'joined'])).toBe('Done. And more\n[status]\nnext line joined');
   });
 
+  it("keeps each item of a nested list the terminal numbers with letters on its own line, and joins its wrapped rest", () => {
+    expect(unwrap(['- Queue:', '  a. phone layout and the', '     Chat rename;', '  b. GitHub button;', '     ii. deeper.', 'is. joined'])).toBe(
+      '- Queue:\n  a. phone layout and the Chat rename;\n  b. GitHub button;\n     ii. deeper. is. joined',
+    );
+  });
+
   it("tells a reply's bullet from a tool call's by its colour", () => {
     expect(isReplyCell(cell({ rgb: 0xffffff }))).toBe(true);
     expect(isReplyCell(cell({ rgb: 0x4eba65 }))).toBe(false);

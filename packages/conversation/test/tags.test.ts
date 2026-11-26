@@ -172,6 +172,16 @@ describe('reply tags', () => {
     expect(keyOf('[rewrite] Yes.')).toBe('Yes');
   });
 
+  it('keys a list by its items without their numbers, which the terminal draws as letters in a nested list (M171)', () => {
+    const raw = '1. Queue:\n   1. phone layout;\n   2. GitHub button;\n      1) deeper.\n2. Done.';
+
+    expect(keyOf(raw)).toBe(keyOf('1. Queue:\n   a. phone layout;\n   b. GitHub button;\n      i. deeper.\n2. Done.'));
+    expect(keyOf(raw)).toBe(keyOf('Queue: phone layout; GitHub button; deeper. Done.'));
+    // A number or word inside a line still counts.
+    expect(keyOf('Build 2. Then a. b.')).toBe('Build2Thenab');
+    expect(keyOf('Yes. Done.')).not.toBe(keyOf('Done.'));
+  });
+
   it('draws links as the terminal does: the text and its target, the target alone when it is the text, and code spans as written', () => {
     expect(drawnLinks('At [changes.ts:280](file:///D:/x/changes.ts#L280).')).toBe('At changes.ts:280 (file:///D:/x/changes.ts#L280).');
     expect(drawnLinks('See [https://a.dev/x](https://a.dev/x) and [](./b.md).')).toBe('See https://a.dev/x and ./b.md.');

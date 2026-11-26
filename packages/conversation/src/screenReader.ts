@@ -71,8 +71,9 @@ export function unwrap(lines: string[]): string {
     const previous = out.at(-1);
     const tag = isRewriteLine(line) || isStateLine(line) || isDetailsLine(line);
 
-    // An artifact tag starts a line of its own, and the screen's wrapped rest of it joins it.
-    if (previous !== undefined && previous !== '' && !alone && !tag && !startsArtifactLine(line) && !/^\s*([-*•]|\d+\.)\s/.test(line)) {
+    // An artifact tag or a list item starts a line of its own, and the screen's wrapped rest of it joins it. Claude Code numbers a nested list's
+    // items with letters (mechanics M171).
+    if (previous !== undefined && previous !== '' && !alone && !tag && !startsArtifactLine(line) && !/^\s*([-*•]|\d+\.)\s|^\s+([a-z]{1,2}|[ivxlcdm]{1,8})\.\s/.test(line)) {
       out[out.length - 1] = `${previous} ${line.trim()}`;
     } else {
       out.push(line.trimEnd());
