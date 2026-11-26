@@ -50,7 +50,7 @@ interface View {
   /** The text typed in each field since the page was drawn, so a field shows what was typed, not the value read from it. */
   typing: Map<string, string>;
   ask: Ask | null;
-  /** Voiceprint enrolment as the hub last said, or null before Talk and dictate asked. */
+  /** Voiceprint enrolment as the hub last said, or null before Dictation asked. */
   enrollment: Enrollment | null;
   /** Why the last enrolment request was refused or failed, or null. */
   enrollError: string | null;
@@ -213,8 +213,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       void devices();
     }
 
-    // Talk and dictate reads how enrolment stands when it first shows.
-    if (state?.page === 'talk' && !asked) {
+    // Dictation reads how enrolment stands when it first shows.
+    if (state?.page === 'dictation' && !asked) {
       asked = true;
       void enroll('status');
     }
@@ -857,7 +857,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     editCell,
     enroll: (action) => void enroll(action),
     voiceSwitch: () => {
-      navigate('read-aloud');
+      navigate('spoken-replies');
       host.querySelector<HTMLElement>('[data-path="voice.enabled"] input')?.focus();
     },
     pair: () => void devices({ pair: true }),
@@ -977,7 +977,7 @@ interface Handlers {
   discard(): void;
   answer(choice: 'save' | 'discard' | 'keep' | 'delete'): void;
   editCell(name: string, path: string, checked: boolean): void;
-  /** Opens Read aloud with the focus on the voice's switch. */
+  /** Opens Spoken replies with the focus on the voice's switch. */
   voiceSwitch(): void;
   enroll(action: string): void;
   pair(): void;
@@ -1152,8 +1152,12 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
     <>
       <div class="settings-page-head">
         <div class="settings-page-title">
-          <h2 tabIndex={-1}>{page.title}</h2>
+          <h2 tabIndex={-1}>
+            {page.title}
+            {page.experimental === undefined ? null : <span class="settings-experimental">Experimental</span>}
+          </h2>
           {page.lede === null ? null : <p class="settings-lede">{page.lede}</p>}
+          {page.experimental === undefined ? null : <p class="settings-lede settings-experimental-note">{page.experimental}</p>}
         </div>
         <div class="settings-buttons">
           {page.buttons.map((button) => (
@@ -1406,7 +1410,7 @@ function FileBlock({ state }: { state: EditorState }) {
   );
 }
 
-/** Talk and dictate's voice enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read. */
+/** Dictation's voice enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read. */
 function EnrollRow({ view, on }: { view: View; on: Handlers }) {
   const row = enrollmentRow(view.enrollment, view.enrollError, Date.now());
 
@@ -1455,7 +1459,7 @@ function UsedBy({ playbooks, on }: { playbooks: readonly string[]; on: Handlers 
   );
 }
 
-/** Says the voice is off, above settings that need it, with a link to its switch on Read aloud. */
+/** Says the voice is off, above settings that need it, with a link to its switch on Spoken replies. */
 function VoiceOff({ on }: { on: Handlers }) {
   return (
     <p class="settings-voice-off">

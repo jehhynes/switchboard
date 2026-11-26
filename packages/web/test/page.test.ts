@@ -816,6 +816,14 @@ describe('drawing', () => {
     expect(renderMicButton).toBe(viewMicButton);
     expect(renderMicButton({ enabled: true, here: true, mic: 'paused-by-voice', speaking: null, speakReplies: true, error: null })).toContain('data-on="true"');
     expect(renderMicButton({ enabled: true, here: true, mic: 'hearing', speaking: 'r1', speakReplies: true, error: null, halfDuplex: 'no echo cancellation' })).toContain('class="mic held"');
+    // Each mic state names the actor: you dictate, and Switchboard speaks replies.
+    const mic = (patch: Partial<Parameters<typeof renderMicButton>[0] & object>): string => renderMicButton({ enabled: true, here: true, speaking: null, speakReplies: true, error: null, ...patch });
+    expect(mic({ mic: 'listening' })).toContain('title="Mic on: Switchboard is ready for your dictation. It sends when you pause.');
+    expect(mic({ mic: 'hearing' })).toContain('title="Mic on: Switchboard is taking dictation.');
+    expect(mic({ mic: 'hearing', speaking: 'r1', halfDuplex: 'no echo cancellation' })).toContain('title="Mic on, dictation paused while Switchboard speaks the reply (no echo cancellation): it resumes when the reply ends.');
+    expect(mic({ mic: 'listening', halfDuplex: 'no echo cancellation' })).toContain('Dictation pauses while Switchboard speaks a reply (no echo cancellation), so you cannot stop the reply by speaking over it.');
+    expect(mic({ mic: 'listening', fullDuplex: 'echo cancelled' })).toContain('Full duplex (echo cancelled): you can stop a spoken reply by speaking over it.');
+    expect(mic({ mic: 'listening', roomHold: true })).toContain('Switchboard heard another voice, so your dictation waits in the composer until you send it.');
   });
 
   it('draws the spinner after the newest item while the session is in a turn, so progress and replies written mid-turn show above it', () => {
@@ -3438,7 +3446,7 @@ describe('the page in use', () => {
     expect(root.querySelector('.view-options-menu')).toBeNull();
     click('.header button.view-options');
     expect(root.querySelector('.header button.view-options')!.getAttribute('title')).toBe('View options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Collapse details']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message details', 'Collapse details', 'Spoken repliesExperimental']);
     expect(root.querySelector('.view-options-menu .menu-separator')).toBeNull();
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.view-options-menu')).toBeNull();
@@ -7154,7 +7162,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     source.emit('message', { message: message('m8', 8, { delivery: 'not-sent', error: 'x', text: 'not mine' }) });
     expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('lost words');
     expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The holder did not answer.');
-    // While the voice is elsewhere, one Talk here takes the cluster's place; here, Speak replies, with no Stop beside it while a reply plays.
+    // While the voice is elsewhere, one Talk here takes the cluster's place; here, Spoken replies, with no Stop beside it while a reply plays.
     expect(root.querySelector('[data-voice="speak-replies"]')).toBeNull();
     click('[data-voice="talk-here"]');
     source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
@@ -7164,7 +7172,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.querySelectorAll('.voice-controls button')).toHaveLength(1);
     expect(root.querySelector('.voice-controls .codicon-debug-stop')).toBeNull();
     expect(root.querySelector('[data-voice="speak-replies"]')!.getAttribute('title')).toBe(SPEAKING_TIP);
-    // The speaker turns Speak replies off, which stops the reply playing.
+    // The speaker turns Spoken replies off, which stops the reply playing.
     click('[data-voice="speak-replies"]');
     await flush();
     expect(posts.filter((post) => /talk-here|speak-replies/.test(post.url)).map((post) => post.body['on'] ?? 'talk')).toEqual(['talk', false]);
@@ -7175,7 +7183,19 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click('[data-voice="stop"]');
     await flush();
     expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(true);
+    // Off and silent, the composer has no speaker at all: experimental spoken replies are turned on in View options (PRD R105).
+    source.emit('voice', { voice: { enabled: true, here: true, speaking: null, speakReplies: false, error: null } });
+    expect(root.querySelector('.voice-controls [data-voice]')).toBeNull();
+    expect(root.querySelector('.composer-mic [data-voice="mic"]')).not.toBeNull();
+    click('.header button.view-options');
+    expect(root.querySelector('[data-action="toggle-spoken-replies"]')!.getAttribute('aria-checked')).toBe('false');
+    expect(root.querySelector('[data-action="toggle-spoken-replies"] .menu-note')!.textContent).toBe('Experimental');
+    click('[data-action="toggle-spoken-replies"]');
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/speak-replies')).map((post) => post.body['on'])).toEqual([false, true]);
     source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
+    expect(root.querySelector('[data-action="toggle-spoken-replies"]')!.getAttribute('aria-checked')).toBe('true');
+    click('.header button.view-options');
 
     // The mic is packages/conversation's button, and drives the computer's voice process.
     expect(root.querySelector('.composer-mic')!.innerHTML).toBe(renderMicButton({ enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null }));

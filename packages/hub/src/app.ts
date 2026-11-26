@@ -940,7 +940,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         enabled: Object.fromEntries(Object.keys(config.settings.sources).map((name) => [name, runtime.enabledSources().has(name)])),
       },
     }),
-    // Talk and dictate's Enroll my voice (architecture.md § Voice check and barge-in): starts or cancels enrolment, or reads how it stands.
+    // Dictation's Enroll my voice (architecture.md § Voice check and barge-in): starts or cancels enrolment, or reads how it stands.
     enroll: async (body: unknown) => {
       const action = isRecord(body) ? body['action'] : undefined;
 

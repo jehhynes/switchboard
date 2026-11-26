@@ -1,5 +1,5 @@
 /**
- * A reply's body as the web page draws it: its primary response (its spoken passage when Speak replies is on),
+ * A reply's body as the web page draws it: its primary response (its spoken passage when Spoken replies is on),
  * then its details, both as plain text at the size of the operator's messages, whether or not it was spoken (architecture.md § Conversation
  * view, Speech). Imports only the tag reader, which imports nothing, for browser bundles.
  */

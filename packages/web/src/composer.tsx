@@ -63,7 +63,7 @@ export function renderComposer(): VNode {
         </div>
         {/* While the box has the focus and the mic is on here: dictation joins the draft and waits for Send (architecture.md § Dictation). */}
         <div class="composer-hint" hidden>
-          Dictating into the draft — press Send
+          Your dictation goes into the draft — press Send
         </div>
         <div class="composer-footer">
           <div class="composer-controls">

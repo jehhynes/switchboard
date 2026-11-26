@@ -32,6 +32,8 @@
 .settings-page-title { flex: 1; min-width: 0; }
 .settings-page-title h2 { margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
 .settings-lede { margin: 4px 0 0; color: var(--vscode-descriptionForeground); }
+/* A page whose feature is experimental: a badge beside its title and a line under its lede. */
+.settings-experimental { margin-left: 8px; padding: 1px 6px; border: 1px solid var(--vscode-editorWarning-foreground); border-radius: 3px; color: var(--vscode-editorWarning-foreground); font-size: 11px; font-weight: 600; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; }
 .settings-help.settings-file { overflow-wrap: anywhere; }
 .settings-buttons { flex: none; display: flex; gap: 6px; }
 .settings-note { margin: 4px 0; color: var(--vscode-editorWarning-foreground); }

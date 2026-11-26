@@ -68,11 +68,11 @@ export function voiceMark(item: DictatedMessage, details: boolean): string {
  */
 export function spokenMark(state: string, details: boolean): string {
   return state === 'failed' && details
-    ? '<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>'
+    ? '<span class="spoken failed" title="Switchboard could not speak this reply; the hub log says why."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>'
     : '';
 }
 
 /** A reply's tone, with message details on: how it sounds when spoken. */
 export function toneMark(tone: string | null, details: boolean): string {
-  return tone === null || !details ? '' : `<span class="tone" title="${escape(`How the reply sounds when spoken: ${tone}`)}">${escape(tone)}</span>`;
+  return tone === null || !details ? '' : `<span class="tone" title="${escape(`How Switchboard speaks the reply: ${tone}`)}">${escape(tone)}</span>`;
 }

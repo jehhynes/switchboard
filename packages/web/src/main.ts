@@ -4777,6 +4777,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         draw();
         break;
+      case 'toggle-spoken-replies':
+        // Spoken replies, experimental and off until turned on here (PRD R105); the voice event redraws the menu's check.
+        void command('speak-replies', { on: state.voice?.speakReplies !== true });
+        break;
       case 'toggle-brief-replies':
         if (!local) {
           view.briefReplies = !(view.briefReplies ?? state.briefReplies);

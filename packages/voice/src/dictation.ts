@@ -271,7 +271,7 @@ export class Dictation {
     return this.#roomHoldUntil;
   }
 
-  /** Why the open capture listens while the voice plays though it cancels no echo, such as "echo check: none heard"; null otherwise. */
+  /** Why the open capture listens while the voice plays though it cancels no echo, such as "echo check: no echo detected"; null otherwise. */
   get fullDuplex(): string | null {
     return this.#stream === null ? null : this.#fullDuplex;
   }

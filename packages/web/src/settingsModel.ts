@@ -51,7 +51,7 @@ export interface Section {
   usedBy?: string[];
   /** Whether its settings do nothing while the voice is off, so it is dimmed then. */
   needsVoice?: boolean;
-  /** A line in its card that leads to another page, such as Read aloud for the spoken alerts. */
+  /** A line in its card that leads to another page, such as Spoken replies for the spoken alerts. */
   link?: { text: string; label: string; page: string };
 }
 
@@ -251,14 +251,14 @@ export const providerName = (provider: string): string => (provider === 'claude'
 export const HOME = 'sessions';
 
 /** The settings pages of no list, each with its title, the line under it, and its sections. */
-const PAGES: Readonly<Record<string, { title: string; lede: string; sections: (state: EditorState) => Section[]; needsVoice?: boolean }>> = {
+const PAGES: Readonly<Record<string, { title: string; lede: string; experimental?: string; sections: (state: EditorState) => Section[]; needsVoice?: boolean }>> = {
   sessions: { title: 'Sessions', lede: 'How playbook and ad-hoc sessions run. A playbook can set its own agent, model and permission mode.', sections: (state) => sessionsFields(state) },
   triage: { title: 'Triage', lede: 'How Switchboard chooses a playbook for each new ticket.', sections: () => triageFields() },
   display: { title: 'Alerts and display', lede: 'How the pages on this computer tell you that work needs you, and how they show diffs.', sections: () => displayFields() },
   devices: { title: 'Devices', lede: 'Phones and other computers that open this page through your tailnet.', sections: () => devicesFields() },
   advanced: { title: 'Advanced', lede: 'Experiments, the programs Switchboard runs, and where settings.json is.', sections: () => advancedFields() },
-  'read-aloud': { title: 'Read aloud', lede: 'Switchboard reads replies and alerts to you.', sections: (state) => readAloudFields(state) },
-  talk: { title: 'Talk and dictate', lede: 'You talk to Switchboard: the microphone, dictation and your voice.', sections: () => talkFields(), needsVoice: true },
+  'spoken-replies': { title: 'Spoken replies', lede: 'Switchboard speaks replies and alerts to you.', experimental: 'Spoken replies may be unreliable. Replies are spoken only after you turn them on in a conversation’s View options; spoken alerts have their own switch below.', sections: (state) => spokenRepliesFields(state) },
+  dictation: { title: 'Dictation', lede: 'You speak to Switchboard: the microphone, dictation and your voice.', sections: () => dictationFields(), needsVoice: true },
   personas: { title: 'Personas', lede: 'The persona each playbook’s sessions take, unless one is pinned to the session.', sections: (state) => personasFields(state), needsVoice: true },
 };
 
@@ -568,11 +568,11 @@ export const SPEECH_STYLES = ['none', 'pair', 'upbeat', 'deadpan', 'expressive']
 /** The choices of `voice.duplex.local` and `voice.duplex.remote`, as core's `DUPLEX_MODES` lists them. */
 const DUPLEX_MODES: FieldOption[] = [
   { value: 'auto', label: 'Auto' },
-  { value: 'full', label: 'Always listen' },
-  { value: 'half', label: 'Pause while speaking' },
+  { value: 'full', label: 'Keep dictation on' },
+  { value: 'half', label: 'Pause dictation' },
 ];
 
-const DUPLEX_INFO = 'Whether you can talk over a reply to stop it. Auto keeps listening when the mic cancels echo, else pauses until replies prove not to reach it, as with headphones.';
+const DUPLEX_INFO = 'Whether you can stop a spoken reply by speaking over it. Auto keeps dictation on while Switchboard speaks when the mic cancels echo; otherwise it pauses dictation while Switchboard speaks, until it finds its speech does not reach the mic, as with headphones.';
 
 const capitalized = (text: string): string => (text === '' ? text : text[0]!.toUpperCase() + text.slice(1));
 
@@ -610,17 +610,17 @@ export function personaField(state: EditorState, playbook: string, label: string
 }
 
 /**
- * The Read aloud page (PRD R105): the voice process's switch and the speaker, how replies are read, and the spoken alerts, which need the voice
+ * The Spoken replies page (PRD R105): the voice process's switch and the speaker, how replies are read, and the spoken alerts, which need the voice
  * on. Needs-you sound is on Alerts and display, since the page and system notifications play it too.
  */
-export function readAloudFields(state: EditorState): Section[] {
+export function spokenRepliesFields(state: EditorState): Section[] {
   const value = state.value ?? undefined;
 
   return [
     {
       heading: 'Voice',
       fields: [
-        { path: 'voice.enabled', label: 'Voice on', kind: 'boolean', help: 'Starts the voice process, for speaking and listening. Off, nothing is spoken or heard and no session gets a persona.', fallback: false },
+        { path: 'voice.enabled', label: 'Use voice', kind: 'boolean', help: 'Starts the voice process, for spoken replies and dictation. Off, Switchboard neither speaks nor takes dictation, and no session gets a persona.', fallback: false },
         { path: 'voice.outputDevice', label: 'Speaker', kind: 'text', help: 'Part of the playback device’s name, such as Speakers.', hint: 'System default' },
       ],
     },
@@ -630,31 +630,31 @@ export function readAloudFields(state: EditorState): Section[] {
         { path: 'voice.voice', label: 'Voice', kind: 'select', help: 'Used when no persona applies. OpenAI recommends Marin and Cedar.', placeholder: 'marin', options: withCurrent(choices(TTS_VOICES), getAt(value, 'voice.voice')) },
         { path: 'voice.style', label: 'Style', kind: 'select', help: 'Used when no persona applies, unless Expressive delivery is on.', placeholder: 'none', options: withCurrent(choices(SPEECH_STYLES), getAt(value, 'voice.style')) },
         { path: 'voice.speed', label: 'Speed', kind: 'number', help: '0.25 to 1.5; 1 is the voice’s own pace.', placeholder: '1' },
-        { path: 'voice.expressive', label: 'Expressive delivery', kind: 'boolean', help: 'Ask for a tone with each spoken reply, and read it in that tone instead of the style.', fallback: false },
-        { path: 'voice.awayMinutes', label: 'Stop speaking after away', kind: 'integer', help: '1 to 1440, with the focus outside every Switchboard window.', placeholder: '2', unit: 'min' },
+        { path: 'voice.expressive', label: 'Expressive delivery', kind: 'boolean', help: 'Switchboard asks for a tone with each spoken reply, and speaks the reply in that tone instead of the style.', fallback: false },
+        { path: 'voice.awayMinutes', label: 'Stop speaking when you are away for', kind: 'integer', help: '1 to 1440. You are away while the focus is outside every Switchboard window.', placeholder: '2', unit: 'min' },
       ],
     },
     {
       heading: 'Spoken alerts',
       needsVoice: true,
       fields: [
-        { path: 'voice.spokenAlerts', label: 'Spoken alerts', kind: 'boolean', help: 'Say when another session finishes or waits on you, as in “Hey Alex? Tinker finished Fix the badge.”, and read its reply if you answer “yes”.', fallback: true },
+        { path: 'voice.spokenAlerts', label: 'Spoken alerts', kind: 'boolean', help: 'Switchboard says when another session finishes or waits on you, as in “Hey Alex? Tinker finished Fix the badge.”, and speaks its reply if you answer “yes”.', fallback: true },
         { path: 'voice.operatorName', label: 'Your name', kind: 'text', help: 'What alerts call you. Empty says only “Hey?”.', hint: 'No name' },
         { path: 'voice.alertOn.finished', label: 'A turn finishes', kind: 'boolean', help: '', fallback: true, group: 'Alert when' },
         { path: 'voice.alertOn.question', label: 'A question', kind: 'boolean', help: '', fallback: true, group: 'Alert when' },
         { path: 'voice.alertOn.permission', label: 'A permission prompt', kind: 'boolean', help: '', fallback: true, group: 'Alert when' },
-        { path: 'voice.alertAnswerSeconds', label: 'Answer window', kind: 'integer', help: '3 to 60. How long the voice listens for your answer after an alert; the mic must be on.', placeholder: '10', unit: 's' },
+        { path: 'voice.alertAnswerSeconds', label: 'Answer window', kind: 'integer', help: '3 to 60. How long Switchboard waits for your answer by voice after a spoken alert; the mic must be on.', placeholder: '10', unit: 's' },
       ],
     },
   ];
 }
 
 /**
- * The Talk and dictate page (architecture.md § Dictation, § Voice check and barge-in): the microphone with the voice enrolment, dictation, talking
+ * The Dictation page (architecture.md § Dictation, § Voice check and barge-in): the microphone with the voice enrolment, dictation, talking
  * over replies, holding dictation while someone else speaks, and under Advanced the voice match threshold. The pitch check's two factors are
  * settings.json only (operator decision 2026-11-25).
  */
-export function talkFields(): Section[] {
+export function dictationFields(): Section[] {
   return [
     { heading: 'Microphone', block: 'enroll', needsVoice: true, fields: [{ path: 'voice.inputDevice', label: 'Microphone', kind: 'text', help: 'Part of the capture device’s name, such as Headset.', hint: 'System default' }] },
     {
@@ -662,24 +662,24 @@ export function talkFields(): Section[] {
       needsVoice: true,
       fields: [
         { path: 'voice.endPauseMs', label: 'End of message after', kind: 'integer', help: '500 to 20000. A pause this long sends what you said; shorter when the words look finished.', placeholder: '3000', unit: 'ms' },
-        { path: 'voice.micIdleMinutes', label: 'Stop listening after', kind: 'integer', help: '0 to 1440 minutes of silence; 0 never stops.', placeholder: '10', unit: 'min' },
+        { path: 'voice.micIdleMinutes', label: 'Stop dictation after', kind: 'integer', help: '0 to 1440 minutes in which the mic picks up no speech; 0 never stops.', placeholder: '10', unit: 'min' },
       ],
     },
     {
-      heading: 'Talking over replies',
+      heading: 'When you speak over a spoken reply',
       needsVoice: true,
       fields: [
         { path: 'voice.duplex.local', label: 'On this computer', kind: 'select', help: DUPLEX_INFO, placeholder: 'auto', options: DUPLEX_MODES },
         { path: 'voice.duplex.remote', label: 'Over Remote Desktop', kind: 'select', help: 'While Switchboard runs in a Remote Desktop session.', placeholder: 'auto', options: DUPLEX_MODES },
-        { path: 'voice.halfDuplexTailMs', label: 'Resume listening after', kind: 'integer', help: '0 to 5000, once a reply that paused listening ends.', placeholder: '800', unit: 'ms' },
+        { path: 'voice.halfDuplexTailMs', label: 'Resume dictation after', kind: 'integer', help: '0 to 5000, once a spoken reply that paused dictation ends.', placeholder: '800', unit: 'ms' },
       ],
     },
     {
-      heading: 'Someone else speaking',
+      heading: 'Another person speaks near the mic',
       needsVoice: true,
       fields: [
-        { path: 'voice.roomHold', label: 'Hold dictation when another voice is heard', kind: 'boolean', help: 'Dictated messages wait in the composer until you press Enter. Turn it off if others often speak nearby.', fallback: true },
-        { path: 'voice.roomHoldSeconds', label: 'Hold for', kind: 'integer', help: '1 to 3600, after another voice was last heard.', placeholder: '60', unit: 's' },
+        { path: 'voice.roomHold', label: 'Hold dictation', kind: 'boolean', help: 'When Switchboard hears another voice, dictated messages wait in the composer until you press Enter. Turn it off if other people often speak near the mic.', fallback: true },
+        { path: 'voice.roomHoldSeconds', label: 'Hold for', kind: 'integer', help: '1 to 3600, after Switchboard last heard another voice.', placeholder: '60', unit: 's' },
       ],
     },
     {
@@ -732,8 +732,8 @@ export function personaFields(state: EditorState, index: number): Section[] {
       heading: '',
       fields: [
         { path: `${path}.name`, label: 'Name', kind: 'text', help: '1 to 40 characters, shown in the conversation’s View options.' },
-        { path: `${path}.voice`, label: 'Voice', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Read aloud: ${capitalized(voice)}` }, ...choices(TTS_VOICES)], getAt(value, `${path}.voice`)) },
-        { path: `${path}.style`, label: 'Style', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Read aloud: ${capitalized(style)}` }, ...choices(SPEECH_STYLES)], getAt(value, `${path}.style`)) },
+        { path: `${path}.voice`, label: 'Voice', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Spoken replies: ${capitalized(voice)}` }, ...choices(TTS_VOICES)], getAt(value, `${path}.voice`)) },
+        { path: `${path}.style`, label: 'Style', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Spoken replies: ${capitalized(style)}` }, ...choices(SPEECH_STYLES)], getAt(value, `${path}.style`)) },
         { path: `${path}.personality`, label: 'Personality', kind: 'prompt', help: 'At most 600 characters. How its spoken replies sound; it never changes how its sessions work.' },
       ],
     },
@@ -765,9 +765,9 @@ export function parseEnrollment(value: unknown): Enrollment | null {
 export const ENROLL_SENTENCES = [
   'Switchboard listens for my voice, so that only what I say reaches my sessions.',
   'I usually ask for a review, a fix or a status update, and sometimes I think out loud.',
-  'When a reply is read aloud and I start talking over it, the reply should stop.',
+  'When a reply is spoken and I start speaking over it, the reply should stop.',
   'The quick brown fox jumps over the lazy dog, and five boxing wizards jump quickly.',
-  'Now keep talking about anything, in your usual voice, until the minute is up.',
+  'Now keep speaking about anything, in your usual voice, until the minute is up.',
 ];
 
 /** The time as `yyyy-MM-dd HH:mm`, in local time. */
@@ -785,17 +785,17 @@ export function enrollmentRow(enrollment: Enrollment | null, error: string | nul
   const when = enrollment?.enrolledAt === null || enrollment?.enrolledAt === undefined ? null : new Date(enrollment.enrolledAt);
   const enrolled =
     when !== null && !Number.isNaN(when.getTime())
-      ? `Enrolled ${localMinute(when)}. Dictated speech that does not match it is dropped, and talking over a reply stops it.`
-      : 'Not enrolled. Until you enrol, every dictated piece passes the voice check, and talking over a reply stops it only with two words that are not the reply’s.';
+      ? `Enrolled ${localMinute(when)}. Dictated speech that does not match it is dropped, and when you speak over a spoken reply while dictation is on, the reply stops.`
+      : 'Not enrolled. Until you enrol, every dictated piece passes the voice check, and when you speak over a spoken reply while dictation is on, the reply stops only on two words that are not the reply’s.';
   const status =
     enrollment === null
       ? 'Reading whether your voice is enrolled…'
       : enrollment.state === 'starting'
         ? 'Starting the voice process…'
         : enrollment.state === 'recording' && enrollment.endsAt !== null
-          ? `Recording. Read these sentences aloud in your usual voice, then keep talking: ${Math.max(0, Math.ceil((enrollment.endsAt - now) / 1000))} s left.`
+          ? `Recording. Read these sentences aloud in your usual voice, then keep speaking: ${Math.max(0, Math.ceil((enrollment.endsAt - now) / 1000))} s left.`
           : enrollment.state === 'recording'
-            ? 'Recording. Read these sentences aloud in your usual voice, then keep talking.'
+            ? 'Recording. Read these sentences aloud in your usual voice, then keep speaking.'
             : enrollment.state === 'failed'
               ? `Enrolment failed: ${enrollment.error ?? 'unknown error'} ${enrolled}`
               : enrollment.state === 'cancelled'
@@ -1301,7 +1301,7 @@ export function displayFields(): Section[] {
   return [
     {
       heading: 'Notifications',
-      link: { text: 'Spoken alerts, which the voice says, are on Read aloud.', label: 'Open Read aloud', page: 'read-aloud' },
+      link: { text: 'Spoken alerts are on Spoken replies.', label: 'Open Spoken replies', page: 'spoken-replies' },
       fields: [
         {
           path: 'alerts.surface',
@@ -1315,7 +1315,7 @@ export function displayFields(): Section[] {
             { value: 'system', label: 'Notifications only' },
           ],
         },
-        { path: 'voice.needsYouSound', label: 'Needs-you sound', kind: 'boolean', help: 'A short sound when another work item starts needing you, between spoken replies or with the alert.', fallback: true },
+        { path: 'voice.needsYouSound', label: 'Needs-you sound', kind: 'boolean', help: 'A short sound when another work item starts needing you, between spoken replies or with a spoken alert.', fallback: true },
       ],
     },
     {
@@ -1619,7 +1619,7 @@ export function fieldOfError(error: string, paths: readonly string[]): string | 
 function sectionPage(error: string): string | null {
   const section = /^([a-z]+)\b/i.exec(error)?.[1];
 
-  return section === 'voice' ? (/^voice\.pitch/.test(error) ? 'talk' : 'read-aloud') : section === 'sessions' ? HOME : section === 'triage' ? 'triage' : section === 'alerts' ? 'display' : section === 'web' ? 'advanced' : null;
+  return section === 'voice' ? (/^voice\.pitch/.test(error) ? 'dictation' : 'spoken-replies') : section === 'sessions' ? HOME : section === 'triage' ? 'triage' : section === 'alerts' ? 'display' : section === 'web' ? 'advanced' : null;
 }
 
 /** The page that holds each error's field; an error with no field, or whose page the navigation does not offer, maps to null and shows on every page. */
@@ -1782,8 +1782,8 @@ export function nav(state: EditorState): NavCategory[] {
     {
       label: 'Voice',
       entries: [
-        item(state, 'read-aloud', 'Read aloud'),
-        item(state, 'talk', 'Talk and dictate'),
+        item(state, 'spoken-replies', 'Spoken replies'),
+        item(state, 'dictation', 'Dictation'),
         group(state, 'personas', 'Personas', [...state.personas.map((_, index) => item(state, `persona:${index}`, state.personaLabel(index))), add(state, 'New persona', 'new-persona')], { page: 'personas', label: 'Playbook personas' }, 'voice.personas'),
       ],
     },
@@ -1930,6 +1930,8 @@ export interface PageView {
   title: string;
   /** One line under the title saying what the page is for, or null. */
   lede: string | null;
+  /** Why the page's feature is marked Experimental, beside its title, or left out. */
+  experimental?: string;
   buttons: PageButton[];
   notes: string[];
   errors: string[];
@@ -2065,7 +2067,8 @@ export function pageView(state: EditorState): PageView {
   }
 
   const fixed = PAGES[page] ?? PAGES[HOME]!;
-  const view = settingsPage(state, fixed.title, fixed.sections(state), [], [], fixed.lede);
+  const page0 = settingsPage(state, fixed.title, fixed.sections(state), [], [], fixed.lede);
+  const view = fixed.experimental === undefined ? page0 : { ...page0, experimental: fixed.experimental };
   const shown = fixed.needsVoice === true && voiceOff(state) && view.message === null ? { ...view, voiceOff: true } : view;
 
   return page === 'personas' && shown.message === null && state.personaIds.length === 0 ? { ...shown, sections: [], message: 'Add a persona with New persona to give a playbook its own.' } : shown;
@@ -2085,7 +2088,7 @@ function personaPage(state: EditorState, at: string): PageView {
     command: 'remove-persona',
     label: 'Remove persona',
     argument: at,
-    tip: 'Removes the persona and its playbook assignments from the draft. Sessions that have it keep its ID and speak with the voice settings.',
+    tip: 'Removes the persona and its playbook assignments from the draft. Sessions that have it keep its ID, and their spoken replies use the Spoken replies settings.',
   };
   const id = state.personaId(index);
   // One name, as the navigation shows it; the ID, which cannot change, under it.

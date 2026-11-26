@@ -13,7 +13,7 @@ export const HOLD_MAX_MS = 30_000;
 /** Why a reply did not play, or stopped, as its speech outcome says it. */
 const SPOKEN_OVER = 'its turn was spoken over';
 const CANCELLED = 'cancelled by the hub';
-const SPEAK_REPLIES_OFF = 'Speak replies turned off';
+const SPEAK_REPLIES_OFF = 'Spoken replies turned off';
 
 /** A reply's passage to speak, of the generation it was offered in. */
 export interface SpeechItem {
@@ -141,7 +141,7 @@ export class Speech {
   }
 
   /**
-   * An offered reply must not play: stopped if it plays, dropped if it waits, and reported `skipped`. With `off`, Speak replies was turned off, and
+   * An offered reply must not play: stopped if it plays, dropped if it waits, and reported `skipped`. With `off`, Spoken replies was turned off, and
    * a reply that started playing is `interrupted` where it stopped, as Stop speaking leaves it, since the operator heard part of it; nothing else
    * is touched.
    */

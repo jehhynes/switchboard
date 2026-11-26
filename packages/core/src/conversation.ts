@@ -112,7 +112,7 @@ export interface ConversationReply {
   ord: number;
   /** When the operator saw it in the conversation (architecture.md § Unread); null while unread. */
   seenAt: number | null;
-  /** Its primary response, the part before its `[details]` line, shown first and read aloud while Speak replies is on (an older reply's `[speak]` passage); null without one. */
+  /** Its primary response, the part before its `[details]` line, shown first and read aloud while Spoken replies is on (an older reply's `[speak]` passage); null without one. */
   speak?: string | null;
   /** Its tone line, how the reply sounds when spoken, never spoken itself; null without one. */
   tone?: string | null;

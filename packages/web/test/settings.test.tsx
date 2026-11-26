@@ -118,9 +118,9 @@ describe('the Settings model (settingsModel.ts)', () => {
       ['sessions must be an object.', 'sessions'],
       ['triage must be an object.', 'triage'],
       ['alerts must be an object.', 'display'],
-      ['voice must be an object.', 'read-aloud'],
-      // The pitch check's factors are settings.json only, so their errors go to Talk and dictate, which has the voice check.
-      ['voice.pitchLowFactor must be a number from 1 to 3.', 'talk'],
+      ['voice must be an object.', 'spoken-replies'],
+      // The pitch check's factors are settings.json only, so their errors go to Dictation, which has the voice check.
+      ['voice.pitchLowFactor must be a number from 1 to 3.', 'dictation'],
       ['Unknown key: extra.', null],
     ]);
   });
@@ -202,7 +202,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     expect(named('page-settings-read')).toHaveLength(1);
     expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
-    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['Sessions', 'Triage', 'Sources', 'Playbooks', 'Schedules', 'Alerts and display', 'Devices', 'Advanced', 'Read aloud', 'Talk and dictate', 'Personas']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['Sessions', 'Triage', 'Sources', 'Playbooks', 'Schedules', 'Alerts and display', 'Devices', 'Advanced', 'Spoken replies', 'Dictation', 'Personas']);
     expect(texts('.settings-nav-entry.group[aria-expanded="false"] .settings-nav-label')).toEqual(['Sources', 'Playbooks', 'Schedules', 'Personas']);
     expect(host.querySelector('.settings-nav-entry.current')?.textContent).toContain('Sessions');
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
@@ -236,11 +236,13 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     // A number's unit follows it rather than sitting in its label.
     expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-unit')?.textContent).toBe('s');
     expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Replies', 'Diffs'], labels: ['Show alerts in', 'Needs-you sound', 'Collapse details', 'Layout', 'Wrap long lines'] });
-    // Spoken alerts are on Read aloud, which a line in Notifications opens.
-    expect(host.querySelector('.settings-link-row')?.textContent).toBe('Spoken alerts, which the voice says, are on Read aloud.Open Read aloud');
+    // Spoken alerts are on Spoken replies, which a line in Notifications opens.
+    expect(host.querySelector('.settings-link-row')?.textContent).toBe('Spoken alerts are on Spoken replies.Open Spoken replies');
     host.querySelector<HTMLButtonElement>('.settings-link-row button')!.click();
     await settle();
-    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Read aloud');
+    expect(host.querySelector('.settings-page-title h2')?.firstChild?.textContent).toBe('Spoken replies');
+    expect(host.querySelector('.settings-page-title h2 .settings-experimental')?.textContent).toBe('Experimental');
+    expect(host.querySelector('.settings-experimental-note')?.textContent).toBe('Spoken replies may be unreliable. Replies are spoken only after you turn them on in a conversation’s View options; spoken alerts have their own switch below.');
     await go('display');
     expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Installed app, else a notification', 'Any open page, else a notification', 'Notifications only']);
     // The diff viewer's layout and wrapping, set once for every page.

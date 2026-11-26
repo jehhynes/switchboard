@@ -1152,7 +1152,7 @@ describe('Dictation', () => {
     const measured = t.logs.find((line) => line.startsWith('echo check: '));
 
     expect(measured).toMatch(/^echo check: echo \(r 0\.\d+ at \d+ ms, level -\d+(\.\d)? dBFS, range \d+(\.\d)? dB, 1\.\d s played; hint: none over Remote Desktop, whose Remote Audio says nothing of headphones\)$/);
-    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Remote Audio; echo check: echo heard');
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Remote Audio; echo check: echo detected');
     expect(t.dictation.fullDuplex).toBeNull();
     expect(t.sent).toEqual([]);
   });
@@ -1167,14 +1167,14 @@ describe('Dictation', () => {
     expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: not measured yet');
     playOver(t, echoWav('quiet.wav'), 'r2');
     expect(t.logs.filter((line) => line.startsWith('echo check: ')).at(-1)).toMatch(/2 of 2 in a row\)$/);
-    expect(t.logs.at(-1)).toBe('listening: full duplex (echo check: none heard; no echo cancellation on Microphone)');
-    expect([t.dictation.halfDuplex, t.dictation.fullDuplex]).toEqual([null, 'echo check: none heard']);
+    expect(t.logs.at(-1)).toBe('listening: full duplex (echo check: no echo detected; no echo cancellation on Microphone)');
+    expect([t.dictation.halfDuplex, t.dictation.fullDuplex]).toEqual([null, 'echo check: no echo detected']);
 
     // Full duplex: a reply plays and its own words are heard over it, as when the headphones come off; half-duplex at once, and the words
     // that are not the reply's neither barge in nor reach the session, though no voiceprint is enrolled.
     playOver(t, echoWav('quiet.wav'), 'r3', () => (t.engine.text = 'tests passed and stop now'));
     expect(t.logs).toContain('echo check: 3 of 5 words heard over the reply are its own (tests passed and stop now): half-duplex again');
-    expect(t.logs).toContain('listening: half-duplex (no echo cancellation on Microphone; echo check: echo heard)');
+    expect(t.logs).toContain('listening: half-duplex (no echo cancellation on Microphone; echo check: echo detected)');
     expect(t.logs).toContain('listening paused while the voice plays (half-duplex): words heard over the reply dropped as its echo: tests passed and stop now');
     expect(t.speech.interrupts).toBe(0);
     expect(t.sent).toEqual([]);
@@ -1189,10 +1189,10 @@ describe('Dictation', () => {
     await t.listening();
     playOver(t, echoWav('quiet.wav'), 'r1');
     playOver(t, echoWav('quiet.wav'), 'r2');
-    expect(t.dictation.fullDuplex).toBe('echo check: none heard');
+    expect(t.dictation.fullDuplex).toBe('echo check: no echo detected');
     playOver(t, echoWav('echo-local.wav'), 'r3');
     expect(t.logs.filter((line) => line.startsWith('echo check: ')).at(-1)).toMatch(/^echo check: echo \(.*\): half-duplex again$/);
-    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: echo heard');
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: echo detected');
 
     t.dictation.mic(false);
     t.dictation.mic(true);
@@ -1225,7 +1225,7 @@ describe('Dictation', () => {
     expect(t.logs).toContain('devices: playback "Headphones (WH-1000XM4)" (headphones), capture "Microphone (WH-1000XM4)", on this computer');
     playOver(t, echoWav('quiet.wav'), 'r1');
     expect(t.logs.filter((line) => line.startsWith('echo check: '))).toEqual([expect.stringMatching(/hint: headphones \(form factor headphones of "Headphones \(WH-1000XM4\)"\); 1 of 1 in a row\)$/)]);
-    expect(t.dictation.fullDuplex).toBe('echo check: none heard');
+    expect(t.dictation.fullDuplex).toBe('echo check: no echo detected');
 
     // Speakers now: the check starts over, half-duplex, and two checks are needed again.
     t.watch.devices!({ output: 'LG HDR 4K', outputId: 'LG HDR 4K#1', formFactor: 'speakers', input: 'Microphone (BRIO)', inputId: 'Microphone (BRIO)#1', remote: false });

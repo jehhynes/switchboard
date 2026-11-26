@@ -36,7 +36,7 @@ export interface VoiceView {
    * until Talk here, the mic or a typed message takes it back (PRD R119).
    */
   deviceOff?: true;
-  /** Only while the voice is here and its capture cancels no echo but listens anyway: why, such as "echo check: none heard"; talking over a reply then stops it. */
+  /** Only while the voice is here and its capture cancels no echo but listens anyway: why, such as "echo check: no echo detected"; talking over a reply then stops it. */
   fullDuplex?: string;
 }
 
@@ -44,8 +44,8 @@ export interface VoiceView {
 const MIC_OFF_TEXT: Record<AwayReason, string> = { locked: 'computer locked', asleep: 'computer going to sleep', disconnected: 'session disconnected' };
 
 /** What the composer shows when a dictated turn is held, while the room hold runs and after it. */
-export const HELD_NOTE = 'Dictation is waiting while another voice is detected. Press Enter to send it.';
-export const HELD_AFTER_NOTE = 'Dictation is still waiting after another voice was detected. Press Enter to send it.';
+export const HELD_NOTE = 'Your dictation is waiting because Switchboard heard another voice. Press Enter to send it.';
+export const HELD_AFTER_NOTE = 'Your dictation is still waiting because Switchboard heard another voice. Press Enter to send it.';
 
 /** A composer's name: a window's draft belongs to one conversation, so a switch never carries it to another session. */
 const composerKey = (key: string, sessionId: string): string => `${key}|${sessionId}`;
@@ -79,7 +79,7 @@ interface Composer {
 const joinText = (draft: string, text: string): string => (draft === '' || /\s$/.test(draft) ? `${draft}${text}` : `${draft} ${text}`);
 
 /**
- * Voiceprint enrolment as Settings' Talk and dictate page shows it (architecture.md § Voice check and barge-in): `idle` before any this run, `starting`
+ * Voiceprint enrolment as Settings' Dictation page shows it (architecture.md § Voice check and barge-in): `idle` before any this run, `starting`
  * while the voice process starts, `recording` until `endsAt`, then how it ended; `enrolledAt` when the saved voiceprint was made, or null.
  */
 export interface EnrollmentView {
@@ -120,7 +120,7 @@ export const VOICE_LINGER_MS = 10 * 60_000;
 export const VOICE_RESTART_MS = 60_000;
 /** The mic codicon in codicon.ttf, which marks the voice target's list row while the mic is on (architecture.md § Voice). */
 export const VOICE_GLYPH = '\u{ec12}';
-/** The speaker codicon (`unmute`), which marks the voice target's row while the mic is off and Speak replies on: the voice speaks there, but nothing listens. */
+/** The speaker codicon (`unmute`), which marks the voice target's row while the mic is off and Spoken replies on: the voice speaks there, but nothing listens. */
 export const SPEAKER_GLYPH = '\u{eb75}';
 
 /**
@@ -132,17 +132,17 @@ export function speechOf(speak: string): string {
 }
 
 /**
- * The voice target's row mark, with where the voice is in its tooltip: the mic while the mic is on, else the speaker while Speak replies is on,
+ * The voice target's row mark, with where the voice is in its tooltip: the mic while the mic is on, else the speaker while Spoken replies is on,
  * else none, since the voice neither listens nor speaks there.
  */
 export function voiceMark(micLive: boolean, speakReplies: boolean, onPhone: boolean): { glyph: string; title: string } | null {
   const where = onPhone ? 'Voice is on a paired device for this session' : 'Voice is set to this session';
 
   if (micLive) {
-    return { glyph: VOICE_GLYPH, title: `${where}. Mic on. Speak replies ${speakReplies ? 'on' : 'off'}.` };
+    return { glyph: VOICE_GLYPH, title: `${where}. Mic on. Spoken replies ${speakReplies ? 'on' : 'off'}.` };
   }
 
-  return speakReplies ? { glyph: SPEAKER_GLYPH, title: `${where}. Mic off. Speak replies on.` } : null;
+  return speakReplies ? { glyph: SPEAKER_GLYPH, title: `${where}. Mic off. Spoken replies on.` } : null;
 }
 /** How long after a session's change an alert for it is sent, so the transcript has given the turn's last reply and a passing state is not called out. */
 export const ALERT_DELAY_MS = 1_500;
@@ -305,7 +305,7 @@ export const NOT_RESUMED = 'Voice did not resume after Switchboard restarted. Se
 
 /**
  * The voice's state a restarting hub hands to the hub that takes over, in `hub-handover.json` (architecture.md § Hub lifecycle): the device and
- * the paired device's sign-in (`phoneHash`) that holds it, the target, Speak replies and the mic, so the restart changes none of them.
+ * the paired device's sign-in (`phoneHash`) that holds it, the target, Spoken replies and the mic, so the restart changes none of them.
  */
 export interface VoiceHandover {
   device: VoiceDevice;
@@ -391,8 +391,8 @@ const FINAL: ReadonlySet<SpokenState> = new Set(['played', 'interrupted', 'skipp
  * only whether the voice is here. The voice process decides the target; the hub mirrors it.
  */
 export class VoiceControl {
-  /** The runtime toggle, one per machine; on until turned off. */
-  speakReplies = true;
+  /** Spoken replies, the runtime toggle, one per machine: off until turned on, since they are experimental (operator decision 2026-11-25). */
+  speakReplies = false;
   #target: { gen: number; sessionId: string | null } = { gen: 0, sessionId: null };
   #client: VoiceConnection | null = null;
   #starting = false;
@@ -458,9 +458,9 @@ export class VoiceControl {
    * that greets it with another device keeps the voice off; after, the hub's own device wins.
    */
   #deviceChosen = false;
-  /** The mic state and Speak replies the rows' mark last showed (`micLive`, `speakReplies`). */
+  /** The mic state and Spoken replies the rows' mark last showed (`micLive`, `speakReplies`). */
   #micLiveShown = false;
-  #speakRepliesShown = true;
+  #speakRepliesShown = false;
   /** Whether the voice process has the phone's capture open, so the phone's audio is relayed. */
   #phoneCapture = false;
   /** Whether the phone's microphone cannot be heard, as its page last said, for a voice process started again. */
@@ -889,7 +889,7 @@ export class VoiceControl {
 
   /**
    * Whether the mic is on where the voice is: turned on, and capture neither off, stopped by the idle timeout nor unavailable. The voice
-   * target's row shows the mic mark only then, else the speaker mark while Speak replies is on (architecture.md § Web page, PRD R109).
+   * target's row shows the mic mark only then, else the speaker mark while Spoken replies is on (architecture.md § Web page, PRD R109).
    */
   get micLive(): boolean {
     return this.#micOn && this.#mic !== 'off' && this.#mic !== 'idle-off' && this.#mic !== 'unavailable';
@@ -897,7 +897,7 @@ export class VoiceControl {
 
   /**
    * Sends each window its voice state when it changed, and the page's list its row mark when the mic came on or went off or
-   * Speak replies was turned on or off.
+   * Spoken replies was turned on or off.
    */
   viewsChanged(): void {
     if (this.micLive !== this.#micLiveShown || this.speakReplies !== this.#speakRepliesShown) {
@@ -1044,7 +1044,7 @@ export class VoiceControl {
 
   /**
    * A reply was added or changed: it is offered for speech when it is the transcript copy of a reply with a primary response, answering a message
-   * that asked for a spoken reply, in the voice target's session, while Speak replies is on (architecture.md § Voice); a rewritten one that was
+   * that asked for a spoken reply, in the voice target's session, while Spoken replies is on (architecture.md § Voice); a rewritten one that was
    * offered is cancelled.
    */
   replyChanged(reply: ConversationReply): void {
@@ -1244,7 +1244,7 @@ export class VoiceControl {
   }
 
   /**
-   * Voiceprint enrolment from Settings' Talk and dictate page (architecture.md § Voice check and barge-in): `start` starts the voice process if it is not
+   * Voiceprint enrolment from Settings' Dictation page (architecture.md § Voice check and barge-in): `start` starts the voice process if it is not
    * running and has it record; `cancel` stops a recording. Why not, or null.
    */
   enroll(action: 'start' | 'cancel'): string | null {
@@ -1660,7 +1660,7 @@ export class VoiceControl {
   }
 
   /**
-   * Speak replies on or off. Turning it off cancels every reply offered with `off`, so the voice process stops the one playing at once,
+   * Spoken replies on or off. Turning it off cancels every reply offered with `off`, so the voice process stops the one playing at once,
    * `interrupted` where it stopped, whether or not its `playing` has reached the hub, and leaves alert lines alone; the composer's speaker is how
    * the operator stops a reply (architecture.md § Conversation view).
    */
@@ -1699,7 +1699,7 @@ export class VoiceControl {
 
     // One request per reply at a time, so its reports stay its own.
     if (this.#offered.has(replyId)) {
-      return 'This reply is being spoken.';
+      return 'Switchboard is already speaking this reply.';
     }
 
     this.#offer(reply, reply.answers);

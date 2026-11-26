@@ -90,6 +90,8 @@ function setup() {
       close: (reason) => void closed.push(reason),
     },
   });
+  // Spoken replies start off (operator decision 2026-11-25); these tests cover them on.
+  control.speakReplies = true;
   const sentOf = <T extends HubMessage['type']>(type: T) => connections.at(-1)!.sent.filter((one) => one.type === type) as Array<Extract<HubMessage, { type: T }>>;
 
   /** The voice process stops and is started again a minute later. */
@@ -633,6 +635,8 @@ function hubOf(windowList: WindowScope[], remote: string[]) {
       close: () => undefined,
     },
   });
+  // Spoken replies start off (operator decision 2026-11-25); these tests cover them on.
+  control.speakReplies = true;
   const sentOf = <T extends HubMessage['type']>(type: T) => connections.at(-1)!.sent.filter((one) => one.type === type) as Array<Extract<HubMessage, { type: T }>>;
   const reply = (id: string, sessionId: string): ConversationReply => {
     const one = { id, sessionId, kind: 'reply', source: 'transcript', speak: 'Done.', opening: 'Done.', answers: `m-${id}`, rewrittenBy: null, withdrawn: false, spokenState: 'none', tone: null, at: t } as unknown as ConversationReply;
@@ -676,7 +680,7 @@ describe('VoiceControl across a hub restart with the voice on a phone (architect
     return { old, handed: JSON.parse(JSON.stringify(old.control.handOver())) as unknown };
   }
 
-  it('hands over the device, sign-in, target, mic and Speak replies, then sends the voice process nothing as its phone socket and windows close', async () => {
+  it('hands over the device, sign-in, target, mic and Spoken replies, then sends the voice process nothing as its phone socket and windows close', async () => {
     const { old, handed } = await handedOver();
     const sent = old.connections[0]!.sent.length;
 

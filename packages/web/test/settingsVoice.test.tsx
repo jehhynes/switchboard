@@ -96,25 +96,27 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(0);
   };
 
-  it('ends the navigation with Voice: Read aloud, Talk and dictate, then Personas, which opens its page and lists each persona by its name or ID', async () => {
+  it('ends the navigation with Voice: Spoken replies, Dictation, then Personas, which opens its page and lists each persona by its name or ID', async () => {
     await open();
 
     expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
-    expect(texts('.settings-nav-category:last-child .settings-nav-list > .settings-nav-entry .settings-nav-label')).toEqual(['Read aloud', 'Talk and dictate', 'Personas']);
+    expect(texts('.settings-nav-category:last-child .settings-nav-list > .settings-nav-entry .settings-nav-label')).toEqual(['Spoken replies', 'Dictation', 'Personas']);
     expect(host.querySelector('.settings-nav-entry[data-key="personas"] .settings-nav-count')?.textContent).toBe('3');
     await go2('personas');
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Personas');
     expect(texts('.settings-nav-children[aria-label="Personas"] .settings-nav-label')).toEqual(['Nova', 'Sage', 'x', '+ New persona']);
   });
 
-  it('draws Read aloud: the voice switch and speaker, replies, and spoken alerts dimmed under a line to the switch while the voice is off', async () => {
+  it('draws Spoken replies: the voice switch and speaker, replies, and spoken alerts dimmed under a line to the switch while the voice is off', async () => {
     await open();
-    await go2('read-aloud');
+    await go2('spoken-replies');
 
-    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Read aloud');
-    expect(host.querySelector('.settings-lede')?.textContent).toBe('Switchboard reads replies and alerts to you.');
+    expect(host.querySelector('.settings-page-title h2')?.firstChild?.textContent).toBe('Spoken replies');
+    expect(host.querySelector('.settings-page-title h2 .settings-experimental')?.textContent).toBe('Experimental');
+    expect(host.querySelector('.settings-experimental-note')?.textContent).toBe('Spoken replies may be unreliable. Replies are spoken only after you turn them on in a conversation’s View options; spoken alerts have their own switch below.');
+    expect(host.querySelector('.settings-lede')?.textContent).toBe('Switchboard speaks replies and alerts to you.');
     expect(headings()).toEqual(['Voice', 'Replies', 'Spoken alerts']);
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Voice on', 'Speaker', 'Voice', 'Style', 'Speed', 'Expressive delivery', 'Stop speaking after away', 'Spoken alerts', 'Your name', 'Alert when', 'Answer window']);
+    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Use voice', 'Speaker', 'Voice', 'Style', 'Speed', 'Expressive delivery', 'Stop speaking when you are away for', 'Spoken alerts', 'Your name', 'Alert when', 'Answer window']);
     // The three Alert when boxes are one row.
     expect(texts('.settings-row.group .settings-check label:not(.settings-box)')).toEqual(['A turn finishes', 'A question', 'A permission prompt']);
     expect(control<HTMLSelectElement>('voice.voice').value).toBe('cedar');
@@ -131,14 +133,14 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-voice-off')).toBeNull();
   });
 
-  it("draws Talk and dictate: the microphone with the enrolment, dictation, talking over replies, someone else speaking, and the match threshold under Advanced, without the pitch check's factors", async () => {
+  it("draws Dictation: the microphone with the enrolment, dictation, talking over replies, someone else speaking, and the match threshold under Advanced, without the pitch check's factors", async () => {
     await open();
-    await go2('talk');
+    await go2('dictation');
 
-    expect(host.querySelector('.settings-lede')?.textContent).toBe('You talk to Switchboard: the microphone, dictation and your voice.');
-    expect(headings()).toEqual(['Microphone', 'Dictation', 'Talking over replies', 'Someone else speaking', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption > label, .settings-section:not(.advanced) .settings-caption > span')).toEqual(['Microphone', 'Your voice', 'End of message after', 'Stop listening after', 'On this computer', 'Over Remote Desktop', 'Resume listening after', 'Hold dictation when another voice is heard', 'Hold for']);
-    expect([...control<HTMLSelectElement>('voice.duplex.local').options].map((one) => one.textContent)).toEqual(['Auto', 'Always listen', 'Pause while speaking']);
+    expect(host.querySelector('.settings-lede')?.textContent).toBe('You speak to Switchboard: the microphone, dictation and your voice.');
+    expect(headings()).toEqual(['Microphone', 'Dictation', 'When you speak over a spoken reply', 'Another person speaks near the mic', 'Advanced']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption > label, .settings-section:not(.advanced) .settings-caption > span')).toEqual(['Microphone', 'Your voice', 'End of message after', 'Stop dictation after', 'On this computer', 'Over Remote Desktop', 'Resume dictation after', 'Hold dictation', 'Hold for']);
+    expect([...control<HTMLSelectElement>('voice.duplex.local').options].map((one) => one.textContent)).toEqual(['Auto', 'Keep dictation on', 'Pause dictation']);
     expect(texts('[data-path="voice.endPauseMs"] .settings-unit')).toEqual(['ms']);
     expect(host.querySelector('.settings-enroll')?.closest('.settings-section')?.querySelector('.settings-section-heading')?.textContent).toBe('Microphone');
     // The whole page needs the voice, so it says it is off once, above its dimmed sections.
@@ -152,39 +154,39 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     expect(host.querySelector('[data-path^="voice.pitch"]')).toBeNull();
   });
 
-  it("shows an error in the pitch check's factors at the top of Talk and dictate, saying where to fix it", async () => {
+  it("shows an error in the pitch check's factors at the top of Dictation, saying where to fix it", async () => {
     answers['page-settings-check'] = { status: 200, body: { errors: ['voice.pitchLowFactor must be a number from 1 to 3.'] } };
     await open();
 
-    expect(entry('Talk and dictate').querySelector('.settings-errors')).not.toBeNull();
+    expect(entry('Dictation').querySelector('.settings-errors')).not.toBeNull();
     expect(host.querySelector('.settings-page > .settings-error')).toBeNull();
-    await go2('talk');
+    await go2('dictation');
     expect(texts('.settings-page > .settings-error')).toEqual(['voice.pitchLowFactor must be a number from 1 to 3. Fix it in settings.json: C:/home/.switchboard/settings.json']);
   });
 
-  it('keeps each voice setting on its settings.json key: an edit on Read aloud or Talk and dictate drafts the same key and marks that page alone', async () => {
+  it('keeps each voice setting on its settings.json key: an edit on Spoken replies or Dictation drafts the same key and marks that page alone', async () => {
     await open();
 
     const moved: Array<[page: string, path: string, input: string | boolean, value: unknown]> = [
-      ['read-aloud', 'voice.enabled', true, true],
-      ['read-aloud', 'voice.outputDevice', 'Speakers', 'Speakers'],
-      ['read-aloud', 'voice.style', 'pair', 'pair'],
-      ['read-aloud', 'voice.speed', '1.25', 1.25],
-      ['read-aloud', 'voice.expressive', true, true],
-      ['read-aloud', 'voice.awayMinutes', '5', 5],
-      ['read-aloud', 'voice.spokenAlerts', false, false],
-      ['read-aloud', 'voice.operatorName', 'Alex', 'Alex'],
-      ['read-aloud', 'voice.alertOn.question', false, false],
-      ['read-aloud', 'voice.alertAnswerSeconds', '20', 20],
-      ['talk', 'voice.inputDevice', 'Headset', 'Headset'],
-      ['talk', 'voice.endPauseMs', '2000', 2000],
-      ['talk', 'voice.micIdleMinutes', '0', 0],
-      ['talk', 'voice.duplex.local', 'full', 'full'],
-      ['talk', 'voice.duplex.remote', 'half', 'half'],
-      ['talk', 'voice.halfDuplexTailMs', '500', 500],
-      ['talk', 'voice.roomHold', false, false],
-      ['talk', 'voice.roomHoldSeconds', '30', 30],
-      ['talk', 'voice.matchThreshold', '0.5', 0.5],
+      ['spoken-replies', 'voice.enabled', true, true],
+      ['spoken-replies', 'voice.outputDevice', 'Speakers', 'Speakers'],
+      ['spoken-replies', 'voice.style', 'pair', 'pair'],
+      ['spoken-replies', 'voice.speed', '1.25', 1.25],
+      ['spoken-replies', 'voice.expressive', true, true],
+      ['spoken-replies', 'voice.awayMinutes', '5', 5],
+      ['spoken-replies', 'voice.spokenAlerts', false, false],
+      ['spoken-replies', 'voice.operatorName', 'Alex', 'Alex'],
+      ['spoken-replies', 'voice.alertOn.question', false, false],
+      ['spoken-replies', 'voice.alertAnswerSeconds', '20', 20],
+      ['dictation', 'voice.inputDevice', 'Headset', 'Headset'],
+      ['dictation', 'voice.endPauseMs', '2000', 2000],
+      ['dictation', 'voice.micIdleMinutes', '0', 0],
+      ['dictation', 'voice.duplex.local', 'full', 'full'],
+      ['dictation', 'voice.duplex.remote', 'half', 'half'],
+      ['dictation', 'voice.halfDuplexTailMs', '500', 500],
+      ['dictation', 'voice.roomHold', false, false],
+      ['dictation', 'voice.roomHoldSeconds', '30', 30],
+      ['dictation', 'voice.matchThreshold', '0.5', 0.5],
     ];
 
     for (const [page, path, input, value] of moved) {
@@ -207,7 +209,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
 
       await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
       expect(getAt(checked() as never, path), path).toEqual(value);
-      expect(texts('.settings-nav-entry:not(.group):has(.settings-dirty) .settings-nav-label'), path).toEqual([page === 'read-aloud' ? 'Read aloud' : 'Talk and dictate']);
+      expect(texts('.settings-nav-entry:not(.group):has(.settings-dirty) .settings-nav-label'), path).toEqual([page === 'spoken-replies' ? 'Spoken replies' : 'Dictation']);
       press('Discard');
       await vi.advanceTimersByTimeAsync(0);
       await open();
@@ -326,14 +328,14 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     expect(texts('.settings-caption label')).toEqual(['Name', 'Voice', 'Style', 'Personality']);
     expect(texts('.settings-section-heading')).toEqual(['Used by']);
     expect(texts('.settings-used-by .settings-help')).toEqual(['No playbook takes this persona. Give it one on the Personas page or a playbook\'s page.']);
-    expect([...control<HTMLSelectElement>('voice.personas[1].voice').options][0]!.textContent).toBe('From Read aloud: Cedar');
+    expect([...control<HTMLSelectElement>('voice.personas[1].voice').options][0]!.textContent).toBe('From Spoken replies: Cedar');
     expect(texts('.settings-note')).toEqual(['Sage is also the name of an OpenAI voice, which makes the settings hard to read. Choose another name.']);
 
     type('voice.personas[1].name', 'Echo One');
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect(entry('Echo One').querySelector('.settings-dirty')).not.toBeNull();
     expect(host.querySelector('.settings-nav-entry[data-key="persona:0"] .settings-dirty')).toBeNull();
-    expect(host.querySelector('.settings-nav-entry[data-key="read-aloud"] .settings-dirty')).toBeNull();
+    expect(host.querySelector('.settings-nav-entry[data-key="spoken-replies"] .settings-dirty')).toBeNull();
     expect(host.querySelectorAll('.settings-note')).toHaveLength(0);
   });
 
@@ -402,17 +404,17 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-bar')).toBeNull();
   });
 
-  it("shows a persona entry's error at the top of its page and a voice error on its field on Read aloud", async () => {
+  it("shows a persona entry's error at the top of its page and a voice error on its field on Spoken replies", async () => {
     answers['page-settings-read'] = { status: 200, body: config({ voice: { personas: ['bad'], speed: 3 } }) };
     answers['page-settings-check'] = { status: 200, body: { errors: ['voice.personas[0] must be an object.', 'voice.speed must be a number from 0.25 to 1.5.'] } };
     await open();
 
     expect(host.querySelector('.settings-nav-entry[data-key="personas"] .settings-errors')).not.toBeNull();
-    expect(entry('Read aloud').querySelector('.settings-errors')).not.toBeNull();
+    expect(entry('Spoken replies').querySelector('.settings-errors')).not.toBeNull();
     await go('Persona 1');
     expect(texts('.settings-page > .settings-error')).toEqual(['voice.personas[0] must be an object. Fix it in settings.json: C:/home/.switchboard/settings.json']);
     expect(host.querySelector('.settings-page .settings-message')?.textContent).toBe('Fix this entry in settings.json in an editor, or remove it.');
-    await go2('read-aloud');
+    await go2('spoken-replies');
     expect(host.querySelector('[data-path="voice.speed"] .settings-field-error')?.textContent).toBe('voice.speed must be a number from 0.25 to 1.5.');
     expect(host.querySelectorAll('.settings-page > .settings-error')).toHaveLength(0);
   });
@@ -427,7 +429,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sage');
   });
 
-  it('reads how enrolment stands on Talk and dictate, records with the sentences while asking each second, and shows a refusal first', async () => {
+  it('reads how enrolment stands on Dictation, records with the sentences while asking each second, and shows a refusal first', async () => {
     let state = 'idle';
 
     answers['page-voice-enroll'] = (body) => {
@@ -442,12 +444,12 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
       return { status: 200, body: { enrollment: { state, endsAt: state === 'recording' ? Date.now() + 60_000 : null, error: null, enrolledAt: state === 'enrolled' ? '2026-11-20T10:00:00.000Z' : null } } };
     };
     await open();
-    await go2('talk');
+    await go2('dictation');
 
     expect(host.querySelector('.settings-enroll-status')?.textContent).toMatch(/^Not enrolled\./);
     press('Enroll my voice');
     await vi.advanceTimersByTimeAsync(0);
-    expect(host.querySelector('.settings-enroll-status')?.textContent).toBe('Recording. Read these sentences aloud in your usual voice, then keep talking: 60 s left.');
+    expect(host.querySelector('.settings-enroll-status')?.textContent).toBe('Recording. Read these sentences aloud in your usual voice, then keep speaking: 60 s left.');
     expect(host.querySelectorAll('.settings-enroll-sentences p')).toHaveLength(5);
     expect(host.querySelector('.settings-enroll .sheet-button')?.textContent).toBe('Cancel');
     await vi.advanceTimersByTimeAsync(1_000);
@@ -481,7 +483,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
 
     pane.open();
     await vi.advanceTimersByTimeAsync(0);
-    await go2('talk');
+    await go2('dictation');
     expect(pending.map((one) => one.action)).toEqual(['status']);
     press('Enroll my voice');
     await vi.advanceTimersByTimeAsync(0);
@@ -498,7 +500,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     pane.requestClose();
     pane.open();
     await vi.advanceTimersByTimeAsync(0);
-    await go2('talk');
+    await go2('dictation');
     pending[2]!.resolve(enrolment('recording'));
     await vi.advanceTimersByTimeAsync(0);
     expect(host.querySelector('.settings-enroll-status')?.textContent).toBe('Reading whether your voice is enrolled…');

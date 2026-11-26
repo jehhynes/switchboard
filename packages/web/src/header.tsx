@@ -244,10 +244,10 @@ function PersonaRow({ session }: { session: PageState['session'] }) {
 }
 
 /**
- * The header's view options button and its menu: Show message details, Collapse details, the persona, and the Chrome
+ * The header's view options button and its menu: Show message details, Collapse details, Spoken replies while voice is on, the persona, and the Chrome
  * pane's state and pairing while it is on.
  */
-function ViewOptions({ view, briefReplies, session }: { view: View; briefReplies: boolean; session: PageState['session'] }) {
+function ViewOptions({ view, briefReplies, session, voice }: { view: View; briefReplies: boolean; session: PageState['session']; voice: PageState['voice'] }) {
   return (
     <div class="menu-anchor view-options-anchor">
       <button type="button" class="icon view-options" data-action="view-menu" aria-haspopup="menu" aria-expanded={view.viewMenu} title="View options" aria-label="View options">
@@ -263,6 +263,13 @@ function ViewOptions({ view, briefReplies, session }: { view: View; briefReplies
             <Gutter checked={briefReplies} />
             <span class="title">Collapse details</span>
           </button>
+          {voice?.enabled === true ? (
+            <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={voice.speakReplies} data-action="toggle-spoken-replies" title="Switchboard speaks the replies of the session the voice is on. Experimental: it may be unreliable.">
+              <Gutter checked={voice.speakReplies} />
+              <span class="title">Spoken replies</span>
+              <span class="menu-note">Experimental</span>
+            </button>
+          ) : null}
           <PersonaRow session={session} />
         </div>
       ) : null}
@@ -330,7 +337,7 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
         {pickerMenu}
       </div>
       <Actions row={selectedRow(state)} view={view} />
-      <ViewOptions view={view} briefReplies={view.briefReplies ?? state.briefReplies} session={state.session} />
+      <ViewOptions view={view} briefReplies={view.briefReplies ?? state.briefReplies} session={state.session} voice={state.voice} />
       <ConnectionDot dot={view.connection} />
     </header>
   );

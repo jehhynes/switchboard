@@ -1030,7 +1030,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     await settled(() => expect(store.message((typed.body as { message: { id: string } }).message.id)?.delivery).toBe('sent'));
   });
 
-  it('runs the voice commands for the window only: Talk here, Stop speaking, Speak replies and Replay, with their refusals', () => {
+  it('runs the voice commands for the window only: Talk here, Stop speaking, Spoken replies and Replay, with their refusals', () => {
     const { voice, calls } = fakeVoice();
     const { service, open, view } = setupSend(new FakeHeld(), undefined, voice);
     const mine = open(2);

@@ -37,10 +37,10 @@ export class AutoDuplex {
   /** The echo check's state, for the mic's tooltip and the voice log. */
   get reason(): string {
     if (this.#full) {
-      return 'echo check: none heard';
+      return 'echo check: no echo detected';
     }
 
-    return this.#heard === 'echo' ? 'echo check: echo heard' : 'echo check: not measured yet';
+    return this.#heard === 'echo' ? 'echo check: echo detected' : 'echo check: not measured yet';
   }
 
   /** The measurements of no echo still needed before full duplex. */

@@ -101,6 +101,12 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
     },
     clearTimer: (timer) => void ((timer as { cleared: boolean }).cleared = true),
   });
+  // Spoken replies start off (operator decision 2026-11-25); these tests cover them on, unless they turn them off.
+  const spokenAtStart = control.speakReplies;
+
+  control.setSpeakReplies(true);
+  notified.length = 0;
+  dockChanges = 0;
   const advance = (ms: number): void => {
     t += ms;
 
@@ -122,6 +128,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
 
   return {
     control,
+    spokenAtStart,
     connections,
     windows,
     full,
@@ -143,6 +150,24 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
 }
 
 describe('VoiceControl', () => {
+  it('starts with spoken replies off, so no message asks for a spoken reply until View options turns them on, since they are experimental', async () => {
+    const { spokenAtStart, control, connections, windows, settle } = setup();
+
+    expect(spokenAtStart).toBe(false);
+    // setup turns them on for the other tests; off again is the state a new hub starts in.
+    control.setSpeakReplies(false);
+    windows.set('k1', scope('k1', 1, 's1'));
+    control.update();
+    await settle();
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' });
+    expect(control.target).toBe('s1');
+    expect(control.view('k1').speakReplies).toBe(false);
+    expect(control.spokenFor('s1', false)).toEqual({ spoken: false, expressive: false });
+    control.setSpeakReplies(true);
+    expect(control.view('k1').speakReplies).toBe(true);
+    expect(control.spokenFor('s1', false)).toEqual({ spoken: true, expressive: false });
+  });
+
   it('sends the focused window\'s session as a target again once it is live again, as after a resume', async () => {
     const { control, connections, windows, full, settle, focus } = setup();
 
@@ -447,7 +472,7 @@ describe('VoiceControl', () => {
     ]);
   });
 
-  it('marks what was offered stopped by a move, cancels a rewritten reply, and cancels all on Speak replies off', async () => {
+  it('marks what was offered stopped by a move, cancels a rewritten reply, and cancels all on Spoken replies off', async () => {
     const { control, connections, windows, reply, replies, settle } = setup();
 
     windows.set('k1', scope('k1', 1, 's1'));
@@ -469,7 +494,7 @@ describe('VoiceControl', () => {
     expect(control.view('k1').speakReplies).toBe(false);
   });
 
-  it('cancels every reply offered as Speak replies off, which the voice process stops at once, playing or not yet reported playing', async () => {
+  it('cancels every reply offered as Spoken replies off, which the voice process stops at once, playing or not yet reported playing', async () => {
     const { control, connections, windows, reply, settle } = setup();
 
     windows.set('k1', scope('k1', 1, 's1'));
@@ -536,7 +561,7 @@ describe('VoiceControl', () => {
     expect(control.replay('k1', 'r1')).toBeNull();
     expect(connections[0]!.sent.at(-1)).toMatchObject({ type: 'speak', replyId: 'r1', gen: 1 });
     // Not again while it is spoken.
-    expect(control.replay('k1', 'r1')).toBe('This reply is being spoken.');
+    expect(control.replay('k1', 'r1')).toBe('Switchboard is already speaking this reply.');
     expect(connections[0]!.sent.filter((one) => one.type === 'speak')).toHaveLength(1);
 
     // Selecting a conversation in the focused window is Talk here at once; in another window it waits for the focus.
@@ -819,7 +844,7 @@ describe('spoken alerts in the hub', () => {
     expect(control.micLive).toBe(false);
     expect(dockChanges()).toBe(before + 4);
 
-    // Speak replies turned off and on again changes the mark between none and the speaker, so each rebuilds the rows; setting it again does not.
+    // Spoken replies turned off and on again changes the mark between none and the speaker, so each rebuilds the rows; setting it again does not.
     control.setSpeakReplies(false);
     expect(dockChanges()).toBe(before + 5);
     control.setSpeakReplies(false);
@@ -841,14 +866,14 @@ describe('speechOf', () => {
 });
 
 describe('voiceMark', () => {
-  it("marks the voice target's row with the mic while the mic is on, else the speaker only while Speak replies is on, saying where the voice is", () => {
-    expect(voiceMark(true, true, false)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is set to this session. Mic on. Speak replies on.' });
-    expect(voiceMark(true, false, false)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is set to this session. Mic on. Speak replies off.' });
-    expect(voiceMark(false, true, false)).toEqual({ glyph: SPEAKER_GLYPH, title: 'Voice is set to this session. Mic off. Speak replies on.' });
+  it("marks the voice target's row with the mic while the mic is on, else the speaker only while Spoken replies is on, saying where the voice is", () => {
+    expect(voiceMark(true, true, false)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is set to this session. Mic on. Spoken replies on.' });
+    expect(voiceMark(true, false, false)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is set to this session. Mic on. Spoken replies off.' });
+    expect(voiceMark(false, true, false)).toEqual({ glyph: SPEAKER_GLYPH, title: 'Voice is set to this session. Mic off. Spoken replies on.' });
     // Neither listening nor speaking: no mark, rather than a speaker that says replies are read.
     expect(voiceMark(false, false, false)).toBeNull();
     expect(voiceMark(false, false, true)).toBeNull();
-    expect(voiceMark(true, false, true)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is on a paired device for this session. Mic on. Speak replies off.' });
+    expect(voiceMark(true, false, true)).toEqual({ glyph: VOICE_GLYPH, title: 'Voice is on a paired device for this session. Mic on. Spoken replies off.' });
     expect(voiceMark(false, true, true)?.glyph).toBe(SPEAKER_GLYPH);
     expect(SPEAKER_GLYPH).not.toBe(VOICE_GLYPH);
   });

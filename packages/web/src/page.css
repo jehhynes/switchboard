@@ -822,7 +822,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 .menu-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .menu-description { font-size: 0.85em; color: var(--vscode-descriptionForeground); white-space: normal; }
 .menu-empty { padding: 8px; text-align: center; color: var(--vscode-descriptionForeground); }
-/* The voice's cluster beside the mic and Send: Speak replies as an icon, or Talk here alone while the voice is elsewhere, whose label is cut short
+/* The voice's cluster beside the mic and Send: Spoken replies as an icon, or Talk here alone while the voice is elsewhere, whose label is cut short
    rather than pushing Send off a narrow footer. */
 .voice-controls { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .voice-controls .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 6px; border: none; border-radius: 4px; background: none; color: var(--vscode-descriptionForeground); font-size: 0.85em; cursor: pointer; }

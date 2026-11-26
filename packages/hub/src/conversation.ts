@@ -2942,7 +2942,7 @@ export class ConversationService {
 
   /**
    * The voice commands (architecture.md § Voice): `talk-here` moves the voice to the window's selected conversation's session, `stop-speaking`
-   * and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Speak replies on or off. Refused with 403 outside the
+   * and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Spoken replies on or off. Refused with 403 outside the
    * window's scope, 409 for a stale `scopeGen` and with the voice's refusal, and 404 while voice is not part of this hub.
    */
   voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic' | 'mic-timing' | 'composer', body: Record<string, unknown>): { status: number; body: unknown } {
