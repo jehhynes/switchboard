@@ -460,8 +460,8 @@ it('cycles F8 in list order through operator-turn rows, opens a closed group and
   el('[data-action="list-search"]').click();
   const search = el('.search-box') as HTMLInputElement;
   search.value = 'No match'; search.dispatchEvent(new Event('input', { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 280));
-  expect(root.querySelector('.row')).toBeNull();
+  // The search applies after its pause.
+  await vi.waitFor(() => expect(root.querySelector('.row')).toBeNull());
   key(search, 'F8');
   expect(el('.row.selected').dataset['row']).toBe('item:2');
   expect(el('.group-head[data-group="review"]').getAttribute('aria-expanded')).toBe('true');

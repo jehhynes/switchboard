@@ -282,7 +282,8 @@ describe('the list header (architecture.md § Web page)', () => {
     // An older row's key is a key too: it searches at once.
     replies.push({ status: 200, body: { rows: [listRow(40, { title: 'Older work', ticket: 'zd 4077', search: 'Older work · zd 4077' })], more: false } });
     input('older');
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // The search goes after its pause.
+    await vi.waitFor(() => expect(posts.filter((post) => post.url.endsWith('/page-search')).at(-1)?.body['text']).toBe('older'));
     releases.shift()!();
     await settle();
     input('zd 4077');

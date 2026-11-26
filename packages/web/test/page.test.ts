@@ -2014,8 +2014,8 @@ it("turns the mic off through Back's path when a phone's conversation is left by
       }
 
       target.dispatchEvent(Object.defineProperty(new Event('touchend', { bubbles: true }), 'touches', { value: [] }));
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      await flush();
+      // The conversation slides away before the list shows.
+      await vi.waitFor(() => expect(root.classList.contains('listing')).toBe(true));
     };
 
     source.emit('hello', { key: 'pk', groups, scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
@@ -2308,8 +2308,8 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     source.emit('draft', { text: 'something else', sessionId: 's' });
     expect(input.value).toBe('my own words');
     input.dispatchEvent(new Event('input'));
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    expect(told().at(-1)).toMatchObject({ draft: 'my own words' });
+    // The page tells the hub after a pause in the typing.
+    await vi.waitFor(() => expect(told().at(-1)).toMatchObject({ draft: 'my own words' }));
     source.emit('draft', { text: '', sessionId: 's' });
     expect(input.value).toBe('my own words');
     input.value = '';
