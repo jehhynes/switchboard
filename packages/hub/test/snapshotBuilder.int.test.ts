@@ -43,6 +43,9 @@ describe('SnapshotBuilder', () => {
     await until(() => built.length === 1);
     expect(built[0]!.snapshot).toEqual(JSON.parse(JSON.stringify(buildSnapshot(store, inputs()))));
     expect(built[0]!.dock).toEqual(JSON.parse(JSON.stringify(dockView(buildSnapshot(store, inputs()), T0, 'C:/w'))));
+    // What the worker read, as the store holds it.
+    expect(built[0]!.snapshot.workItems.map((item) => [item.id, item.ticket.title, item.status])).toEqual([[1, 'Built in a worker', 'running']]);
+    expect(built[0]!.dock.groups.flatMap((group) => group.rows).map((row) => [row.key, row.title])).toEqual([['item:1', 'Built in a worker']]);
     expect(logs).toEqual([]);
     await builder.close();
     store.close();

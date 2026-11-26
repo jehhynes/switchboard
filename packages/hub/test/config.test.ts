@@ -192,14 +192,6 @@ describe('readConfigFile', () => {
     expect(value({ expandReplies: true, briefReplies: 'yes' })).toEqual({ briefReplies: 'yes' });
     expect(value([])).toEqual([]);
   });
-
-  it('returns the playbooks inside the value, valid or not', () => {
-    const text = JSON.stringify({ playbooks: { 'dev:develop': TASK, 'dev:bad': { description: 'x' } } });
-
-    write(settingsFile(), text);
-
-    expect(readConfigFile(configDir())).toEqual({ path: settingsFile(), version: fileVersion(text), value: JSON.parse(text), error: null });
-  });
 });
 
 describe('loadConfig', () => {

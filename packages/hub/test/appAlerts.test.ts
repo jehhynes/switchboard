@@ -4,6 +4,8 @@ import type { Exec } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import { Store } from '@switchboard/core';
 import type { SessionRunner } from '@switchboard/core';
+import { createServer as createNetServer } from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHubApp, parseAction, parseReport } from '../src/app.js';
 import { windowOf, windowsDir } from '../src/dock.js';
@@ -306,8 +308,15 @@ describe('createHubApp', () => {
     closers.push(() => server.close());
     const record = { protocol: 1, version: 't', build: 'b', configDir: 'C:/cfg', execPath: '', port: server.port, token: server.token, pid: 1, startedAt: '' };
 
-    expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'stage', stage: 'x' }, 5000)).toMatchObject({ status: 409, error: 'Unknown session s1.' });
-    expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'nope' }, 5000)).toMatchObject({ status: 400, error: 'Expected {sessionId, kind, stage|path|reason|prompt|label and target}.' });
-    expect(await postToHub({ ...record, port: 1 }, '/report', {}, 1000)).toBeNull();
+    // The refusal names what it refused; its wording is the route's own.
+    expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'stage', stage: 'x' }, 5000)).toMatchObject({ status: 409, error: expect.stringContaining('s1') });
+    expect(await postToHub(record, '/report', { sessionId: 's1', kind: 'nope' }, 5000)).toMatchObject({ status: 400, error: expect.stringContaining('kind') });
+
+    // A listener of this test's that drops each connection unanswered stands in for a hub that is gone.
+    const gone = createNetServer((socket) => socket.destroy());
+
+    await new Promise<void>((done) => gone.listen(0, '127.0.0.1', done));
+    closers.push(() => new Promise<void>((done) => gone.close(() => done())));
+    expect(await postToHub({ ...record, port: (gone.address() as AddressInfo).port }, '/report', {}, 1000)).toBeNull();
   });
 });

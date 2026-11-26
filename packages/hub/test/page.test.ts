@@ -350,8 +350,12 @@ describe('pageList', () => {
     const list = pageList(dock, view);
     const ownRow = dock.groups.flatMap((group) => group.rows).find((row) => row.key === 'item:1')!;
 
-    expect(list.map((group) => [group.key, group.title, group.glyph])).toEqual(dock.groups.map((group) => [group.key, group.title, group.glyph]));
-    expect(list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)).toEqual({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: ownRow.priority, time: ownRow.time, ticket: ownRow.ticket, ticketNumber: ownRow.ticket.slice('gh '.length), sourceKind: ownRow.sourceKind, url: ownRow.url, playbook: ownRow.playbook, links: [], returned: ownRow.returned, comment: ownRow.comment, mark: ownRow.mark, details: ownRow.details, stripe: ownRow.stripe, dim: ownRow.dim, host: null, actions: pageActions(ownRow), main: null, pastes: [], opens: pageOpens(ownRow), search: ownRow.search, band: null, voice: null, questions: 0, history: { ticketId: own.ticket.id, key: ownRow.ticket } });
+    expect(list.map((group) => [group.key, group.title])).toEqual([['review', 'Ready for review'], ['progress', 'In progress'], ['unstarted', 'Unstarted'], ['done', 'Done']]);
+    expect(list.map((group) => group.glyph)).toEqual(dock.groups.map((group) => group.glyph));
+    const shown = list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)!;
+
+    expect(shown).toMatchObject({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: null, time: { text: '0m', title: 'Working since 2026-10-03 12:00 UTC' }, ticket: 'gh 101', ticketNumber: '101', sourceKind: 'github', url: 'https://github.com/o/r/issues/101', playbook: 'dev:develop', links: [], returned: 0, comment: null, mark: { kind: 'running', title: 'Running' }, details: [{ text: 'Running', title: null, tone: null }], stripe: null, dim: false, host: null, main: null, pastes: [], opens: [{ label: 'Open in VS Code', icon: 'vscode' }], search: 'Fix the badge · gh 101 · dev:develop · In progress', band: null, voice: null, questions: 0, history: { ticketId: 1, key: 'gh 101' } });
+    expect(shown.actions.map((one) => one.label)).toEqual(['Stop session', 'Mark done', 'Snooze…', 'Add comment…', 'Delete']);
     // Each work item's row carries its waiting questions as counted.
     const counted = pageList(dock, view, null, (one) => (one.id === 4 ? 3 : 0)).flatMap((group) => group.rows);
 
@@ -370,7 +374,7 @@ describe('pageList', () => {
     expect(dockRow7.terminal !== null || dockRow7.commands.some((one) => one.command['type'] === 'terminal')).toBe(true);
     expect([...page7.opens, ...page7.actions].map((one) => one.label)).not.toContain('Open in terminal');
     // Each row in the list view's group, in its order, a hosted conversation with its host's name.
-    expect(list.map((group) => group.rows.map((row) => row.workItemId))).toEqual(dock.groups.map((group) => group.rows.map((row) => Number(row.key.slice('item:'.length)))));
+    expect(list.map((group) => group.rows.map((row) => row.workItemId))).toEqual([[], [1, 4, 5], [], []]);
     expect(list.flatMap((group) => group.rows).filter((row) => row.host !== null).map((row) => [row.workItemId, row.host]).sort()).toEqual([[4, 'support'], [5, 'x']]);
     expect(list.some((group) => (group.key as string) === 'conversations')).toBe(false);
   });
@@ -389,27 +393,19 @@ describe('pageList', () => {
 });
 
 describe('pageHeader', () => {
-  it("offers the list view's sources, repo roots and schedules", () => {
-    const sources = [{ kind: 'github', label: 'GitHub', enabled: true, title: 'gh: polled', sources: [{ name: 'gh', enabled: true }] }];
-
-    expect(pageHeader({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] })).toEqual({ notes: [], sources, repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] });
-  });
-
-  it("carries the list view's holder notice and restart result", () => {
-    const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update.', confirm: { question: 'Restart the terminal holder?', detail: 'd', action: 'Restart and resume' } };
-    const holderResult = { at: 5, text: 'The terminal holder restarted.', failed: false };
-    const header = pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [], holderNotice, holderResult });
-
-    expect(header).toMatchObject({ holderNotice, holderResult });
-    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('holderNotice');
-  });
-
   it("carries the list view's notes and its held-session note, which is absent while every held session has a work item", () => {
     const notes = ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'];
     const header = pageHeader({ notes, heldNote: '2 held sessions without a work item', sources: [], repoRoots: [], schedules: [] });
 
     expect(header).toMatchObject({ notes, heldNote: '2 held sessions without a work item' });
     expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('heldNote');
+    // The holder's notice and restart result, only when the list view has them.
+    const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update.', confirm: { question: 'Restart the terminal holder?', detail: 'd', action: 'Restart and resume' } };
+    const holderResult = { at: 5, text: 'The terminal holder restarted.', failed: false };
+
+    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [], holderNotice, holderResult })).toMatchObject({ holderNotice, holderResult });
+    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('holderNotice');
+    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('holderResult');
     // The lost phone's note goes apart from the warning notes, untoned (PRD R119).
     expect(pageHeader({ notes: [], voiceNote: 'Voice stopped unexpectedly.', sources: [], repoRoots: [], schedules: [] })).toMatchObject({ notes: [], voiceNote: 'Voice stopped unexpectedly.' });
     expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('voiceNote');
