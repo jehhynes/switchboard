@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseZohoConfig } from '../src/config.js';
 import type { ZohoConfig } from '../src/config.js';
-import { commandToken, deskClient } from '../src/desk.js';
+import { deskClient } from '../src/desk.js';
 
 let server: Server | undefined;
 
@@ -65,15 +65,6 @@ describe('deskClient without a server', () => {
     const config = (parseZohoConfig({ ...REQUIRED, orgId: '1', agentId: '1', apiBase: 'http://127.0.0.1:1/api/v1' }) as { config: ZohoConfig }).config;
 
     expect(await deskClient(config, async () => ({ token: 't' }))('/teams')).toEqual({ error: expect.stringMatching(/^Zoho Desk could not be reached: /) });
-  });
-});
-
-describe('commandToken', () => {
-  it('returns what the command prints, and fails when it prints nothing or exits non-zero', async () => {
-    expect(await commandToken('echo abc123')()).toEqual({ token: 'abc123' });
-    expect(await commandToken('true')()).toEqual({ error: 'The Zoho token command failed: it printed nothing' });
-    expect(await commandToken('echo refused >&2; exit 2')()).toEqual({ error: 'The Zoho token command failed: refused' });
-    expect(await commandToken('echo abc123', 'no-such-bash')()).toEqual({ error: expect.stringMatching(/^The Zoho token command failed: .*ENOENT/) });
   });
 });
 

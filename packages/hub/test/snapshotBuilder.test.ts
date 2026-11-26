@@ -1,16 +1,13 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, Store } from '@switchboard/core';
 import { dockView } from '../src/dock.js';
 import { buildSnapshot } from '../src/snapshot.js';
-import type { SnapshotInputs } from '../src/snapshot.js';
 import { SnapshotBuilder } from '../src/snapshotBuilder.js';
 import type { Built } from '../src/snapshotBuilder.js';
+import { inputs, storeWithItem, T0, until } from './snapshotFixtures.js';
 
-const WORKER = resolve(import.meta.dirname, '../dist/snapshotWorkerMain.js');
-const T0 = Date.UTC(2026, 10, 19, 12);
 
 let dir: string;
 
@@ -23,44 +20,6 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-const inputs = (): SnapshotInputs => ({
-  settings: DEFAULT_SETTINGS,
-  playbooks: [],
-  settingsError: null,
-  playbookErrors: [],
-  enabled: [],
-  sources: [],
-  held: [],
-  holder: null,
-  guarded: [],
-  nodeError: null,
-  hookErrors: { claude: null, codex: null },
-  sourceErrors: {},
-  sourceNotes: {},
-  pullRequests: {},
-  kinds: {},
-  now: T0,
-  configDir: 'C:/cfg',
-});
-
-function storeWithItem(path: string): Store {
-  const store = Store.open(path);
-  const ticket = store.insertTicket({ source: 'adhoc', sourceKey: '1', ref: '#1', sourceId: null, title: 'Built in a worker', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' } as never);
-
-  store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: T0 } as never);
-
-  return store;
-}
-
-const until = async (test: () => boolean): Promise<void> => {
-  for (const deadline = Date.now() + 10_000; !test(); ) {
-    if (Date.now() > deadline) {
-      throw new Error('timed out');
-    }
-
-    await new Promise((done) => setTimeout(done, 20));
-  }
-};
 
 describe('SnapshotBuilder', () => {
   it('builds once for changes that come together, and again for a change during a build', async () => {
@@ -93,32 +52,6 @@ describe('SnapshotBuilder', () => {
     expect(built[0]!.snapshot.workItems.map((item) => item.ticket.title)).toEqual(['Built in a worker']);
     expect(builder.latest()).toBe(built[1]);
     await builder.close();
-  });
-
-  it.runIf(existsSync(WORKER))('builds in a worker thread from a read-only store the same snapshot and dock view the main thread would', async () => {
-    const path = join(dir, 'switchboard.db');
-    const store = storeWithItem(path);
-    const built: Built[] = [];
-    const logs: string[] = [];
-    const builder = new SnapshotBuilder({
-      inputs,
-      inThread: () => {
-        throw new Error('built on the main thread');
-      },
-      onBuilt: (one) => built.push(one),
-      worker: { script: WORKER, data: { kind: 'snapshot', db: path, windows: 'C:/w' } },
-      now: Date.now,
-      log: (line) => logs.push(line),
-    });
-
-    expect(builder.inThread).toBe(false);
-    builder.schedule();
-    await until(() => built.length === 1);
-    expect(built[0]!.snapshot).toEqual(JSON.parse(JSON.stringify(buildSnapshot(store, inputs()))));
-    expect(built[0]!.dock).toEqual(JSON.parse(JSON.stringify(dockView(buildSnapshot(store, inputs()), T0, 'C:/w'))));
-    expect(logs).toEqual([]);
-    await builder.close();
-    store.close();
   });
 
   it('builds on the main thread once its worker fails, and says so once', async () => {
@@ -165,30 +98,6 @@ describe('SnapshotBuilder', () => {
     expect(built[0]!.snapshot.workItems).toHaveLength(1);
     builder.schedule();
     await until(() => built.length === 2);
-    await builder.close();
-  });
-
-  it('answers an unreadable store with the error, which the main thread logs, and builds on demand on the main thread', async () => {
-    const store = storeWithItem(':memory:');
-    const logs: string[] = [];
-    const builder = new SnapshotBuilder({
-      inputs,
-      inThread: (given) => ({ snapshot: buildSnapshot(store, given), dock: dockView(buildSnapshot(store, given), given.now, 'C:/w') }),
-      onBuilt: () => undefined,
-      worker: existsSync(WORKER) ? { script: WORKER, data: { kind: 'snapshot', db: join(dir, 'absent', 'x.db'), windows: 'C:/w' } } : null,
-      now: Date.now,
-      log: (line) => logs.push(line),
-    });
-
-    expect(builder.buildNow().snapshot.workItems).toHaveLength(1);
-    expect(builder.dirty).toBe(false);
-
-    if (existsSync(WORKER)) {
-      builder.schedule();
-      await until(() => logs.length > 0);
-      expect(logs[0]).toMatch(/^snapshot build failed: /);
-    }
-
     await builder.close();
   });
 });

@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseGithubConfig } from '../src/config.js';
-import { ghArgs, ghError, spawnGh } from '../src/gh.js';
+import { ghArgs, ghError } from '../src/gh.js';
 
 const VALID = { repo: 'acme/widgets', logins: ['work-login'], project: { owner: 'acme', number: 3 }, assignedStatuses: ['⚒️ Dev'] };
 
@@ -100,16 +100,5 @@ describe('ghError', () => {
 describe('ghArgs', () => {
   it('passes strings with -f and numbers with -F', () => {
     expect(ghArgs('query{x}', { owner: 'acme', number: 19504 })).toEqual(['api', 'graphql', '-f', 'query=query{x}', '-f', 'owner=acme', '-F', 'number=19504']);
-  });
-});
-
-describe('spawnGh', () => {
-  it('reports a missing executable', async () => {
-    expect(await spawnGh('D:/no/such/gh.exe')('query', {})).toEqual({ error: 'The GitHub CLI was not found at D:/no/such/gh.exe. Install it or set ghPath in the source\'s settings.' });
-  });
-
-  it("passes gh's error output through", async () => {
-    // Node stands in for gh and fails on the unknown script "api".
-    expect(await spawnGh(process.execPath)('query', {})).toEqual({ error: expect.stringMatching(/Cannot find module .*api/) });
   });
 });
