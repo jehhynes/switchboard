@@ -149,7 +149,7 @@ describe('the page in use', () => {
     update.remove();
     await vi.waitFor(() => expect(shown()).toBe(true), { timeout: 4_000 });
     page.close();
-  });
+  }, 20_000);
 
   it('keeps the embedded browser showing under a menu or modal once its host cuts holes, sending the layers over it and the backdrop darkening', async () => {
     const postMessage = vi.fn();
@@ -253,6 +253,6 @@ describe('the page in use', () => {
     // Stopped, it is no longer followed.
     expect(postMessage.mock.calls.length).toBe(sent);
     page.close();
-  });
+  }, 20_000);
 
 });

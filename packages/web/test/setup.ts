@@ -51,12 +51,14 @@ if (typeof History !== 'undefined') {
 }
 
 // A popstate still to come when a test ends would land in the next test and move that test's address, so a test that moved through the
-// history ends with one real timer turn, after its pages are closed. A timer turn takes about 15 ms on Windows, so other tests skip it.
+// history ends with two real timer turns, after its pages are closed. A timer turn takes about 15 ms on Windows, so other tests skip it.
 afterEach(async () => {
   for (const page of [...open]) page.close();
 
+  // jsdom moves through the history in two timer tasks, the second of which changes the address and fires popstate.
   if (traversed) {
     traversed = false;
+    await new Promise((done) => realTimeout(done, 0));
     await new Promise((done) => realTimeout(done, 0));
   }
 });

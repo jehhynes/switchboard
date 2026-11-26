@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     env: testTemp(),
     environment: 'jsdom',
+    // A fresh context per file in a kept worker: jsdom costs far less to set up there than in a new process.
     pool: 'vmForks',
     include: ['test/**/*.test.ts'],
     coverage: {

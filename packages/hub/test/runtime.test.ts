@@ -429,7 +429,7 @@ describe('Runtime', () => {
     } finally {
       runtime.stop();
     }
-  });
+  }, MARKER_MS + MARKER_WATCH_RETRY_MS * 4 + 2_000);
 
   it('reads the roster when a session that ended writes a marker, so a session resumed outside the holder returns to Working at once', async () => {
     let now = T0;

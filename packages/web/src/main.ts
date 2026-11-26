@@ -5868,7 +5868,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     const covered = !holes && browserTab() && framesCovered();
-    iframe.place(browserTab() && state.connected && openingShown() === null && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !covered && (holes || !settingsPane.isOpen()) && !(isPhone() && root.classList.contains('listing')), holes ? frameLayers() : undefined);
+    iframe.place(browserTab() && state.connected && openingShown() === null && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !covered && (holes || !settingsPane.isOpen()) && !(isPhone() && root.classList.contains('listing')), holes && browserTab() ? frameLayers() : undefined);
   };
   const browserResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reportFrames()) : null;
 

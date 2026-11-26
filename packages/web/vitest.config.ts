@@ -8,7 +8,10 @@ export default defineConfig({
   test: {
     env: testTemp(),
     environment: 'jsdom',
+    // A fresh context per file in a kept worker: jsdom costs far less to set up there than in a new process.
     pool: 'vmForks',
+    // @pierre/diffs loads its themes with a dynamic import, which fails in a vm context, so the diff viewer's tests run in their own process.
+    poolMatchGlobs: [['**/test/{changesViewer,diffCacheKeys,diffViewer}.test.ts', 'forks']],
     include: ['test/**/*.test.{ts,tsx}'],
     setupFiles: ['test/setup.ts'],
     coverage: {
