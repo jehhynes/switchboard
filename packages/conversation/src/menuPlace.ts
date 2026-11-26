@@ -5,11 +5,10 @@
  * nothing, for browser bundles.
  */
 
-/** The least room a menu leaves to the viewport's edge, its narrowest and widest unless it sets its own, and its greatest height (`.menu`'s `max-height`). */
+/** The least room a menu leaves to the viewport's edge, and its narrowest and widest unless it sets its own. */
 const MARGIN = 8;
 const MIN_WIDTH = 160;
 export const MENU_MAX_WIDTH = 360;
-const MAX_HEIGHT = 420;
 
 export interface Box {
   left: number;
@@ -47,8 +46,9 @@ export function menuPlace(anchor: Box, menu: Box & { width: number; height: numb
     flipX,
     flipY,
     maxWidth: Math.max(MIN_WIDTH, Math.min(widest, Math.floor(flipX ? left : right))),
-    // No least height: in a view too short for a few rows, the menu scrolls within the room rather than pass the edge.
-    maxHeight: Math.max(0, Math.min(MAX_HEIGHT, Math.floor(view.height * 0.6), Math.floor(flipY ? above : below))),
+    // All the room on its side, so no row is hidden while there is room to show it; no least height: in a view too short for a few rows, the
+    // menu scrolls within the room rather than pass the edge.
+    maxHeight: Math.max(0, Math.floor(flipY ? above : below)),
   };
 }
 
@@ -58,11 +58,23 @@ export interface MenuElement {
   getBoundingClientRect(): Box & { width: number; height: number };
   classList: { remove(...names: string[]): void; toggle(name: string, on: boolean): boolean };
   style: { maxWidth: string; maxHeight: string };
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
 }
 
 /**
- * Places each open `.menu` under `root` (`menuPlace`), measured from its default place under its parent, the element it opens from; nothing
- * before the viewport has a size, as in a test's DOM. Run after each draw, a resize and a scroll, which moves a menu's anchor. `widest` reads a
+ * Marks a menu that scrolls with `more-above` and `more-below` while it has rows past its top or bottom edge, which menu.css draws as a fade
+ * with a chevron on that edge, so a cut-off menu shows that it scrolls. Run after placing it and on its own scroll.
+ */
+export function markScroll(menu: Pick<MenuElement, 'classList' | 'scrollTop' | 'scrollHeight' | 'clientHeight'>): void {
+  menu.classList.toggle('more-above', menu.scrollTop > 1);
+  menu.classList.toggle('more-below', menu.scrollHeight - menu.clientHeight - menu.scrollTop > 1);
+}
+
+/**
+ * Places each open `.menu` under `root` (`menuPlace`), measured from its default place under its parent, the element it opens from, and marks
+ * the edges it has rows past (`markScroll`); nothing before the viewport has a size, as in a test's DOM. Run after each draw, a resize and a scroll, which moves a menu's anchor. `widest` reads a
  * menu's own widest, as its CSS `max-width` sets it, once its size from the last draw is cleared.
  */
 export function placeMenus(root: { querySelectorAll(selector: string): Iterable<MenuElement> }, view: { width: number; height: number }, widest: (menu: MenuElement) => number = () => MENU_MAX_WIDTH): void {
@@ -71,6 +83,9 @@ export function placeMenus(root: { querySelectorAll(selector: string): Iterable<
   }
 
   for (const menu of root.querySelectorAll('.menu')) {
+    // Measuring it unsized can clamp its scroll to a shorter range, so where it was scrolled to is put back once it is sized again.
+    const scrolled = menu.scrollTop;
+
     menu.classList.remove('flip-x', 'flip-y');
     menu.style.maxWidth = '';
     menu.style.maxHeight = '';
@@ -82,5 +97,7 @@ export function placeMenus(root: { querySelectorAll(selector: string): Iterable<
     menu.classList.toggle('flip-y', place.flipY);
     menu.style.maxWidth = `${place.maxWidth}px`;
     menu.style.maxHeight = `${place.maxHeight}px`;
+    menu.scrollTop = scrolled;
+    markScroll(menu);
   }
 }

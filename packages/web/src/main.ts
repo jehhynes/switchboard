@@ -2,7 +2,7 @@ import { applyEvent, commandQuery, OPEN_IN_VSCODE, EMPTY, mentionOf, mentionQuer
 import { snoozeChoices } from '@switchboard/core/snooze';
 import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 import type { PageState } from './model.js';
-import { MENU_MAX_WIDTH, menuPlace, placeMenus } from '@switchboard/conversation/menuPlace';
+import { markScroll, MENU_MAX_WIDTH, menuPlace, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
 import { ARTIFACTS_SEEN, artifactShow, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unknownSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, NewDraft, SideTab, Tab, View } from './render.js';
@@ -6010,8 +6010,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   settingsShown?.observe(root.querySelector('#list-sheet')!, { childList: true, subtree: true });
   window.addEventListener('resize', () => reportFrames(), { signal: listening.signal });
   window.addEventListener('resize', fitMenus, { signal: listening.signal });
-  // A scroll moves a menu's anchor; a menu's own scrolling does not.
-  document.addEventListener('scroll', (event) => (event.target instanceof Element && event.target.closest('.menu') !== null ? undefined : fitMenus()), { capture: true, signal: listening.signal });
+  // A scroll moves a menu's anchor; a menu's own scrolling does not, but changes which of its edges have rows past them.
+  document.addEventListener(
+    'scroll',
+    (event) => {
+      const menu = event.target instanceof Element ? event.target.closest<HTMLElement>('.menu') : null;
+
+      if (menu === null) {
+        fitMenus();
+      } else if (menu === event.target) {
+        markScroll(menu);
+      }
+    },
+    { capture: true, signal: listening.signal },
+  );
   // A move to a monitor of another scale changes devicePixelRatio without a resize of the column in CSS pixels.
   const watchScale = (): void => {
     if (typeof window.matchMedia === 'function') {

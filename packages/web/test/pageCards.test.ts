@@ -557,6 +557,48 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('sizes a menu to the room below its button, marks the edges it has rows past as it scrolls, and keeps its scroll over a redraw', () => {
+    const { page, source } = start();
+    const actions = [{ label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state' as const, confirm: null, input: null }];
+    const rect = (top: number, height: number) => ({ left: 300, right: 340, top, bottom: top + height, width: 40, height, x: 300, y: top, toJSON: () => ({}) }) as DOMRect;
+    const isMenu = (node: Element) => node.classList.contains('actions-menu');
+
+    hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', actions })])] });
+    // A phone on its side, 393 px tall: the button's bottom at 52 px, and 600 px of rows, which a browser draws 2 px under it.
+    Object.defineProperty(document.documentElement, 'clientWidth', { value: 852, configurable: true });
+    Object.defineProperty(document.documentElement, 'clientHeight', { value: 393, configurable: true });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('actions-anchor') ? rect(8, 44) : isMenu(this) ? rect(54, 600) : rect(0, 0);
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get(this: HTMLElement) { return isMenu(this) ? 600 : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get(this: HTMLElement) { return isMenu(this) ? Math.min(600, parseFloat(this.style.maxHeight) || 600) : 0; } });
+    onTestFinished(() => {
+      delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+      delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+      delete (document.documentElement as { clientWidth?: number }).clientWidth;
+      delete (document.documentElement as { clientHeight?: number }).clientHeight;
+    });
+
+    click('button.actions');
+    const menu = root.querySelector<HTMLElement>('.actions-menu')!;
+    const edges = () => ['more-above', 'more-below'].filter((name) => menu.classList.contains(name));
+
+    // All 331 px below the button, less the 8 px margin, not a share of the height: the rows past its bottom show it scrolls.
+    expect(menu.style.maxHeight).toBe('331px');
+    expect(edges()).toEqual(['more-below']);
+    menu.scrollTop = 100;
+    menu.dispatchEvent(new Event('scroll'));
+    expect(edges()).toEqual(['more-above', 'more-below']);
+    // A redraw for the stream keeps where it was scrolled to.
+    source.emit('session', { session: session() });
+    expect(root.querySelector('.actions-menu')).toBe(menu);
+    expect(menu.scrollTop).toBe(100);
+    menu.scrollTop = 269;
+    menu.dispatchEvent(new Event('scroll'));
+    expect(edges()).toEqual(['more-above']);
+    page.close();
+  });
+
   it('answers a card from the keyboard: numbers pick by place, arrows move between options, Enter goes on and sends, Backspace goes back', async () => {
     const { page, source } = start();
     const asked = '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2\n2. Keep the route? {#keep-route}\n   - A) Keep\n   - B) Remove';

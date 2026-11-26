@@ -1,7 +1,12 @@
 /* Where every menu of the web page opens (architecture.md § Conversation view, Menus): under the element that holds it, left edges
    lined up; `placeMenus` (menuPlace.ts) adds flip-x to line it up with that element's right edge, or flip-y to open it above, when it would
-   pass the viewport's edge. */
+   pass the viewport's edge, and sizes it to the room on that side. */
 .menu-anchor { position: relative; display: flex; min-width: 0; }
-.menu { position: absolute; z-index: 20; top: calc(100% + 2px); left: 0; box-sizing: border-box; width: max-content; min-width: 160px; max-width: min(360px, calc(100vw - 16px)); max-height: min(60vh, 420px); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 4px; list-style: none; border-radius: 8px; font-size: 13px; font-weight: normal; line-height: 1.4; text-transform: none; }
+.menu { position: absolute; z-index: 20; top: calc(100% + 2px); left: 0; box-sizing: border-box; width: max-content; min-width: 160px; max-width: min(360px, calc(100vw - 16px)); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 4px; list-style: none; border-radius: 8px; font-size: 13px; font-weight: normal; line-height: 1.4; text-transform: none; }
 .menu.flip-x { left: auto; right: 0; }
 .menu.flip-y { top: auto; bottom: calc(100% + 2px); }
+/* A menu taller than its room scrolls; a fade with a chevron at each edge it has rows past (`more-above`, `more-below`, set by `markScroll`)
+   shows that it does, since a touch screen shows no scroll bar. They stick to the menu's top and bottom edges, over its 4 px padding, and take no presses. */
+.menu.more-above::before, .menu.more-below::after { position: sticky; z-index: 1; display: flex; align-items: center; justify-content: center; grid-column: 1 / -1; height: 28px; font: 16px/1 codicon; color: var(--vscode-descriptionForeground); pointer-events: none; }
+.menu.more-above::before { content: '\eab7'; top: 0; margin: -4px 0 -24px; background: linear-gradient(to bottom, var(--glass-fill, var(--vscode-menu-background)) 40%, transparent); }
+.menu.more-below::after { content: '\eab4'; bottom: 0; margin: -24px 0 -4px; background: linear-gradient(to top, var(--glass-fill, var(--vscode-menu-background)) 40%, transparent); }

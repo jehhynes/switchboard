@@ -2,7 +2,7 @@
 // app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History (its title first at 20 px, its
 // groups' headings at 14 px, and its pinned state on the first screen), History's filter and the Changes tree's search box (each at least 160 px
 // wide and covered by nothing else of its bar, with History's chips shown and the search's options menu open), Settings, the drawer, a sheet,
-// a work item with more tabs than fit, the composer under each other tab and a maximized column with the mic on, a conversation with questions waiting, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
+// a work item with more tabs than fit, the composer under each other tab and a maximized column with the mic on, a conversation with questions waiting, the long Actions, More actions, row and More tabs menus, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
 // a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, and the More menu lies above everything under it. Line 2 is one line, never wrapping and its items never
 // below one another, at several list widths down to 200 px; its playbook or host is cut, with an ellipsis and a tooltip naming it whole, only
 // where it does not fit beside the comment icon and the key; a key shows its source's logo, GitHub's, Zoho's or a plugin's, in place of its source's label; every pill, the key included, shows its text where line 2 is 300 px wide or more and its icon alone under that,
@@ -59,7 +59,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -105,6 +105,11 @@ const state = (text, tone) => ({ text, title: null, tone });
 const remove = { label: 'Delete', action: 'delete', icon: 'trash', group: 'state', confirm: { question: 'Delete Fix it?', detail: 'It goes for good.', action: 'delete' }, input: null };
 // The open work item's main control, which the header draws beside Actions: its icon alone on a phone.
 const approve = { label: 'Approve', action: 'approve', icon: 'check', group: 'main', confirm: null, input: null };
+// The menu views' work item offers as much as a real one awaiting approval, so its Actions and row menus are as long: on a phone on its side
+// taller than the room, so they scroll, and on a phone held upright and an iPad not.
+const control = (label, action, icon, group) => ({ label, action, icon, group, confirm: null, input: null });
+const asking = (label, action, icon) => ({ ...control(label, action, icon, 'asking'), confirm: { question: label + ' Fix it?', detail: 'It cannot be undone.', action } });
+const crowdedMenu = view?.endsWith('-menu') ? { actions: [approve, control('Snooze…', 'snooze', 'clock', 'state'), control('Mark done', 'done', 'pass', 'state'), control('Add comment…', 'comment', 'comment', 'notes'), asking('Stop session', 'stop', 'debug-stop'), { ...remove, group: 'asking' }], pastes: ['report', 'comment'], opens: [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'file', file: 'D:/w/report.md' }], url: 'https://github.com/o/r/issues/1' } : {};
 // The second row's line 2 holds more pills than fit beside its long playbook, so some drop out.
 const pr = (n) => ({ label: 'PR #' + n, url: 'https://github.com/o/r/pull/' + n, kind: 'pr', badge: String(n), glyph: '\u{ea64}', mentioned: false });
 const crowded = { ticket: 'gh 21509', ticketNumber: '21509', url: 'https://github.com/o/r/issues/21509', playbook: 'dev:address-pr-review', comment: { glyph: '\u{ea6b}', title: 'A comment' }, links: [pr(21512), pr(21513), pr(21514), pr(21515), { label: 'Design notes', url: 'https://example.com/notes', kind: 'url', badge: 'Design notes', glyph: '\u{eb15}', mentioned: false }], returned: 2 };
@@ -121,11 +126,11 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 // The header's sources: GitHub's and Zoho's logos are the page's own; the DPAF plugin gives its own, a made-up mark here.
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 const header = { notes: [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, remove], details: [state('2/5 fixing tests · 4m', 'dim')] }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
-const listing = view === 'list' || narrow !== null;
+const listing = view === 'list' || view === 'more-menu' || view === 'row-menu' || narrow !== null;
 const open = !listing && !view?.startsWith('settings');
 if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list { width: ' + narrow + 'px !important; min-width: 0 !important; max-width: none !important; }</style>');
 // A title longer than any header here fits, so the header shows how much of it is left beside the main control.
@@ -151,7 +156,7 @@ history.replaceState(null, '', location.search + (open ? (view?.endsWith('-chang
 // The tabs view's work item has more artifacts, with long titles but the newest's, than any strip here fits.
 // The mic views' work item has one long Markdown artifact.
 const mic = view?.startsWith('mic-') === true;
-const artifacts = mic ? [{ path: 'chat/plan.md', owner: 'chat', kind: 'note', title: 'Plan', ext: 'md', type: 'markdown', updatedAt: now - 1000 }] : view === 'tabs' ? Array.from({ length: 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: i === 9 ? 'Plan' : 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
+const artifacts = mic ? [{ path: 'chat/plan.md', owner: 'chat', kind: 'note', title: 'Plan', ext: 'md', type: 'markdown', updatedAt: now - 1000 }] : view === 'tabs' || view === 'tab-menu' ? Array.from({ length: view === 'tab-menu' ? 20 : 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: i === 9 ? 'Plan' : 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
 class FakeSource {
   constructor() {
     this.listeners = {};
@@ -536,6 +541,12 @@ const OPEN = {
   'mic-max-history': [openTab('[data-side="history"]'), '.panel-max'],
   'mic-max-changes': [openTab('[data-action="diff-tab"]'), '.panel-max'],
   'mic-max-artifact': [openTab('[data-action="artifact"][data-path="chat/plan.md"]'), '.panel-max'],
+  // The long menus (menuFailures): the open work item's Actions, the list's More actions, and a row's menu by a right click or long press on it.
+  'actions-menu': ['[data-action=actions]'],
+  'more-menu': ['[data-action=list-more]'],
+  'row-menu': [{ contextmenu: '#list .row[data-work-item="1"]' }],
+  // The tab strip's More menu, a grid rather than a list, with 20 artifacts.
+  'tab-menu': ['.tab-more-button'],
 };
 
 /** The search views: the field, and the bar whose controls must not cover it. */
@@ -607,6 +618,49 @@ const CARD_LOOK = `(async () => {
   const style = getComputedStyle(back);
   return { contrast: Math.round(ratio(over(rgba(getComputedStyle(topic).color), ground), ground) * 100) / 100, disabled: back.disabled, border: style.borderTopColor, borderAlpha: rgba(style.borderTopColor)[3] };
 })()`;
+
+/**
+ * The open menu as it shows, then scrolled to its end: whether it scrolls, where its box lies, the scroll marks (`more-above`, `more-below`) and
+ * whether its fade shows, and at its end whether its last row is the element under the row's centre. Scrolled back to its top after.
+ */
+const MENU = `(async () => {
+  const menu = document.querySelector('.menu');
+  if (!menu) return null;
+  const marks = () => ['more-above', 'more-below'].filter((name) => menu.classList.contains(name));
+  const rows = [...menu.querySelectorAll('.menu-row')];
+  const box = menu.getBoundingClientRect();
+  const first = { marks: marks(), fade: getComputedStyle(menu, '::after').content, sideways: menu.scrollWidth > menu.clientWidth + 1 };
+  menu.scrollTop = menu.scrollHeight;
+  await new Promise((done) => setTimeout(done, 150));
+  const last = rows.at(-1).getBoundingClientRect();
+  const hit = document.elementFromPoint(last.left + last.width / 2, last.top + last.height / 2);
+  const end = { marks: marks(), sideways: menu.scrollWidth > menu.clientWidth + 1, last: rows.at(-1).textContent, whole: last.top >= box.top - 0.5 && last.bottom <= box.bottom + 0.5, hit: hit !== null && rows.at(-1).contains(hit) };
+  menu.scrollTop = 0;
+  await new Promise((done) => setTimeout(done, 150));
+  return { scrolls: menu.scrollHeight > menu.clientHeight + 1, flipped: menu.classList.contains('flip-y'), rows: rows.length, top: box.top, bottom: box.bottom, inside: box.left >= -0.5 && box.top >= -0.5 && box.right <= innerWidth + 0.5 && box.bottom <= innerHeight + 0.5, height: innerHeight, first, end, back: marks() };
+})()`;
+
+/**
+ * A long menu's failures: it stays inside the viewport; one that scrolls takes all the room on its side, shows that it scrolls with the fade
+ * below it, and at its end shows its last row whole and pressable with the fade above it only; one that fits shows no fade. The fixture's
+ * Actions and More menus fit a phone held upright and an iPad, and scroll on a phone on its side.
+ */
+function menuFailures(view, size, r) {
+  const out = [];
+
+  if (r === null) return ['opened no menu'];
+  if (!r.inside) out.push('the menu passes the viewport: ' + r.top + ' to ' + r.bottom + ' of ' + r.height);
+  if (r.first.sideways || r.end.sideways) out.push('the menu scrolls sideways' + (r.first.sideways ? '' : ' once scrolled to its end'));
+  if (r.scrolls) {
+    if (r.flipped ? r.top > 8.5 : r.bottom < r.height - 8.5) out.push('the menu scrolls but stops ' + (r.flipped ? r.top + ' px under the top' : r.height - r.bottom + ' px above the bottom') + ', leaving room unused');
+    if (r.first.marks.join() !== 'more-below' || r.first.fade === 'none') out.push('the menu scrolls but shows it with ' + JSON.stringify(r.first));
+    if (r.end.marks.join() !== 'more-above' || !r.end.whole || !r.end.hit) out.push('at its end the menu shows ' + JSON.stringify(r.end));
+  } else if (r.first.marks.length > 0) out.push('the menu fits but is marked ' + r.first.marks.join(', '));
+  if (r.back.join() !== r.first.marks.join()) out.push('scrolled back to its top the menu is marked ' + r.back.join(', '));
+  if (view === 'tab-menu' && size.phone && size.orientation === 'landscape' && !r.scrolls) out.push('the More tabs menu fits, so its scrolling is not checked');
+  if (!['row-menu', 'tab-menu'].includes(view) && r.scrolls !== (size.phone && size.orientation === 'landscape')) out.push(r.scrolls ? 'the menu scrolls where the screen has room for all ' + r.rows + ' rows' : 'the menu fits, so its scrolling is not checked');
+  return out;
+}
 
 /** Opens the More menu again and answers whether it lies above everything at the centres of its rows in view, and inside the viewport. */
 const moreOnTop = `(async () => {
@@ -917,10 +971,16 @@ try {
         const steps = OPEN[view] ?? [];
         const missing = [];
 
-        for (const selector of steps) {
-          if (typeof selector === 'object') {
-            if (!(await evaluate(selector.eval))) missing.push(selector.name);
-          } else if (!(await evaluate('(() => { const node = document.querySelector(' + JSON.stringify(selector) + '); node?.click(); return node !== null; })()'))) missing.push(selector);
+        for (const step of steps) {
+          // A step is a selector to click, one to open the menu of, as a right click or a long press does, at its centre, or a script to run (openTab).
+          if (typeof step === 'object' && step.eval !== undefined) {
+            if (!(await evaluate(step.eval))) missing.push(step.name);
+          } else {
+            const selector = typeof step === 'string' ? step : step.contextmenu;
+            const act = typeof step === 'string' ? 'node.click()' : 'node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: node.getBoundingClientRect().left + node.getBoundingClientRect().width / 2, clientY: node.getBoundingClientRect().top + node.getBoundingClientRect().height / 2 }))';
+
+            if (!(await evaluate('(() => { const node = document.querySelector(' + JSON.stringify(selector) + '); if (node) ' + act + '; return node !== null; })()'))) missing.push(selector);
+          }
           await wait(150);
         }
 
@@ -972,6 +1032,15 @@ try {
             if (!look.disabled || look.borderAlpha > 0) found.push("the first question's Back is " + (look.disabled ? 'disabled with the border ' + look.border : 'enabled'));
           }
           await evaluate('(() => { const panel = document.getElementById("panel"); panel.scrollTop = panel.scrollHeight; })()');
+        }
+
+        if (view.endsWith('-menu') && missing.length === 0) {
+          found.push(...menuFailures(view, size, await evaluate(MENU)));
+          // The menu as it opens, before the touch targets' sweep scrolls it to its end.
+          if (shots !== null) {
+            mkdirSync(shots, { recursive: true });
+            writeFileSync(join(shots, name.replaceAll(' ', '-') + '-open.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+          }
         }
 
         if (view === 'tabs' && missing.length === 0) {
