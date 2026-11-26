@@ -267,6 +267,13 @@ interface SherpaModule {
   };
 }
 
+/**
+ * onnxruntime threads per device: the fewest whose decode keeps within 0.8 of real time on the operator's machine. Each extra thread spins between
+ * chunks without decoding faster: on the GPU 4 threads cost 3.1 cores and 1 thread 0.36 at the same speed; on the CPU 4 cost 8.2 cores, 2
+ * cost 3.2 at 0.45 of real time, and 1 thread took 0.67 to 0.92 (mechanics.md M166).
+ */
+export const RECOGNISER_THREADS: Readonly<Record<AsrDevice, number>> = { gpu: 1, cpu: 2 };
+
 export interface Hotwords {
   bpeVocab: string;
   hotwordsFile: string | null;
@@ -295,7 +302,7 @@ export function sherpaEngine(module: unknown, device: AsrDevice, modelDir: strin
       modelConfig: {
         transducer: { encoder: file(`encoder${suffix}.onnx`), decoder: file(`decoder${suffix}.onnx`), joiner: file(`joiner${suffix}.onnx`) },
         tokens: file('tokens.txt'),
-        numThreads: 4,
+        numThreads: RECOGNISER_THREADS[device],
         provider: device === 'gpu' ? 'cuda' : 'cpu',
         debug: 0,
         modelingUnit: 'bpe',

@@ -230,6 +230,7 @@ describe('sherpaEngine', () => {
       const cpu = sherpaEngine(module, 'cpu', dir, () => ({ bpeVocab: 'v', hotwordsFile: null }));
 
       expect([(gpu as AsrEngine).device, (cpu as AsrEngine).device]).toEqual(['gpu', 'cpu']);
+      expect([configs[0]?.modelConfig.numThreads, configs[1]?.modelConfig.numThreads]).toEqual([1, 2]);
       expect(configs[0]).toMatchObject({ modelConfig: { provider: 'cuda', transducer: { encoder: join(dir, 'encoder.onnx'), joiner: join(dir, 'joiner.onnx') }, bpeVocab: 'v' }, hotwordsFile: 'h.txt', hotwordsScore: 1.5 });
       expect(configs[1]).toMatchObject({ modelConfig: { provider: 'cpu', transducer: { encoder: join(dir, 'encoder.int8.onnx'), decoder: join(dir, 'decoder.int8.onnx') } } });
       expect(configs[1]).not.toHaveProperty('hotwordsFile');
