@@ -88,8 +88,11 @@ export function modalLayers(root: HTMLElement): Layers {
       const focused = document.activeElement;
 
       if (top !== null && added.includes(top) && replaced === null && !(focused !== null && top.contains(focused))) {
-        // A layer that opens without placing the focus itself starts on its first control.
-        top.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+        // A layer that opens without placing the focus itself starts on its first control, past a title bar's X, which takes it only alone.
+        // In document order: jsdom lists a selector list's matches by selector.
+        const controls = [...top.querySelectorAll<HTMLElement>('*')].filter((one) => one.matches(FOCUSABLE));
+
+        (controls.find((control) => !control.matches('.sheet-close')) ?? controls[0])?.focus();
       } else if (closed.length > 0 && added.length === 0 && (focused === null || focused === document.body || !focused.isConnected)) {
         // The focus fell with the layer that closed: it goes back to what opened that layer, if that is still there to take it.
         const opener = closed.at(-1)!.opener;

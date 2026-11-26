@@ -5698,7 +5698,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.sheet = { kind: 'confirm', row: key, action };
       draw();
       // A control that asks first starts on Cancel, so Enter cancels it.
-      sheetHost.querySelector<HTMLElement>('.sheet [data-action="sheet-cancel"]')?.focus();
+      sheetHost.querySelector<HTMLElement>('.sheet-foot [data-action="sheet-cancel"]')?.focus();
       return;
     } else {
       void runAction(key, action.label, {});

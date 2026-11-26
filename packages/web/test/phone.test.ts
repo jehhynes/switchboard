@@ -112,7 +112,7 @@ describe('the page on a phone', () => {
 
     // No rule for every box, however written, such as `*` or `:where(*)`.
     expect(rules.filter((rule) => rule.selector.includes('*') && rule.body.includes('overscroll-behavior')).map((rule) => rule.selector)).toEqual([]);
-    expect(vertical).toEqual(expect.arrayContaining(['#list', '.scroll', '.artifact-doc', '.local-entries', '.menu', '.sheet', '.hist-body', '.settings-page', '.changes-rows', '.diff-host', '.prompt-screen']));
+    expect(vertical).toEqual(expect.arrayContaining(['#list', '.scroll', '.artifact-doc', '.local-entries', '.menu', '.sheet-body', '.hist-body', '.settings-page', '.changes-rows', '.diff-host', '.prompt-screen']));
     for (const selector of vertical) {
       expect([selector, overscroll(selector)]).toEqual([selector, nested.includes(selector) ? [] : expect.arrayContaining(['contain'])]);
     }

@@ -1294,8 +1294,8 @@
       "until": 1793426400000
     },
     {
-      "label": "Indefinitely",
-      "description": "",
+      "label": "Never",
+      "description": "Until you unsnooze it",
       "until": null
     }
   ],

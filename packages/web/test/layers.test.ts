@@ -57,6 +57,15 @@ describe('the modal layers (architecture.md § Web page, Layers)', () => {
     expect(document.activeElement?.className).toBe('own');
   });
 
+  it("starts a layer past its title bar's X, in document order, and on the X only when it is the layer's one control", () => {
+    // The footer's button is listed first by a selector list in jsdom; the radio comes first in the document.
+    dialog('sheet', '<div class="sheet-head"><button class="sheet-close">X</button></div><div class="sheet-body"><input type="radio" class="pick"></div><div class="sheet-foot"><button class="go">Go</button></div>');
+    expect(document.activeElement?.className).toBe('pick');
+    shut('sheet');
+    dialog('sheet', '<div class="sheet-head"><button class="sheet-close">X</button></div><div class="sheet-body"><p>Nothing to press.</p></div>');
+    expect(document.activeElement?.className).toBe('sheet-close');
+  });
+
   it('gives the focus back to the control that opened a layer once the layer closes with the focus in it, even one pressed without taking the focus', () => {
     const opener = root.querySelector<HTMLElement>('.opener')!;
 

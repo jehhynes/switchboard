@@ -113,6 +113,10 @@
   --sb-status-warning: #F2CC0C;
   --sb-status-error: #F14C4C;
   --sb-status-turn: #3794FF;
+  /* A destructive confirm's button (sheetFrame.tsx): white text on it is 5.5:1, 6.6:1 hovered. */
+  --sb-danger: #C72E0F;
+  --sb-danger-hover: #B02A0E;
+  --sb-danger-foreground: #FFFFFF;
   color-scheme: dark;
 }
 
@@ -213,6 +217,9 @@
     --sb-status-warning: #A37A00;
     --sb-status-error: #8F0A14;
     --sb-status-turn: #005FB8;
+    --sb-danger: #B3261E;
+    --sb-danger-hover: #9C2018;
+    --sb-danger-foreground: #FFFFFF;
     color-scheme: light;
   }
 }

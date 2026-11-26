@@ -400,7 +400,7 @@ describe('the list header (architecture.md § Web page)', () => {
     click('.more-menu [data-action="list-log"]');
     expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Switchboard log');
     expect(root.querySelector('[aria-label="Filter log"]')).not.toBeNull();
-    click('#list-sheet [data-action="list-sheet-cancel"].sheet-button');
+    click('#list-sheet .sheet-close');
 
     // Get the browser extension downloads this computer's copy and says how to load it unpacked (PRD R121).
     click('.more-actions');
@@ -416,7 +416,7 @@ describe('the list header (architecture.md § Web page)', () => {
       'Select Load unpacked and choose the extracted switchboard-extension folder.',
     ]);
     expect(posts.map((one) => one.url)).not.toContain('/v1/conversation/page-extension');
-    click('#list-sheet .sheet-button.secondary');
+    click('#list-sheet .sheet-close');
     expect(root.querySelector('#list-sheet .sheet')).toBeNull();
 
     // Open Settings opens the page's Settings, which reads settings.json from the hub.
@@ -565,7 +565,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(posts.filter((post) => post.url.endsWith('/held-stop')).map((post) => post.body['id'])).toEqual(['owned', 'orphan']);
     expect(root.querySelector('.held-sheet')?.textContent).toContain('Stopped background session orphan.');
     expect(root.querySelector('.held-sheet')?.textContent).toContain('No background sessions. Code Mode sessions appear here while they run.');
-    click('#list-sheet .sheet-button.primary');
+    click('#list-sheet .sheet-close');
     click('.held-note');
     await flush();
     expect(root.querySelector('.held-sheet')).not.toBeNull();
@@ -601,7 +601,7 @@ describe('the list header (architecture.md § Web page)', () => {
     let release: () => void = () => {};
     answers['/held-list'] = { status: 200, body: { held: [] }, wait: new Promise<void>((resolve) => { release = resolve; }) };
     click('[data-action="list-held-refresh"]');
-    click('#list-sheet .sheet-button.primary');
+    click('#list-sheet .sheet-close');
     release();
     await vi.advanceTimersByTimeAsync(10000);
     expect(root.querySelector('.held-sheet')).toBeNull();
@@ -647,7 +647,7 @@ describe('the list header (architecture.md § Web page)', () => {
     let release: () => void = () => {};
     answers['/held-list'] = { status: 200, body: { held: [] }, wait: new Promise<void>((resolve) => { release = resolve; }) };
     click('[data-action="list-held-refresh"]');
-    click('#list-sheet .sheet-button.primary');
+    click('#list-sheet .sheet-close');
     answers['/held-list'] = { status: 403, body: { error: 'Remote access no longer allows this device.' } };
     click('.held-note');
     await flush();
@@ -733,7 +733,7 @@ describe('the list header (architecture.md § Web page)', () => {
     // A paired device's copy reaches the hub through this page, so it is loaded in this browser (PRD R121).
     click('.more-menu [data-action="list-extension"]');
     expect(root.querySelector('#list-sheet .sheet-detail')?.textContent).toContain('signed in as this browser is, so load it in this browser');
-    click('#list-sheet .sheet-button.secondary');
+    click('#list-sheet .sheet-close');
     remote.page.close();
 
     const { page, source } = start(true);
@@ -828,7 +828,7 @@ describe('the list header (architecture.md § Web page)', () => {
     await flush();
     expect(root.querySelector('#list-sheet .sheet-error')?.textContent).toBe('Pairing a device needs remote access.');
     expect(root.querySelector('#list-sheet .pair-qr')).toBeNull();
-    click('#list-sheet .sheet-button.primary');
+    click('#list-sheet .sheet-close');
     expect(root.querySelector('#list-sheet .sheet')).toBeNull();
     page.close();
   });

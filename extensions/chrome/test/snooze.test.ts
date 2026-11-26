@@ -124,8 +124,9 @@ describe('snoozeMenus', () => {
       'Next weekMon, Oct 12, 6:00 AM',
       'In 2 weeksMon, Oct 19, 6:00 AM',
       'In 4 weeksMon, Nov 2, 6:00 AM',
-      'Indefinitely',
+      'NeverUntil you unsnooze it',
     ]);
+    expect(menu()?.querySelector('.switchboard-snooze-menu-heading')?.textContent).toBe('Snooze until');
 
     items()[3]!.click();
     expect(hub.snooze).toHaveBeenCalledExactlyOnceWith(ISSUE, six(9, 12));
@@ -135,7 +136,7 @@ describe('snoozeMenus', () => {
     expect(menu()).toBeNull();
   });
 
-  it('sends null for Indefinitely', () => {
+  it('sends null for Never', () => {
     const { hub, menus } = start();
 
     menus.choose(ISSUE, anchor);

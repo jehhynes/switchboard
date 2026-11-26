@@ -46,6 +46,10 @@ const SETTINGS_PAGES = {
   'settings-personas': ['personas', 'personas/page'],
   'settings-persona': ['personas', 'persona:0'],
 };
+/** The modal sheets, each opened by OPEN's presses and checked by modalFailures: Delete's question, Snooze, an input dialog, the header's sheets. */
+const MODAL_VIEWS = ['sheet', 'snooze', 'comment', 'new-session', 'folders', 'pair', 'held', 'log', 'extension', 'shortcut', 'holder'];
+/** The modal views whose first text box is filled past its cap, to see it grow and then scroll. */
+const GROWING = ['snooze', 'comment', 'new-session'];
 /**
  * iPhone 16 Pro in the installed app under the opaque status bar: 393 by 852 pt, less the 59 pt status bar in portrait; none in landscape. Both
  * draw the phone's layout. iPad Air 11" on its side, 1180 by 820 pt less its 24 pt status bar, draws the drawer.
@@ -55,7 +59,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair', 'context-details', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
@@ -64,7 +68,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -114,6 +118,9 @@ const approve = { label: 'Approve', action: 'approve', icon: 'check', group: 'ma
 // taller than the room, so they scroll, and on a phone held upright and an iPad not.
 const control = (label, action, icon, group) => ({ label, action, icon, group, confirm: null, input: null });
 const asking = (label, action, icon) => ({ ...control(label, action, icon, 'asking'), confirm: { question: label + ' Fix it?', detail: 'It cannot be undone.', action } });
+// The modal views' work item offers Snooze… and an input dialog beside Delete.
+const comment = { ...control('Add comment…', 'comment', 'comment', 'notes'), input: { question: 'Add a comment to Fix it', detail: 'The comment shows in the tooltip of the row and in History.', action: 'Add comment', text: null, choice: null } };
+const modalActions = ['snooze', 'comment'].includes(view) ? { actions: [approve, control('Snooze…', 'snooze', 'clock', 'state'), comment, remove] } : {};
 const crowdedMenu = view?.endsWith('-menu') ? { actions: [approve, control('Snooze…', 'snooze', 'clock', 'state'), control('Mark done', 'done', 'pass', 'state'), control('Add comment…', 'comment', 'comment', 'notes'), asking('Stop session', 'stop', 'debug-stop'), { ...remove, group: 'asking' }], pastes: ['report', 'comment'], opens: [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'file', file: 'D:/w/report.md' }], url: 'https://github.com/o/r/issues/1' } : {};
 const snooze = { label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state', confirm: null, input: null };
 // The second row's line 2 holds more pills than fit beside its long playbook, so some drop out.
@@ -132,8 +139,8 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 // The header's sources: GitHub's and Zoho's logos are the page's own; the DPAF plugin gives its own, a made-up mark here.
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 // The list's notes, which a phone folds into one line.
-const header = { notes: view === 'list' || view?.startsWith('narrow') ? ['settings.json: sources.zoho.orgId is missing, so Zoho Desk is not polled.', 'Voice: the voice process stopped.'] : [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, snooze, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
+const header = { notes: view === 'list' || view?.startsWith('narrow') ? ['settings.json: sources.zoho.orgId is missing, so Zoho Desk is not polled.', 'Voice: the voice process stopped.'] : [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [], ...(view === 'holder' ? { holderNotice: { text: 'The terminal holder runs an older build.', detail: 'Restart it to run this build.', confirm: { question: 'Restart the terminal holder?', detail: 'Its 2 sessions stop and resume in the new holder. A tool call that is running is cut off.', action: 'Restart and resume' } } } : {}) };
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, view === 'snooze' ? 'Call Center dialer stops receiving incoming calls when its registration lapses after the carrier rotates its SIP proxy and the softphone keeps the stale binding' : 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, snooze, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu, ...modalActions }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
@@ -230,7 +237,9 @@ const diffOf = (path) => ({ path, status: 'M', patch: 'diff --git a/' + path + '
 const planText = '# Plan\\n\\n' + Array.from({ length: 40 }, (_, i) => 'Step ' + (i + 1) + ': renew the registration 30 s before it lapses, and check the inbound route again.').join('\\n\\n');
 const stackData = { scopeGen: 3, repo: 'switchboard', root: 'D:/w', branch: 'fix/dialer-registration', head: 'c1', commitIds: ['c1'], more: false, incomplete: false, github: { state: 'none', observedAt: null }, links: [], main: { ref: 'origin/main', behind: 0, fetchedAt: now } };
 const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? { scopeGen: 3, paths: changesList.rows.map((row) => row.path), more: false } : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : String(url).endsWith('/context-details') ? { details: contextDetails } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? planText : '') });
+// Background sessions: one of a work item and one without.
+const heldRows = [{ session: 'h1', item: 'gh 1', nativeSessionId: '2f1c0a7e-1d2b-4c3d-9e8f-0a1b2c3d4e5f', cwd: 'D:/git/switchboard.worktrees/some-long-branch-name', state: 'idle', idle: '4m', memory: '182 MB', clients: 1, orphan: false, exited: false, terminal: {} }, { session: 'h2', item: '(no work item)', nativeSessionId: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', cwd: 'D:/git/r', state: 'running', idle: '0s', memory: '240 MB', clients: 0, orphan: true, exited: false, terminal: null }];
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/held-list') ? { held: heldRows } : String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : String(url).endsWith('/context-details') ? { details: contextDetails } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? planText : '') });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -597,6 +606,15 @@ const OPEN = {
   sheet: ['[data-action=actions]', '[data-action=row-action][data-label=Delete]'],
   // Pair a device with more devices than fit, whose list scrolls in its own area.
   pair: ['[data-action=list-more]', '[data-action=list-devices]'],
+  snooze: ['[data-action=actions]', '[data-action=row-action][data-label="Snooze…"]'],
+  comment: ['[data-action=actions]', '[data-action=row-action][data-label="Add comment…"]'],
+  'new-session': ['[data-action=list-new-session]'],
+  folders: ['[data-action=list-new-session]', '[data-action=list-folder-toggle]', '[data-action=list-folder-browse]'],
+  held: ['[data-action=list-more]', '[data-action=list-later-held]'],
+  log: ['[data-action=list-more]', '[data-action=list-log]'],
+  extension: ['[data-action=list-more]', '[data-action=list-extension]'],
+  shortcut: ['[data-action=list-more]', '[data-action=list-shortcut]'],
+  holder: ['[data-action=list-holder-restart]'],
   // Devices with a pairing address shown.
   'settings-pair': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="devices"]', '.settings-devices > .sheet-button'],
   // An artifact chosen from More, so the strip keeps it beside the tabs it always keeps: the oldest, so the newest stays unread where it has room.
@@ -625,7 +643,6 @@ const OPEN = {
   diffs: ['[data-action=diff-tab]'],
   // The context meter's popover with Compact….
   context: ['[data-context=toggle]'],
-  snooze: ['[data-action=actions]', '[data-action=row-action][data-label="Snooze…"]'],
   // The context meter's menu with its details shown.
   'context-details': ['.context-ring', '[data-context=details]'],
 };
@@ -753,6 +770,61 @@ function menuFailures(view, size, r) {
   if (r.back.join() !== r.first.marks.join()) out.push('scrolled back to its top the menu is marked ' + r.back.join(', '));
   if (view === 'tab-menu' && size.phone && size.orientation === 'landscape' && !r.scrolls) out.push('the More tabs menu fits, so its scrolling is not checked');
   if (!['row-menu', 'tab-menu'].includes(view) && r.scrolls !== (size.phone && size.orientation === 'landscape')) out.push(r.scrolls ? 'the menu scrolls where the screen has room for all ' + r.rows + ' rows' : 'the menu fits, so its scrolling is not checked');
+  return out;
+}
+
+/**
+ * Measures the open sheet (sheetFrame.tsx): its box against the viewport, its title bar, its dismiss controls in view, and whether its body
+ * is wider than it. With grow set, it fills the sheet's first text box past its cap and measures it before and after.
+ */
+const modalMeasure = (grow) => `(async () => {
+  const sheet = document.querySelector('[aria-modal="true"]');
+  if (!sheet) return null;
+  const box = sheet.getBoundingClientRect();
+  const head = sheet.querySelector(':scope > .sheet-head');
+  const body = sheet.querySelector(':scope > .sheet-body');
+  const inView = (node) => { const r = node.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top >= -0.5 && r.bottom <= innerHeight + 0.5 && r.left >= -0.5 && r.right <= innerWidth + 0.5; };
+  const out = {
+    box: { top: box.top, bottom: box.bottom, left: box.left, right: box.right },
+    head: head ? { top: head.getBoundingClientRect().top - box.top, height: head.getBoundingClientRect().height, title: head.querySelector('.sheet-title')?.textContent ?? null, lines: (() => { const title = head.querySelector('.sheet-title'); return title ? title.getBoundingClientRect().height / parseFloat(getComputedStyle(title).lineHeight) : null; })() } : null,
+    dismiss: [...sheet.querySelectorAll('[data-dismiss]')].filter(inView).map((one) => one.getAttribute('aria-label') ?? one.textContent.trim()),
+    wide: body ? body.scrollWidth - body.clientWidth : null,
+    grow: null,
+  };
+  if (${grow}) {
+    const text = sheet.querySelector('textarea');
+    if (text) {
+      const before = text.getBoundingClientRect().height;
+      text.value = Array.from({ length: 60 }, (_, i) => 'Line ' + (i + 1)).join('\\n');
+      text.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 100));
+      const style = getComputedStyle(text);
+      out.grow = { before, after: text.getBoundingClientRect().height, max: parseFloat(style.maxHeight), scrolls: text.scrollHeight > text.clientHeight + 1, inView: inView(sheet) };
+    }
+  }
+  return out;
+})()`;
+
+/** A sheet's failures: outside the viewport, no title bar at its top, under 44 px, no dismiss control in view, a body wider than the sheet, a text box that does not grow to its cap and scroll. */
+function modalFailures(view, m) {
+  const out = [];
+  if (m === null) return ['no modal dialog is open'];
+  if (m.box.top < -0.5 || m.box.left < -0.5 || m.box.bottom > m.viewport.height + 0.5 || m.box.right > m.viewport.width + 0.5) out.push('the sheet reaches past the viewport: ' + JSON.stringify(m.box));
+  if (m.head === null || m.head.top > 1.5 || !m.head.title) out.push('the sheet has no title bar with its title at its top');
+  else if (m.head.height < 43.5) out.push('the title bar is ' + Math.round(m.head.height) + ' px tall, under 44 px');
+  // A long title is cut at two lines, with no part of a third showing.
+  if (m.head !== null && m.head.lines > 2.05) out.push('the title box is ' + m.head.lines.toFixed(2) + ' lines tall, past two');
+  if (m.dismiss.length === 0) out.push('no Cancel, Close, Back or X is in view');
+  if (m.wide === null || m.wide > 1) out.push("the sheet's body is " + m.wide + ' px wider than the sheet');
+  if (GROWING.includes(view)) {
+    if (m.grow === null) out.push('no text box to grow');
+    else {
+      if (!(m.grow.after > m.grow.before + 20)) out.push('the text box did not grow: ' + Math.round(m.grow.before) + ' to ' + Math.round(m.grow.after) + ' px');
+      if (Math.abs(m.grow.after - m.grow.max) > 1) out.push('the text box grew to ' + Math.round(m.grow.after) + ' px, not its cap of ' + Math.round(m.grow.max) + ' px');
+      if (!m.grow.scrolls) out.push('the text box at its cap does not scroll');
+      if (!m.grow.inView) out.push('the sheet leaves the viewport once its text box grows');
+    }
+  }
   return out;
 }
 
@@ -992,7 +1064,7 @@ function failures(view, size, m) {
   // status bar, so no colour is painted there, and its bars, inside the notch's insets, are under 90% of the width. The iPad is not checked for it.
   if (size.device === 'iphone' && size.orientation === 'portrait') {
     const edge = m.edge;
-    const own = ['sheet', 'pair', 'snooze'].includes(view) ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head)(\.|$)/.test(edge.name ?? '');
+    const own = MODAL_VIEWS.includes(view) ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head)(\.|$)/.test(edge.name ?? '');
 
     if (!own) out.push('WebKit finds ' + (edge.name ?? 'no fixed or sticky box (hit ' + edge.hit + ')') + (edge.kind ? ' (' + edge.kind + ')' : '') + ' at the top edge, not the view\'s top bar');
     else if (edge.kind === 'bar' && (edge.top !== 0 || edge.height <= 10 || edge.background !== m.bar)) out.push('the top bar ' + edge.name + ' is at ' + edge.top + ', ' + edge.height + ' px tall, ' + edge.background + ' for the bars\' ' + m.bar);
@@ -1174,6 +1246,14 @@ try {
             if (!look.disabled || look.borderAlpha > 0) found.push("the first question's Back is " + (look.disabled ? 'disabled with the border ' + look.border : 'enabled'));
           }
           await evaluate('(() => { const panel = document.getElementById("panel"); panel.scrollTop = panel.scrollHeight; })()');
+        }
+
+        // Every sheet: in the viewport, its title bar at its top, a dismiss control in view, and its text box growing to its cap (modalFailures).
+        if (MODAL_VIEWS.includes(view) && missing.length === 0) {
+          const sheet = await evaluate(modalMeasure(GROWING.includes(view)));
+
+          if (report) console.log(name + ' sheet: ' + JSON.stringify(sheet));
+          found.push(...modalFailures(view, sheet === null ? null : { ...sheet, viewport: { width: size.width, height: size.height } }));
         }
 
         if (view.endsWith('-menu') && missing.length === 0) {

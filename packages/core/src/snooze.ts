@@ -1,7 +1,7 @@
-/** A snooze the operator can pick: the wake time, or null to snooze until restored (PRD R49). */
+/** A snooze the operator can pick: the wake time, or null to snooze until unsnoozed (PRD R49). */
 export interface SnoozeChoice {
   label: string;
-  /** The wake time as the picker shows it; empty for an indefinite snooze. */
+  /** The wake time as the picker shows it, or what ends a snooze with none. */
   description: string;
   until: number | null;
 }
@@ -41,7 +41,7 @@ export function wakeText(time: number): string {
 
 /**
  * The snooze picker's choices (PRD R49): days wake at 6am that many days on, Next week on the first Monday after the current day,
- * In 2 weeks and In 4 weeks 14 and 28 days on, and Indefinitely never. A choice that wakes when an earlier one does is left out, as
+ * In 2 weeks and In 4 weeks 14 and 28 days on, and Never, which only Unsnooze ends. A choice that wakes when an earlier one does is left out, as
  * Next week is on a Saturday, where In 2 days is that Monday.
  */
 export function snoozeChoices(now: Date): SnoozeChoice[] {
@@ -55,5 +55,5 @@ export function snoozeChoices(now: Date): SnoozeChoice[] {
     timed('In 4 weeks', daysFrom(now, 28)),
   ];
 
-  return [...choices.filter((choice, index) => choices.findIndex((other) => other.until === choice.until) === index), { label: 'Indefinitely', description: '', until: null }];
+  return [...choices.filter((choice, index) => choices.findIndex((other) => other.until === choice.until) === index), { label: 'Never', description: 'Until you unsnooze it', until: null }];
 }

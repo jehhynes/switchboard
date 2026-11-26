@@ -80,7 +80,7 @@ describe('the page in use', () => {
     root.querySelector('#list-sheet .sheet')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     expect(isOpen()).toBe(true);
     // Closed, the sheet no longer holds it.
-    root.querySelector<HTMLElement>('#list-sheet [data-action="list-sheet-cancel"].sheet-button')!.click();
+    root.querySelector<HTMLElement>('#list-sheet .sheet-close')!.click();
     vi.advanceTimersByTime(DRAWER_HIDE_MS * 3);
     expect(isOpen()).toBe(false);
     vi.useRealTimers();

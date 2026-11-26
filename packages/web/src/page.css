@@ -138,7 +138,7 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
 /* On a phone the source icons leave the title row for the top of More Actions, as check rows; outside the phone's layout they are in the row. */
 :where(html.phone) .list-header .header-sources, :where(html.phone) .list-header .header-separator { display: none; }
 :where(html:not(.phone)) .more-menu .more-source { display: none; }
-.sheet-select { box-sizing: border-box; width: 100%; min-height: 26px; font: inherit; color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); border-radius: 2px; }
+.sheet-select { box-sizing: border-box; width: 100%; min-height: 28px; padding: 2px 6px; font: inherit; color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground)); background: var(--vscode-dropdown-background, var(--vscode-input-background)); border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent)); border-radius: 4px; }
 .sheet-error { margin: 0 0 12px; color: var(--vscode-errorForeground); }
 .sheet-field .sheet-error { margin: 0; }
 /* The New session form (PRD R122): the folder combo box and its list, the provider switch, Run as and More options, and the folder browser. */
@@ -162,7 +162,7 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
 .provider-option + .provider-option { border-left: 1px solid var(--vscode-widget-border, var(--vscode-input-border, transparent)); }
 .provider-option[aria-pressed="true"] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .provider-option-mark { display: inline-flex; font-size: 14px; }
-.run-as .sheet-choice { min-height: 24px; }
+.run-as .sheet-choice { min-height: 32px; padding: 0 12px; }
 .more-options-toggle { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground); font: inherit; cursor: pointer; }
 .more-options .sheet-field { margin: 8px 0 0; }
 @media (hover: none), (pointer: coarse) { .folder-row, .provider-option, .folder-combo .folder-toggle { min-height: 44px; } .folder-combo .folder-toggle { width: 44px; } .run-as .sheet-choice { min-height: 44px; } }
@@ -171,15 +171,14 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
 .pair-qr { width: 220px; height: 220px; margin-bottom: 12px; }
 .pair-address { box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; margin: 0 0 12px; }
 .pair-url { min-width: 0; padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; text-align: start; user-select: all; font-family: var(--vscode-editor-font-family, monospace); background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15)); }
-/* Pair a device keeps its title, code and buttons in view: its device list scrolls in its own area, two rows high at least, and the sheet scrolls only where even that does not fit. */
-.sheet.pair-sheet { display: flex; flex-direction: column; }
-.pair-sheet > * { flex-shrink: 0; }
-.pair-sheet > .device-list { flex-shrink: 1; overflow-y: auto; overscroll-behavior: contain; }
-.pair-sheet > .device-list.many { min-height: 160px; }
+/* Pair a device's QR code shrinks on a short screen, so the code and the devices fit under it. */
 .pair-sheet .pair-qr { width: min(220px, 24vh); height: min(220px, 24vh); }
 .pair-code { margin: 0 0 8px; font: 600 24px var(--vscode-editor-font-family, monospace); letter-spacing: 2px; user-select: all; }
 .device-list { list-style: none; margin: 0 0 12px; padding: 0; }
 .device { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--vscode-widget-border, transparent); }
+/* In a sheet the list is a card, its rows between the card's hairlines. */
+.device-list.sheet-card .device { padding: 8px 12px; border-top: none; }
+.device-list.sheet-card > .device + .device { border-top: 1px solid var(--vscode-panel-border); }
 .device-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .device-detail { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
 @media (hover: none), (pointer: coarse) { .sheet-select { min-height: 44px; } .more-menu .menu-row { height: 44px; } }
@@ -478,9 +477,7 @@ button.picker > .codicon-chevron-down { order: 2; }
 .row-menu:focus { outline: none; }
 .row-menu-anchor > .row-menu.flip-x { left: auto; right: 0; }
 .row-menu-anchor > .row-menu.flip-y { top: auto; bottom: 0; }
-.sheet-input { box-sizing: border-box; width: 100%; min-height: 90px; max-height: 300px; resize: vertical; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 2px; padding: 4px 6px; }
-.sheet-input.tall { min-height: 150px; max-height: 400px; }
-.sheet-select { width: 100%; font: inherit; color: var(--vscode-dropdown-foreground); background: var(--vscode-dropdown-background); border: 1px solid var(--vscode-dropdown-border, transparent); padding: 2px 4px; }
+.sheet-input { box-sizing: border-box; width: 100%; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 4px; padding: 4px 8px; }
 .sheet-note { margin: 4px 0 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .menu-row[aria-haspopup] > .codicon { margin-left: auto; }
 .menu-separator { height: 1px; margin: 4px 10px; background: var(--vscode-menu-separatorBackground, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); }
@@ -948,25 +945,60 @@ body.artifact-window > .artifact-view { height: 100%; }
 .actions-anchor { flex: none; }
 button.actions { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 0; border-radius: 4px; cursor: pointer; }
 button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
-/* A sheet over the page asks before Stop session and Delete, picks a snooze, or shows a draft the clipboard refused. */
-.sheet-backdrop { position: fixed; inset: 0; z-index: var(--sb-z-sheet); display: flex; align-items: center; justify-content: center; padding: max(16px, var(--sb-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: rgba(0, 0, 0, 0.4); }
-.sheet { box-sizing: border-box; width: min(440px, 100%); max-height: calc(100% - 32px); overflow-y: auto; overscroll-behavior: contain; padding: 16px; border-radius: 8px; }
-.sheet-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+/* The sheets over the page (sheetFrame.tsx, architecture.md § Web page, Sheets), drawn as Settings is: a card on the editor's background, the
+   side bar's title bar and footer, and a body that alone scrolls, so the title and the buttons stay in view. A group of choices is one of
+   Settings' cards, rows between hairlines. */
+.sheet-backdrop { position: fixed; inset: 0; z-index: var(--sb-z-sheet); display: flex; align-items: center; justify-content: center; padding: max(16px, var(--sb-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: rgba(0, 0, 0, 0.45); }
+.sheet { box-sizing: border-box; display: flex; flex-direction: column; width: min(480px, 100%); max-height: 100%; overflow: hidden; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 8px; box-shadow: 0 8px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5)); background: var(--vscode-editor-background); color: var(--vscode-foreground); }
+.sheet-head { flex: none; display: flex; align-items: center; gap: 8px; box-sizing: border-box; min-height: 44px; padding: 0 8px 0 20px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
+/* A long title, such as Snooze's work item, takes two lines at most, so the body and the footer keep their room on a short screen. */
+/* The clamped box has no padding, where a third line would show, and is two lines high at most; its margin spaces it in the bar. */
+.sheet-title { flex: 1; min-width: 0; margin: 10px 0; padding: 0; font-size: 14px; font-weight: 600; line-height: 1.4; max-height: 2.8em; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.sheet-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-icon-foreground, var(--vscode-foreground)); cursor: pointer; }
+.sheet-close:hover { background: var(--vscode-toolbar-hoverBackground); }
+.sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 20px; }
+.sheet-body > :last-child { margin-bottom: 0; }
+.sheet-foot { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; box-sizing: border-box; min-height: 52px; padding: 8px 20px; border-top: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
 .sheet-detail { margin: 0 0 12px; color: var(--vscode-descriptionForeground); }
-.sheet-field { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; padding: 0; border: none; }
-.sheet-field legend, .sheet-label { padding: 0; margin-bottom: 4px; color: var(--vscode-descriptionForeground); }
-.sheet-choice { display: flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
-.sheet textarea, .sheet input[type="date"] { box-sizing: border-box; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; padding: 4px 6px; }
-.sheet textarea { width: 100%; resize: vertical; }
-.sheet-text { min-height: 160px; font-family: var(--vscode-editor-font-family, monospace); }
-.sheet-buttons { display: flex; justify-content: flex-end; gap: 8px; }
-.sheet-button { min-height: 28px; padding: 0 14px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; cursor: pointer; }
+.sheet-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0 0 16px; padding: 0; border: none; }
+.sheet-field legend, .sheet-label { padding: 0; margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--vscode-foreground); }
+.sheet-field > .sheet-label { margin-bottom: 0; }
+.sheet-card { overflow: hidden; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-editorWidget-background, transparent); }
+.sheet-card > * + * { border-top: 1px solid var(--vscode-panel-border); }
+.sheet-choice { display: flex; align-items: center; gap: 10px; min-height: 32px; cursor: pointer; }
+.sheet-card > .sheet-choice { min-height: 36px; padding: 0 12px; }
+.sheet-choice-label { flex: none; }
+.sheet-choice-detail { flex: 1; min-width: 0; text-align: right; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
+.sheet-choice .snooze-date { margin-left: auto; }
+.sheet textarea, .sheet input[type="date"] { box-sizing: border-box; min-height: 28px; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; padding: 4px 8px; }
+.sheet :is(textarea, input, select):focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+/* A sheet's text boxes grow with their text (grow.tsx) up to their max-height, then scroll. */
+.sheet textarea { display: block; width: 100%; resize: none; overflow-y: auto; overscroll-behavior: contain; line-height: 1.4; }
+.sheet textarea.sheet-input { max-height: 40vh; }
+.sheet textarea.sheet-input.tall, .sheet textarea.sheet-text { max-height: 60vh; }
+.sheet textarea.snooze-comment, .sheet textarea.sheet-prompt { max-height: 30vh; }
+.sheet-text { font-family: var(--vscode-editor-font-family, monospace); }
+.sheet-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.sheet-button { min-height: 28px; padding: 0 14px; font: inherit; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; cursor: pointer; }
 .sheet-button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .sheet-button.primary:hover { background: var(--vscode-button-hoverBackground); }
 .sheet-button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+.sheet-button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+/* A destructive confirm's action: Delete, Stop session, Stop a background session. */
+.sheet-button.primary.danger { background: var(--sb-danger); border-color: var(--sb-danger); color: var(--sb-danger-foreground); }
+.sheet-button.primary.danger:hover { background: var(--sb-danger-hover); border-color: var(--sb-danger-hover); }
 .sheet-button:disabled { opacity: 0.5; cursor: default; }
-.sheet.hub-log-sheet { width: min(1100px, 100%); height: min(800px, calc(100% - 32px)); display: flex; flex-direction: column; overflow: hidden; }
-.hub-log { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 10px; margin-bottom: 12px; }
+/* On a phone a sheet spans the width at the bottom, clear of the top safe area, and its last part ends above the home indicator's inset. */
+:where(html.phone) .sheet-backdrop { align-items: flex-end; padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+:where(html.phone) .sheet { width: 100%; border-bottom: none; border-radius: 12px 12px 0 0; }
+:where(html.phone) .sheet > .sheet-foot { padding-bottom: calc(8px + env(safe-area-inset-bottom)); min-height: calc(52px + env(safe-area-inset-bottom)); }
+:where(html.phone) .sheet > .sheet-body:last-child { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+:where(html.phone) .sheet.hub-log-sheet { height: 100%; }
+@media (hover: none), (pointer: coarse) { .sheet-close { width: 44px; height: 44px; } .sheet-card > .sheet-choice { min-height: 44px; } .more-options-toggle { min-height: 44px; } }
+/* The log fills its sheet: its body lays out the log, whose text scrolls in its own box. */
+.sheet.hub-log-sheet { width: min(1100px, 100%); height: min(800px, 100%); }
+.hub-log-sheet .sheet-body { display: flex; flex-direction: column; }
+.hub-log { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 10px; }
 .hub-log > .sheet-detail, .hub-log-note { margin: 0; color: var(--vscode-descriptionForeground); }
 .hub-log-note { flex: 1 1 0; min-width: 0; }
 .hub-log-tools { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; flex: none; }
@@ -991,8 +1023,10 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 @media (hover: none), (pointer: coarse) { .hub-log-tools .sheet-input, .hub-log-tools label, .hub-log .sheet-button, .hub-log-chip { min-height: 44px; } }
 @media (max-width: 600px) { .hub-log-tools.hub-log-levels { flex-wrap: nowrap; overflow-x: auto; } .hub-log-chip { flex: none; } .hub-log-tools .hub-log-area { flex: 0 0 140px; } .hub-log-errors { flex: none; } }
 .held-sheet { width: min(1000px, 100%); }
-.held-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; margin-bottom: 16px; }
-.held-row, .held-confirm { border: 1px solid var(--vscode-widget-border); padding: 12px; border-radius: 4px; min-width: 0; }
+/* Each background session, and the question before one stops, is one of Settings' cards. */
+.held-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; }
+.held-row, .held-confirm { min-width: 0; padding: 12px 14px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-editorWidget-background, transparent); }
+.held-confirm .sheet-title { margin: 0 0 8px; padding: 0; }
 .held-confirm { margin-bottom: 12px; }
 .held-row dl { margin: 0 0 12px; }
 .held-row dl > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; margin: 4px 0; }

@@ -4,6 +4,7 @@ import qrcode from 'qrcode-generator';
 import { providerMark } from '@switchboard/conversation/providerIcons';
 import { mount } from './island.js';
 import { HubLog } from './hubLog.js';
+import { GrowingText } from './grow.js';
 import { AppShortcut } from './appShortcut.js';
 import { trusted } from './trusted.js';
 import type { SourceIcon } from '@switchboard/core';
@@ -645,15 +646,11 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
     <Frame
       title="Pair a device"
       wide="pair-sheet"
+      close
       buttons={
-        <>
-          <button type="button" class="sheet-button secondary" data-action="list-sheet-go" disabled={sheet.busy}>
-            New code
-          </button>
-          <button type="button" class="sheet-button primary" data-action="list-sheet-cancel">
-            Close
-          </button>
-        </>
+        <button type="button" class="sheet-button secondary" data-action="list-sheet-go" disabled={sheet.busy}>
+          New code
+        </button>
       }
     >
       {pairing === null ? (
@@ -674,7 +671,7 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
       ) : sheet.devices.length === 0 ? (
         <p class="sheet-detail">No device is signed in.</p>
       ) : (
-        <ul class={`device-list${sheet.devices.length > 2 ? ' many' : ''}`}>
+        <ul class={`device-list sheet-card${sheet.devices.length > 2 ? ' many' : ''}`}>
           {sheet.devices.map((one) => (
             <li class="device" data-key={`device-${one.id}`}>
               <span class="device-text">
@@ -732,10 +729,7 @@ function Select({ label, field, items, chosen, after }: { label: string; field: 
 
 function HeldSheet({ sheet }: { sheet: Extract<HeaderSheet, { kind: 'held' }> }) {
   const stopping = sheet.stopping;
-  return <Frame title="Background sessions" wide="held-sheet" buttons={<>
-    <button type="button" class="sheet-button secondary" data-action="list-held-refresh" disabled={sheet.busy}>Refresh</button>
-    <button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>
-  </>}>
+  return <Frame title="Background sessions" wide="held-sheet" close buttons={<button type="button" class="sheet-button secondary" data-action="list-held-refresh" disabled={sheet.busy}>Refresh</button>}>
     <p class="sheet-detail">Code Mode sessions Switchboard keeps running in the background, with or without a work item. Stop ends a session's process.</p>
     {sheet.error === null ? null : <p class="sheet-error" role="alert">{sheet.error}</p>}
     {sheet.listError === null ? null : <p class="sheet-error" role="alert">{sheet.listError}</p>}
@@ -743,7 +737,7 @@ function HeldSheet({ sheet }: { sheet: Extract<HeaderSheet, { kind: 'held' }> })
     {stopping === null ? null : <div class="held-confirm" role="group" aria-label="Confirm Stop">
       <h3 class="sheet-title">{stopping.orphan ? `Stop background session ${stopping.session}?` : `Stop the background session of ${stopping.item}?`}</h3>
       <p class="sheet-detail">{`Session ${stopping.session} in ${stopping.cwd}. Its process ends and anything it is doing stops.`}</p>
-      <div class="sheet-buttons"><button type="button" class="sheet-button secondary" data-action="list-held-cancel" disabled={sheet.busy}>Cancel</button><button type="button" class="sheet-button primary" data-action="list-held-confirm" disabled={sheet.busy}>Stop</button></div>
+      <div class="sheet-buttons"><button type="button" class="sheet-button secondary" data-action="list-held-cancel" disabled={sheet.busy}>Cancel</button><button type="button" class="sheet-button primary danger" data-action="list-held-confirm" disabled={sheet.busy}>Stop</button></div>
     </div>}
     {sheet.rows === null ? (sheet.listError === null ? <p class="sheet-detail" role="status">Loading…</p> : null) : sheet.rows.length === 0 ? <p class="sheet-detail">No background sessions. Code Mode sessions appear here while they run.</p> : <div class="held-rows">
       {sheet.rows.map((row) => <section class="held-row" key={row.session} aria-label={`${row.item}: ${row.session}`}>
@@ -765,15 +759,11 @@ function ExtensionSheet({ remote }: { remote: boolean }) {
   return (
     <Frame
       title="Get the browser extension"
+      close
       buttons={
-        <>
-          <button type="button" class="sheet-button secondary" data-action="list-sheet-cancel">
-            Close
-          </button>
-          <a class="sheet-button primary" href={EXTENSION_DOWNLOAD} download="switchboard-extension.zip">
-            Download
-          </a>
-        </>
+        <a class="sheet-button primary" href={EXTENSION_DOWNLOAD} download="switchboard-extension.zip">
+          Download
+        </a>
       }
     >
       <p class="sheet-detail">
@@ -809,7 +799,7 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
   }
 
   if (sheet.kind === 'log') {
-    return <Frame title="Switchboard log" wide="hub-log-sheet" buttons={<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>}><HubLog fetch={read} /></Frame>;
+    return <Frame title="Switchboard log" wide="hub-log-sheet" close><HubLog fetch={read} /></Frame>;
   }
   if (sheet.kind === 'held') return <HeldSheet sheet={sheet} />;
 
@@ -821,7 +811,7 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
   }
 
   const cancel = (
-    <button type="button" class="sheet-button secondary" data-action="list-sheet-cancel" disabled={sheet.busy}>
+    <button type="button" class="sheet-button secondary" data-action="list-sheet-cancel" data-dismiss disabled={sheet.busy}>
       Cancel
     </button>
   );
@@ -832,14 +822,7 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
     const confirm = header?.holderNotice?.confirm ?? null;
 
     return confirm === null ? (
-      <Frame
-        title="Restart the terminal holder"
-        buttons={
-          <button type="button" class="sheet-button primary" data-action="list-sheet-cancel">
-            Close
-          </button>
-        }
-      >
+      <Frame title="Restart the terminal holder" close>
         <p class="sheet-detail">{header?.holderNotice?.text ?? 'The terminal holder runs the installed build.'}</p>
         {error}
       </Frame>
@@ -912,7 +895,7 @@ function Browser({ browser, places, local }: { browser: FolderBrowser; places: F
       title="Choose a folder"
       buttons={
         <>
-          <button type="button" class="sheet-button secondary" data-action="list-browse-back">
+          <button type="button" class="sheet-button secondary" data-action="list-browse-back" data-dismiss>
             Back
           </button>
           <button type="button" class="sheet-button primary" data-action="list-browse-use" disabled={browser.path === null || browser.busy}>
@@ -1060,17 +1043,19 @@ function NewSession({ sheet, header, cancel, error, local }: { sheet: NewSession
           </label>
           <label class="sheet-field">
             <span class="sheet-label">First message</span>
-            <textarea class="sheet-prompt" data-field="prompt" rows={4} placeholder="Optional. Leave empty to start without a message." value={sheet.prompt}></textarea>
+            <GrowingText class="sheet-prompt" data-field="prompt" rows={3} placeholder="Optional. Leave empty to start without a message." value={sheet.prompt} />
           </label>
           {message ? (
             <fieldset class="sheet-field run-as">
               <legend>Run as</legend>
+              <div class="sheet-card">
               {RUN_AS.map((one) => (
                 <label class="sheet-choice">
                   <input type="radio" name="new-session-run" data-field="run" value={one.value} checked={sheet.run === one.value} />
                   <span>{one.label}</span>
                 </label>
               ))}
+              </div>
             </fieldset>
           ) : null}
         </>
@@ -1889,7 +1874,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.sheet = sheet;
         redraw();
         void refreshHeld(sheet);
-        sheetHost.querySelector<HTMLElement>('[data-action="list-sheet-cancel"].sheet-button')?.focus();
+        sheetHost.querySelector<HTMLElement>('.sheet-close')?.focus();
         break;
       }
       case 'list-settings':

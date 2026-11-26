@@ -38,7 +38,7 @@ describe('dockView', () => {
       ['In 3 days', 'Tue, Oct 6, 6:00 AM', Date.UTC(2026, 9, 6, 6)],
       ['In 2 weeks', 'Sat, Oct 17, 6:00 AM', Date.UTC(2026, 9, 17, 6)],
       ['In 4 weeks', 'Sat, Oct 31, 6:00 AM', Date.UTC(2026, 9, 31, 6)],
-      ['Indefinitely', '', null],
+      ['Never', 'Until you unsnooze it', null],
     ]);
   });
 

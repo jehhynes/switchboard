@@ -9,7 +9,7 @@ describe('snoozeChoices (PRD R49)', () => {
   // Monday 5 October 2026, 9:54.
   const monday = at(5, 9, 54);
 
-  it('offers days at 6am, Next week on a Monday, 14 and 28 days, and Indefinitely', () => {
+  it('offers days at 6am, Next week on a Monday, 14 and 28 days, and Never', () => {
     expect(snoozeChoices(monday).map((choice) => [choice.label, choice.description, choice.until])).toEqual([
       ['Tomorrow', 'Tue, Oct 6, 6:00 AM', six(6)],
       ['In 2 days', 'Wed, Oct 7, 6:00 AM', six(7)],
@@ -17,7 +17,7 @@ describe('snoozeChoices (PRD R49)', () => {
       ['Next week', 'Mon, Oct 12, 6:00 AM', six(12)],
       ['In 2 weeks', 'Mon, Oct 19, 6:00 AM', six(19)],
       ['In 4 weeks', 'Mon, Nov 2, 6:00 AM', new Date(2026, 10, 2, 6).getTime()],
-      ['Indefinitely', '', null],
+      ['Never', 'Until you unsnooze it', null],
     ]);
   });
 
@@ -39,13 +39,13 @@ describe('snoozeChoices (PRD R49)', () => {
       ['In 3 days', 'Tue, Oct 13, 6:00 AM'],
       ['In 2 weeks', 'Sat, Oct 24, 6:00 AM'],
       ['In 4 weeks', 'Sat, Nov 7, 6:00 AM'],
-      ['Indefinitely', ''],
+      ['Never', 'Until you unsnooze it'],
     ]);
     // Sunday: Tomorrow is Monday; Friday: In 3 days is.
-    expect(labels(at(11, 12)).map(([label]) => label)).toEqual(['Tomorrow', 'In 2 days', 'In 3 days', 'In 2 weeks', 'In 4 weeks', 'Indefinitely']);
-    expect(labels(at(9, 12)).map(([label]) => label)).toEqual(['Tomorrow', 'In 2 days', 'In 3 days', 'In 2 weeks', 'In 4 weeks', 'Indefinitely']);
+    expect(labels(at(11, 12)).map(([label]) => label)).toEqual(['Tomorrow', 'In 2 days', 'In 3 days', 'In 2 weeks', 'In 4 weeks', 'Never']);
+    expect(labels(at(9, 12)).map(([label]) => label)).toEqual(['Tomorrow', 'In 2 days', 'In 3 days', 'In 2 weeks', 'In 4 weeks', 'Never']);
     // Before 6am on Monday the day is still Sunday's.
-    expect(labels(at(12, 1)).map(([label]) => label)).toEqual(['Tomorrow', 'In 2 days', 'In 3 days', 'In 2 weeks', 'In 4 weeks', 'Indefinitely']);
+    expect(labels(at(12, 1)).map(([label]) => label)).toEqual(['Tomorrow', 'In 2 days', 'In 3 days', 'In 2 weeks', 'In 4 weeks', 'Never']);
   });
 
   it('counts the day from 6am, so before 6am "Tomorrow" is 6am that same morning', () => {

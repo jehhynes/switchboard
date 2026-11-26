@@ -2,6 +2,7 @@
 // hub's config routes as page commands. Its state, fields and pages are in settingsModel.ts.
 import type { VNode } from 'preact';
 import { mount } from './island.js';
+import { ModalFrame } from './sheetFrame.js';
 import { isPhone } from './layout.js';
 import { copyAddress, PairAddress, QrCode, usedText } from './listHeader.js';
 import type { Device, Pairing } from './listHeader.js';
@@ -1780,45 +1781,51 @@ function NameFields({ names, on }: { names: NewNameView; on: Handlers }) {
 function AskSheet({ ask, on }: { ask: Ask; on: Handlers }) {
   if (ask.kind === 'delete') {
     return (
-      <div class="sheet-backdrop settings-ask" onClick={(event) => event.target === event.currentTarget && on.answer('keep')}>
-        <div class="sheet glass" role="alertdialog" aria-modal="true" aria-labelledby="settings-ask-title">
-          <h2 id="settings-ask-title" class="sheet-title">
-            Delete playbook {ask.name}?
-          </h2>
-          <p class="sheet-detail">{ask.detail}</p>
-          <div class="sheet-buttons">
-            <button type="button" class="sheet-button secondary" onClick={() => on.answer('keep')}>
+      <ModalFrame
+        title={`Delete playbook ${ask.name}?`}
+        titleId="settings-ask-title"
+        dismiss={() => on.answer('keep')}
+        backdrop="settings-ask"
+        role="alertdialog"
+        buttons={
+          <>
+            <button type="button" class="sheet-button secondary" data-dismiss onClick={() => on.answer('keep')}>
               Cancel
             </button>
             <button type="button" class="sheet-button primary danger" onClick={() => on.answer('delete')}>
               Delete
             </button>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      >
+        <p class="sheet-detail">{ask.detail}</p>
+      </ModalFrame>
     );
   }
 
   return (
-    <div class="sheet-backdrop settings-ask" onClick={(event) => event.target === event.currentTarget && on.answer('keep')}>
-      <div class="sheet glass" role="alertdialog" aria-modal="true" aria-labelledby="settings-ask-title">
-        <h2 id="settings-ask-title" class="sheet-title">
-          Save changes to settings?
-        </h2>
-        <p class="sheet-detail">Your changes are lost if you do not save them.</p>
-        <div class="sheet-buttons">
+    <ModalFrame
+      title="Save changes to settings?"
+      titleId="settings-ask-title"
+      dismiss={() => on.answer('keep')}
+      backdrop="settings-ask"
+      role="alertdialog"
+      buttons={
+        <>
           <button type="button" class="sheet-button secondary" onClick={() => on.answer('discard')}>
             Discard
           </button>
-          <button type="button" class="sheet-button secondary" onClick={() => on.answer('keep')}>
+          <button type="button" class="sheet-button secondary" data-dismiss onClick={() => on.answer('keep')}>
             Keep editing
           </button>
           <button type="button" class="sheet-button primary" onClick={() => on.answer('save')}>
             Save
           </button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <p class="sheet-detail">Your changes are lost if you do not save them.</p>
+    </ModalFrame>
   );
 }
 
