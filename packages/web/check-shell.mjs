@@ -2,7 +2,7 @@
 // app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History (its title first at 20 px, its
 // groups' headings at 14 px, and its pinned state on the first screen), History's filter and the Changes tree's search box (each at least 160 px
 // wide and covered by nothing else of its bar, with History's chips shown and the search's options menu open), Settings, the drawer, a sheet,
-// the persona dialog, a work item with more tabs than fit, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
+// the persona dialog, a work item with more tabs than fit, the composer under each other tab and a maximized column with the mic on, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
 // a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, and the More menu lies above everything under it. Line 2 is one line, never wrapping and its items never
 // below one another, at several list widths down to 200 px; its playbook or host is cut, with an ellipsis and a tooltip naming it whole, only
 // where it does not fit beside the comment icon and the key; a key shows its source's logo, GitHub's, Zoho's or a plugin's, in place of its source's label; every pill, the key included, shows its text where line 2 is 300 px wide or more and its icon alone under that,
@@ -47,11 +47,16 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'persona', 'tabs', 'changes', 'changes-options', 'history-filters'];
+/**
+ * The mic-on views (architecture.md § Web page): the mic listening while another tab shows, where the tabs fold (`mic-`) and in a desktop's
+ * maximized column (`mic-max-`), so the composer shows under the tab.
+ */
+const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'persona', 'tabs', 'changes', 'changes-options', 'history-filters', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -132,13 +137,16 @@ for (let i = 0; view !== 'empty' && open && i < 30; i++) {
 }
 // The conversation ends with a message the transcript did not show, so its Send again is measured as a touch target.
 if (open && view === 'conversation') items.push({ type: 'message', id: 'm-lost', sessionId: 's', workItemId: 1, at: now - 30000, ord: 100, provisional: false, withdrawn: false, origin: 'typed', text: 'Can we make these notices bigger?', delivery: 'unconfirmed', error: 'The transcript does not show this message.' });
-history.replaceState(null, '', location.search + (open ? '#w=1' : '#'));
+// The Changes views open it by the route, which leaves its tab in the strip.
+history.replaceState(null, '', location.search + (open ? (view?.endsWith('-changes') ? '#w=1&t=changes' : '#w=1') : '#'));
 // The tabs view's work item has more artifacts, with long titles but the newest's, than any strip here fits.
-const artifacts = view === 'tabs' ? Array.from({ length: 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: i === 9 ? 'Plan' : 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
+// The mic views' work item has one long Markdown artifact.
+const mic = view?.startsWith('mic-') === true;
+const artifacts = mic ? [{ path: 'chat/plan.md', owner: 'chat', kind: 'note', title: 'Plan', ext: 'md', type: 'markdown', updatedAt: now - 1000 }] : view === 'tabs' ? Array.from({ length: 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: i === 9 ? 'Plan' : 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
 class FakeSource {
   constructor() {
     this.listeners = {};
-    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open ? [session] : [], items, more: false, state: view === 'history' ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0 }), 20);
+    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open ? [session] : [], items, more: false, state: view === 'history' ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0, ...(mic ? { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: false, error: null, recognizer: null } } : {}) }), 20);
     // The tabs view's artifacts change after the page first shows them, so each is unread until its tab shows it.
     if (view === 'tabs') setTimeout(() => artifacts.forEach((artifact) => this.emit('artifact', { artifact: { ...artifact, updatedAt: artifact.updatedAt + 60000 } })), 120);
     // check-resize pauses the stream (window.__paused), so a resize is shown without a redraw.
@@ -191,12 +199,13 @@ const settingsRead = { settings: { path: 'C:/Users/someone/.switchboard/settings
 // Pair a device and Devices list more devices than the sheet shows at once, so its list scrolls, and a pairing address longer than a phone's line.
 const pairDevices = [{ id: 'a1', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true }, { id: 'b2', label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now, current: false, voice: true }, ...['Android · Chrome', 'iPad · Safari', 'Mac · Safari', 'Windows · Chrome', 'Linux · Firefox', 'Android · Firefox'].map((label, i) => ({ id: 'c' + i, label, host: 'some-long-computer-name.tail1234ab.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now - i * 86400000, current: false }))];
 const pairing = { url: 'https://some-long-computer-name.tail1234ab.ts.net/page?t=' + 'a'.repeat(64), code: 'ABCD-EFGH', host: 'some-long-computer-name.tail1234ab.ts.net', expiresAt: now + 5 * 60000 };
-// The Changes tab's routes: two changed files, a branch of one commit, and the worktree's files.
-const changeRow = (path) => ({ path, status: 'M', stages: ['unstaged'], additions: 3, deletions: 1, binary: false, hash: path });
-const changesList = { scopeGen: 3, base: 'b0', head: 'c1', from: 'base', to: 'worktree', commits: [{ sha: 'c1', parent: 'b0', subject: 'Renew the registration before it lapses', time: Math.floor(now / 1000) - 600 }], commitsMore: false, rows: [changeRow('src/dialer/registration.ts'), changeRow('src/dialer/monitor.ts')], stages: { staged: 0, unstaged: 2, untracked: 0 }, shown: 2, total: 2 };
+// The Changes views' routes: two changed files, a branch of one commit, the worktree's files and a file's diff.
+const changesList = { scopeGen: 3, base: 'b0', head: 'c1', from: 'base', to: 'worktree', commits: [{ sha: 'c1', parent: 'b0', subject: 'Renew the registration before it lapses', time: Math.floor(now / 1000) - 600 }], commitsMore: false, rows: [{ path: 'src/dialer/registration.ts', status: 'M', stages: ['committed'], additions: 30, deletions: 4, binary: false, hash: 'h1', viewed: false }, { path: 'src/dialer/monitor.ts', status: 'M', stages: ['working'], additions: 3, deletions: 1, binary: false, hash: 'h2', viewed: false }], stages: { committed: 1, staged: 0, working: 1, untracked: 0 }, shown: 2, total: 2 };
+const changesDiff = (path) => ({ path, status: 'M', patch: 'diff --git a/' + path + ' b/' + path + '\\n--- a/' + path + '\\n+++ b/' + path + '\\n@@ -1,3 +1,3 @@\\n line\\n-old\\n+new\\n line\\n', old: 'line\\nold\\nline\\n', new: 'line\\nnew\\nline\\n', binary: false, tooLarge: null });
+const planText = '# Plan\\n\\n' + Array.from({ length: 40 }, (_, i) => 'Step ' + (i + 1) + ': renew the registration 30 s before it lapses, and check the inbound route again.').join('\\n\\n');
 const stackData = { scopeGen: 3, repo: 'switchboard', root: 'D:/w', branch: 'fix/dialer-registration', head: 'c1', commitIds: ['c1'], more: false, incomplete: false, github: { state: 'none', observedAt: null }, links: [], main: { ref: 'origin/main', behind: 0, fetchedAt: now } };
-const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? { scopeGen: 3, paths: ['src/dialer/monitor.ts', 'src/dialer/registration.ts'], more: false } : null);
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {})), text: async () => '' });
+const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? { scopeGen: 3, paths: ['src/dialer/monitor.ts', 'src/dialer/registration.ts'], more: false } : url.includes('/v1/conversation/diff?') ? changesDiff(new URL(url, location.href).searchParams.get('path')) : null);
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? planText : '') });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -483,6 +492,11 @@ const PROBES = `(() => {
   document.body.insertAdjacentHTML('beforeend', '<div class="console" style="position: fixed; left: 0; bottom: 0; width: 300px"><div class="console-foot"><p class="console-note">Ended.</p><button type="button" class="console-reconnect">Reconnect</button></div></div>');
 })()`;
 
+/** A step that opens the tab `selector` names, by its tab in a strip or else by its row in that strip's More menu. */
+function openTab(selector) {
+  return { name: selector, eval: '(async () => { const tab = document.querySelector(' + JSON.stringify('.tabs ' + selector) + '); if (tab) { tab.click(); return true; } document.querySelector(".tab-more-button")?.click(); await new Promise((done) => setTimeout(done, 150)); const row = document.querySelector(' + JSON.stringify('.tab-menu ' + selector) + '); row?.click(); return row !== null; })()' };
+}
+
 const OPEN = {
   history: ['[data-action=actions]', '[data-action=row-history]'],
   // Settings as it opens: on a phone its navigation's categories alone.
@@ -506,6 +520,14 @@ const OPEN = {
   'changes-options': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-options]', '.tree-options-menu [data-option=regex]'],
   // History's chips shown, one turned off, as a phone shows them behind Filters; a wider pane shows them without it.
   'history-filters': ['[data-action=actions]', '[data-action=row-history]', '[data-action=history-chips]', '.hist-chip[data-category="you"]'],
+  // The mic views' tab, from the strip or from More where the strip has no room for it; the desktop's in its column, then maximized.
+  'mic-history': [openTab('[data-tab="history"]')],
+  'mic-changes': [openTab('[data-action="diff-tab"]')],
+  'mic-artifact': [openTab('[data-action="artifact"][data-path="chat/plan.md"]')],
+  'mic-console': [openTab('[data-tab="console"]')],
+  'mic-max-history': [openTab('[data-side="history"]'), '.panel-max'],
+  'mic-max-changes': [openTab('[data-action="diff-tab"]'), '.panel-max'],
+  'mic-max-artifact': [openTab('[data-action="artifact"][data-path="chat/plan.md"]'), '.panel-max'],
 };
 
 /** The search views: the field, and the bar whose controls must not cover it. */
@@ -566,6 +588,36 @@ async function press(send, size, at) {
     await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y }] });
     await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   }
+}
+
+/**
+ * The mic views' composer: whether it shows with its mic button, the tab shown, where the tab's pane ends (the folded tabs' panel, or the
+ * maximized column), and whether its mic button and box take a press at their centres.
+ */
+const MIC = `(() => {
+  const composer = document.getElementById('composer');
+  if (composer.hidden || getComputedStyle(composer).display === 'none') return { shown: false };
+  const box = composer.getBoundingClientRect();
+  const hit = (node) => { if (!node) return false; const one = node.getBoundingClientRect(); const at = document.elementFromPoint(one.left + one.width / 2, one.top + one.height / 2); return at !== null && node.contains(at); };
+  const maximized = document.querySelector('#root.maximized') !== null;
+  const pane = (maximized ? document.querySelector('.detail') : document.getElementById('panel')).getBoundingClientRect();
+  const strip = maximized ? document.querySelector('.detail .tabs') : document.querySelector('.main .tabs');
+  return { shown: true, maximized, top: box.top, bottom: box.bottom, pane: pane.bottom, tab: strip?.querySelector('.tab.selected')?.dataset.id ?? null, mic: hit(composer.querySelector('button[data-voice="mic"]')), input: hit(composer.querySelector('textarea')) };
+})()`;
+
+/** Checks a mic view: the composer shows under the tab chosen, below its pane and nothing over it, its mic button and box taking a press. */
+function micFailures(view, size, c) {
+  const out = [];
+  const want = { history: 'history', changes: 'changes', artifact: 'artifact:chat/plan.md', console: 'console' }[view.replace(/^mic-(max-)?/, '')];
+
+  if (!c.shown) return ['the composer is hidden on the ' + want + ' tab with the mic on'];
+  if (c.tab !== want) out.push('the ' + (c.tab ?? 'no') + ' tab shows, not ' + want);
+  if (view.startsWith('mic-max-') && !c.maximized) out.push('the column is not maximized');
+  if (c.pane > c.top + 0.5) out.push('the tab\'s pane ends at ' + c.pane + ', under the composer\'s top at ' + c.top);
+  if (c.bottom > size.height + 0.5) out.push('the composer passes the viewport\'s bottom');
+  if (!c.mic) out.push('the mic button does not take a press at its centre');
+  if (!c.input) out.push('the composer\'s box does not take a press at its centre');
+  return out;
 }
 
 /** Checks one view's measurements; answers its failures. */
@@ -794,6 +846,8 @@ try {
       for (const view of VIEWS) {
         // A phone shows the list or the conversation, never a drawer, in either orientation.
         if (view === 'drawer' && size.phone) continue;
+        // The column maximizes only where it is a column.
+        if (view.startsWith('mic-max-') && size.device !== 'desktop') continue;
         if (size.views !== undefined && !size.views.includes(view)) continue;
         if (only !== null && !only.includes(view)) continue;
         // A list wider than the screen is not a width this screen has.
@@ -811,7 +865,9 @@ try {
         const missing = [];
 
         for (const selector of steps) {
-          if (!(await evaluate('(() => { const node = document.querySelector(' + JSON.stringify(selector) + '); node?.click(); return node !== null; })()'))) missing.push(selector);
+          if (typeof selector === 'object') {
+            if (!(await evaluate(selector.eval))) missing.push(selector.name);
+          } else if (!(await evaluate('(() => { const node = document.querySelector(' + JSON.stringify(selector) + '); node?.click(); return node !== null; })()'))) missing.push(selector);
           await wait(150);
         }
 
@@ -841,6 +897,8 @@ try {
         }
 
         if (view.startsWith('settings') && view !== 'settings-nav' && missing.length === 0) found.push(...settingsFailures(view, size, await evaluate(SETTINGS)));
+
+        if (view.startsWith('mic-') && missing.length === 0) found.push(...micFailures(view, size, await evaluate(MIC)));
 
         if (view === 'tabs' && missing.length === 0) {
           const more = await evaluate(moreOnTop);

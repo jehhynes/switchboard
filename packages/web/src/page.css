@@ -1038,9 +1038,10 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
    The conversation's pane keeps the width set on its sash, 940 px by default, its timeline and composer as wide as with the column hidden, and
    the column, at least 360 px (DETAIL_MIN), takes the rest of the width, so a wide screen gives the status and artifacts the room. */
 .detail { display: none; }
-/* Where the tabs fold into the conversation's, as on a phone, the other tabs get the whole height: the composer and the ended session's note
-   above it show only on the Conversation tab (#root.off-conversation, set by main.ts), hidden rather than removed so the draft, attachments and
-   live words stay and a voice reply plays on. A wide layout always shows the conversation here. */
+/* Where the tabs fold into the conversation's, as on a phone, the other tabs get the whole height while the mic is off: the composer and the
+   ended session's note above it show only on the Conversation tab (#root.off-conversation, set by main.ts), hidden rather than removed so the
+   draft, attachments and live words stay and a voice reply plays on. While the mic is on main.ts leaves the class off, so the composer shows
+   under every tab, which ends above it, as dictation's sign. A wide layout always shows the conversation here. */
 #root.off-conversation #note, #root.off-conversation #composer { display: none; }
 :where(html:not(.phone)) #root.wide > .main { flex: 0 1 var(--chat-width, 940px); }
 :where(html:not(.phone)) #root.wide > .chat-sash { display: block; }
@@ -1054,7 +1055,11 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 /* The maximize button is no tab: it keeps the strip's background when focused or pressed, so it never looks chosen, shows the focus outline
    alone for the keyboard, and takes an icon button's hover where the pointer can hover. */
 .tab.panel-max, .tab.panel-max:hover, .tab.panel-max:focus, .tab.panel-max:active { background: var(--sb-tab-strip); }
-@media (hover: hover) { .tab.panel-max:hover { background: var(--vscode-toolbar-hoverBackground); } }:where(html:not(.phone)) #root.wide.maximized > .detail { position: fixed; inset: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); z-index: var(--sb-z-maximized); min-width: 0; border-left: none; }
+@media (hover: hover) { .tab.panel-max:hover { background: var(--vscode-toolbar-hoverBackground); } }
+:where(html:not(.phone)) #root.wide.maximized > .detail { position: fixed; inset: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); z-index: var(--sb-z-maximized); min-width: 0; border-left: none; }
+/* While the mic is on (#root.dictating), the maximized column ends above the conversation's composer, its height measured by main.ts, so the
+   composer shows below whatever tab the column shows. */
+:where(html:not(.phone)) #root.wide.maximized.dictating > .detail { bottom: var(--sb-composer-height, 0px); border-bottom: 1px solid var(--vscode-panel-border); }
 /* The column's tab strip starts at the column's top, with no band above, and its tabs keep their own height. One pixel of the strip above
    them keeps the chosen tab's top edge off the window's top edge, which the window's frame can cover. */
 :where(html:not(.phone)) .detail-head { flex: none; display: flex; align-items: flex-start; padding-top: 1px; border-bottom: 1px solid var(--vscode-panel-border); }

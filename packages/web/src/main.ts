@@ -74,6 +74,10 @@ const SEEN_CHECK_MS = 250;
 const COMPOSER_MAX_PX = 200;
 /** How long the composer says a message sent from the History or Artifacts tab went. */
 export const SENT_NOTE_MS = 4_000;
+/** How long the composer stays on another tab after the mic goes off other than by its own button, so a moment's change does not move the tab. */
+export const DICTATION_GRACE_MS = 1_500;
+/** The voice view's mic states in which the mic is on, listening, paused or unable to run (architecture.md § Dictation). */
+const MIC_ON = new Set(['listening', 'hearing', 'typing', 'paused-other-app', 'paused-by-voice', 'unavailable', 'starting']);
 /** How often the page reads the prompt a session waits on in its terminal while it waits. */
 export const PROMPT_POLL_MS = 1_000;
 /** How long the box's draft waits before the hub hears it. */
@@ -830,6 +834,39 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The mic button shows starting from a Mic on tap until the voice view confirms it, and the tap's error if it failed.
   const micStart = new MicStart(() => draw());
   let micScope: number | null | undefined;
+  // While the mic is on for the session shown, the composer shows on every tab, so the operator sees that dictation is on (architecture.md
+  // § Web page). It stays DICTATION_GRACE_MS after the mic goes off other than by a tap on its button here, so a moment's change of the voice's
+  // state does not hide it and show it again; another work item drops it at once, and a Mic on tap still starting counts only in its own.
+  let dictationShown = false;
+  let dictationFor: number | null | undefined;
+  let dictationGrace: ReturnType<typeof setTimeout> | undefined;
+  let micOffTapped = false;
+  const micOn = (): boolean =>
+    state.connected &&
+    state.session?.conversation === 'full' &&
+    !draftShown() &&
+    ((state.voice?.here === true && MIC_ON.has(state.voice.mic ?? '')) || (micScope === state.scope?.workItemId && (micStart.pending === 'starting' || micOpening)));
+  const dictating = (): boolean => {
+    const on = micOn();
+    const moved = state.scope?.workItemId !== dictationFor;
+
+    dictationFor = state.scope?.workItemId;
+
+    if (on || !dictationShown || micOffTapped || moved) {
+      clearTimeout(dictationGrace);
+      dictationGrace = undefined;
+      dictationShown = on;
+      micOffTapped &&= on;
+      return on;
+    }
+
+    dictationGrace ??= setTimeout(() => {
+      dictationGrace = undefined;
+      dictationShown = false;
+      draw();
+    }, DICTATION_GRACE_MS);
+    return true;
+  };
   // A Mic on tap's steps, as milliseconds from the tap, sent to the hub log once its start ends (architecture.md § Dictation).
   let micTiming: { at: number; steps: Array<{ step: string; ms: number }> } | null = null;
   const micStep = (step: string, at = deps.now()): void => {
@@ -1151,7 +1188,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    sentNote.hidden = mainTab() === 'conversation';
+    // The maximized column shows a tab over the conversation, with the composer below it while the mic is on.
+    sentNote.hidden = mainTab() === 'conversation' && !panelMaximized;
 
     if (!sentNote.hidden) {
       sentTimer = setTimeout(() => void (sentNote.hidden = true), SENT_NOTE_MS);
@@ -1659,6 +1697,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const on = button.dataset['on'] === 'true';
     let attempt = 0;
 
+    micOffTapped = !on;
+
     const timing = on ? { at: deps.now(), steps: [] } : null;
 
     if (on) {
@@ -1670,6 +1710,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     const failed = (error: string): void => {
+      // A refused Mic off leaves the mic on, so a later off by other means keeps the grace.
+      if (!on) {
+        micOffTapped = false;
+      }
+
       // A refusal answered after a later tap or Mic off is not shown.
       if (on && !micStart.fail(error, attempt)) {
         return;
@@ -1917,7 +1962,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const live = state.connected && state.session?.conversation === 'full' && !drafting;
     const full = live || (state.connected && drafting);
 
-    // On every tab, so the operator can type and dictate from History or the artifacts too, but on a short screen (page.css).
+    // Shown under the other tabs where they fold only while the mic is on (page.css, #root.off-conversation).
     composerHost.hidden = state.scope === null;
     input.disabled = !full;
     attachButton.disabled = !live;
@@ -2353,6 +2398,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       : null;
 
   resized?.observe(panel);
+  // The maximized column ends this far above the page's bottom while the mic is on, so the composer shows below it (page.css).
+  const composerSized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => root.style.setProperty('--sb-composer-height', `${composerHost.offsetHeight}px`)) : null;
+
+  composerSized?.observe(composerHost);
+  listening.signal.addEventListener('abort', () => {
+    composerSized?.disconnect();
+    clearTimeout(dictationGrace);
+  });
 
   let listFocus: string | null = null;
   let pendingRowControl: { key: string; run: () => void } | null = null;
@@ -2718,9 +2771,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     root.classList.toggle('wide', side);
     root.classList.toggle('item-opening', pending !== null);
-    // Where the tabs fold into the conversation's, the composer and the note show only on the Conversation tab (page.css).
+    // Where the tabs fold into the conversation's, the composer and the note show only on the Conversation tab while the mic is off (page.css);
+    // while it is on, the composer shows under every tab, and the maximized column ends above it.
     // A work item being opened opens on the Conversation tab there, so its composer keeps its place meanwhile.
-    root.classList.toggle('off-conversation', state.scope !== null && pending === null && mainTab() !== 'conversation');
+    const micShown = dictating();
+
+    root.classList.toggle('dictating', micShown);
+    root.classList.toggle('off-conversation', state.scope !== null && pending === null && mainTab() !== 'conversation' && !micShown);
 
     // The hidden box gives up the focus, so its blur tells the hub, and spoken turns send as messages again rather than join a draft out of view.
     if (root.classList.contains('off-conversation') && composerHost.contains(document.activeElement)) {

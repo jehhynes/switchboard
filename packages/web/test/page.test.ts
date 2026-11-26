@@ -1281,6 +1281,12 @@ describe("the list's CSS", () => {
     expect(css).toContain(`\n${rule} > .main { --sb-end: env(safe-area-inset-bottom); }\n`);
   });
 
+  it('ends the maximized column above the composer while the mic is on, at the composer\'s measured height', () => {
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.wide.maximized.dictating > .detail')).toEqual(['bottom: var(--sb-composer-height, 0px); border-bottom: 1px solid var(--vscode-panel-border);']);
+    // The column's own rule still runs it to the page's bottom while the mic is off.
+    expect(declarationsOf((selector) => selector === ':where(html:not(.phone)) #root.wide.maximized > .detail').join(' ')).toMatch(/inset: var\(--sb-top\) env\(safe-area-inset-right\) 0 env\(safe-area-inset-left\);/);
+  });
+
   it('puts Status and Artifacts beside the conversation only where #root.wide says they fit, never on a phone', () => {
     expect(css).toContain('\n:where(html:not(.phone)) #root.wide > .main {');
     expect(css).not.toMatch(/(^|\n)#root\.wide/);

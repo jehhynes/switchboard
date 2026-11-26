@@ -1,6 +1,6 @@
 import { afterEach, onTestFinished, beforeEach, describe, expect, it, vi } from 'vitest';
 import { timeline } from '../src/model.js';
-import { SENT_NOTE_MS, startPage } from '../src/main.js';
+import { DICTATION_GRACE_MS, SENT_NOTE_MS, startPage } from '../src/main.js';
 import { drawAtOnce } from './frame.js';
 import { message, reply, session, scope, listRow, listGroup, artifact, resizeTo, FakeSource } from './pageFixtures.js';
 
@@ -217,6 +217,112 @@ describe('the page', () => {
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.classList.contains('off-conversation')).toBe(false);
     resizeTo(1024);
+    page.close();
+  });
+
+  it('shows the composer on every tab while the mic is on for the session shown, hiding it at once after its own Mic off and after a grace otherwise', () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    window.innerWidth = 700;
+
+    const { page, source } = start();
+    const composer = root.querySelector<HTMLElement>('#composer')!;
+    const input = composer.querySelector('textarea')!;
+    const voice = (mic: string, patch: Record<string, unknown> = {}) => ({ voice: { enabled: true, here: true, mic, speaking: null, speakReplies: false, error: null, ...patch } });
+    const offTab = () => root.classList.contains('off-conversation');
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [], ...voice('off') });
+    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
+    expect(offTab()).toBe(true);
+    expect(root.classList.contains('dictating')).toBe(false);
+
+    // Every state in which the mic is on keeps the composer under the History tab, the mic button in it, and lets its box keep the focus.
+    for (const mic of ['listening', 'hearing', 'typing', 'paused-other-app', 'paused-by-voice', 'unavailable', 'starting']) {
+      source.emit('voice', voice(mic));
+      expect([mic, offTab(), root.classList.contains('dictating')]).toEqual([mic, false, true]);
+    }
+    expect(composer.querySelector('button[data-voice="mic"]')).not.toBeNull();
+    input.focus();
+    source.emit('voice', voice('typing'));
+    expect(document.activeElement).toBe(input);
+
+    // Mic off from its own button hides it as soon as the voice says the mic is off.
+    source.emit('voice', voice('listening'));
+    composer.querySelector<HTMLElement>('button[data-voice="mic"]')!.click();
+    expect(offTab()).toBe(false);
+    source.emit('voice', voice('off'));
+    expect(offTab()).toBe(true);
+    expect(document.activeElement).not.toBe(input);
+
+    // The mic going off by other means, as the idle timeout, keeps it DICTATION_GRACE_MS, and the mic on again meanwhile keeps it for good.
+    source.emit('voice', voice('listening'));
+    source.emit('voice', voice('idle-off'));
+    expect(offTab()).toBe(false);
+    vi.advanceTimersByTime(DICTATION_GRACE_MS - 1);
+    source.emit('voice', voice('hearing'));
+    vi.advanceTimersByTime(DICTATION_GRACE_MS);
+    expect(offTab()).toBe(false);
+    source.emit('voice', voice('off'));
+    vi.advanceTimersByTime(DICTATION_GRACE_MS - 1);
+    expect(offTab()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(offTab()).toBe(true);
+    expect(root.classList.contains('dictating')).toBe(false);
+
+    // The voice in another window, or a session the page cannot talk to, is no mic on for this page.
+    source.emit('voice', voice('listening', { here: false }));
+    expect(offTab()).toBe(true);
+    source.emit('voice', voice('listening'));
+    expect(offTab()).toBe(false);
+    source.emit('session', { session: session({ state: 'ended', conversation: 'read-only', reason: 'Ended.' }) });
+    vi.advanceTimersByTime(DICTATION_GRACE_MS);
+    expect(offTab()).toBe(true);
+
+    // On the Conversation tab nothing changes, and the wide layout keeps the composer with the conversation, marking the mic for the maximized column.
+    source.emit('session', { session: session() });
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
+    expect(offTab()).toBe(false);
+    resizeTo(1920);
+    expect(root.classList.contains('wide')).toBe(true);
+    expect(root.classList.contains('dictating')).toBe(true);
+    resizeTo(1024);
+    page.close();
+  });
+
+  it('keeps the grace after a refused Mic off, and counts a Mic on still starting only for the work item it was tapped in', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    onTestFinished(() => void vi.useRealTimers());
+    window.innerWidth = 700;
+
+    const fetch = vi.fn(async (url: string) =>
+      (url.endsWith('/mic') ? { status: 409, ok: false, json: async () => ({ error: 'The mic did not change.' }), text: async () => '' } : { status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response,
+    );
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
+    const source = FakeSource.last!;
+    const voice = (mic: string) => ({ voice: { enabled: true, here: true, mic, speaking: null, speakReplies: false, error: null } });
+    const offTab = () => root.classList.contains('off-conversation');
+    const mic = () => root.querySelector<HTMLElement>('#composer button[data-voice="mic"]')!;
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [], ...voice('listening') });
+    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
+    expect(offTab()).toBe(false);
+
+    // The hub refuses Mic off, so the mic stays on; the inactivity timeout later turns it off, and the grace still applies.
+    mic().click();
+    await flush();
+    await flush();
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('The mic did not change.');
+    source.emit('voice', voice('idle-off'));
+    expect(offTab()).toBe(false);
+    vi.advanceTimersByTime(DICTATION_GRACE_MS);
+    expect(offTab()).toBe(true);
+
+    // A Mic on tap still starting shows the composer under History; another work item, whose mic is off, does not inherit it.
+    mic().click();
+    expect(offTab()).toBe(false);
+    expect(root.classList.contains('dictating')).toBe(true);
+    source.emit('hello', { key: 'pk', groups: [], scope: { ...scope, scopeGen: 4, workItemId: 2, conversations: [{ ...scope.conversations[0]!, workItemId: 2 }] }, sessions: [session()], items: [], more: false, state: null, artifacts: [], ...voice('off') });
+    expect(root.classList.contains('dictating')).toBe(false);
     page.close();
   });
 
