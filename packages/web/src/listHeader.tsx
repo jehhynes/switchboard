@@ -616,6 +616,7 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
   return (
     <Frame
       title="Pair a device"
+      wide="pair-sheet"
       buttons={
         <>
           <button type="button" class="sheet-button secondary" data-action="list-sheet-go" disabled={sheet.busy}>
@@ -645,7 +646,7 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
       ) : sheet.devices.length === 0 ? (
         <p class="sheet-detail">No device is signed in.</p>
       ) : (
-        <ul class="device-list">
+        <ul class={`device-list${sheet.devices.length > 2 ? ' many' : ''}`}>
           {sheet.devices.map((one) => (
             <li class="device" data-key={`device-${one.id}`}>
               <span class="device-text">

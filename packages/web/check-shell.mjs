@@ -45,11 +45,11 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-table'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -159,7 +159,10 @@ if (listing) {
 const historyView = { key: 'gh 1', title: 'Fix it', url: '', facts: [{ label: 'Status', value: 'Running' }], links: [], reconstructed: false, recordedSince: null, sections: [{ key: 'w1', workItemId: 1, title: 'dev:build', status: 'Running', tone: 'accent', facts: [], prompt: null, entries: Array.from({ length: 40 }, (_, i) => ({ key: 'e' + i, at: now - (40 - i) * 3600000, category: 'session', icon: 'play', text: 'Entry ' + i, lines: [], detail: null, shortId: null, links: [], tone: null, reconstructed: false, refused: null, stateChange: false })) }] };
 // Settings reads a file with checkboxes on General and in the playbooks' table.
 const settingsRead = { settings: { path: 'C:/Users/someone/.switchboard/settings.json', version: 'v1', value: { sessions: { codeMode: true }, web: { tailscale: true }, sources: { github: { repo: 'o/r', logins: ['me'], repoRoot: 'D:/git/r' } }, schedules: { weekly: { playbook: 'dev:build', repoRoot: 'D:/git/r', every: 'week', day: 'mon', at: '09:00' } }, voice: { enabled: true, personas: [{ id: 'nova', name: 'Nova', voice: 'cedar' }], playbookPersonas: { 'dev:build': 'nova' } }, playbooks: { 'dev:build': { description: 'Build it', template: 'Build.', reports: ['done', 'approval'] }, 'dev:plan': { description: 'Plan it', template: 'Plan.', autoStart: true } } }, error: null }, permissionModes: ['default', 'auto'], codexPermissionModes: ['default'], providers: ['claude', 'codex'], templateVariables: [], sourceKinds: ['github'], sourceLabels: { github: 'GitHub' }, inUse: {}, enabled: { github: true }, configDir: 'C:/Users/someone/.switchboard' };
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/page-devices') ? { devices: [{ id: 'a1', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true }, { id: 'b2', label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now, current: false, voice: true }] } : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
+// Pair a device and Devices list more devices than the sheet shows at once, so its list scrolls, and a pairing address longer than a phone's line.
+const pairDevices = [{ id: 'a1', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true }, { id: 'b2', label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now, current: false, voice: true }, ...['Android · Chrome', 'iPad · Safari', 'Mac · Safari', 'Windows · Chrome', 'Linux · Firefox', 'Android · Firefox'].map((label, i) => ({ id: 'c' + i, label, host: 'some-long-computer-name.tail1234ab.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now - i * 86400000, current: false }))];
+const pairing = { url: 'https://some-long-computer-name.tail1234ab.ts.net/page?t=' + 'a'.repeat(64), code: 'ABCD-EFGH', host: 'some-long-computer-name.tail1234ab.ts.net', expiresAt: now + 5 * 60000 };
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -445,6 +448,10 @@ const OPEN = {
   'settings-table': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="playbooks"]', '.settings-nav-entry[data-key="namespace:dev"]', '.settings-nav-entry.item[data-page="namespace:dev"], .settings-page-title h2'],
   drawer: ['[data-action=drawer]'],
   sheet: ['[data-action=actions]', '[data-action=row-action][data-label=Delete]'],
+  // Pair a device with more devices than fit, whose list scrolls in its own area.
+  pair: ['[data-action=list-more]', '[data-action=list-devices]'],
+  // Devices with a pairing address shown.
+  'settings-pair': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="devices"]', '.settings-devices > .sheet-button'],
   persona: ['[data-action=view-menu]', '[data-action=persona]'],
   // An artifact chosen from More, so the strip keeps it beside the tabs it always keeps: the oldest, so the newest stays unread where it has room.
   tabs: ['.tab-more-button', '.tab-menu [data-action=artifact][data-path="chat/a0.md"]'],
@@ -595,7 +602,7 @@ function failures(view, size, m) {
   // status bar, so no colour is painted there, and its bars, inside the notch's insets, are under 90% of the width. The iPad is not checked for it.
   if (size.device === 'iphone' && size.orientation === 'portrait') {
     const edge = m.edge;
-    const own = view === 'sheet' ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head|persona-head)(\.|$)/.test(edge.name ?? '');
+    const own = view === 'sheet' || view === 'pair' ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head|persona-head)(\.|$)/.test(edge.name ?? '');
 
     if (!own) out.push('WebKit finds ' + (edge.name ?? 'no fixed or sticky box (hit ' + edge.hit + ')') + (edge.kind ? ' (' + edge.kind + ')' : '') + ' at the top edge, not the view\'s top bar');
     else if (edge.kind === 'bar' && (edge.top !== 0 || edge.height <= 10 || edge.background !== m.bar)) out.push('the top bar ' + edge.name + ' is at ' + edge.top + ', ' + edge.height + ' px tall, ' + edge.background + ' for the bars\' ' + m.bar);

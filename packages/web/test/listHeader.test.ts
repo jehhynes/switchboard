@@ -725,6 +725,8 @@ describe('the list header (architecture.md § Web page)', () => {
     // The address stands on its own line, apart from the sentence, with Copy beside it.
     expect(sheet.querySelector('.pair > .sheet-detail')?.textContent).toBe("Scan this with the device's camera, or open this address on it and type the code below:");
     expect(sheet.querySelector('.pair-address .pair-url')?.textContent).toBe('https://pc.tail.ts.net/');
+    expect(sheet.classList.contains('pair-sheet')).toBe(true);
+    expect(sheet.querySelector('.device-list')?.classList.contains('many')).toBe(false);
 
     const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'));
 
@@ -746,13 +748,14 @@ describe('the list header (architecture.md § Web page)', () => {
     await flush();
     expect(root.querySelector('#list-sheet .pair .sheet-error')?.textContent).toBe('The browser did not allow the clipboard. Select the address and copy it.');
     Reflect.deleteProperty(navigator, 'clipboard');
-    // New code forgets the copy.
+    // New code forgets the copy; three devices or more scroll in their own area.
     answers['/page-devices'] = { status: 200, body: { devices: [phone, { ...phone, id: '4567cdef' }, own] } };
     click('#list-sheet [data-action="list-sheet-go"]');
     await flush();
     await flush();
     expect(root.querySelector('#list-sheet .pair-address button')?.textContent).toBe('Copy');
     expect(root.querySelector('#list-sheet .pair .sheet-error')).toBeNull();
+    expect(root.querySelector('#list-sheet .device-list')?.classList.contains('many')).toBe(true);
     answers['/page-devices'] = { status: 200, body: { devices: [phone, own] } };
     click('#list-sheet [data-action="list-sheet-go"]');
     await flush();

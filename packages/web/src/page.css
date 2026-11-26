@@ -165,6 +165,12 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
 .pair-qr { width: 220px; height: 220px; margin-bottom: 12px; }
 .pair-address { box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; margin: 0 0 12px; }
 .pair-url { min-width: 0; padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; text-align: start; user-select: all; font-family: var(--vscode-editor-font-family, monospace); background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15)); }
+/* Pair a device keeps its title, code and buttons in view: its device list scrolls in its own area, two rows high at least, and the sheet scrolls only where even that does not fit. */
+.sheet.pair-sheet { display: flex; flex-direction: column; }
+.pair-sheet > * { flex-shrink: 0; }
+.pair-sheet > .device-list { flex-shrink: 1; overflow-y: auto; overscroll-behavior: contain; }
+.pair-sheet > .device-list.many { min-height: 160px; }
+.pair-sheet .pair-qr { width: min(220px, 24vh); height: min(220px, 24vh); }
 .pair-code { margin: 0 0 8px; font: 600 24px var(--vscode-editor-font-family, monospace); letter-spacing: 2px; user-select: all; }
 .device-list { list-style: none; margin: 0 0 12px; padding: 0; }
 .device { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--vscode-widget-border, transparent); }
