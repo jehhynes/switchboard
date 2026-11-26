@@ -267,7 +267,8 @@ describe('hub entry point', () => {
       const waited = await launch(join(dist, 'hub.js'), {}, ['install', '--wait']).exited;
       const after = record()!;
 
-      expect(waited.stderr).toBe('');
+      // install --wait waits 60 seconds; a failure shows what it and the hub's log said.
+      expect(waited.stderr, `hub.log:\n${readFileSync(hubLogPath(home), 'utf8').slice(-6000)}`).toBe('');
       expect(waited.code).toBe(0);
       expect(after.pid).not.toBe(before.pid);
       expect(after.build).toBe(next);
@@ -275,5 +276,5 @@ describe('hub entry point', () => {
     } finally {
       await stopAndWait();
     }
-  }, 60_000);
+  }, 90_000);
 });
