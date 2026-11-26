@@ -298,11 +298,12 @@ describe('serveHub', () => {
 
   it('stays up while a page is connected', async () => {
     const exit = vi.fn();
-    const hub = served(await serve({ idleMs: 100, exit, app: async () => pageApp(), browserPort: null }));
+    // Long enough for the page to sign in and connect on a loaded machine; the window below is twice as long.
+    const hub = served(await serve({ idleMs: 500, exit, app: async () => pageApp(), browserPort: null }));
     const stream = await openPageStream(hub.record);
 
     expect(stream).not.toBeNull();
-    await new Promise((done) => setTimeout(done, 400));
+    await new Promise((done) => setTimeout(done, 1_000));
     expect(exit).not.toHaveBeenCalled();
 
     stream!.close();
@@ -538,7 +539,7 @@ describe('serveHub restart onto a new build', () => {
     const lines: string[] = [];
     const exit = vi.fn();
     let busy: string | null = 'a session is starting';
-    let release: () => void = () => {};
+    let release: (() => void) | null = null;
     let successor: Promise<ServeResult> | null = null;
 
     mkdirSync(switchboardHome(home), { recursive: true });
@@ -565,11 +566,13 @@ describe('serveHub restart onto a new build', () => {
 
     const slow = call(old.record.port, 'POST', '/slow', old.record.token, 5000, {});
 
+    // The request is being answered before the app stops being busy, or the hub could hand over in between.
+    await until(() => (release !== null ? true : null));
     busy = null;
     await until(() => (lines.some((line) => line.includes('waits: a request is being answered')) ? true : null));
     expect(successor).toBeNull();
 
-    release();
+    release!();
     expect((await slow)?.status).toBe(200);
     await until(() => (exit.mock.calls.length > 0 ? true : null));
 
