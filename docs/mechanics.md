@@ -1920,3 +1920,14 @@ The offline startup limitation below is superseded by M145's verified-origin she
   - In each workflow tested, a turn that began on its own wrote `UserPromptSubmit` before any work, and the time of the last turn end was the marker's `at`.
 - **Not verified:** `Monitor` and other ways a turn can begin on its own; whether Claude exposes a session's pending cron jobs or wakeups (the idle limit does not wait for them, PRD R95); a compaction's turn; Linux.
 - **Current use:** the idle limit of a held session counts input and its turn-end marker, and counts output only when its latest marker is no turn end (architecture.md § Code Mode sessions, End rule).
+
+## M162. Host and GPU memory a GPU recogniser frees, 2026-11-25
+
+- **Versions:** sherpa-onnx-node 2.0.1, its CUDA 12 build and the fp32 Nemotron 0.6B 160 ms streaming model from the operator's `~/.switchboard/voice/models`, on an NVIDIA RTX 2000 Ada (16 GB), Windows 11 Pro 10.0.26300; Node.js v24.14.0 with `--expose-gc`.
+- **Method:** a scratch Node process, not committed, with no hub, capture or playback, loaded the CUDA build with its runtime first on `PATH`, created the recogniser with the voice process's settings (CUDA, 4 threads, modified beam search with 4 paths, no hotwords), decoded a second of silence, then freed it as `sherpaEngine.free` does: the stream dropped and collected, then the recogniser a turn of the event loop later; it did this twice. It read its own private bytes and working set (`Get-Process`) and its dedicated GPU memory (`GPU Process Memory(pid_*)\Dedicated Usage`) after each step. The operator's voice process (pid 103596) held 4.9 GB of private memory with one recogniser loaded since it started.
+- **Result:**
+  - With sherpa-onnx loaded and no recogniser: 25 MiB private, 0 GPU.
+  - Loaded and decoded: 4526 MiB private, 978 MiB working set, 3367 MiB of GPU memory; the load and first decode took 4.7 s, and 3.4 s the second time.
+  - Freed and collected: 1025 MiB private, 647 MiB working set, 87 MiB of GPU memory. A second load and free gave the same numbers within 10 MiB, so about 1 GB stays with the process after the first load, most likely the CUDA and cuDNN runtime, and each recogniser adds 3.5 GB of host memory and 3.3 GB of GPU memory, which a free returns.
+- **Not verified:** the same in the voice process, with hotwords, the voice check's speaker model and capture loaded; the CPU build's int8 model; Linux.
+- **Current use:** the voice process frees its recogniser once capture has gone unused for 30 minutes (architecture.md § Dictation).
