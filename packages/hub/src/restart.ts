@@ -1,3 +1,4 @@
+import { rotateLog } from '@switchboard/core';
 import type { LogLevel } from '@switchboard/core';
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -197,6 +198,8 @@ export interface SuccessorOptions {
 export function startSuccessor(options: SuccessorOptions): Promise<Successor | { error: string }> {
   const readyMs = options.readyMs ?? READY_TIMEOUT_MS;
   let log: number;
+
+  rotateLog(options.logPath);
 
   try {
     log = openSync(options.logPath, 'a');

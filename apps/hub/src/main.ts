@@ -4,7 +4,7 @@ import { answers, hubBundlePath, hubLogPath, lockAddress, logLine, switchboardHo
 import type { LogLevel } from '@switchboard/core';
 import { execFile } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, loadConfigFolder, reportReady, runConfig, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, dropColourOverrides, findHub, gitBashRoot, handledBody, holdSupervisorLock, HubSupervisor, isSnapshotWorker, pendingHandover, postToHub, readStopped, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, stopSupervisor, supervisorAddress, supervisorOffPath, ticketBody } from '@switchboard/hub';
+import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, loadConfigFolder, reportReady, runConfig, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, dropColourOverrides, logWriter, findHub, gitBashRoot, handledBody, holdSupervisorLock, HubSupervisor, isSnapshotWorker, pendingHandover, postToHub, readStopped, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, stopSupervisor, supervisorAddress, supervisorOffPath, ticketBody } from '@switchboard/hub';
 
 declare const __SWITCHBOARD_VERSION__: string | undefined;
 
@@ -493,7 +493,8 @@ async function start(home: string, rest: readonly string[]): Promise<number> {
   }
 
   const configDir = loaded.dir;
-  const child = startDetached(process.execPath, bundle, home, [`--home=${home}`, `--config=${configDir}`, ...passed.filter((argument) => !argument.startsWith('--config='))]);
+  const rotate = !(await answers(lockAddress(home)));
+  const child = startDetached(process.execPath, bundle, home, [`--home=${home}`, `--config=${configDir}`, ...passed.filter((argument) => !argument.startsWith('--config='))], { rotate });
 
   if (rest.includes('--no-wait')) {
     process.stdout.write(`Starting the hub (pid ${child.pid}); its output goes to ${hubLogPath(home)}.\n`);
@@ -629,7 +630,8 @@ async function supervise(home: string, rest: readonly string[]): Promise<number>
       }
 
       try {
-        startDetached(process.execPath, bundle, home, [`--home=${home}`, ...configArgs, ...passed]).on('error', (error) => log(`the hub did not start: ${error.message}`, 'warn'));
+        // The supervisor starts a hub only once it found the hub lock free.
+        startDetached(process.execPath, bundle, home, [`--home=${home}`, ...configArgs, ...passed], { rotate: true }).on('error', (error) => log(`the hub did not start: ${error.message}`, 'warn'));
         return null;
       } catch (error) {
         return String(error);
@@ -676,6 +678,11 @@ async function supervise(home: string, rest: readonly string[]): Promise<number>
 
   return 0;
 }
+
+/** Where the serving hub's error lines go: its standard error, or hub.log by path once that was rotated away (`logWriter`). */
+let writeError = (text: string): void => {
+  process.stderr.write(text);
+};
 
 /** Returns an exit code, or -1 to keep serving. */
 async function main(argv: readonly string[]): Promise<number> {
@@ -737,11 +744,13 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   const build = bundle === undefined ? 'unknown' : buildOf(bundle);
-  const log = (line: string, level: LogLevel = 'info') => process.stdout.write(logLine(new Date(), level, line));
+  const writeLine = logWriter(hubLogPath(home), (text) => process.stdout.write(text));
+  writeError = logWriter(hubLogPath(home), (text) => process.stderr.write(text), 2);
+  const log = (line: string, level: LogLevel = 'info') => writeLine(logLine(new Date(), level, line));
   const loaded = loadConfigFolder(configDeps(home), flag(argv, 'config'));
 
   if ('error' in loaded) {
-    process.stderr.write(logLine(new Date(), 'error', `hub: did not start: ${loaded.error}`));
+    writeError(logLine(new Date(), 'error', `hub: did not start: ${loaded.error}`));
 
     return 1;
   }
@@ -760,7 +769,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   if ('refused' in result) {
-    process.stderr.write(logLine(new Date(), 'warn', `hub: did not start: ${result.refused}.`));
+    writeError(logLine(new Date(), 'warn', `hub: did not start: ${result.refused}.`));
 
     return 1;
   }
@@ -793,12 +802,12 @@ process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
 }) as typeof process.emitWarning;
 
 process.on('uncaughtException', (error) => {
-  process.stderr.write(logLine(new Date(), 'error', `hub: unexpected error: ${error instanceof Error && error.stack !== undefined ? error.stack.replace(/^Error: /, '') : String(error)}`));
+  writeError(logLine(new Date(), 'error', `hub: unexpected error: ${error instanceof Error && error.stack !== undefined ? error.stack.replace(/^Error: /, '') : String(error)}`));
   process.exit(1);
 });
 
 process.on('unhandledRejection', (error) => {
-  process.stderr.write(logLine(new Date(), 'error', `hub: unexpected error in a promise nothing awaited: ${error instanceof Error && error.stack !== undefined ? error.stack.replace(/^Error: /, '') : String(error)}`));
+  writeError(logLine(new Date(), 'error', `hub: unexpected error in a promise nothing awaited: ${error instanceof Error && error.stack !== undefined ? error.stack.replace(/^Error: /, '') : String(error)}`));
 });
 
 // Every hub.js command, the supervisor and `start` included, so nothing it starts inherits them (mechanics M149).
@@ -815,7 +824,7 @@ if (isSnapshotWorker()) {
       }
     })
     .catch((error: unknown) => {
-      process.stderr.write(logLine(new Date(), 'error', `hub: did not start: ${failedStart(error)}`));
+      writeError(logLine(new Date(), 'error', `hub: did not start: ${failedStart(error)}`));
       process.exit(1);
     });
 }

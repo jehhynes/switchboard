@@ -1,3 +1,6 @@
+import { appendFileSync, renameSync, statSync } from 'node:fs';
+import { basename } from 'node:path';
+
 /**
  * Log levels (architecture.md § Hub log): error, something failed and needs the operator; warn, something degraded or was skipped but
  * Switchboard carried on; info, an event worth seeing; debug, timing and internals, hidden on the page by default.
@@ -46,6 +49,40 @@ export class RepeatedLog {
     if (this.#seen.delete(key)) {
       this.log(line, 'info');
     }
+  }
+}
+
+/** The size at which a log is rotated when its process next starts. */
+export const LOG_ROTATE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Renames a log at or over `maxBytes` to `<path>.1`, replacing the previous one, before a process that appends to it starts (architecture.md
+ * § Hub log). A process still writing to it, such as the hub handing over, goes on writing to `<path>.1`. A failed rename is appended to the
+ * log as a warning and tried again at the next start.
+ */
+export function rotateLog(path: string, maxBytes = LOG_ROTATE_BYTES, at = new Date()): 'rotated' | 'kept' | 'failed' {
+  let size: number;
+
+  try {
+    size = statSync(path).size;
+  } catch {
+    return 'kept';
+  }
+
+  if (size < maxBytes) {
+    return 'kept';
+  }
+
+  try {
+    renameSync(path, `${path}.1`);
+    return 'rotated';
+  } catch (error) {
+    try {
+      appendFileSync(path, logLine(at, 'warn', `hub: ${basename(path)} is over ${Math.round(maxBytes / 1024 / 1024)} MB but could not be renamed to ${basename(path)}.1: ${plainError(error)}; trying again at the next start`));
+    } catch {
+      // A log that cannot be written must not stop a start.
+    }
+    return 'failed';
   }
 }
 
