@@ -1,11 +1,14 @@
 import type { Ticket } from './model.js';
 import type { Settings, SourceSettings } from './settings.js';
 
-/** Compares repo paths as Windows does: either separator, any case, no trailing separator. */
-export function samePath(a: string, b: string): boolean {
-  const key = (path: string) => path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
+/** A repo path as Windows compares it: either separator, any case, no trailing separator. */
+export function pathKey(path: string): string {
+  return path.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
+}
 
-  return key(a) === key(b);
+/** Compares repo paths as Windows does (`pathKey`). */
+export function samePath(a: string, b: string): boolean {
+  return pathKey(a) === pathKey(b);
 }
 
 /** A source's home repository, `owner/name` in lowercase, from its `repo` setting: the one plugin key core reads. Empty when it has none. */

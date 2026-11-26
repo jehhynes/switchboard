@@ -770,6 +770,14 @@ describe('Store', () => {
     store.linkWorktree({ ticketId: ticket.id, path: '/wt/a', branch: '1-a', linkedBy: 'report' });
     expect(store.workItemAtWorktree('/wt/a')).toEqual({ id: newer.id, title: 'One' });
     expect(store.workItemAtWorktree('/wt/b')).toBeNull();
+    // On Windows a path stored with backslashes matches git's forward-slash spelling in any case, non-ASCII letters included.
+    store.linkWorktree({ ticketId: ticket.id, path: 'D:\\Wörk\\wt-c\\', branch: '1-c', linkedBy: 'report' });
+    expect(store.workItemAtWorktree('d:/wÖrk/WT-C', 'win32')).toEqual({ id: newer.id, title: 'One' });
+    expect(store.workItemAtWorktree('d:/wörk/wt', 'win32')).toBeNull();
+    // Elsewhere case and backslashes count; only a trailing slash does not.
+    store.linkWorktree({ ticketId: ticket.id, path: '/work/Wt-d/', branch: '1-d', linkedBy: 'report' });
+    expect(store.workItemAtWorktree('/work/Wt-d', 'linux')).toEqual({ id: newer.id, title: 'One' });
+    expect(store.workItemAtWorktree('/work/wt-d', 'linux')).toBeNull();
   });
 
   it('keeps one paste per label per work item, replacing its file in place (R60)', () => {

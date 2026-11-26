@@ -1,6 +1,7 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import type { Comment, Link, Paste, Session, Ticket, Triage, WorkItem, WorkItemStatus, Worktree } from './model.js';
 import { ownPrompt } from './group.js';
+import { pathKey } from './repo.js';
 import { CONVERSATION_RETENTION, TURN_SLACK_MS, TURN_STATES } from './conversation.js';
 import type { ConversationMessage, ConversationReply, ConversationState, MessageAnswer, Piece, TranscriptCheckpoint } from './conversation.js';
 
@@ -1391,8 +1392,17 @@ export class Store {
   }
 
   /** The newest work item whose ticket's linked worktree is at `path`, with its ticket's title. */
-  workItemAtWorktree(path: string): { id: number; title: string } | null {
-    return this.#one('SELECT w.id AS id, t.title AS title FROM worktrees wt JOIN workItems w ON w.ticketId = wt.ticketId JOIN tickets t ON t.id = wt.ticketId WHERE wt.path = ? ORDER BY w.id DESC LIMIT 1', path);
+  workItemAtWorktree(path: string, platform: NodeJS.Platform = process.platform): { id: number; title: string } | null {
+    // On Windows git names a worktree C:/..., which a stored path may spell with backslashes or another case (`pathKey`); elsewhere paths
+    // differ by case and a backslash is a file name character, so only a trailing separator is ignored.
+    const key = platform === 'win32' ? pathKey : (one: string) => one.replace(/\/+$/, '');
+    const wanted = key(path);
+    const rows = this.#all(
+      'SELECT wt.path AS path, w.id AS id, t.title AS title FROM worktrees wt JOIN workItems w ON w.ticketId = wt.ticketId JOIN tickets t ON t.id = wt.ticketId ORDER BY w.id DESC',
+    ) as Array<{ path: string; id: number; title: string }>;
+    const found = rows.find((row) => key(row.path) === wanted);
+
+    return found === undefined ? null : { id: found.id, title: found.title };
   }
 
   /** Links the ticket's worktree, replacing an earlier link. */
