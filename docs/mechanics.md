@@ -1952,6 +1952,19 @@ The offline startup limitation below is superseded by M145's verified-origin she
 - **Not verified:** reflogs expired by `gc` (90 days by default), and branches created by other tools that write refs without a reflog.
 - **Current use:** the reflog source of the Changes tab's stacked bases (`reflogParent` in `packages/hub/src/stack.ts`; [architecture.md](architecture.md) § Web page, Changes tree).
 
+## M165. The cost of the hub's marker reads, transcript title reads and log files, 2026-11-26
+
+- **Versions:** Node.js 24.14.0 on Windows 11 Pro 10.0.26300, Intel Core Ultra 9 285K, temporary folders on C: (NTFS).
+- **Marker reads:** a scratch script, not committed, wrote N markers of the hook's shape into a temporary home, let them age 2.5 s, and timed `readMarkers` alone and one marker tick, `ClaudeRunner.markers` then `CodeModeRunner.markers` as `Runtime.readMarkers` calls them, with no file changed and with one marker replaced by rename before each tick, as a running session's hook does. The operator's own activity folder held 456 markers, which is where the first count comes from.
+
+  | Markers | Before: `readMarkers` | Before: tick | After: `readMarkers` | After: tick | After: tick with one write |
+  |---|---|---|---|---|---|
+  | 456 | 147 ms | 286 ms | 3.1 ms | 3.9 ms | 9.1 ms |
+  | 2000 | 677 ms | 1366 ms | 24.8 ms | 23.7 ms | 26.2 ms |
+
+  Before, each tick read and parsed every file twice; at a 5 s interval 456 markers cost about 206 s of main-thread time an hour, from the timer alone. After, a tick lists the folder and stats each file once, and parses only changed files; the stat calls are most of what is left. A marker is taken as unchanged while its size, mtime and file ID are, so the cache relies on the hook writer replacing a marker by writing a temporary file and renaming it over the marker: on NTFS a file of the same size and mtime renamed over a marker gave it another file ID (15481123719661237 before, 13792273859397304 after, from `statSync` with `bigint`; as a number the first read 15481123719661236, since Windows file IDs can pass 2^53, so the cache keeps them as bigints). Reading them as bigints left the tick's time within the run-to-run spread (3.9 to 5.9 ms at 456 markers, 24 to 32 ms at 2000, with other checks loading the machine). A marker that fails to read or parse is read again on every tick rather than kept.
+- **Current use:** `readMarkers` and `markerPass` in `packages/claude/src/install.ts` (architecture.md § Claude Code runner, Hooks).
+
 ## M166. Memory and CPU the voice process spends between utterances, 2026-11-26
 
 - **Versions:** sherpa-onnx-node 2.0.1 (the npm CPU build, and the CUDA 12 build from the operator's `~/.switchboard/voice/models`), the Nemotron 0.6B 160 ms streaming models (int8 on the CPU, fp32 on the GPU), onnxruntime-node 1.31.1 with the LiveKit turn model, Node.js v24.14.0, Windows 11 Pro 10.0.26300, an Intel Core Ultra 9 285K (24 cores) and an NVIDIA RTX 2000 Ada (16 GB). Scratch scripts, not committed, in `.wip/perf-voice/` of the `fix/voice-native` worktree; models read only; no capture, playback or hub; other builds ran on the machine meanwhile.

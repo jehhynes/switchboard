@@ -22,7 +22,7 @@ import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
 import { dockView } from '../src/dock.js';
 import { questionIndex, QUESTIONS_SINCE } from '../src/questions.js';
-import { T0, home, playbook, PLAYBOOKS, config, fail, issue, deferred, setup } from './runtimeFixtures.js';
+import { T0, home, playbook, PLAYBOOKS, config, fail, issue, deferred, setup, appServerRunner } from './runtimeFixtures.js';
 
 describe('handled assignment reports', () => {
   const url = 'https://github.com/acme/widgets/issues/7';
@@ -387,6 +387,26 @@ describe('Runtime', () => {
     await runtime.readRoster();
     expect(store.session('s1')).toMatchObject({ state: 'ended', released: true });
     expect(runtime.hasActiveSessions()).toBe(false);
+  });
+
+  it('reads the activity folder once for every runner in a marker read', () => {
+    const dir = join(home, '.switchboard', 'activity');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'a.json'), JSON.stringify({ sessionId: 'a', event: 'Stop' }));
+    const seen: string[][] = [];
+    const reading = (write: boolean): SessionRunner['markers'] => () => {
+      seen.push([...readMarkers(join(home, '.switchboard')).keys()]);
+      // A marker written after the first runner's read is left to the next marker read.
+      if (write) writeFileSync(join(dir, 'b.json'), JSON.stringify({ sessionId: 'b', event: 'Stop' }));
+      return new Map();
+    };
+    const { runtime } = setup(config({ installHooks: true }), () => T0, { claude: { ...appServerRunner(), markers: reading(true) }, codeMode: { ...appServerRunner(), markers: reading(false) } });
+
+    runtime.readMarkers();
+    expect(seen).toEqual([['a'], ['a']]);
+
+    runtime.readMarkers();
+    expect(seen.slice(2).map((keys) => keys.sort())).toEqual([['a', 'b'], ['a', 'b']]);
   });
 
   it('reads a marker as soon as the hook writes it, before the marker timer fires', async () => {

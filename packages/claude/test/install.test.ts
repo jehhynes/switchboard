@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONTRACT_HOOK_SOURCE, HOOK_SOURCE } from '../src/hooks.js';
-import { claudeSettingsPath, installHooks, readMarkers } from '../src/install.js';
+import { claudeSettingsPath, installHooks, markerPass, readMarkers } from '../src/install.js';
 
 let dir: string;
 
@@ -81,5 +81,123 @@ describe('readMarkers', () => {
     writeFileSync(join(dir, 'activity', 'c.json.1.tmp'), '{}');
 
     expect([...readMarkers(dir)]).toEqual([['a', { sessionId: 'a', event: 'Stop' }]]);
+  });
+
+  /** Writes a marker file whose mtime is an hour old, so a read does not count it as just written. */
+  const writeOld = (file: string, text: string, mtime = new Date(Date.now() - 3_600_000)) => {
+    writeFileSync(join(dir, 'activity', file), text);
+    utimesSync(join(dir, 'activity', file), mtime, mtime);
+  };
+
+  it('reads a file again only when its stat changed', () => {
+    mkdirSync(join(dir, 'activity'));
+    const mtime = new Date(Date.now() - 3_600_000);
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stop' }), mtime);
+    expect(readMarkers(dir).get('a')?.event).toBe('Stop');
+
+    // Same size and mtime in the same file: the earlier read stands, which shows the file was not read again.
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stap' }), mtime);
+    expect(readMarkers(dir).get('a')?.event).toBe('Stop');
+
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'StopFailure' }), mtime);
+    expect(readMarkers(dir).get('a')?.event).toBe('StopFailure');
+
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'StopFailurf' }));
+    expect(readMarkers(dir).get('a')?.event).toBe('StopFailurf');
+  });
+
+  it('reads a replaced file of the same size and mtime again', () => {
+    mkdirSync(join(dir, 'activity'));
+    const mtime = new Date(Date.now() - 3_600_000);
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stop' }), mtime);
+    expect(readMarkers(dir).get('a')?.event).toBe('Stop');
+
+    // The hook writes a temporary file and renames it over the marker, which gives the marker a new file ID.
+    writeOld('a.json.1.tmp', JSON.stringify({ sessionId: 'a', event: 'Stap' }), mtime);
+    renameSync(join(dir, 'activity', 'a.json.1.tmp'), join(dir, 'activity', 'a.json'));
+    expect(readMarkers(dir).get('a')?.event).toBe('Stap');
+  });
+
+  it('reads a file that failed to parse again on the next read, even with the same stat', () => {
+    mkdirSync(join(dir, 'activity'));
+    const mtime = new Date(Date.now() - 3_600_000);
+    writeOld('a.json', '{"sessionId":"a"x', mtime);
+    writeOld('n.json', 'null', mtime);
+    expect(readMarkers(dir).size).toBe(0);
+
+    // Same size and mtime, in the same file.
+    writeOld('a.json', '{"sessionId":"a"}', mtime);
+    expect([...readMarkers(dir).keys()]).toEqual(['a']);
+  });
+
+  it('sees a new file ID when a file of the same size and mtime is renamed over a marker, as the hook writes one', () => {
+    mkdirSync(join(dir, 'activity'));
+    const mtime = new Date(Date.now() - 3_600_000);
+    const path = join(dir, 'activity', 'a.json');
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stop' }), mtime);
+    const before = statSync(path, { bigint: true });
+
+    writeOld('a.json.1.tmp', JSON.stringify({ sessionId: 'a', event: 'Stap' }), mtime);
+    renameSync(join(dir, 'activity', 'a.json.1.tmp'), path);
+    const after = statSync(path, { bigint: true });
+
+    expect([after.size, after.mtimeNs]).toEqual([before.size, before.mtimeNs]);
+    expect(after.ino).not.toBe(before.ino);
+  });
+
+  it('reads a just-written file again even when its stat is unchanged', () => {
+    mkdirSync(join(dir, 'activity'));
+    const mtime = new Date();
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stop' }), mtime);
+    expect(readMarkers(dir).get('a')?.event).toBe('Stop');
+
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stap' }), mtime);
+    expect(readMarkers(dir).get('a')?.event).toBe('Stap');
+  });
+
+  it('drops removed files, adds new ones and reads a fixed unreadable one', () => {
+    mkdirSync(join(dir, 'activity'));
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stop' }));
+    writeOld('b.json', '{');
+    expect([...readMarkers(dir).keys()]).toEqual(['a']);
+
+    rmSync(join(dir, 'activity', 'a.json'));
+    writeOld('b.json', JSON.stringify({ sessionId: 'b', event: 'Stop' }));
+    writeOld('c.json', JSON.stringify({ sessionId: 'c', event: 'Stop' }));
+    expect([...readMarkers(dir).keys()].sort()).toEqual(['b', 'c']);
+
+    rmSync(join(dir, 'activity'), { recursive: true });
+    expect(readMarkers(dir).size).toBe(0);
+  });
+
+  it('keys markers by their session ID, not their file name, as before', () => {
+    mkdirSync(join(dir, 'activity'));
+    writeOld('x.json', JSON.stringify({ sessionId: 'a', event: 'Stop', at: 1 }));
+    expect([...readMarkers(dir)]).toEqual([['a', { sessionId: 'a', event: 'Stop', at: 1 }]]);
+  });
+
+  it('answers every read in a pass from one read of the folder', () => {
+    mkdirSync(join(dir, 'activity'));
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stop' }));
+
+    const seen = markerPass(() => {
+      const first = readMarkers(dir);
+      first.delete('a');
+      writeOld('b.json', JSON.stringify({ sessionId: 'b', event: 'Stop' }));
+      const second = markerPass(() => readMarkers(dir));
+
+      return [first.size, [...second.keys()]];
+    });
+
+    // A caller's change to its map does not reach the next caller, and the file written during the pass is read after it.
+    expect(seen).toEqual([0, ['a']]);
+    expect([...readMarkers(dir).keys()].sort()).toEqual(['a', 'b']);
+  });
+
+  it('ends a pass that throws', () => {
+    mkdirSync(join(dir, 'activity'));
+    expect(() => markerPass(() => { readMarkers(dir); throw new Error('boom'); })).toThrow('boom');
+    writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stop' }));
+    expect([...readMarkers(dir).keys()]).toEqual(['a']);
   });
 });

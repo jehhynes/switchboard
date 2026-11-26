@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { classify, ClaudeRunner, CODE_MODE_IDLE_MS, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster, readTranscriptLaunch, readTranscriptLimit } from '@switchboard/claude';
+import { classify, ClaudeRunner, CODE_MODE_IDLE_MS, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, markerPass, readRoster, readTranscriptLaunch, readTranscriptLimit } from '@switchboard/claude';
 import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, LimitReading, MarkerReading, SessionLimit, ObservedFork, ObservedSession, PermissionMode, PolledTicket, Provider, PullRequestStatus, WorkItemStatus, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree, Reconciled } from '@switchboard/core';
@@ -1241,8 +1241,12 @@ export class Runtime {
     }
   }
 
-  /** Sends a marker event for each live session whose marker shows another state. */
+  /** Sends a marker event for each live session whose marker shows another state; every runner's markers come from one read of the folder. */
   readMarkers(): void {
+    markerPass(() => this.applyMarkers());
+  }
+
+  private applyMarkers(): void {
     const started = this.deps.store.startedSessions();
     const markers = new Map<string, MarkerReading>();
 

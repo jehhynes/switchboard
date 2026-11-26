@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hubRunning, stoppedHomes } from '@switchboard/core';
 import { CONTRACT_HOOK_SOURCE, HOOK_SOURCE, planHooks } from './hooks.js';
@@ -85,26 +85,105 @@ export async function installHooks(
   return null;
 }
 
-/** Hook markers by native session ID. An unreadable marker is skipped; the next hook event rewrites it. */
-export function readMarkers(switchboardHome: string): Map<string, Marker> {
-  const dir = join(switchboardHome, 'activity');
+/**
+ * A marker file as last read: its stat, when it was read, and its marker. The file ID is read as a bigint, since a Windows file ID can pass 2^53
+ * and lose its last digits as a number.
+ */
+interface ReadFile {
+  mtimeMs: number;
+  size: bigint;
+  ino: bigint;
+  readAt: number;
+  marker: Marker;
+}
+
+/**
+ * A file written this close to its read is read again, because a rewrite in the same file-system tick can keep its mtime and size (Linux
+ * stamps files from a coarse clock).
+ */
+const RECENT_WRITE_MS = 2_000;
+
+/** Each activity folder's files as last read, by file name. */
+const folders = new Map<string, Map<string, ReadFile>>();
+/** The markers read during the current `markerPass`, by folder. */
+let pass: Map<string, Map<string, Marker>> | null = null;
+
+function readFolder(dir: string): Map<string, Marker> {
   const markers = new Map<string, Marker>();
   let files: string[];
 
   try {
     files = readdirSync(dir).filter((file) => file.endsWith('.json'));
   } catch {
+    folders.delete(dir);
     return markers;
   }
 
+  const before = folders.get(dir);
+  const after = new Map<string, ReadFile>();
+
   for (const file of files) {
+    const path = join(dir, file);
+    let entry = before?.get(file);
+
     try {
-      const marker = JSON.parse(readFileSync(join(dir, file), 'utf8')) as Marker;
-      markers.set(marker.sessionId, marker);
+      const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
+
+      if (stat === undefined) {
+        continue;
+      }
+
+      const mtimeMs = Number(stat.mtimeNs / 1_000_000n);
+
+      // The hook writes a temporary file and renames it over the marker, which gives the marker a new file ID even when its size and mtime
+      // are the old ones (mechanics M165); an in-place rewrite with the same size and mtime, which the hook never makes, would not be read.
+      if (entry === undefined || entry.mtimeMs !== mtimeMs || entry.size !== stat.size || entry.ino !== stat.ino || entry.readAt - entry.mtimeMs < RECENT_WRITE_MS) {
+        const readAt = Date.now();
+        // A failed read or parse is not kept, so the next read tries the file again.
+        const marker = JSON.parse(readFileSync(path, 'utf8')) as Marker;
+
+        entry = { mtimeMs, size: stat.size, ino: stat.ino, readAt, marker };
+      }
+
+      markers.set(entry.marker.sessionId, entry.marker);
+      after.set(file, entry);
     } catch {
       continue;
     }
   }
 
+  folders.set(dir, after);
+
   return markers;
+}
+
+/**
+ * Hook markers by native session ID. An unreadable marker is skipped; the next hook event rewrites it. Only files whose stat changed are read
+ * again, and inside a {@link markerPass} the folder is read once.
+ */
+export function readMarkers(switchboardHome: string): Map<string, Marker> {
+  const dir = join(switchboardHome, 'activity');
+  let markers = pass?.get(dir);
+
+  if (markers === undefined) {
+    markers = readFolder(dir);
+    pass?.set(dir, markers);
+  }
+
+  return new Map(markers);
+}
+
+/** Runs `read` with every `readMarkers` inside it answered from one read of each folder, as a marker tick's callers share one. */
+export function markerPass<T>(read: () => T): T {
+  if (pass !== null) {
+    return read();
+  }
+
+  pass = new Map();
+
+  try {
+    return read();
+  } finally {
+    pass = null;
+  }
 }
