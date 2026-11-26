@@ -4,7 +4,7 @@ import { AppServer, AppServerError, AppServerRunner, items, notMaterialized, obj
 import type { Json, ThreadSettings } from '@switchboard/codex';
 import { ConversationLog } from '@switchboard/conversation';
 import { codexContext } from '@switchboard/conversation';
-import type { ContextView, SlashCommand } from '@switchboard/conversation';
+import type { ContextDetails, ContextParts, ContextView, SlashCommand } from '@switchboard/conversation';
 import type { ConversationAdapter, ConversationChanged, DeliveryOutcome, NativeRequest, ResolveGuard, SendGuard } from './conversationAdapter.js';
 
 const UNKNOWN = 'Codex did not confirm delivery. Switchboard will check its history; check the terminal before resending.';
@@ -34,6 +34,12 @@ export class CodexConversationAdapter implements ConversationAdapter {
   #toolItems = new Map<string, Json>();
   /** Each thread's context size from its latest `thread/tokenUsage/updated`, by session; unknown until the first after the hub started. */
   #contexts = new Map<string, ContextView>();
+  /** Each thread's latest request's tokens by kind, from the same notification, by session. */
+  #parts = new Map<string, ContextParts>();
+  /** The model and effort of each thread's latest `thread/settings/updated`, by session. */
+  #current = new Map<string, ThreadSettings>();
+  /** When each thread last compacted, from its history and live items, by session. */
+  #compacted = new Map<string, number>();
   /** The first model seen in a thread's `thread/settings/updated`, and the differences last noted, by session. */
   #settings = new Map<string, { model: string | null; noted: string }>();
   readonly #unlisten: () => void;
@@ -47,6 +53,22 @@ export class CodexConversationAdapter implements ConversationAdapter {
   close(): void { this.#closed = true; this.#unlisten(); this.#logs.clear(); this.#requests.clear(); }
   commands(session: Session): SlashCommand[] { return this.#commands.get(session.id) ?? []; }
   context(session: Session): ContextView | null { return this.supports(session) ? (this.#contexts.get(session.id) ?? null) : null; }
+  /**
+   * The context meter's details (architecture.md § Context meter): the model and effort of the thread's latest settings, else of its start, the
+   * latest request's tokens, its last compaction and the plan usage windows; the hub adds the session's limit.
+   */
+  details(session: Session): Omit<ContextDetails, 'limit'> {
+    const settings = this.#current.get(session.id) ?? this.deps.runner.startSettings(session);
+    const compacted = this.#compacted.get(session.id);
+    return {
+      provider: 'codex',
+      model: settings?.model ?? null,
+      effort: settings?.effort ?? null,
+      parts: this.#parts.get(session.id) ?? null,
+      compacted: compacted === undefined ? null : { at: compacted, trigger: null },
+      windows: this.deps.runner.usageWindows(),
+    };
+  }
   requests(session: Session): NativeRequest[] { return [...this.#requests.values()].filter(r => r.sessionId === session.id && r.generation === this.deps.server.generation).map(r => r.view); }
 
   /**
@@ -156,6 +178,9 @@ export class CodexConversationAdapter implements ConversationAdapter {
   #item(session: Session, item: Json, at: number): void {
     if (typeof item['id'] !== 'string') return;
     const time = typeof item['completedAtMs'] === 'number' ? item['completedAtMs'] : at || this.deps.now();
+    // A compaction's time is only one Codex recorded, or the hub's clock for one that arrived live; never made up for history.
+    const recorded = typeof item['completedAtMs'] === 'number' ? item['completedAtMs'] : at;
+    if (item['type'] === 'contextCompaction' && recorded > (this.#compacted.get(session.id) ?? 0)) this.#compacted.set(session.id, recorded);
     if (item['type'] === 'userMessage') {
       const content = Array.isArray(item['content']) ? item['content'].map(object) : [];
       const text = content.filter(c => c['type'] === 'text').map(c => String(c['text'] ?? '')).join('\n').replace(/^(?:\[(?:spoken|expressive)\]\s*)+/, '');
@@ -175,15 +200,21 @@ export class CodexConversationAdapter implements ConversationAdapter {
       return;
     }
     if (event['method'] === 'thread/settings/updated') {
-      this.#settingsChanged(session, threadSettings(object(params['threadSettings'])));
+      const settings = threadSettings(object(params['threadSettings']));
+      this.#current.set(session.id, settings);
+      this.#settingsChanged(session, settings);
       return;
     }
     if (event['method'] === 'thread/tokenUsage/updated') {
       // The latest request's tokens are what the thread holds now (architecture.md § Context meter).
       const usage = object(params['tokenUsage']);
-      const used = object(usage['last'])['totalTokens'];
+      const last = object(usage['last']);
+      const used = last['totalTokens'];
       const window = usage['modelContextWindow'];
-      if (typeof used === 'number' && used > 0) this.#contexts.set(session.id, codexContext(used, typeof window === 'number' ? window : null));
+      if (typeof used === 'number' && used > 0) {
+        this.#contexts.set(session.id, codexContext(used, typeof window === 'number' ? window : null));
+        this.#parts.set(session.id, codexParts(last));
+      }
       return;
     }
     if (event['method'] === 'item/started' && object(params['item'])['type'] === 'fileChange') {
@@ -280,4 +311,11 @@ export class CodexConversationAdapter implements ConversationAdapter {
     this.#skillPaths.set(session.id, new Map(skills.filter(s => s['enabled'] === true && typeof s['name'] === 'string' && typeof s['path'] === 'string').map(s => [String(s['name']), String(s['path'])])));
     this.#commands.set(session.id, [{ name: 'compact', description: 'Compact the conversation' }, ...skills.filter(s => s['enabled'] === true && typeof s['name'] === 'string').map(s => ({ name: String(s['name']), description: String(s['description'] ?? '') }))]);
   }
+}
+
+/** A token-usage breakdown by kind: Codex counts the cached input inside `inputTokens` and the reasoning inside `outputTokens`. */
+export function codexParts(last: Json): ContextParts {
+  const n = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
+  const cached = n(last['cachedInputTokens']);
+  return { cacheRead: cached, cacheWrite: null, input: Math.max(0, n(last['inputTokens']) - cached), output: n(last['outputTokens']), reasoning: n(last['reasoningOutputTokens']) };
 }

@@ -5,7 +5,7 @@ import { CodexRunner } from '@switchboard/codex';
 import { Store } from '@switchboard/core';
 import type { SessionRunner } from '@switchboard/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHubApp, parseAction, parseReport } from '../src/app.js';
+import { claudeUsageOnce, createHubApp, parseAction, parseReport } from '../src/app.js';
 import { windowOf, windowsDir } from '../src/dock.js';
 import { loadConfig } from '../src/config.js';
 import { postToHub } from '../src/client.js';
@@ -550,4 +550,24 @@ describe('createHubApp', () => {
     expect(((await app.post['/v1/conversation/page-settings-read']!({})).body as { sourceKinds: string[] }).sourceKinds).toEqual(['github', 'zoho', 'forum']);
   });
 
+});
+
+describe('claudeUsageOnce', () => {
+  it('ClaudeUsageOnce_PressWhileReading_SharesTheReadAndStartsAnotherAfter', async () => {
+    let finish: (value: string) => void = () => {};
+    const read = vi.fn(() => new Promise<string>((done) => (finish = done)));
+    const usage = claudeUsageOnce(read);
+    const first = usage();
+    const second = usage();
+
+    expect(read).toHaveBeenCalledTimes(1);
+    finish('a');
+    expect(await first).toBe('a');
+    expect(await second).toBe('a');
+    const third = usage();
+
+    expect(read).toHaveBeenCalledTimes(2);
+    finish('b');
+    expect(await third).toBe('b');
+  });
 });

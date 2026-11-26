@@ -9,7 +9,7 @@ import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, refusal, sess
 import type { ConversationServiceDeps, ConversationVoice } from '../src/conversation.js';
 import type { ConversationAdapter, ConversationChanged } from '../src/conversationAdapter.js';
 import { SessionConversation } from '@switchboard/conversation';
-import type { InputOutcome } from '@switchboard/conversation';
+import type { InputOutcome, UsageWindow } from '@switchboard/conversation';
 import { dockView, windowOf } from '../src/dock.js';
 import { canonicalFolder } from '../src/folders.js';
 import { WindowScopes } from '../src/windows.js';
@@ -490,6 +490,43 @@ describe('ConversationService', () => {
       const items = store.conversation('s2', null, 50).items;
       expect(items).toHaveLength(22);
       expect(items.at(-1)).toMatchObject({ type: 'reply', opening: 'Last.' });
+    });
+
+    it('ContextDetails_ClaudeSession_AnswersTranscriptUsagePlanUsageAndLimitOnce', async () => {
+      let usage: { windows: UsageWindow[] } | { error: string } = { windows: [{ minutes: 300, limit: null, usedPercent: 79, resetsAt: 1_800_000_000_000 }] };
+      const claudeUsage = vi.fn(async () => usage);
+      const { service, transcript, open, store } = setup(new FakeHeld(), { claudeUsage });
+      const request = JSON.stringify({ type: 'assistant', effort: 'high', message: { model: 'claude-opus-5-5', usage: { input_tokens: 2_000, cache_creation_input_tokens: 14_000, cache_read_input_tokens: 598_000, output_tokens: 4_000 } } });
+      const compacted = JSON.stringify({ type: 'system', subtype: 'compact_boundary', timestamp: '2026-11-26T20:00:00.000Z', compactMetadata: { trigger: 'auto', preTokens: 900_000, postTokens: 40_000 } });
+
+      transcript('D:/w12', 'n2', [compacted, request]);
+      const { key } = open(2);
+      const body = { window: key, scopeGen: 1, opId: 'o1', sessionId: 's2' };
+
+      expect(await service.contextDetails(body)).toEqual({
+        status: 200,
+        body: {
+          details: {
+            provider: 'claude',
+            model: 'claude-opus-5-5',
+            effort: 'high',
+            parts: { cacheRead: 598_000, cacheWrite: 14_000, input: 2_000, output: 4_000, reasoning: null },
+            compacted: { at: Date.parse('2026-11-26T20:00:00.000Z'), trigger: 'auto' },
+            windows: [{ minutes: 300, limit: null, usedPercent: 79, resetsAt: 1_800_000_000_000 }],
+            limit: null,
+          },
+        },
+      });
+      expect(claudeUsage).toHaveBeenCalledTimes(1);
+
+      // The limit the session is stopped at comes with the details; a usage read that fails fails them with its reason.
+      store.updateSession('s2', { rateLimit: { kind: 'usage', window: null, resetsAt: 1_800_000_600_000, exact: true, cli: true, message: null, since: NOW, at: NOW, launchId: null, attempts: 0, nextAt: NOW } });
+      expect(await service.contextDetails(body)).toMatchObject({ status: 200, body: { details: { limit: { kind: 'usage', resetsAt: 1_800_000_600_000 } } } });
+      usage = { error: 'Claude Code did not answer the usage request; this version may not offer it.' };
+      expect(await service.contextDetails(body)).toEqual({ status: 409, body: { error: 'Claude Code did not answer the usage request; this version may not offer it.' } });
+      expect(await service.contextDetails({ ...body, window: 'forged' })).toMatchObject({ status: 403 });
+      expect(await service.contextDetails({ ...body, sessionId: 7 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } });
+      expect(claudeUsage).toHaveBeenCalledTimes(3);
     });
 
     it('Commands_SkillsPastOneRead_ListedInOneRequest', async () => {

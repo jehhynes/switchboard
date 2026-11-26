@@ -135,6 +135,20 @@ describe('Codex app-server runner', () => {
     expect(p.state).toHaveBeenLastCalledWith('s1', 'failed', 'Overloaded.');
   });
 
+  it('keeps every rate-limit window for the context details, the default limit first and each shortest first, named by its limit otherwise', async () => {
+    const p = setup(); await p.runner.start(p.action);
+    expect(p.runner.usageWindows()).toEqual([]);
+    p.emit({ method: 'account/rateLimits/updated', params: { rateLimits: { limitId: 'codex', primary: { usedPercent: 12, resetsAt: 7_200, windowDurationMins: 300 }, secondary: { usedPercent: 40, resetsAt: 900_000, windowDurationMins: 10_080 } } } });
+    p.emit({ method: 'account/rateLimits/updated', params: { rateLimits: { limitId: 'codex_other', limitName: 'GPT-6 Mini', primary: { usedPercent: 3, resetsAt: null, windowDurationMins: null } } } });
+    // A sparse update replaces only the window it names.
+    p.emit({ method: 'account/rateLimits/updated', params: { rateLimits: { limitId: 'codex', primary: { usedPercent: 20, resetsAt: 7_300, windowDurationMins: 300 } } } });
+    expect(p.runner.usageWindows()).toEqual([
+      { minutes: 300, limit: null, usedPercent: 20, resetsAt: 7_300_000 },
+      { minutes: 10_080, limit: null, usedPercent: 40, resetsAt: 900_000_000 },
+      { minutes: null, limit: 'GPT-6 Mini', usedPercent: 3, resetsAt: null },
+    ]);
+  });
+
   it('gives a usage limit read without a reset the reset of a rate-limit update that comes after the failed turn, and replays it on a read', async () => {
     const p = setup(); await p.runner.start(p.action); p.session.state = 'running';
     p.emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { status: 'failed', error: { message: 'Usage limit.', codexErrorInfo: 'usageLimitExceeded' } } } });

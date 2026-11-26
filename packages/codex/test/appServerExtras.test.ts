@@ -93,9 +93,9 @@ describe("a thread's start settings (mechanics M108)", () => {
     const server = { request, listen: () => () => {}, generation: 0 } as unknown as AppServer;
     const session = { id: 's1', workItemId: 1, cwd: 'D:/repo', nativeSessionId: 'thread-1', state: 'idle' } as never;
     const runner = new AppServerRunner({ server, session: () => session, sessions: () => [session], created: () => {}, instructions: () => '', state: () => {}, now: () => 0, resumeOptions: () => ({ permissionMode: 'auto', model: null }) });
-    expect(runner.startSettings({ ...(session as object), nativeSessionId: 'thread-9' } as never)).toEqual({ model: null, approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', network: null, mode: 'default' });
+    expect(runner.startSettings({ ...(session as object), nativeSessionId: 'thread-9' } as never)).toEqual({ model: null, effort: null, approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', network: null, mode: 'default' });
     await runner.start({ sessionId: 's1', workItemId: 1, cwd: mkdtempSync(join(tmpdir(), 'sb-start-')), permissionMode: 'bypassPermissions', model: null, prompt: '', name: 'n' } as never);
     await runner.configure(session);
-    expect(runner.startSettings(session)).toEqual({ model: 'gpt-a', approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: 'danger-full-access', network: null, mode: 'default' });
+    expect(runner.startSettings(session)).toEqual({ model: 'gpt-a', effort: null, approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: 'danger-full-access', network: null, mode: 'default' });
   });
 });

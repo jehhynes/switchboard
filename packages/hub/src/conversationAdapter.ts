@@ -1,5 +1,5 @@
 import type { ConversationMessage, Session } from '@switchboard/core';
-import type { ContextView, ConversationChange, InputOutcome, SessionInput, SlashCommand } from '@switchboard/conversation';
+import type { ContextDetails, ContextView, ConversationChange, InputOutcome, SessionInput, SlashCommand } from '@switchboard/conversation';
 
 export type SendGuard = NonNullable<Parameters<SessionInput['send']>[2]>;
 export type ResolveGuard = Parameters<SessionInput['resolve']>[4];
@@ -33,5 +33,7 @@ export interface ConversationAdapter {
   requests?(session: Session): NativeRequest[];
   /** The session's context size as last read (architecture.md § Context meter), or null while it is not known. */
   context?(session: Session): ContextView | null;
+  /** The context meter's details, read when the page asks (architecture.md § Context meter), without the session's limit, which the hub adds. */
+  details?(session: Session): Omit<ContextDetails, 'limit'> | Promise<Omit<ContextDetails, 'limit'>>;
   answer?(session: Session, id: string, answer: unknown): Promise<void>;
 }

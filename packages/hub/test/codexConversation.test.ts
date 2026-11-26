@@ -29,14 +29,15 @@ function setup(resume?: (sessionId: string) => Promise<string | null>) {
   const server={generation:1,listen:(listener:(event:Json)=>void)=>{receive=listener;return ()=>{};},request:vi.fn(async()=>({data:[]})),respond:vi.fn(async()=>{})};
   let turns:Json[]=[];
   let start:Json|null={model:null,approvalPolicy:'never',approvalsReviewer:'user',sandbox:'danger-full-access',mode:'default'};
-  const runner={startSettings:()=>start,subscription:()=>0,configure:vi.fn(async()=>{}),restoreInstructions:vi.fn(async()=>{}),follow:vi.fn(async()=>({status:{type:'idle'}})),history:vi.fn(async(threadId:string)=>threadId==='thread-1'?turns:[]),send:vi.fn(async()=>{})};
+  let windows:Json[]=[];
+  const runner={usageWindows:()=>windows,startSettings:()=>start,subscription:()=>0,configure:vi.fn(async()=>{}),restoreInstructions:vi.fn(async()=>{}),follow:vi.fn(async()=>({status:{type:'idle'}})),history:vi.fn(async(threadId:string)=>threadId==='thread-1'?turns:[]),send:vi.fn(async()=>{})};
   const frames:Json[]=[];const others:Json[]=[];const titles:string[]=[];let adapter:CodexConversationAdapter;
   const service=new ConversationService({store,windows:scopes,projectsDir:'/unused',claudeConfig:'/unused',screen:async()=>{throw new Error('Codex must not read a screen');},input:{reserve:async()=>{throw new Error('Codex must not reserve terminal input');},write:async()=>{throw new Error('Codex must not type');},cannotType:()=> 'holder unavailable'},hooks:()=>false,now:()=>now,newId:()=>String(++id),log:()=>{},...(resume===undefined?{}:{resume}),adapters:changed=>[adapter=new CodexConversationAdapter({store,server:server as unknown as AppServer,runner:runner as unknown as AppServerRunner,now:()=>now,newId:()=>String(++id),log:()=>{},requestsChanged:()=>service.sessionsChanged(),providerTitle:(_id,title)=>titles.push(title)},changed)]});
   service.open(key,frame=>frames.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!)));
   service.open(other,frame=>others.push(JSON.parse(/^data: (.*)$/m.exec(frame)![1]!)));
   closes.push(()=>{service.stop();store.close();});
   const body={window:key,scopeGen:scopes.scope(key)!.scopeGen,sessionId:'s1',launch:'launch-1',opId:'op-1',text:'hello'};
-  return {store,service,adapter:()=>adapter,server,runner,key,other,body,frames,others,titles,emit:(event:Json)=>receive(event),turns:(value:Json[])=>{turns=value;},advance:()=>{now+=6_000;},start:(value:Json|null)=>{start=value;}};
+  return {store,service,adapter:()=>adapter,server,runner,key,other,body,frames,others,titles,emit:(event:Json)=>receive(event),turns:(value:Json[])=>{turns=value;},windows:(value:Json[])=>{windows=value;},advance:()=>{now+=6_000;},start:(value:Json|null)=>{start=value;}};
 }
 
 describe('Codex conversation adapter and shared service',()=>{
@@ -224,6 +225,35 @@ describe('Codex conversation adapter and shared service',()=>{
     p.emit({method:'thread/tokenUsage/updated',params:{threadId:'thread-9',turnId:'t1',tokenUsage:{total:{},last:{totalTokens:5}}}});
     await p.service.poll();
     expect(p.frames.length).toBe(sent);
+  });
+});
+
+describe('Codex context details (architecture.md § Context meter)',()=>{
+  it('answers the model and effort of the latest settings, else the start, the last request by kind, the last compaction, the usage windows and the limit',async()=>{
+    const p=setup();await p.service.poll();
+    const body={window:p.key,scopeGen:p.body.scopeGen,opId:'o1',sessionId:'s1'};
+    // Nothing read yet: the start's model, no tokens, no compaction and no windows.
+    p.start({model:'gpt-a',effort:'medium',approvalPolicy:'never',approvalsReviewer:'user',sandbox:'danger-full-access',mode:'default'});
+    expect(await p.service.contextDetails(body)).toEqual({status:200,body:{details:{provider:'codex',model:'gpt-a',effort:'medium',parts:null,compacted:null,windows:[],limit:null}}});
+
+    p.emit({method:'thread/tokenUsage/updated',params:{threadId:'thread-1',turnId:'t1',tokenUsage:{total:{},last:{inputTokens:60_000,cachedInputTokens:50_000,outputTokens:2_000,reasoningOutputTokens:500,totalTokens:62_000},modelContextWindow:258_400}}});
+    p.emit({method:'thread/settings/updated',params:{threadId:'thread-1',threadSettings:{model:'gpt-b',effort:'high',approvalPolicy:'never',approvalsReviewer:'user',sandboxPolicy:{type:'dangerFullAccess'},collaborationMode:{mode:'default'}}}});
+    p.emit({method:'item/completed',params:{threadId:'thread-1',item:{id:'c1',type:'contextCompaction',completedAtMs:5_000}}});
+    p.windows([{minutes:300,limit:null,usedPercent:40,resetsAt:7_200_000}]);
+    p.store.updateSession('s1',{rateLimit:{kind:'throttle',window:null,resetsAt:null,exact:false,cli:false,message:null,since:1_000,at:1_000,launchId:null,attempts:0,nextAt:2_000}});
+    expect(await p.service.contextDetails(body)).toEqual({status:200,body:{details:{
+      provider:'codex',model:'gpt-b',effort:'high',
+      // The cached input is part of Codex's input, and the reasoning part of its output.
+      parts:{cacheRead:50_000,cacheWrite:null,input:10_000,output:2_000,reasoning:500},
+      compacted:{at:5_000,trigger:null},
+      windows:[{minutes:300,limit:null,usedPercent:40,resetsAt:7_200_000}],
+      limit:{kind:'throttle',resetsAt:null},
+    }}});
+    expect(await p.service.contextDetails({...body,window:p.other})).toMatchObject({status:403});
+    // A compaction in history with no time of its own keeps the one known; it is never dated now.
+    p.turns([{id:'t0',items:[{id:'c0',type:'contextCompaction'}]}]);
+    p.advance();await p.service.poll();
+    expect(await p.service.contextDetails(body)).toMatchObject({body:{details:{compacted:{at:5_000}}}});
   });
 });
 

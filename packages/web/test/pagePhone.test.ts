@@ -872,6 +872,75 @@ it('shows the context meter as one ring in the composer, its numbers in the tool
     page.close();
   });
 
+  it('reads the context details once on Show details, shows them while loading, a refusal with Try again, and drops them when the menu closes (architecture.md § Context meter)', async () => {
+    let answer: { status: number; body: unknown } = { status: 409, body: { error: 'Claude Code did not answer the usage request; this version may not offer it.' } };
+    let release: () => void = () => {};
+    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
+      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
+
+      if (url.endsWith('/context-details')) {
+        await new Promise<void>((done) => (release = done));
+      }
+
+      const reply = url.endsWith('/context-details') ? answer : { status: 200, body: {} };
+
+      return { status: reply.status, ok: reply.status === 200, json: async () => reply.body, text: async () => JSON.stringify(reply.body) } as unknown as Response;
+    });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
+    const source = FakeSource.last!;
+
+    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ context: { used: 20_000, window: 200_000, compactAt: 167_000, model: 'claude-sonnet-4-6' } })], items: [], more: false, state: null, artifacts: [] });
+
+    const slot = root.querySelector<HTMLElement>('.context-meter')!;
+    const menu = () => slot.querySelector<HTMLElement>('.context-menu');
+
+    slot.querySelector<HTMLButtonElement>('button.context-ring')!.click();
+    // Opening the menu reads nothing.
+    expect(posts.some((post) => post.url.endsWith('/context-details'))).toBe(false);
+    expect(menu()!.querySelector('.context-details')).toBeNull();
+    slot.querySelector<HTMLButtonElement>('[data-context="details"]')!.click();
+    await flush();
+    expect(menu()!.querySelector('[role="status"]')!.textContent).toBe('Loading details…');
+    expect(slot.querySelector('[data-context="details"]')).toBeNull();
+    release();
+    await vi.waitFor(() => expect(menu()!.querySelector('.context-error')?.textContent).toBe('Claude Code did not answer the usage request; this version may not offer it.'));
+    expect(posts.filter((post) => post.url.endsWith('/context-details')).map((post) => post.body)).toMatchObject([{ window: 'pk', scopeGen: 3, sessionId: 's' }]);
+
+    answer = { status: 200, body: { details: { provider: 'claude', model: 'claude-sonnet-4-6', effort: null, parts: { cacheRead: 15_000, cacheWrite: 4_000, input: 600, output: 400, reasoning: null }, compacted: null, windows: [{ minutes: 300, limit: null, usedPercent: 12, resetsAt: null }], limit: null } } };
+    slot.querySelector<HTMLButtonElement>('[data-context="details"]')!.click();
+    await flush();
+    release();
+    await vi.waitFor(() => expect(menu()!.querySelector('.context-details')).not.toBeNull());
+    expect(menu()!.querySelector('.context-details')!.textContent).toContain('Cache read15k');
+    expect(menu()!.querySelector('.context-details')!.textContent).toContain('5-hour12%');
+    expect(slot.querySelector('[data-context="compact"]')).not.toBeNull();
+
+    // An answer that comes after the page moved to another conversation is dropped, also once the page comes back.
+    slot.querySelector<HTMLButtonElement>('button.context-ring')!.click();
+    slot.querySelector<HTMLButtonElement>('button.context-ring')!.click();
+    slot.querySelector<HTMLButtonElement>('[data-context="details"]')!.click();
+    await flush();
+    source.emit('hello', { key: 'pk', groups: [], scope: { ...scope, workItemId: 2, sessionId: 's2', scopeGen: 4 }, sessions: [session({ id: 's2' })], items: [], more: false, state: null, artifacts: [] });
+    release();
+    await flush();
+    await flush();
+    source.emit('hello', { key: 'pk', groups: [], scope: { ...scope, scopeGen: 5 }, sessions: [session({ context: { used: 20_000, window: 200_000, compactAt: 167_000, model: 'claude-sonnet-4-6' } })], items: [], more: false, state: null, artifacts: [] });
+    if (menu() === null) slot.querySelector<HTMLButtonElement>('button.context-ring')!.click();
+    expect(menu()!.querySelector('.context-details')).toBeNull();
+    expect(slot.querySelector('[data-context="details"]')).not.toBeNull();
+    slot.querySelector<HTMLButtonElement>('[data-context="details"]')!.click();
+    await flush();
+    release();
+    await vi.waitFor(() => expect(menu()!.querySelector('.context-details')).not.toBeNull());
+
+    // Closed and opened again, the menu asks anew.
+    slot.querySelector<HTMLButtonElement>('button.context-ring')!.click();
+    slot.querySelector<HTMLButtonElement>('button.context-ring')!.click();
+    expect(menu()!.querySelector('.context-details')).toBeNull();
+    expect(slot.querySelector('[data-context="details"]')).not.toBeNull();
+    page.close();
+  });
+
   it('shows an unknown context as the empty ring, and offers no Compact for a session the composer cannot talk to', () => {
     const { page, source } = start();
 

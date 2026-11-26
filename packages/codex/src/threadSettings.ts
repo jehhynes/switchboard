@@ -5,6 +5,8 @@ import { permissionOptions } from './appServerRunner.js';
 /** The parts of a thread's settings that change how its turns run, as `thread/settings/updated` reports them (mechanics M108). */
 export interface ThreadSettings {
   model: string | null;
+  /** The reasoning effort: `effort` in the notification, `reasoningEffort` in a start's answer; null when not set. Not compared. */
+  effort: string | null;
   approvalPolicy: string;
   approvalsReviewer: string;
   sandbox: string;
@@ -23,6 +25,7 @@ export function threadSettings(settings: Json): ThreadSettings {
 
   return {
     model: typeof settings['model'] === 'string' ? settings['model'] : null,
+    effort: typeof settings['effort'] === 'string' ? settings['effort'] : typeof settings['reasoningEffort'] === 'string' ? settings['reasoningEffort'] : null,
     approvalPolicy: typeof policy === 'string' ? policy : policy !== null && typeof policy === 'object' ? Object.keys(policy)[0] ?? 'unknown' : 'unknown',
     approvalsReviewer: String(settings['approvalsReviewer'] ?? 'user'),
     sandbox: SANDBOXES[sandbox] ?? sandbox,
@@ -38,7 +41,7 @@ export function threadSettings(settings: Json): ThreadSettings {
 export function startSettings(permissionMode: string, model: string | null): ThreadSettings {
   const options = permissionOptions(permissionMode);
 
-  return { model: model === '' ? null : model, approvalPolicy: String(options['approvalPolicy']), approvalsReviewer: String(options['approvalsReviewer']), sandbox: String(options['sandbox']), network: null, mode: 'default' };
+  return { model: model === '' ? null : model, effort: null, approvalPolicy: String(options['approvalPolicy']), approvalsReviewer: String(options['approvalsReviewer']), sandbox: String(options['sandbox']), network: null, mode: 'default' };
 }
 
 /** The settings a `thread/start` or `thread/resume` answer reports the thread runs with, or null when it reports none. */

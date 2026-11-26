@@ -35,10 +35,16 @@ body.vscode-high-contrast, body.vscode-high-contrast-light { --sb-composer-backg
 .context-ring.warn .context-arc { stroke: var(--vscode-editorWarning-foreground); }
 .context-ring.full .context-arc { stroke: var(--vscode-errorForeground); }
 .context-ring.unknown .context-track { stroke-opacity: 0.35; stroke-dasharray: 2 2; }
-.context-menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 20; display: flex; flex-direction: column; gap: 4px; width: max-content; min-width: 200px; max-width: 320px; padding: 8px 10px; border-radius: 6px; white-space: normal; }
+.context-menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 20; display: flex; flex-direction: column; gap: 4px; width: max-content; min-width: 240px; max-width: min(320px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 6px; white-space: normal; }
 .context-line:first-child { color: var(--vscode-foreground); }
 .context-line, .context-confirm { color: var(--vscode-descriptionForeground); }
-.context-actions { display: flex; gap: 6px; margin-top: 4px; }
+.context-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.context-details { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent)); color: var(--vscode-descriptionForeground); }
+.context-row { display: flex; justify-content: space-between; gap: 16px; }
+.context-row > span:last-child { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; text-align: right; }
+.context-row.sub { padding-left: 8px; }
+.context-heading { margin-top: 6px; font-size: 0.85em; letter-spacing: 0.04em; text-transform: uppercase; }
+.context-error { color: var(--vscode-errorForeground); }
 .context-action { padding: 2px 10px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, transparent); font: inherit; cursor: pointer; }
 .context-action:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
 .context-action.primary { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }

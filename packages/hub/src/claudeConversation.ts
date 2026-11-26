@@ -3,8 +3,8 @@ import { join } from 'node:path';
 import { sessionName } from '@switchboard/core';
 import type { ConversationMessage, Session } from '@switchboard/core';
 import { findTranscript } from '@switchboard/claude';
-import { SessionCommands, SessionConversation, SessionInput, SNAPSHOT_SCROLLBACK, TranscriptContext, readSnapshot } from '@switchboard/conversation';
-import type { ContextView, InputOutcome, SlashCommand } from '@switchboard/conversation';
+import { SessionCommands, SessionConversation, SessionInput, SNAPSHOT_SCROLLBACK, TranscriptContext, readSnapshot, transcriptDetails } from '@switchboard/conversation';
+import type { ContextDetails, ContextView, InputOutcome, SlashCommand } from '@switchboard/conversation';
 import type { ConversationServiceDeps } from './conversation.js';
 import type { ConversationAdapter, ConversationChanged, SendGuard, ResolveGuard } from './conversationAdapter.js';
 
@@ -78,6 +78,19 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
     }
 
     return context.reader.read(context.path);
+  }
+  /**
+   * The context meter's details (architecture.md § Context meter): the model, effort, tokens and last compaction from the end of the session's
+   * transcript, and the plan usage Claude Code reports when asked once; a failed usage read fails the details with its reason.
+   */
+  async details(session: Session): Promise<Omit<ContextDetails, 'limit'>> {
+    const usage = this.deps.claudeUsage === undefined ? { windows: null } : await this.deps.claudeUsage();
+
+    if ('error' in usage) {
+      throw new Error(usage.error);
+    }
+
+    return { provider: 'claude', ...transcriptDetails(transcriptOf(this.#readers.get(session.id), this.deps.projectsDir, session)), windows: usage.windows };
   }
   async poll(sessions: Session[]): Promise<void> {
     const live = sessions.filter(session => this.supports(session) && session.nativeSessionId !== null && session.state !== 'starting');

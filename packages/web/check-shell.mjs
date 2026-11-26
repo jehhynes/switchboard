@@ -55,7 +55,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair', 'context-details', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
@@ -64,7 +64,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -143,7 +143,9 @@ if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list
 // A title longer than any header here fits, so the header shows how much of it is left beside the main control.
 const longTitle = 'Call Center dialer stops receiving incoming calls when its registration lapses';
 const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: longTitle, scopeGen: 3, conversations: [{ workItemId: 1, title: longTitle, primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0, sessionTitle: 'switchboard · dev:build · github 1' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
-const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, ...(view === 'context' ? { provider: 'claude', context: { used: 120000, window: 200000, compactAt: 167000, model: 'claude-opus-4-5' } } : {}) };
+const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, ...(view === 'context' ? { provider: 'claude', context: { used: 120000, window: 200000, compactAt: 167000, model: 'claude-opus-4-5' } } : { context: { used: 618_000, window: 1_000_000, compactAt: 967_000, model: 'claude-opus-5-5' } }) };
+// The context meter's details (architecture.md § Context meter), as the hub answers them for a Claude session.
+const contextDetails = { provider: 'claude', model: 'claude-opus-5-5', effort: 'medium', parts: { cacheRead: 598_000, cacheWrite: 14_000, input: 2_000, output: 4_000, reasoning: null }, compacted: { at: Date.now() - 7_200_000, trigger: 'auto' }, windows: [{ minutes: 300, limit: null, usedPercent: 79, resetsAt: Date.now() + 9_000_000 }, { minutes: 10_080, limit: null, usedPercent: 63, resetsAt: Date.now() + 120_000_000 }, { minutes: 10_080, limit: 'Fable', usedPercent: 4, resetsAt: Date.now() + 120_000_000 }], limit: null };
 const items = [];
 for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
@@ -228,7 +230,7 @@ const diffOf = (path) => ({ path, status: 'M', patch: 'diff --git a/' + path + '
 const planText = '# Plan\\n\\n' + Array.from({ length: 40 }, (_, i) => 'Step ' + (i + 1) + ': renew the registration 30 s before it lapses, and check the inbound route again.').join('\\n\\n');
 const stackData = { scopeGen: 3, repo: 'switchboard', root: 'D:/w', branch: 'fix/dialer-registration', head: 'c1', commitIds: ['c1'], more: false, incomplete: false, github: { state: 'none', observedAt: null }, links: [], main: { ref: 'origin/main', behind: 0, fetchedAt: now } };
 const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? { scopeGen: 3, paths: changesList.rows.map((row) => row.path), more: false } : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? planText : '') });
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : String(url).endsWith('/context-details') ? { details: contextDetails } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? planText : '') });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -624,7 +626,24 @@ const OPEN = {
   // The context meter's popover with Compact….
   context: ['[data-context=toggle]'],
   snooze: ['[data-action=actions]', '[data-action=row-action][data-label="Snooze…"]'],
+  // The context meter's menu with its details shown.
+  'context-details': ['.context-ring', '[data-context=details]'],
 };
+
+/** The context menu's failures: no details, a menu past the viewport or scrolled, or a row whose value wraps under its name. */
+const CONTEXT_DETAILS = `(() => {
+  const menu = document.querySelector('.context-menu');
+  if (!menu || !menu.querySelector('.context-details')) return ['the context menu shows no details'];
+  const out = [];
+  const box = menu.getBoundingClientRect();
+  if (box.left < -0.5 || box.top < -0.5 || box.right > innerWidth + 0.5 || box.bottom > innerHeight + 0.5) out.push('the context menu passes the viewport: ' + [box.left, box.top, box.right, box.bottom].map(Math.round).join(', ') + ' of ' + innerWidth + ' by ' + innerHeight);
+  for (const row of menu.querySelectorAll('.context-row')) {
+    const spans = row.querySelectorAll('span');
+    if (spans.length === 2 && spans[1].getBoundingClientRect().top >= spans[0].getBoundingClientRect().bottom - 1) out.push('the row ' + row.textContent + ' puts its value under its name');
+    if (row.getBoundingClientRect().height > 2 * parseFloat(getComputedStyle(row).lineHeight || '20') - 1) out.push('the row ' + row.textContent + ' wraps');
+  }
+  return out;
+})()`;
 
 /** The search views: the field, and the bar whose controls must not cover it. */
 const SEARCHES = {
@@ -1126,6 +1145,9 @@ try {
         if (view.startsWith('settings') && view !== 'settings-nav' && missing.length === 0) found.push(...settingsFailures(view, size, await evaluate(SETTINGS)));
 
         if (view.startsWith('mic-') && missing.length === 0) found.push(...micFailures(view, size, await evaluate(MIC)));
+
+        // The context meter's menu shows its details whole inside the viewport, each row on one line with its value beside its name.
+        if (view === 'context-details' && missing.length === 0) found.push(...(await evaluate(CONTEXT_DETAILS)));
 
         // The questions chip floats centred over the composer's box, clear of it and on top of what it floats over, at the conversation's end
         // and halfway up.

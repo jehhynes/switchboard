@@ -5,12 +5,13 @@ import type { ConversationMessage, ConversationReply, ConversationState, Interru
 import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, resumesHeld, START_PROMPT, waitsOnLimit } from '@switchboard/core';
 import type { BackgroundCounts, ViewSettings } from '@switchboard/core';
 import { ArtifactFolder, realInside, EXTERNAL_NAME, ExternalArtifacts, externalFile, externalName, inGit, joinMessages, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setComment, SLUG } from '@switchboard/conversation';
+import type { UsageWindow } from '@switchboard/conversation';
 import type { CardDraft, CarriedQuestion, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
 import type { MessageAnswer } from '@switchboard/core';
 import { carriedCards, dismissedAt, questionIndex, questionsSince } from './questions.js';
 import { promptKeyData, readPrompt, screenRows, stepsText, TYPING_PAUSE_MS } from '@switchboard/conversation';
 import type { QuestionsView } from '@switchboard/protocol';
-import type { Artifact, ArtifactTag, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
+import type { Artifact, ArtifactTag, ContextDetails, ContextView, ConversationChange, HeardTag, InputOutcome, InputSteps, PromptKey, ScreenPrompt, SlashCommand } from '@switchboard/conversation';
 import { SESSION_ENDED, SESSION_RELAUNCHED } from './runtime.js';
 import { artifactFile, artifactMime, findFiles, MAX_INPUT_CHARS } from './page.js';
 import { LOCAL_RAW_MAX_BYTES, localTarget } from './localFiles.js';
@@ -279,6 +280,10 @@ export interface ConversationServiceDeps {
   /** Waits between screen reads while a message is typed; a timer by default. */
   sleep?(ms: number): Promise<void>;
   newId(): string;
+  /**
+   * Asks Claude Code once for the plan usage windows (architecture.md § Context meter); without it no Claude plan usage is read, as in tests.
+   */
+  claudeUsage?(): Promise<{ windows: UsageWindow[] } | { error: string }>;
   /**
    * Starts a new session of the work item with `prompt`, the operator's first message, as New conversation… on the page does (architecture.md
    * § Web page): the session, or why it was refused.
@@ -3170,6 +3175,39 @@ export class ConversationService {
    * `commands` (architecture.md § Slash commands): the slash commands the window's current session offers, for the composer's list: the built-ins,
    * then the skills its transcript lists. Refused as `history` is: 403 outside the scope, 409 for a stale `scopeGen`. It only reads.
    */
+  /**
+   * `context-details {window, scopeGen, opId, sessionId}`: the context meter's details for the page's session, read once on the page's request
+   * (architecture.md § Context meter), with the limit the session is stopped at; 409 with the reason when they cannot be read.
+   */
+  async contextDetails(body: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+    const { window, scopeGen, sessionId } = body;
+
+    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof sessionId !== 'string') {
+      return { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } };
+    }
+
+    const refused = refusal(this.#page(window), scopeGen, sessionId, true);
+
+    if (refused !== null) {
+      return refused;
+    }
+
+    const session = this.deps.store.session(sessionId);
+    const adapter = session === null ? undefined : this.#adapter(session);
+
+    if (session === null || adapter?.details === undefined) {
+      return { status: 409, body: { error: 'Switchboard reads no details for this session.' } };
+    }
+
+    try {
+      const details: ContextDetails = { ...(await adapter.details(session)), limit: session.rateLimit == null ? null : { kind: session.rateLimit.kind, resetsAt: session.rateLimit.resetsAt } };
+
+      return { status: 200, body: { details } };
+    } catch (error) {
+      return { status: 409, body: { error: error instanceof Error ? error.message : String(error) } };
+    }
+  }
+
   commands(body: Record<string, unknown>): { status: number; body: unknown } {
     const { window, scopeGen, sessionId } = body;
 

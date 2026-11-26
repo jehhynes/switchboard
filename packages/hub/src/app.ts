@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, watch, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { dirname, join, posix, win32 } from 'node:path';
 import { homedir } from 'node:os';
-import { claudeSettingsPath, readRoster, spawnExec } from '@switchboard/claude';
+import { claudeSettingsPath, readRoster, readUsage, spawnExec } from '@switchboard/claude';
 import { hostKey, hubBundlePath, SCHEDULE_SOURCE, NEW_CONVERSATION_TITLE, personaById, Store, switchboardHome, ticketRoot } from '@switchboard/core';
 import { CODEX_PERMISSION_MODES, PERMISSION_MODES, PROVIDERS, resumesHeld, settingsWarnings, TEMPLATE_VARIABLES } from '@switchboard/core';
 import type { FlowEvent, SourceSettings, ViewSettings } from '@switchboard/core';
@@ -669,6 +669,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     screen: (session, scrollback) => runtime.heldScreen(session, scrollback),
     input: { reserve: (sessionId, launch) => runtime.reserveInput(sessionId, launch), write: (session, data) => runtime.writeHeld(session, data), cannotType: () => runtime.heldCannotType() },
     hooks: () => config.settings.sessions.installHooks,
+    claudeUsage: claudeUsageOnce(() => readUsage(config.settings.sessions.claudePath, deps.claudeSettings, deps.exec)),
     now: deps.now,
     newId: randomUUID,
     resume: (sessionId) => runtime.resumeThread(sessionId),
@@ -1155,6 +1156,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/v1/conversation/page-new-session': async (body) => (isRecord(body) ? conversation.newSession(body) : { status: 400, body: { error: 'Expected {window, opId, folder, provider, model?, prompt?, run?}.' } }),
       '/v1/conversation/page-folders': async (body) => (isRecord(body) ? conversation.pageFolders(body) : { status: 400, body: { error: 'Expected {window, path?}.' } }),
       '/v1/conversation/states': async (body) => (isRecord(body) ? conversation.states(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
+      '/v1/conversation/context-details': async (body) => (isRecord(body) ? conversation.contextDetails(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/commands': async (body) => (isRecord(body) ? conversation.commands(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/talk-here': async (body) => (isRecord(body) ? conversation.voiceCommand('talk-here', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/stop-speaking': async (body) => (isRecord(body) ? conversation.voiceCommand('stop-speaking', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
@@ -1343,4 +1345,11 @@ function openPlaybooks(runtime: Runtime): Record<string, number> {
 
 function optionalString(value: unknown): value is string | null | undefined {
   return value === undefined || value === null || typeof value === 'string';
+}
+
+/** One read at a time: a press while a read runs shares its answer, so pages never start two Claude Code processes at once. */
+export function claudeUsageOnce<T>(read: () => Promise<T>): () => Promise<T> {
+  let running: Promise<T> | null = null;
+
+  return () => (running ??= read().finally(() => (running = null)));
 }

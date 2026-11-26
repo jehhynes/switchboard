@@ -46,7 +46,10 @@ import type { Opening } from './opening.js';
 import { LIST_HASH, parseRoute, parseScrolls, parseTabSets, ROUTE_KEY, routeHash, SCROLL_KEY, startRoute, tabSetKey, TABS_KEY, withScroll, withTabSet } from './route.js';
 import type { Route, ScrollPlace, TabSet } from './route.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
-import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
+import type { ContextDetails, ContextDetailsState, ContextMenuState } from '@switchboard/conversation/contextMeter';
+
+/** How long the context meter's details may take: Claude's plan usage comes from a Claude Code process the hub gives 30 s. */
+const CONTEXT_DETAILS_MS = 40_000;
 import { EMPTY_HISTORY_UI, expandable, needsYou, renderHistory } from './history.js';
 import type { HistoryHead, HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
@@ -1793,6 +1796,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The context meter's menu (architecture.md § Context meter): closed, open, or asking to confirm Compact, which sends /compact as a chosen
   // slash command to the session the page shows, leaving the box's draft alone.
   let contextMenu: ContextMenuState = 'closed';
+  // The menu's details, read once on Show details for the page's scope and session they were asked for, and dropped when the menu closes or
+  // the page shows another scope.
+  let contextDetails: { key: string | null; scopeGen: number | null; sessionId: string; state: ContextDetailsState } | null = null;
+  const detailsShown = (asked: { key: string | null; scopeGen: number | null; sessionId: string }): boolean => asked.key === state.key && asked.scopeGen === (state.scope?.scopeGen ?? null) && asked.sessionId === state.session?.id;
   const drawContext = (): void => {
     // New conversation…'s draft has no session whose context to show yet.
     const full = state.connected && state.session?.conversation === 'full' && !draftShown();
@@ -1801,10 +1808,21 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       contextMenu = 'open';
     }
 
-    mount(contextSlot, state.session === null ? null : renderShared(renderContextMeter(state.session.context, contextMenu, full)));
+    if (contextDetails !== null && !detailsShown(contextDetails)) {
+      contextDetails = null;
+    }
+
+    const details = contextDetails?.state ?? { state: 'none' as const };
+
+    mount(contextSlot, state.session === null ? null : renderShared(renderContextMeter(state.session.context, contextMenu, full, details)));
   };
   const setContextMenu = (menu: ContextMenuState, focus: string | null = null): void => {
     contextMenu = menu;
+
+    if (menu === 'closed') {
+      contextDetails = null;
+    }
+
     drawContext();
 
     if (focus !== null) {
@@ -1832,6 +1850,32 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
 
+  const showDetails = async (): Promise<void> => {
+    const session = state.session;
+
+    if (session === null) {
+      return;
+    }
+
+    const asked = { key: state.key, scopeGen: state.scope?.scopeGen ?? null, sessionId: session.id, state: { state: 'loading' } as ContextDetailsState };
+
+    contextDetails = asked;
+    drawContext();
+
+    const answer = await command('context-details', { sessionId: session.id }, { timeout: CONTEXT_DETAILS_MS });
+
+    // The menu closed, was asked again, or the page moved to another scope meanwhile.
+    if (contextDetails !== asked || !detailsShown(asked)) {
+      return;
+    }
+
+    contextDetails = {
+      ...asked,
+      state: answer.status === 200 && typeof answer.body['details'] === 'object' && answer.body['details'] !== null ? { state: 'shown', details: answer.body['details'] as ContextDetails } : { state: 'failed', error: String(answer.body['error'] ?? 'Switchboard could not read the details.') },
+    };
+    drawContext();
+  };
+
   // A click in the meter can redraw the element it hit, which then is no longer in the slot when the click reaches the document.
   let slotClick: Event | null = null;
 
@@ -1847,6 +1891,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       setContextMenu('open', 'compact');
     } else if (which === 'compact-confirm') {
       void compact();
+    } else if (which === 'details') {
+      void showDetails();
     }
   });
   contextSlot.addEventListener('keydown', (event) => {

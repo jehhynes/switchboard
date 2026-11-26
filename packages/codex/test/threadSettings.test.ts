@@ -3,12 +3,12 @@ import { answeredSettings, settingsDifferences, startSettings, threadSettings } 
 
 describe('thread settings (mechanics M108)', () => {
   it("reads a settings update as thread/start names it, and Switchboard's start settings from its permission mode", () => {
-    expect(threadSettings({ model: 'gpt-a', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandboxPolicy: { type: 'workspaceWrite', networkAccess: true }, collaborationMode: { mode: 'plan' } })).toEqual({ model: 'gpt-a', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', network: true, mode: 'plan' });
-    expect(threadSettings({ approvalPolicy: { granular: { rules: true } }, sandboxPolicy: { type: 'readOnly' } })).toEqual({ model: null, approvalPolicy: 'granular', approvalsReviewer: 'user', sandbox: 'read-only', network: null, mode: 'default' });
-    expect(startSettings('auto', '')).toEqual({ model: null, approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', network: null, mode: 'default' });
-    expect(startSettings('bypassPermissions', 'gpt-a')).toEqual({ model: 'gpt-a', approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: 'danger-full-access', network: null, mode: 'default' });
+    expect(threadSettings({ model: 'gpt-a', effort: 'high', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandboxPolicy: { type: 'workspaceWrite', networkAccess: true }, collaborationMode: { mode: 'plan' } })).toEqual({ model: 'gpt-a', effort: 'high', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', network: true, mode: 'plan' });
+    expect(threadSettings({ approvalPolicy: { granular: { rules: true } }, sandboxPolicy: { type: 'readOnly' } })).toEqual({ model: null, effort: null, approvalPolicy: 'granular', approvalsReviewer: 'user', sandbox: 'read-only', network: null, mode: 'default' });
+    expect(startSettings('auto', '')).toEqual({ model: null, effort: null, approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write', network: null, mode: 'default' });
+    expect(startSettings('bypassPermissions', 'gpt-a')).toEqual({ model: 'gpt-a', effort: null, approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: 'danger-full-access', network: null, mode: 'default' });
     // A thread/start answer as Codex 0.171 gave it (mechanics M108); one without settings gives none.
-    expect(answeredSettings({ model: 'gpt-6.2-astra', approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: { type: 'readOnly', networkAccess: false }, serviceTier: null })).toEqual({ model: 'gpt-6.2-astra', approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'read-only', network: false, mode: 'default' });
+    expect(answeredSettings({ model: 'gpt-6.2-astra', approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: { type: 'readOnly', networkAccess: false }, serviceTier: null, reasoningEffort: 'xhigh' })).toEqual({ model: 'gpt-6.2-astra', effort: 'xhigh', approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'read-only', network: false, mode: 'default' });
     expect(answeredSettings({ thread: { id: 't' } })).toBeNull();
     expect(startSettings('plan', null)).toMatchObject({ approvalPolicy: 'never', sandbox: 'read-only' });
   });

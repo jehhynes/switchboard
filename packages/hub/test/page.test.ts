@@ -916,6 +916,7 @@ describe('the web page routes', () => {
           return { status: 200, body: { scopeGen: 1 } };
         },
         '/v1/conversation/new-conversation': async () => ({ status: 200, body: {} }),
+        '/v1/conversation/context-details': async () => ({ status: 200, body: { details: null } }),
         '/v1/conversation/resume': async (body) => {
           posted.push(body);
           return { status: 200, body: {} };
@@ -1406,7 +1407,8 @@ describe('the web page routes', () => {
       expect(JSON.parse(refused.body)).toEqual({ error: 'Do this from the page on the computer that runs Switchboard.' });
     }
 
-    for (const command of ['held-list', 'held-stop']) {
+    // A paired device reads the context meter's details too, which start Claude Code on this computer for its plan usage.
+    for (const command of ['held-list', 'held-stop', 'context-details']) {
       expect((await post(command, { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' })).status).toBe(200);
     }
 

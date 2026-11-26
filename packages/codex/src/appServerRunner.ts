@@ -30,6 +30,14 @@ export interface AppServerRunnerDeps {
   now(): number;
 }
 
+/** A plan usage window as `account/rateLimits/updated` gives it: length in minutes, the limit when not the default, share used and reset time. */
+export interface UsageWindow {
+  minutes: number | null;
+  limit: string | null;
+  usedPercent: number;
+  resetsAt: number | null;
+}
+
 /** Persistent threads in Codex's built-in daemon; no hook markers and no process kill per thread. */
 /**
  * Whether Codex refused to read or resume a thread because it has no turn yet (mechanics M108): "thread … is not materialized yet;
@@ -50,8 +58,8 @@ export class AppServerRunner implements SessionRunner {
   readonly #configuring = new Map<string, Promise<void>>();
   readonly #compactions = new Map<string, string>();
   readonly #seenCompactions = new Map<string, Set<string>>();
-  /** The latest reset time of each rate-limit window, from `account/rateLimits/updated` (mechanics M100). */
-  readonly #windows = new Map<string, { resetsAt: number | null; full: boolean }>();
+  /** Each rate-limit window as the latest `account/rateLimits/updated` gave it, by limit and window (mechanics M100). */
+  readonly #windows = new Map<string, UsageWindow & { full: boolean }>();
   /** The limit each session's last failed turn stopped at, which a later rate-limit update can give a reset. */
   readonly #limits = new Map<string, LimitReading>();
   /** The settings each thread's first start or resume answer since the hub started reported, by thread ID. */
@@ -118,14 +126,28 @@ export class AppServerRunner implements SessionRunner {
     });
   }
 
-  /** Keeps each window of a sparse rate-limit update; a window at 100% holds its reset time. */
+  /** Keeps each window of a sparse rate-limit update; a window at 100% holds its reset time. A limit other than the default is named by its name. */
   #rateLimits(snapshot: Json): void {
+    const id = String(snapshot['limitId'] ?? 'codex');
+    const limit = id === 'codex' ? null : typeof snapshot['limitName'] === 'string' ? snapshot['limitName'] : id;
     for (const name of ['primary', 'secondary']) {
       const window = snapshot[name];
       if (window === null || typeof window !== 'object') continue;
       const fields = object(window);
-      this.#windows.set(`${String(snapshot['limitId'] ?? 'codex')}/${name}`, { resetsAt: typeof fields['resetsAt'] === 'number' ? fields['resetsAt'] * 1000 : null, full: typeof fields['usedPercent'] === 'number' && fields['usedPercent'] >= 100 });
+      const used = typeof fields['usedPercent'] === 'number' ? fields['usedPercent'] : null;
+      this.#windows.set(`${id}/${name}`, {
+        minutes: typeof fields['windowDurationMins'] === 'number' ? fields['windowDurationMins'] : null,
+        limit,
+        usedPercent: used ?? 0,
+        resetsAt: typeof fields['resetsAt'] === 'number' ? fields['resetsAt'] * 1000 : null,
+        full: used !== null && used >= 100,
+      });
     }
+  }
+
+  /** The plan usage windows the latest rate-limit updates gave, shortest first; none before the first update after the hub started. */
+  usageWindows(): UsageWindow[] {
+    return [...this.#windows.values()].map(({ full: _full, ...window }) => window).sort((a, b) => (a.limit === null ? 0 : 1) - (b.limit === null ? 0 : 1) || (a.minutes ?? Infinity) - (b.minutes ?? Infinity));
   }
 
   /** The latest reset of a full window, or null when no update named one. */
