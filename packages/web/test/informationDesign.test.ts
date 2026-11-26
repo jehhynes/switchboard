@@ -154,13 +154,12 @@ describe('the conversation status row and question card', () => {
     expect(card.querySelector('.prompt-note')!.textContent).toBe('Answer it in the terminal.');
   });
 
-  it('QuestionsChip_Stylesheet_TakesItsOwnLineAtTheRightRatherThanFloat', () => {
+  it('QuestionsChip_Stylesheet_FloatsCentred8PxOverTheComposerInTheGlass', () => {
     const chip = rule(css, '.question-waiting');
 
-    expect(chip).not.toBe('');
-    expect(chip).not.toMatch(/position:\s*(absolute|fixed)/);
-    expect(chip).toMatch(/margin: 0 0 8px auto/);
-    expect(css).not.toMatch(/\.question-waiting[^{]*\{[^}]*position:\s*(absolute|fixed)/);
+    expect(chip).toMatch(/position: absolute; z-index: 2; bottom: 100%; margin-bottom: 8px; left: 50%; transform: translateX\(-50%\)/);
+    expect(rule(css, '#composer')).toMatch(/position: relative/);
+    expect(rule(css, '.glass, .question-waiting')).toMatch(/backdrop-filter: blur\(8px\)/);
   });
 
   it('QuestionCard_Stylesheet_TopicIsNoLinkAndDisabledButtonsLoseTheAccentBorder', () => {

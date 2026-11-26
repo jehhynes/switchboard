@@ -12,9 +12,8 @@
 // the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them. Every control shown is a touch target of at least 44 px each way,
 // and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
 // task list, whose read-only boxes are not controls; on the desktop a question card's step dots are at least 24 px tall.
-// The questions waiting chip takes its own room above the composer, under the session's note: it covers no part of the conversation, the note or
-// the composer, at the conversation's end and halfway up, and the conversation's last row shows whole at its end. The card's topic is 4.5:1 on
-// the card, and its first question's disabled Back has no border.
+// The questions waiting chip floats centred over the composer, clear of its box, at the conversation's end and halfway up. The card's topic is
+// 4.5:1 on the card, and its first question's disabled Back has no border.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -515,6 +514,8 @@ const TOUCH = `(() => {
   // a toast, a top bar, the Changes tree over the diffs or the list as a drawer are. Only targets of one layer are
   // checked for overlaps, since a layer is drawn over what scrolls under it.
   const layer = (node) => {
+    // The questions-waiting chip floats over the conversation in a layer of its own (page.css).
+    if (node.matches('.question-waiting')) return node;
     for (let one = node.parentElement; one && one !== document.body; one = one.parentElement) {
       const style = getComputedStyle(one);
       if (style.position === 'fixed' || style.position === 'sticky' || (style.position !== 'static' && style.zIndex !== 'auto')) return one;
@@ -653,23 +654,19 @@ const searchFit = ({ field, bar }) => `(() => {
 })()`;
 
 /**
- * Scrolls the conversation to its end or halfway, and answers whether the questions chip shows, what it covers (the conversation's visible
- * area, the session's note, the composer's box, or whatever the page draws at its centre) and, at the end, how much of the last row is cut.
+ * Scrolls the conversation to its end or halfway, and answers whether the questions chip shows and where it floats against the composer's box:
+ * how far its centre is from the box's, the gap from its bottom to the box's top, and whether a press at its centre reaches it.
  */
-const chipClear = (at) => `(async () => {
+const chipFloat = (at) => `(async () => {
   const panel = document.getElementById('panel');
   panel.scrollTop = ${at === 'end' ? 'panel.scrollHeight' : '(panel.scrollHeight - panel.clientHeight) / 2'};
   await new Promise((done) => setTimeout(done, 200));
   const chip = document.querySelector('#composer .question-waiting');
-  if (!chip || chip.hidden || chip.getBoundingClientRect().height === 0) return { shown: false, covers: [], cut: null };
+  if (!chip || chip.hidden || chip.getBoundingClientRect().height === 0) return { shown: false };
   const box = chip.getBoundingClientRect();
-  const over = (selector, one) => { const r = one.getBoundingClientRect(); return r.height > 0 && Math.min(r.bottom, box.bottom) - Math.max(r.top, box.top) > 0.5 && Math.min(r.right, box.right) - Math.max(r.left, box.left) > 0.5 ? [selector] : []; };
-  const covers = [...over('#panel', panel), ...[...document.querySelectorAll('#note > *')].flatMap((one) => over('#note .' + one.className.split(' ')[0], one)), ...over('.composer', document.querySelector('#composer .composer'))];
+  const composer = document.querySelector('#composer .composer').getBoundingClientRect();
   const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-  if (!hit || !chip.contains(hit)) covers.push('its centre, under ' + (hit ? hit.tagName.toLowerCase() + '.' + hit.className : 'nothing'));
-  const last = [...panel.querySelectorAll('.timeline > li')].at(-1)?.getBoundingClientRect();
-  const end = panel.getBoundingClientRect().bottom;
-  return { shown: true, covers, cut: last && last.bottom > end + 0.5 ? Math.round(last.bottom - end) + ' px' : null };
+  return { shown: true, off: Math.round(Math.abs(box.left + box.right - composer.left - composer.right) / 2), gap: Math.round(composer.top - box.bottom), top: Math.round(box.top), pressed: hit !== null && chip.contains(hit) };
 })()`;
 
 /**
@@ -1130,14 +1127,20 @@ try {
 
         if (view.startsWith('mic-') && missing.length === 0) found.push(...micFailures(view, size, await evaluate(MIC)));
 
-        // The questions chip covers nothing, at the conversation's end and halfway up.
+        // The questions chip floats centred over the composer's box, clear of it and on top of what it floats over, at the conversation's end
+        // and halfway up.
         if (view.startsWith('questions')) {
           for (const at of ['middle', 'end']) {
-            const chip = await evaluate(chipClear(at));
+            const chip = await evaluate(chipFloat(at));
 
+            if (report) console.log(name + ' chip at the ' + at + ': ' + JSON.stringify(chip));
             if (!chip.shown) found.push('no questions chip with the card out of view at the ' + at);
-            else if (chip.covers.length > 0) found.push('at the ' + at + ' the questions chip covers ' + chip.covers.join(', '));
-            if (at === 'end' && chip.cut !== null) found.push("the conversation's last row is cut at its end: " + chip.cut);
+            else {
+              if (chip.off > 1) found.push('at the ' + at + ' the questions chip is ' + chip.off + " px off the composer's centre");
+              if (chip.gap < 0) found.push('at the ' + at + " the questions chip covers the composer's box by " + -chip.gap + ' px');
+              if (chip.top < 0) found.push('at the ' + at + ' the questions chip is above the viewport');
+              if (!chip.pressed) found.push('at the ' + at + ' a press at the questions chip\'s centre reaches something else');
+            }
           }
           // The card's topic is a label at 4.5:1 or more, and its first question's Back, disabled, has no border of its own.
           const look = await evaluate(CARD_LOOK);

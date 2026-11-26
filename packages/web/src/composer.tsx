@@ -44,7 +44,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
 export function renderComposer(): VNode {
   return (
     <>
-      {/* While a card that can be answered is out of view, how many of its questions wait, on its own line above the box; the page fills it in (PRD R103). */}
+      {/* While a card that can be answered is out of view, how many of its questions wait; the page fills it in (PRD R103). */}
       <button class="question-waiting" type="button" data-action="goto-card" title="Go to the questions" hidden></button>
       <div class="composer-sent" role="status" hidden>
         <span class="codicon codicon-check" aria-hidden="true"></span>
