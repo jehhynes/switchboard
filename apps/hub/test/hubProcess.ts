@@ -5,7 +5,7 @@ import { rm } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, join, resolve } from 'node:path';
-import { hubRecordPath, parseHubRecord } from '@switchboard/core';
+import { hubLogPath, hubRecordPath, parseHubRecord } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { afterEach, beforeEach } from 'vitest';
 
@@ -15,13 +15,20 @@ export const main = join(import.meta.dirname, '..', 'dist', 'main.js');
 export let home: string;
 const children: ChildProcess[] = [];
 
-/** Gives each test a temporary home, and ends the processes it started before removing it. */
+/** Gives each test a temporary home, prints its hub log when the test fails, and ends the processes it started before removing it. */
 export function useTestHome(): void {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'switchboard-app-'));
   });
 
-  afterEach(async () => {
+  afterEach(async ({ task }) => {
+    // A hub that hangs on CI shows what it did only here.
+    if (task.result?.state === 'fail') {
+      const log = hubLogPath(home);
+
+      console.error(existsSync(log) ? `hub.log of the failed test:\n${readFileSync(log, 'utf8').slice(-8000)}` : 'The failed test wrote no hub.log.');
+    }
+
     const running = children.splice(0).filter((child) => child.exitCode === null && child.signalCode === null);
 
     for (const child of running) child.kill();
