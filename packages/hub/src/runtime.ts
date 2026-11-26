@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { classify, ClaudeRunner, CODE_MODE_IDLE_MS, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, markerPass, readRoster, readTranscriptLaunch, readTranscriptLimit } from '@switchboard/claude';
+import { classify, ClaudeRunner, CODE_MODE_IDLE_MS, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, markerPass, pruneMarkers, readRoster, readTranscriptLaunch, readTranscriptLimit } from '@switchboard/claude';
 import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
 import type { FlowAction, FlowEvent, FlowResult, HandledWork, LimitReading, MarkerReading, SessionLimit, ObservedFork, ObservedSession, PermissionMode, PolledTicket, Provider, PullRequestStatus, WorkItemStatus, Session, SessionRunner, Source, SourceSettings, Store, Ticket, TicketLookup, Triage, Worktree, Reconciled } from '@switchboard/core';
@@ -44,8 +44,10 @@ export const MARKER_SETTLE_MS = 50;
 export const MARKER_WATCH_RETRY_MS = 1_000;
 /** How often a tick ends snoozes whose wake time has passed (PRD R49). */
 export const WAKE_MS = 60_000;
-/** The roster, marker and wake timers `start` sets before the poll timers. */
-const FIXED_TIMERS = 3;
+/** How often the hub deletes the activity markers of sessions it does not know, besides at start. */
+export const MARKER_PRUNE_MS = 24 * 60 * 60 * 1000;
+/** The roster, marker, wake and marker prune timers `start` sets before the poll timers. */
+const FIXED_TIMERS = 4;
 /** How long a done or link report waits for the source read that checks it (PRD R10, R52). */
 export const REPORT_CHECK_MS = 6_000;
 /** When the source is read again after a done report it lists as assigned; GitHub issue search lags an unassignment by seconds (mechanics M34). */
@@ -120,6 +122,8 @@ export interface RuntimeDeps {
   log(line: string, level?: LogLevel): void;
   /** The Code Mode idle limit, shorter than the default for tests and live acceptance (`--code-mode-idle-ms`). */
   codeModeIdleMs?: number;
+  /** How often the marker prune runs after start; `MARKER_PRUNE_MS` by default, shorter in tests. */
+  markerPruneMs?: number;
   /** Stand-ins for the holder link's connection, lock check and start, for tests. */
   holder?: Partial<Pick<HolderLinkDeps, 'connect' | 'lockHeld' | 'launch' | 'killTree'>>;
 }
@@ -173,7 +177,7 @@ export class Runtime {
   private listeners = new Set<() => void>();
   /** Reads the conversation of sessions whose turn may be ending, so the flow sees a question card written just before the turn ended. */
   private conversation: ConversationReader = { read: () => {}, catchUp: () => null };
-  /** The roster, marker and wake timers, then one poll timer per source; `restartPolls` replaces the poll timers. */
+  /** The roster, marker, wake and marker prune timers, then one poll timer per source; `restartPolls` replaces the poll timers. */
   private timers: NodeJS.Timeout[] = [];
   /** Set by `stop`, so a pending recheck does not read a source after the store closes. */
   private stopped = false;
@@ -775,7 +779,8 @@ export class Runtime {
   }
 
   start(): void {
-    this.timers.push(setInterval(() => void this.readRoster(), ROSTER_MS), setInterval(() => this.readMarkers(), MARKER_MS), setInterval(() => this.wake(), WAKE_MS));
+    this.timers.push(setInterval(() => void this.readRoster(), ROSTER_MS), setInterval(() => this.readMarkers(), MARKER_MS), setInterval(() => this.wake(), WAKE_MS), setInterval(() => this.pruneMarkers(), this.deps.markerPruneMs ?? MARKER_PRUNE_MS));
+    this.pruneMarkers();
     this.watchMarkers();
     this.restartPolls();
   }
@@ -795,6 +800,17 @@ export class Runtime {
     this.markerWatchRetry = null;
     this.holder.close();
     this.codexServer.close();
+  }
+
+  /** Deletes week-old activity markers of sessions the store does not hold, so the folder the marker reads list stays small (mechanics M165). */
+  pruneMarkers(): void {
+    const known = this.deps.store.nativeSessionIds();
+    // File times come from the wall clock, so the injected clock does not apply.
+    const { removed, failed } = pruneMarkers(this.home, (id) => known.has(id), Date.now());
+
+    if (removed > 0 || failed > 0) {
+      this.deps.log(`removed ${removed} activity markers a week old of sessions the store does not hold${failed > 0 ? `; ${failed} could not be removed` : ''}`);
+    }
   }
 
   /** Reads the markers soon after a hook writes one; the `MARKER_MS` timer stays as a fallback. */

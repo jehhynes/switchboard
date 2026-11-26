@@ -1963,7 +1963,8 @@ The offline startup limitation below is superseded by M145's verified-origin she
   | 2000 | 677 ms | 1366 ms | 24.8 ms | 23.7 ms | 26.2 ms |
 
   Before, each tick read and parsed every file twice; at a 5 s interval 456 markers cost about 206 s of main-thread time an hour, from the timer alone. After, a tick lists the folder and stats each file once, and parses only changed files; the stat calls are most of what is left. A marker is taken as unchanged while its size, mtime and file ID are, so the cache relies on the hook writer replacing a marker by writing a temporary file and renaming it over the marker: on NTFS a file of the same size and mtime renamed over a marker gave it another file ID (15481123719661237 before, 13792273859397304 after, from `statSync` with `bigint`; as a number the first read 15481123719661236, since Windows file IDs can pass 2^53, so the cache keeps them as bigints). Reading them as bigints left the tick's time within the run-to-run spread (3.9 to 5.9 ms at 456 markers, 24 to 32 ms at 2000, with other checks loading the machine). A marker that fails to read or parse is read again on every tick rather than kept.
-- **Current use:** `readMarkers` and `markerPass` in `packages/claude/src/install.ts` (architecture.md § Claude Code runner, Hooks).
+- **Pruning:** in the operator's folder 348 of the 456 markers were over 7 days old, since only `SessionEnd` deletes a marker. The same script with 456 markers, 348 of them dated 8 days back and 2 of those of known sessions, deleted 346 in 208 ms, once, on the main thread; with 2000 markers, 1500 old, it deleted 1498 in 943 ms. A tick over the 110 left took 1.5 ms.
+- **Current use:** `readMarkers`, `markerPass` and `pruneMarkers` in `packages/claude/src/install.ts` (architecture.md § Claude Code runner, Hooks).
 
 ## M166. Memory and CPU the voice process spends between utterances, 2026-11-26
 

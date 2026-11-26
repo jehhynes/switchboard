@@ -173,6 +173,58 @@ export function readMarkers(switchboardHome: string): Map<string, Marker> {
   return new Map(markers);
 }
 
+/** How long a marker of no stored session is kept after its last write. */
+export const MARKER_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Deletes each marker in `<home>/activity` last written more than `MARKER_KEEP_MS` before `now` whose session ID, by file name or content,
+ * `known` does not hold. Every Claude session on the computer writes a marker, and only its `SessionEnd` deletes it, so a session that is killed
+ * or crashes leaves its marker for good. Returns how many it deleted and how many it could not.
+ */
+export function pruneMarkers(switchboardHome: string, known: (sessionId: string) => boolean, now: number): { removed: number; failed: number } {
+  const dir = join(switchboardHome, 'activity');
+  const result = { removed: 0, failed: 0 };
+  let files: string[];
+
+  try {
+    files = readdirSync(dir).filter((file) => file.endsWith('.json'));
+  } catch {
+    return result;
+  }
+
+  for (const file of files) {
+    const path = join(dir, file);
+
+    try {
+      const stat = statSync(path, { throwIfNoEntry: false });
+
+      if (stat === undefined || now - stat.mtimeMs <= MARKER_KEEP_MS || known(file.slice(0, -'.json'.length))) {
+        continue;
+      }
+
+      let sessionId: unknown = null;
+
+      try {
+        sessionId = (JSON.parse(readFileSync(path, 'utf8')) as Partial<Marker>).sessionId;
+      } catch {
+        // An unreadable marker names no session but its file's.
+      }
+
+      // A hook that wrote the marker again since the stat, as for a session resumed after a week, keeps it.
+      if ((typeof sessionId === 'string' && known(sessionId)) || statSync(path, { throwIfNoEntry: false })?.mtimeMs !== stat.mtimeMs) {
+        continue;
+      }
+
+      rmSync(path);
+      result.removed++;
+    } catch {
+      result.failed++;
+    }
+  }
+
+  return result;
+}
+
 /** Runs `read` with every `readMarkers` inside it answered from one read of each folder, as a marker tick's callers share one. */
 export function markerPass<T>(read: () => T): T {
   if (pass !== null) {

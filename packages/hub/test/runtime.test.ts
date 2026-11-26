@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -22,7 +22,7 @@ import type { RuntimeDeps } from '../src/runtime.js';
 import { controlsOf, doneSince } from '../src/rows.js';
 import { dockView } from '../src/dock.js';
 import { questionIndex, QUESTIONS_SINCE } from '../src/questions.js';
-import { T0, home, playbook, PLAYBOOKS, config, fail, issue, deferred, setup, appServerRunner } from './runtimeFixtures.js';
+import { T0, home, playbook, PLAYBOOKS, config, fail, issue, deferred, setup, appServerRunner, FakeCodex } from './runtimeFixtures.js';
 
 describe('handled assignment reports', () => {
   const url = 'https://github.com/acme/widgets/issues/7';
@@ -407,6 +407,62 @@ describe('Runtime', () => {
 
     runtime.readMarkers();
     expect(seen.slice(2).map((keys) => keys.sort())).toEqual([['a', 'b'], ['a', 'b']]);
+  });
+
+  it('deletes week-old markers of sessions the store does not hold at start, and logs how many', async () => {
+    const { source, runtime, logs } = setup(config({ installHooks: true }));
+    source.result = { tickets: [issue('8')] };
+    await runtime.pollSource('github');
+    await runtime.settled();
+    const dir = join(home, '.switchboard', 'activity');
+    mkdirSync(dir, { recursive: true });
+    const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    for (const id of ['00000001-native', 'stranger', 'other']) {
+      writeFileSync(join(dir, `${id}.json`), JSON.stringify({ sessionId: id, event: 'Stop' }));
+      utimesSync(join(dir, `${id}.json`), old, old);
+    }
+    writeFileSync(join(dir, 'fresh.json'), JSON.stringify({ sessionId: 'fresh', event: 'Stop' }));
+
+    runtime.start();
+    runtime.stop();
+
+    expect(readdirSync(dir).sort()).toEqual(['00000001-native.json', 'fresh.json']);
+    expect(logs).toContain('removed 2 activity markers a week old of sessions the store does not hold');
+
+    // Nothing to remove logs nothing.
+    const count = logs.length;
+    runtime.pruneMarkers();
+    expect(logs.length).toBe(count);
+  });
+
+  it('deletes week-old markers of unknown sessions again on its timer, also after the poll timers restart', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      // A prune every second, so the second passes run no 5 s marker or 30 s roster timer.
+      const { runtime, logs } = setup(config({ installHooks: true }), () => T0, undefined, new FakeCodex(), {}, { markerPruneMs: 1_000 });
+      const dir = join(home, '.switchboard', 'activity');
+      const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+      const stale = (id: string) => {
+        writeFileSync(join(dir, `${id}.json`), JSON.stringify({ sessionId: id, event: 'Stop' }));
+        utimesSync(join(dir, `${id}.json`), old, old);
+      };
+
+      runtime.start();
+      mkdirSync(dir, { recursive: true });
+      stale('first');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(existsSync(join(dir, 'first.json'))).toBe(false);
+
+      // Refresh sources replaces the poll timers and must keep the prune timer.
+      expect(runtime.pollNow()).toBeNull();
+      stale('second');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(existsSync(join(dir, 'second.json'))).toBe(false);
+      expect(logs.filter((line) => line.startsWith('removed 1 activity markers'))).toHaveLength(2);
+      runtime.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reads a marker as soon as the hook writes it, before the marker timer fires', async () => {

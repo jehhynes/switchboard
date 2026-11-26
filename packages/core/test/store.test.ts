@@ -437,6 +437,21 @@ describe('Store', () => {
     reopened.close();
   });
 
+  it('lists every native and retired ID of every session, ended ones too', () => {
+    const store = Store.open(':memory:');
+    const ticket = store.insertTicket({ source: 'adhoc', sourceKey: 'k', ref: '#k', sourceId: null, title: 't', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: 1, lastPolledAt: null, repoRoot: '' } as never);
+    const item = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: 1 } as never);
+    const session = { workItemId: item.id, kind: 'task', provider: 'claude', shortId: null, cwd: 'C:/r', stateAt: 1, startedAt: 1, released: false } as const;
+
+    expect(store.nativeSessionIds()).toEqual(new Set());
+    store.insertSession({ ...session, id: 's1', nativeSessionId: 'n3', state: 'ended', retiredIds: ['n1', 'n2'] } as never);
+    store.insertSession({ ...session, id: 's2', nativeSessionId: null, state: 'starting', retiredIds: [] } as never);
+    store.insertSession({ ...session, id: 's3', nativeSessionId: 't1', state: 'idle', retiredIds: [] } as never);
+
+    expect(store.nativeSessionIds()).toEqual(new Set(['n1', 'n2', 'n3', 't1']));
+    store.close();
+  });
+
   it('drops the window bindings and keeps the host of every hosted conversation', () => {
     const version = MIGRATIONS.indexOf('DROP TABLE windowBindings;');
     const path = join(dir, 'window-bindings.db');

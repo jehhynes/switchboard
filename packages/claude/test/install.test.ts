@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONTRACT_HOOK_SOURCE, HOOK_SOURCE } from '../src/hooks.js';
-import { claudeSettingsPath, installHooks, markerPass, readMarkers } from '../src/install.js';
+import { claudeSettingsPath, installHooks, MARKER_KEEP_MS, markerPass, pruneMarkers, readMarkers } from '../src/install.js';
 
 let dir: string;
 
@@ -199,5 +199,44 @@ describe('readMarkers', () => {
     expect(() => markerPass(() => { readMarkers(dir); throw new Error('boom'); })).toThrow('boom');
     writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'Stop' }));
     expect([...readMarkers(dir).keys()]).toEqual(['a']);
+  });
+});
+
+describe('pruneMarkers', () => {
+  const write = (file: string, text: string, ageMs: number) => {
+    const path = join(dir, 'activity', file);
+    writeFileSync(path, text);
+    const at = new Date(Date.now() - ageMs);
+    utimesSync(path, at, at);
+  };
+  const left = () => readdirSync(join(dir, 'activity')).sort();
+
+  it('deletes only week-old markers of sessions nobody knows', () => {
+    mkdirSync(join(dir, 'activity'));
+    const old = MARKER_KEEP_MS + 60_000;
+    write('gone.json', JSON.stringify({ sessionId: 'gone', event: 'Stop' }), old);
+    write('bad.json', '{', old);
+    write('known.json', JSON.stringify({ sessionId: 'known', event: 'Stop' }), old);
+    // Known by the session ID inside, under another file name.
+    write('renamed.json', JSON.stringify({ sessionId: 'retired', event: 'Stop' }), old);
+    write('recent.json', JSON.stringify({ sessionId: 'recent', event: 'Stop' }), MARKER_KEEP_MS - 60_000);
+    write('other.json.1.tmp', '{}', old);
+    const known = new Set(['known', 'retired']);
+
+    expect(pruneMarkers(dir, (id) => known.has(id), Date.now())).toEqual({ removed: 2, failed: 0 });
+    expect(left()).toEqual(['known.json', 'other.json.1.tmp', 'recent.json', 'renamed.json']);
+    expect(readMarkers(dir).has('gone')).toBe(false);
+  });
+
+  it('counts a marker it cannot delete, and reads no folder that is missing', () => {
+    expect(pruneMarkers(join(dir, 'none'), () => false, Date.now())).toEqual({ removed: 0, failed: 0 });
+    mkdirSync(join(dir, 'activity'));
+    // A folder named like a marker cannot be removed as a file.
+    mkdirSync(join(dir, 'activity', 'stuck.json'));
+    const at = new Date(Date.now() - MARKER_KEEP_MS - 60_000);
+    utimesSync(join(dir, 'activity', 'stuck.json'), at, at);
+
+    expect(pruneMarkers(dir, () => false, Date.now())).toEqual({ removed: 0, failed: 1 });
+    expect(existsSync(join(dir, 'activity', 'stuck.json'))).toBe(true);
   });
 });

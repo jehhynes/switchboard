@@ -1482,6 +1482,13 @@ export class Store {
     return this.#all('SELECT * FROM sessions WHERE move IS NOT NULL ORDER BY startedAt, rowid');
   }
 
+  /** Every Claude session ID or Codex thread ID a stored session has or retired, ended sessions included. */
+  nativeSessionIds(): Set<string> {
+    const rows = this.#db.prepare('SELECT nativeSessionId, retiredIds FROM sessions').all() as { nativeSessionId: string | null; retiredIds: string }[];
+
+    return new Set(rows.flatMap((row) => [...(row.nativeSessionId === null ? [] : [row.nativeSessionId]), ...row.retiredIds.split(',').filter((id) => id !== '')]));
+  }
+
   /** Sessions a start confirmed: a roster read can end them, or revive one the operator resumed. */
   startedSessions(): Session[] {
     return this.#all('SELECT * FROM sessions WHERE shortId IS NOT NULL ORDER BY startedAt, rowid');
