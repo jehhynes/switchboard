@@ -114,6 +114,15 @@ export function record(): HubRecord | null {
   }
 }
 
+/** The test home's hub log, or a note that there is none, for a failure message. */
+export function hubLog(): string {
+  try {
+    return `hub.log:\n${readFileSync(hubLogPath(home), 'utf8')}`;
+  } catch {
+    return 'no hub.log';
+  }
+}
+
 export async function recorded(): Promise<HubRecord> {
   for (const deadline = Date.now() + 10_000; Date.now() < deadline; ) {
     const found = record();

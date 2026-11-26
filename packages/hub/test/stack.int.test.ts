@@ -2,7 +2,6 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { samePath } from '@switchboard/core';
 import type { Gh, GhResult } from '@switchboard/github';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { nodeGit } from '../src/changes.js';
@@ -328,8 +327,9 @@ describe('PageStack from the reflog', gitTimeout, () => {
     writeFileSync(fetchHead, '');
     utimesSync(fetchHead, 1_800_000_000, 1_800_000_000);
 
-    // Git names the worktree with forward slashes; the store matches it as Windows compares paths.
-    const workItemAt = vi.fn((path: string) => (samePath(path, repo.root) ? { id: 3, title: 'Base work' } : null));
+    // The path as git prints it, which on Windows has forward slashes and no 8.3 short names.
+    const baseWorktree = repo.git('rev-parse', '--show-toplevel').trim();
+    const workItemAt = vi.fn((path: string) => (path === baseWorktree ? { id: 3, title: 'Base work' } : null));
     const result = await view(page(join(other, 'wt'), { workItemAt }).stack);
 
     expect(result.links[0]).toMatchObject({ name: 'base', upstreamMissing: true, branchDeleted: false, workItem: { id: 3, title: 'Base work' } });

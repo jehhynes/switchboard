@@ -102,7 +102,6 @@ describe('readMarkers', () => {
     writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'StopFailure' }), mtime);
     expect(readMarkers(dir).get('a')?.event).toBe('StopFailure');
 
-    // Same size, a later mtime. Not "now": within the same millisecond it would equal the first mtime.
     writeOld('a.json', JSON.stringify({ sessionId: 'a', event: 'StopFailurf' }), new Date(mtime.getTime() + 1000));
     expect(readMarkers(dir).get('a')?.event).toBe('StopFailurf');
   });

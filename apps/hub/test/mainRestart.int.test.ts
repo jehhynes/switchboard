@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { hubBundlePath, hubLogPath, hubRecordPath, switchboardHome } from '@switchboard/core';
 import { buildOf, installLockAddress, serveHub, vscodeSettingsPath } from '@switchboard/hub';
 import { describe, expect, it } from 'vitest';
-import { main, home, useTestHome, start, launch, record, recorded, until, stopAndWait, pageStreamStatus, pageCookie, get } from './hubProcess.js';
+import { main, home, useTestHome, start, launch, record, recorded, until, stopAndWait, pageStreamStatus, pageCookie, get, hubLog } from './hubProcess.js';
 
 useTestHome();
 
@@ -170,14 +170,14 @@ describe('hub entry point', () => {
       const restarted = await start('restart').exited;
       const after = record()!;
 
-      // hub.js restart waits 60 seconds; a failure shows what it and the hub's log said.
-      expect(restarted.code, `${restarted.stderr}\nhub.log:\n${readFileSync(hubLogPath(home), 'utf8').slice(-6000)}`).toBe(0);
+      expect(restarted.code, hubLog()).toBe(0);
       expect(after.pid).not.toBe(before.pid);
       expect(after.build).toBe(before.build);
       expect(restarted.stdout).toBe(`Restarting the hub (pid ${before.pid}, build ${before.build}) onto build ${before.build}.\nRestarted: pid ${after.pid}, build ${after.build}.\n`);
     } finally {
       await stopAndWait();
     }
+    // Past the command's own 60-second wait, so a hub that does not restart fails with the hub log.
   }, 90_000);
 
   it("installs the builds a build folder carries on hub.js install, and refuses to run from another folder", async () => {
@@ -267,14 +267,14 @@ describe('hub entry point', () => {
       const waited = await launch(join(dist, 'hub.js'), {}, ['install', '--wait']).exited;
       const after = record()!;
 
-      // install --wait waits 60 seconds; a failure shows what it and the hub's log said.
-      expect(waited.stderr, `hub.log:\n${readFileSync(hubLogPath(home), 'utf8').slice(-6000)}`).toBe('');
-      expect(waited.code).toBe(0);
+      expect(waited.code, hubLog()).toBe(0);
+      expect(waited.stderr).toBe('');
       expect(after.pid).not.toBe(before.pid);
       expect(after.build).toBe(next);
       expect(waited.stdout).toMatch(new RegExp(`^Installed hub build ${next} in .*\\.\\nConfig folder: .*\\.\\nThe running hub \\(pid ${before.pid}, build ${before.build}\\) restarts onto it once it is quiet; waiting for that\\.\\n(It waits until it is quiet: .*\\.\\n)?Restarted: pid ${after.pid}, build ${next}\\.\\n$`));
     } finally {
       await stopAndWait();
     }
+    // Past the command's own 60-second wait, so a hub that does not restart fails with the hub log.
   }, 90_000);
 });
