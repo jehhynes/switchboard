@@ -321,7 +321,7 @@ try {
       if (!(await until('document.getElementById("boot")?.className === "failed"', 10_000))) found.push('the boot screen did not say the page failed: ' + (await evaluate('document.body?.innerText?.slice(0, 120)')));
       const background = await evaluate('getComputedStyle(document.documentElement).backgroundColor');
 
-      if (background !== 'rgb(248, 248, 248)') found.push('the boot screen is not light: ' + background);
+      if (background !== 'rgb(250, 250, 253)') found.push('the boot screen is not light: ' + background);
       await shot('boot-failed-light');
       setMode({ failJs: false });
       await scheme('dark');
