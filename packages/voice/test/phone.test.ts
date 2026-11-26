@@ -237,6 +237,7 @@ describe('VoiceService with the voice on the phone', () => {
           warmSoon: () => calls.push('warm'),
           target: () => undefined,
           settingsChanged: () => undefined,
+          keepContexts: () => undefined,
           reference: () => undefined,
           close: () => undefined,
         }) as unknown as import('../src/dictation.js').Dictation,

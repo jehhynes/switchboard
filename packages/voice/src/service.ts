@@ -234,6 +234,7 @@ export class VoiceService {
     switch (message.type) {
       case 'targets':
         this.#targets = new Map(message.targets.map((target) => [target.sessionId, target]));
+        this.#dictation?.keepContexts(new Set(this.#targets.keys()));
         this.#focus = message.focus;
         this.#router.update(message.targets, message.focus);
         return;

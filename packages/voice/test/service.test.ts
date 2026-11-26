@@ -52,6 +52,7 @@ describe('VoiceService', () => {
           mic: (on: boolean) => calls.push(`mic ${on}`),
           typing: (on: boolean, listen: boolean) => calls.push(`typing ${on}${listen ? ' listen' : ''}`),
           context: (sessionId: string, lastReply: string) => calls.push(`context ${sessionId} ${lastReply}`),
+          keepContexts: (sessionIds: ReadonlySet<string>) => calls.push(`keep ${[...sessionIds].join(',')}`),
           target: (gen: number, sessionId: string | null, repo: string | null) => calls.push(`target ${gen} ${sessionId} ${repo}`),
           reference: (pcm: Buffer) => calls.push(`reference ${pcm.length}`),
           settingsChanged: () => calls.push('settings'),
@@ -73,7 +74,7 @@ describe('VoiceService', () => {
     service.receive({ type: 'heard', heard: 'a llama', meant: 'Ollama' });
     service.receive({ type: 'targets', targets: [{ sessionId: 's1', workItemId: 1, repo: 'acme/app' }], focus: null });
     service.receive({ type: 'talk-here', sessionId: 's1' });
-    expect(calls).toEqual(['settings', 'mic true', 'typing true', 'typing true listen', 'context s1 Done.', 'heard a llama=Ollama', 'target 1 s1 acme/app']);
+    expect(calls).toEqual(['settings', 'mic true', 'typing true', 'typing true listen', 'context s1 Done.', 'heard a llama=Ollama', 'keep s1', 'target 1 s1 acme/app']);
 
     // Turning voice off in the settings stops capture, whatever the mic was set to.
     service.receive({ type: 'settings', settings: { ...DEFAULT_SETTINGS.voice, enabled: false } });
@@ -151,6 +152,7 @@ describe('VoiceService', () => {
           enroll: (action: string) => calls.push(`enroll ${action}`),
           target: () => undefined,
           settingsChanged: () => undefined,
+          keepContexts: () => undefined,
           reference: () => undefined,
           close: () => undefined,
         }) as unknown as import('../src/dictation.js').Dictation,
@@ -310,7 +312,7 @@ describe('VoiceService', () => {
       voiceprint: { learnVoice: (voice: string, samples: Float32Array) => learnt.push({ voice, samples: samples.length }) } as unknown as import('../src/voiceprint.js').Voiceprint,
       dictation: (given) => {
         hooks = given;
-        return { state: 'off', error: null, target: () => undefined, reference: () => undefined, settingsChanged: () => undefined, close: () => undefined } as unknown as import('../src/dictation.js').Dictation;
+        return { state: 'off', error: null, target: () => undefined, reference: () => undefined, settingsChanged: () => undefined, keepContexts: () => undefined, close: () => undefined } as unknown as import('../src/dictation.js').Dictation;
       },
       now: clock.now,
       log: () => undefined,
@@ -402,6 +404,7 @@ describe('VoiceService', () => {
           enroll: () => undefined,
           target: (gen: number, sessionId: string | null) => calls.push(`target ${gen} ${sessionId}`),
           settingsChanged: () => undefined,
+          keepContexts: () => undefined,
           reference: () => undefined,
           close: () => undefined,
         }) as unknown as import('../src/dictation.js').Dictation,
@@ -467,7 +470,7 @@ describe('VoiceService', () => {
       send: () => undefined,
       dictation: (given) => {
         hooks = given;
-        return { state: 'listening', halfDuplex: null, fullDuplex: null, error: null, recognizer: null, roomHold: null, hearing: false, answerable: false, otherAppRecording: false, enrolling: false, listen: () => undefined, mic: () => undefined, target: () => undefined, settingsChanged: () => undefined, reference: () => undefined, close: () => undefined } as unknown as import('../src/dictation.js').Dictation;
+        return { state: 'listening', halfDuplex: null, fullDuplex: null, error: null, recognizer: null, roomHold: null, hearing: false, answerable: false, otherAppRecording: false, enrolling: false, listen: () => undefined, mic: () => undefined, target: () => undefined, settingsChanged: () => undefined, keepContexts: () => undefined, reference: () => undefined, close: () => undefined } as unknown as import('../src/dictation.js').Dictation;
       },
       now: clock.now,
       log: () => undefined,

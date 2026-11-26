@@ -258,6 +258,30 @@ describe('VoiceControl dictation', () => {
     expect(connection.sent.filter((one) => one.type === 'typing').at(-1)).toEqual({ type: 'typing', on: false });
   });
 
+  it('forgets the last reply sent for a session that left the targets, so it sends it again when the session returns', async () => {
+    const { control, connection, windows, settle } = await setup();
+    const contexts = (): HubMessage[] => connection.sent.filter((one) => one.type === 'context');
+
+    await settle();
+    expect(contexts()).toEqual([{ type: 'context', sessionId: 's1', lastReply: 'Which port?' }]);
+    // The same reply is not sent twice while the session stays a target.
+    connection.receive({ type: 'active', gen: 2, sessionId: 's1', reason: 'focus' });
+    expect(contexts()).toHaveLength(1);
+
+    const k1 = windows.get('k1')!;
+
+    windows.delete('k1');
+    control.update();
+    expect(connection.sent.filter((one) => one.type === 'targets').at(-1)).toMatchObject({ targets: [{ sessionId: 's2' }] });
+    windows.set('k1', k1);
+    control.update();
+    connection.receive({ type: 'active', gen: 3, sessionId: 's1', reason: 'focus' });
+    expect(contexts()).toEqual([
+      { type: 'context', sessionId: 's1', lastReply: 'Which port?' },
+      { type: 'context', sessionId: 's1', lastReply: 'Which port?' },
+    ]);
+  });
+
   it('shows live words and joins pieces to the draft in the here window, and sends the whole draft once at a spoken turn\'s end while the composer is unfocused', async () => {
     const { control, connection, notified, dictated, piece, end, fragments } = await setup();
 

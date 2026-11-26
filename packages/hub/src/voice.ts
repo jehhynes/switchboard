@@ -991,6 +991,13 @@ export class VoiceControl {
     if (this.#client !== null && text !== this.#targetsSent) {
       this.#targetsSent = text;
       this.#client.send(message);
+
+      // The process keeps only the targets' latest replies, so a session that returns is sent its reply again.
+      for (const sessionId of this.#contextSent.keys()) {
+        if (!targets.has(sessionId)) {
+          this.#contextSent.delete(sessionId);
+        }
+      }
     }
 
     this.#syncTyping();

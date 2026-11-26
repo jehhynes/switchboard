@@ -593,6 +593,30 @@ describe('Dictation', () => {
     expect(collectAt).toHaveLength(2);
   });
 
+  it('gives the turn model the target session\'s last reply until the session leaves the targets', async () => {
+    const { dictation, chats, say, quiet, sent, listening } = setup({ turn: () => 0.5 });
+
+    dictation.context('s1', 'Which port?');
+    dictation.context('s2', 'Done.');
+    dictation.keepContexts(new Set(['s1']));
+    await listening();
+    say('use 8080', 100);
+    quiet(500);
+    await settle();
+    expect(chats.at(-1)?.[0]).toEqual({ role: 'assistant', content: 'Which port?' });
+
+    for (let step = 0; step < 100 && !sent.some((one) => one.type === 'utterance'); step++) {
+      quiet(100);
+      await settle();
+    }
+
+    dictation.keepContexts(new Set(['s2']));
+    say('and restart it', 100);
+    quiet(500);
+    await settle();
+    expect(chats.at(-1)?.[0]).toEqual({ role: 'assistant', content: '' });
+  });
+
   it('closes the turn model with the recogniser it frees for disuse, not while capture is in use, and asks it again after Mic on', async () => {
     const { dictation, engine, chats, clock, watch, say, quiet, listening, turnClosed } = setup({ turn: () => 0.5, settings: { micIdleMinutes: 120 } });
 

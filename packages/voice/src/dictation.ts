@@ -596,6 +596,15 @@ export class Dictation {
     this.#contexts.set(sessionId, lastReply);
   }
 
+  /** The voice targets changed: the latest replies of sessions no longer among them go, and the hub sends one again if a session returns. */
+  keepContexts(sessionIds: ReadonlySet<string>): void {
+    for (const sessionId of this.#contexts.keys()) {
+      if (!sessionIds.has(sessionId)) {
+        this.#contexts.delete(sessionId);
+      }
+    }
+  }
+
   /** Audio being played, for echo cancellation and the echo check. */
   reference(pcm: Buffer): void {
     this.#stream?.reference(pcm);
