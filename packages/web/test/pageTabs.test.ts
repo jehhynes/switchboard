@@ -698,6 +698,10 @@ describe('the page in use', () => {
 
     expect(sourceIcons(null)).toEqual({});
     expect(sourceIcons({ notes: [], sources: [{ kind: 'github', enabled: true, title: '', sources: [] }, { kind: 'dpaf', icon, enabled: false, title: '', sources: [] }], repoRoots: [], schedules: [] })).toEqual({ dpaf: icon });
+    // The same header gives the same object, so the list's rows, which take it, are not drawn again; another header is read anew.
+    const header = { notes: [], sources: [{ kind: 'dpaf', icon, enabled: true, title: '', sources: [] }], repoRoots: [], schedules: [] };
+    expect(sourceIcons(header)).toBe(sourceIcons(header));
+    expect(sourceIcons({ ...header, sources: [] })).toEqual({});
   });
 
   it("draws line 2's pills the same on every redraw, however narrow the row, without measuring them (page.css, Line 2)", async () => {

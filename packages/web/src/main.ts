@@ -16,7 +16,7 @@ import { rowDrag } from './reorder.js';
 import type { DragView } from './reorder.js';
 import { menuRows, renderHeader, renderMaximize, renderSideSwitch, renderTabs } from './header.js';
 import { CHAT_MIN, chatNeed, fitLayout, isPhone, sideLimit, sideWidth, type Layout } from './layout.js';
-import { pageLedger, renderTimeline } from './timeline.js';
+import { pageLedger, renderTimeline, timelineInputs } from './timeline.js';
 import { fitFade } from './replyFade.js';
 import { cardSteps, currentStep, draftAnswers, moveStep, pickLetter, picked, sendLabel, setComment } from '@switchboard/conversation/questions';
 import type { CardDraft as SharedDraft, LedgerCard } from '@switchboard/conversation/questions';
@@ -2375,7 +2375,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // A pane holds Preact's tree, or what the page draws into it itself: an open artifact or a console, whose frame, media and terminal must not be
   // redrawn. Each hand-over empties it first.
   const preactPanes = new WeakSet<HTMLElement>();
+  /** The inputs of the timeline last drawn in a pane (`timelineInputs`), until another tree is drawn in it. */
+  const timelineDrawn = new WeakMap<HTMLElement, unknown[]>();
   const drawPane = (pane: HTMLElement, tree: ComponentChild): void => {
+    timelineDrawn.delete(pane);
+
     if (!preactPanes.has(pane)) {
       pane.replaceChildren();
       preactPanes.add(pane);
@@ -2388,6 +2392,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     pane.classList.remove('console-pane', 'browser-pane', 'history-pane', 'diff-pane', 'framed');
   };
   const takePane = (pane: HTMLElement): void => {
+    timelineDrawn.delete(pane);
+
     if (preactPanes.delete(pane)) {
       unmount(pane);
     }
@@ -2798,8 +2804,20 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
 
         drawDiagrams(pane);
+      } else if (tab === 'artifacts') {
+        drawPane(pane, renderArtifacts(state, now));
+        drawDiagrams(pane);
       } else {
-        drawPane(pane, tab === 'artifacts' ? renderArtifacts(state, now) : renderTimeline(state, view));
+        const at = Date.now();
+        const drawn = timelineDrawn.get(pane);
+
+        // A timeline drawn from the same inputs is left as it is, so an event that changes nothing in it, such as a list change, costs nothing here.
+        if (drawn === undefined || !preactPanes.has(pane) || timelineInputs(state, view, at).some((one, index) => one !== drawn[index])) {
+          drawPane(pane, renderTimeline(state, view, at));
+          // After the draw, which opens the newest reply for good in `view.open` when it has to.
+          timelineDrawn.set(pane, timelineInputs(state, view, at));
+        }
+
         drawDiagrams(pane);
       }
 

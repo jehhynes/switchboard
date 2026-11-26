@@ -13,6 +13,7 @@ import { copyButton, renderCardText, renderInline, renderMarkdown } from './mark
 import { ago, dayLabel, deliveryMark, replyRender, withoutQuestions } from './render.js';
 import type { CardDraft, View } from './render.js';
 import { trusted } from './trusted.js';
+import { kept } from './island.js';
 import { backgroundLabel } from '@switchboard/core/group';
 import type { ArtifactView, MessageView, NativeRequest, QuestionsView, ReplyView, ScreenPrompt } from '@switchboard/protocol';
 
@@ -60,7 +61,14 @@ function AnswerReference({ card, lines: answered }: { card: string; lines: Ledge
   );
 }
 
-function Reply({ item, earlier, view, stamped: shown, card, briefReplies, latest }: { item: ReplyView; earlier: ReplyView | null; view: View; stamped: boolean; card: VNode | null; briefReplies: boolean; latest: boolean }) {
+/**
+ * What a reply draws from the view: open, the folds opened (read in full, and added to for the newest reply), with olds naming those of this
+ * reply, so a fold opened or closed draws it again; details, message details.
+ */
+type ReplyProps = { item: ReplyView; earlier: ReplyView | null; open: Set<string>; folds: string; details: boolean; stamped: boolean; card: string | null; briefReplies: boolean; latest: boolean };
+
+function Reply({ item, earlier, open: opened, details, stamped: shown, card: cardHtml, briefReplies, latest }: ReplyProps) {
+  const card = cardHtml === null ? null : trusted(cardHtml);
   if (item.kind === 'note') {
     return (
       <li class="note" data-id={item.id}>
@@ -80,9 +88,9 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies, latest
   const unasked = (text: string): string => (card === null ? text : withoutEndingQuestions(text));
   const folded = passage !== null && hasUnspokenText(unasked(opening), unasked(passage));
   // Opening a reply is for good: an open reply has nothing to fold it again. The newest reply is open until a newer reply makes it fold.
-  const expanded = !folded || !briefReplies || latest || view.open.has(`more:${item.id}`);
+  const expanded = !folded || !briefReplies || latest || opened.has(`more:${item.id}`);
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
-  const markdownPart = (text: string, last: boolean): string => (card === null ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, view.open, last));
+  const markdownPart = (text: string, last: boolean): string => (card === null ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, opened, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
   // With Collapse details on, details that follow the whole primary response draw in the fade's box, opened or not, so opening the reply, or
   // folding the newest once a newer reply comes, moves none of its lines; only the box's height and mask change. Details around or before a passage show in their places once opened.
@@ -92,13 +100,13 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies, latest
   // The newest reply shows whole. Folding one whose details come before or around its passage, as an older reply's [speak] passage can have,
   // would move its primary response above them, so once shown whole it stays open, as if clicked.
   if (latest && folded && briefReplies && !trailing) {
-    view.open.add(`more:${item.id}`);
+    opened.add(`more:${item.id}`);
   }
   const body = passage === null ? markdownPart(opening, true) : replyBody(opening, passage, said, !expanded || trailing, replyRender(markdownPart));
   const more = (expanded && !trailing) || passage === null ? '' : detailsPreview(opening, passage, markdownPart);
-  const tone = toneMark(item.tone, view.details);
+  const tone = toneMark(item.tone, details);
   // The copy button comes first on the line under the reply, then the tone and a speech failure with message details on, and the time at the right.
-  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy reply'), tone, spokenMark(item.spoken.state, view.details)], item.at, shown);
+  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy reply'), tone, spokenMark(item.spoken.state, details)], item.at, shown);
 
   return (
     <li class={`reply ${item.kind}${item.unread ? ' unread' : ''}${expanded ? '' : ' folded'}`} data-unread={item.unread ? item.id : undefined} data-id={item.id} data-speak={item.speak === null ? undefined : '1'} tabIndex={-1}>
@@ -119,7 +127,7 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies, latest
           </div>
         )}
         {earlier === null ? null : (
-          <details class="fold" data-fold={`earlier:${item.id}`} open={view.open.has(`earlier:${item.id}`)}>
+          <details class="fold" data-fold={`earlier:${item.id}`} open={opened.has(`earlier:${item.id}`)}>
             <summary>Rewritten</summary>
             <div class="was">{trusted(renderMarkdown(earlier.opening))}</div>
           </details>
@@ -129,6 +137,27 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies, latest
       {card}
     </li>
   );
+}
+
+const KeptMessage = kept(Message);
+const KeptReply = kept(Reply);
+const NONE: LedgerQuestion[] = [];
+
+/** The folds of a reply that are open, by name: its rest, its rewrite and, for a reply with a card, its runs of questions (`withoutQuestions`). */
+function foldsOf(open: ReadonlySet<string>, id: string, card: boolean): string {
+  const folds = [open.has(`more:${id}`) ? 'more' : '', open.has(`earlier:${id}`) ? 'earlier' : ''];
+
+  if (card) {
+    const prefix = `questions:reply:${id}:`;
+
+    for (const one of open) {
+      if (one.startsWith(prefix)) {
+        folds.push(one.slice(prefix.length));
+      }
+    }
+  }
+
+  return folds.join(' ');
 }
 
 /** The details a folded reply leaves out, in order, for its fade; a reply whose passage is not found in its text shows its text. */
@@ -294,6 +323,13 @@ export function cardNote(state: PageState): string | null {
 
 /** The card with this key, drawn by the renderer in packages/conversation; null for a reply that asks no questions. */
 export function cardOf(key: string, ledger: QuestionLedger, view: View, state: PageState, canAnswer: boolean): VNode | null {
+  const html = cardHtml(key, ledger, view, state, canAnswer);
+
+  return html === null ? null : <>{trusted(html)}</>;
+}
+
+/** The HTML of the card with this key (`cardOf`); null for a reply that asks no questions. */
+function cardHtml(key: string, ledger: QuestionLedger, view: View, state: PageState, canAnswer: boolean): string | null {
   const card = ledger.cards.get(key);
 
   if (card === undefined) {
@@ -302,8 +338,7 @@ export function cardOf(key: string, ledger: QuestionLedger, view: View, state: P
 
   const ui = view.cards.get(key);
   const draft = ui?.local ?? state.questions?.drafts[key];
-  return <>{trusted(
-    renderQuestionCard(card, draft, {
+  return renderQuestionCard(card, draft, {
       canAnswer,
       note: card.questions.some((one) => one.state === 'open') ? cardNote(state) : null,
       sending: ui?.sending === true,
@@ -311,8 +346,32 @@ export function cardOf(key: string, ledger: QuestionLedger, view: View, state: P
       menuOpen: ui?.menuOpen === true,
       inline: renderInline,
       block: renderCardText,
-    }),
-  )}</>;
+    });
+}
+
+/**
+ * What `renderTimeline` draws from: a draw whose inputs are all `===` to the last one's draws the same timeline, so the page leaves it as it is.
+ * The view's sets, maps and drafts change in place, so they are read as text; the day of `now`, for the day dividers' Today and Yesterday.
+ */
+export function timelineInputs(state: PageState, view: View, now: number): unknown[] {
+  return [
+    state.items,
+    state.artifacts,
+    state.session,
+    state.scope,
+    state.questions,
+    state.connected,
+    state.more,
+    state.briefReplies,
+    view.details,
+    view.briefReplies,
+    JSON.stringify(view.newDraft),
+    JSON.stringify(view.prompt),
+    [...view.open].join('\n'),
+    JSON.stringify([...view.cards]),
+    JSON.stringify([...view.requestValues]),
+    startOfDay(now),
+  ];
 }
 
 /** The local midnight starting the day of a time. */
@@ -343,6 +402,12 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   // The newest reply, not an aside or a note, which Collapse details leaves open until a newer one comes (PRD R96).
   const newest = [...entries].reverse().find((entry) => entry.type === 'reply' && entry.item.kind === 'reply');
   const latest = newest?.type === 'reply' ? newest.item.id : null;
+  const briefReplies = view.briefReplies ?? state.briefReplies;
+  const replyRow = (item: ReplyView, earlier: ReplyView | null, shown: boolean, isLatest: boolean): VNode => {
+    const card = item.kind === 'reply' ? cardHtml(`reply:${item.id}`, links, view, state, canAnswer) : null;
+
+    return <KeptReply key={item.id} item={item} earlier={earlier} open={view.open} folds={foldsOf(view.open, item.id, card !== null)} details={view.details} stamped={shown} card={card} briefReplies={briefReplies} latest={isLatest} />;
+  };
   const rows = entries.flatMap((entry) => {
     if (entry.type === 'artifact') {
       return [<ArtifactRow key={`artifact:${entry.artifact.path}`} artifact={entry.artifact} now={now} />];
@@ -365,9 +430,9 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
     const shown = stamped(timed, view.details, divider !== null);
     const row =
       entry.type === 'message' ? (
-        <Message key={entry.item.id} item={entry.item} stamped={shown} details={view.details} answered={links.answers.get(entry.item.id) ?? []} />
+        <KeptMessage key={entry.item.id} item={entry.item} stamped={shown} details={view.details} answered={links.answers.get(entry.item.id) ?? NONE} />
       ) : (
-        <Reply key={entry.item.id} item={entry.item} earlier={entry.earlier} view={view} stamped={shown} card={entry.item.kind === 'reply' ? cardOf(`reply:${entry.item.id}`, links, view, state, canAnswer) : null} briefReplies={view.briefReplies ?? state.briefReplies} latest={entry.item.id === latest} />
+        replyRow(entry.item, entry.earlier, shown, entry.item.id === latest)
       );
 
     return divider === null ? [row] : [divider, row];

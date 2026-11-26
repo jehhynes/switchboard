@@ -7,6 +7,7 @@ import type { DragView } from './reorder.js';
 import { hasSourceLogo, SourceLogo } from './listHeader.js';
 import type { SourceIcon } from '@switchboard/core';
 import { WindowRows } from './windowRows.js';
+import { kept } from './island.js';
 
 /** The codicon Returned's pill shows. */
 const RETURNED_GLYPH = '\u{eae2}';
@@ -37,7 +38,7 @@ function Pill({ classes, glyph, logo, label, text, title, opens }: { classes: st
  * pills and Returned whole, from the last, where they do not fit (page.css, Line 2); line 3 the mark and the
  * details, a muted " · " between them, in their tones. The row's stripe is on its left edge.
  */
-function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, position, icons }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; menuPoint: { x: number; y: number } | undefined; pillsOpen: boolean; movable: boolean; drag: DragView | null; position?: { index: number; total: number }; icons: Readonly<Record<string, SourceIcon>> }) {
+function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, index, total, icons }: { row: PageRow; selected: boolean; menu: ComponentChildren | null; menuPoint: { x: number; y: number } | undefined; pillsOpen: boolean; movable: boolean; drag: DragView | null; index?: number; total?: number; icons: Readonly<Record<string, SourceIcon>> }) {
   const kind = row.mark?.kind;
   // The questions waiting on the operator: an icon after the title on line 1, where only the title gives up room, so it is never cut or left out;
   // its name and tooltip say how many.
@@ -85,7 +86,7 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
       : { 'data-action': 'select', 'data-work-item': String(row.workItemId), 'aria-current': String(selected) };
 
   return (
-    <li class="list-row" data-window-row={position === undefined ? undefined : key} aria-posinset={position === undefined ? undefined : position.index + 1} aria-setsize={position?.total}>
+    <li class="list-row" data-window-row={index === undefined ? undefined : key} aria-posinset={index === undefined ? undefined : index + 1} aria-setsize={total}>
       <div role="group" aria-label={row.title} aria-description="Press Enter to open" tabIndex={0} class={classes} data-row={key} {...click} title={row.title}>
         <span class="row-head">
           {row.priority === null ? null : <span class="priority" role="img" title={row.priority} aria-label={row.priority}></span>}
@@ -130,9 +131,25 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
   );
 }
 
-/** The source plugins' own logos by kind, from the list header's source icons. */
-export function sourceIcons(header: PageHeader | null): Record<string, SourceIcon> {
-  return Object.fromEntries((header?.sources ?? []).flatMap((group) => (group.icon === undefined ? [] : [[group.kind, group.icon]])));
+/** A row drawn again only when its row or its place in the list changed (`kept`). */
+const KeptRow = kept(Row);
+const NO_ICONS: Readonly<Record<string, SourceIcon>> = {};
+const iconsOf = new WeakMap<PageHeader, Record<string, SourceIcon>>();
+
+/** The source plugins' own logos by kind, from the list header's source icons; the same object for the same header, so rows are not drawn again. */
+export function sourceIcons(header: PageHeader | null): Readonly<Record<string, SourceIcon>> {
+  if (header === null) {
+    return NO_ICONS;
+  }
+
+  let icons = iconsOf.get(header);
+
+  if (icons === undefined) {
+    icons = Object.fromEntries((header.sources ?? []).flatMap((group) => (group.icon === undefined ? [] : [[group.kind, group.icon]])));
+    iconsOf.set(header, icons);
+  }
+
+  return icons;
 }
 
 /** A group's rows in runs of one band each, in their order; a row without a band is in a run with no heading. */
@@ -177,12 +194,12 @@ export function renderList(groups: readonly PageGroup[], selected: number | null
         const rowList = (shown: readonly PageRow[]) =>
           shown.length === 0 ? null : group.key === 'done' ? (
             <WindowRows rows={shown} selected={selected} renderRow={(row, index) => (
-              <Row key={rowKey(row)} row={row} selected={isSelected(row)} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} menuPoint={menu?.row === rowKey(row) ? menu.point : undefined} pillsOpen={pillsOpen} movable={false} drag={null} position={{ index, total: shown.length }} icons={icons} />
+              <KeptRow key={rowKey(row)} row={row} selected={isSelected(row)} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} menuPoint={menu?.row === rowKey(row) ? menu.point : undefined} pillsOpen={pillsOpen} movable={false} drag={null} index={index} total={shown.length} icons={icons} />
             )} />
           ) : (
             <ul class="rows">
               {shown.map((row) => (
-                <Row key={rowKey(row)} row={row} selected={isSelected(row)} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} menuPoint={menu?.row === rowKey(row) ? menu.point : undefined} pillsOpen={pillsOpen} movable={group.key === 'review' && row.workItemId !== null} drag={drag} icons={icons} />
+                <KeptRow key={rowKey(row)} row={row} selected={isSelected(row)} menu={menu !== null && menu.row === rowKey(row) ? menu.rows : null} menuPoint={menu?.row === rowKey(row) ? menu.point : undefined} pillsOpen={pillsOpen} movable={group.key === 'review' && row.workItemId !== null} drag={drag} icons={icons} />
               ))}
             </ul>
           );

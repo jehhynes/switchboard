@@ -5,6 +5,7 @@ import type StateInline from 'markdown-it/lib/rules_inline/state_inline.mjs';
 import type Token from 'markdown-it/lib/token.mjs';
 import { full as emoji } from 'markdown-it-emoji';
 import footnote from 'markdown-it-footnote';
+import { KEPT_CHARS, KEPT_ENTRIES, KEPT_LONGEST, textCache } from './lru.js';
 
 /**
  * GitHub-flavoured Markdown (architecture.md § Web page, Markdown). Raw HTML stays off, so a reply's text can never inject markup; the few
@@ -540,6 +541,12 @@ export function copyButton(action: 'copy-code' | 'copy-reply', label: string): s
   return `<button class="copy" type="button" data-action="${action}" title="${label}" aria-label="${label} to clipboard"><span class="codicon codicon-copy" aria-hidden="true"></span></button>`;
 }
 
+/**
+ * `renderMarkdown`'s HTML by its text, the least recently used first, within the bounds `trusted`'s HTML has (`textCache`), so a draw of a long
+ * conversation fits and a long document is rendered each time rather than kept.
+ */
+const rendered = textCache<string>(KEPT_ENTRIES, KEPT_CHARS, KEPT_LONGEST);
+
 /** What a link resolver answers for a link to a path: the attributes of its `<a>`, null to open it in a file tab, or why it may not open. */
 export type LinkAnswer = string | null | { denied: string };
 
@@ -551,7 +558,19 @@ export type LinkAnswer = string | null | { denied: string };
  * the file tab's wider route.
  */
 export function renderMarkdown(text: string, base?: (path: string) => string | null, link?: (href: string) => LinkAnswer): string {
-  return linkify(markdown.render(text), base, link);
+  if (base !== undefined || link !== undefined) {
+    return linkify(markdown.render(text), base, link);
+  }
+
+  // Without a resolver the HTML depends on the text alone, so a reply drawn again is not rendered again.
+  let html = rendered.get(text);
+
+  if (html === undefined) {
+    html = linkify(markdown.render(text));
+    rendered.set(text, html);
+  }
+
+  return html;
 }
 
 export function renderInline(text: string): string {

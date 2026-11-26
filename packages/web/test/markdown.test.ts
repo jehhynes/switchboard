@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import MarkdownIt from 'markdown-it';
+import { describe, expect, it, vi } from 'vitest';
+import { KEPT_LONGEST } from '../src/lru.js';
 import { renderCardText, renderInline, renderMarkdown, slug } from '../src/markdown.js';
 
 /** The Markdown as the page would hold it: parsed into a detached host. */
@@ -377,5 +379,21 @@ describe('links a caller refuses', () => {
 
     host.innerHTML = renderMarkdown('[x](notes.md)', undefined, () => null);
     expect(host.querySelector('a')!.dataset['action']).toBe('local-file');
+  });
+});
+
+describe('renderMarkdown kept', () => {
+  it('RenderMarkdown_SameTextAgain_RendersOnceAndLongTextEachTime', () => {
+    const render = vi.spyOn(MarkdownIt.prototype, 'render');
+    const short = 'Kept **once**.';
+    const long = `# Long\n\n${'word '.repeat(KEPT_LONGEST / 5 + 1)}`;
+
+    try {
+      expect(renderMarkdown(short)).toBe(renderMarkdown(short));
+      expect(renderMarkdown(long)).toBe(renderMarkdown(long));
+      expect(render.mock.calls.map((call) => (call[0] as string).length)).toEqual([short.length, long.length, long.length]);
+    } finally {
+      render.mockRestore();
+    }
   });
 });
