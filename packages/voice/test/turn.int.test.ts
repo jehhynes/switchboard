@@ -31,4 +31,30 @@ describe('turn detection', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('keeps a replacement started before the closed child exits: its requests are answered by it, and the next request goes to it too', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turn-'));
+
+    try {
+      mkdirSync(join(dir, 'onnx'));
+      writeFileSync(join(dir, 'onnx', 'model_q8.onnx'), '');
+      // Answers with its process ID, so the test can tell the children apart.
+      writeFileSync(join(dir, 'turn.js'), `require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => process.stdout.write(JSON.stringify({ id: JSON.parse(line).id, p: process.pid }) + '\\n'));`);
+
+      const model = turnModel(dir, join(dir, 'turn.js'), () => undefined)!;
+      const first = await model.probability([{ role: 'user', content: 'a' }]);
+
+      // The old child's exit arrives while the replacement is still starting.
+      model.close();
+
+      const second = await model.probability([{ role: 'user', content: 'b' }]);
+      const third = await model.probability([{ role: 'user', content: 'c' }]);
+
+      expect(second).not.toBe(first);
+      expect(third).toBe(second);
+      model.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -86,11 +86,15 @@ export function turnModel(modelDir: string, workerScript: string, log: (line: st
     // The default.
   }
 
-  let worker: ChildProcess | null = null;
+  type Pending = Map<number, { resolve(p: number): void; reject(error: Error): void }>;
+  let worker: { child: ChildProcess; pending: Pending } | null = null;
   let next = 0;
-  const pending = new Map<number, { resolve(p: number): void; reject(error: Error): void }>();
-  const start = (): ChildProcess => {
+  // Each child answers and fails only its own requests, and clears `worker` only while it is still the one: a closed child's exit comes
+  // after a request may have started its replacement.
+  const start = (): { child: ChildProcess; pending: Pending } => {
     const child = spawn(process.execPath, [workerScript, `--model=${modelDir}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const pending: Pending = new Map();
+    const mine = { child, pending };
 
     createInterface({ input: child.stdout! }).on('line', (line) => {
       try {
@@ -111,7 +115,9 @@ export function turnModel(modelDir: string, workerScript: string, log: (line: st
     child.stderr!.on('data', (data: Buffer) => log(`turn model: ${data.toString('utf8').trim()}`));
     child.on('error', () => undefined);
     child.on('exit', () => {
-      worker = null;
+      if (worker === mine) {
+        worker = null;
+      }
 
       for (const waiting of pending.values()) {
         waiting.reject(new Error('The turn model stopped.'));
@@ -120,7 +126,7 @@ export function turnModel(modelDir: string, workerScript: string, log: (line: st
       pending.clear();
     });
 
-    return child;
+    return mine;
   };
 
   return {
@@ -131,11 +137,11 @@ export function turnModel(modelDir: string, workerScript: string, log: (line: st
 
         const id = next++;
 
-        pending.set(id, { resolve, reject });
-        worker.stdin!.write(`${JSON.stringify({ id, chat })}\n`);
+        worker.pending.set(id, { resolve, reject });
+        worker.child.stdin!.write(`${JSON.stringify({ id, chat })}\n`);
       }),
     close: () => {
-      worker?.kill();
+      worker?.child.kill();
       worker = null;
     },
   };

@@ -833,7 +833,7 @@ export class Dictation {
     }
   }
 
-  /** Capture was not in use for {@link RECOGNISER_IDLE_MS}: the recogniser is freed and no load ahead waiting runs. */
+  /** Capture was not in use for {@link RECOGNISER_IDLE_MS}: the recogniser is freed, the turn model's process closed and no load ahead waiting runs. */
   #unloadIdle(): void {
     this.#unloadTimer = null;
 
@@ -843,6 +843,8 @@ export class Dictation {
 
     this.#unloaded = true;
     this.#warmUrgent = false;
+    // The turn model's process holds about 670 MB (mechanics.md M166); it starts again at its next request.
+    this.deps.turn?.close();
 
     if (this.#warmTimer !== null) {
       this.#clearTimer(this.#warmTimer);

@@ -53,6 +53,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
   const used: string[] = [];
   let spoke = 0;
   let changed = 0;
+  let turnClosed = 0;
   /** The reply the fake speech plays, and what a barge-in's stop answers. */
   const speech: { playing: { replyId: string; text: string; voice: string } | null; until: number; interrupts: number; heard: { said: string; rest: string } } = { playing: null, until: -Infinity, interrupts: 0, heard: { said: '', rest: '' } };
   let id = 0;
@@ -82,7 +83,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
               chats.push(chat);
               return options.turn!(chat);
             },
-            close: () => undefined,
+            close: () => void turnClosed++,
           },
     watchMicUse: (onChanged, onFailed, onDevices) => {
       if (options.watcher === 'none') {
@@ -147,7 +148,7 @@ function setup(options: { turn?: (chat: ChatTurn[]) => number; watcher?: 'none' 
     recognizers.push({ load: false, at: clock.t });
   };
 
-  return { clock, capture, engine, sent, logs, chats, termsAsked, loads, recognizers, used, watch, settings, dictation, say, quiet, loud, listening, speech, spoke: () => spoke, changed: () => changed };
+  return { clock, capture, engine, sent, logs, chats, termsAsked, loads, recognizers, used, watch, settings, dictation, say, quiet, loud, listening, speech, spoke: () => spoke, changed: () => changed, turnClosed: () => turnClosed };
 }
 
 /** A WAV's PCM from `fixtures/echo`: real captures of a reply played aloud (README.md there). */
@@ -590,6 +591,29 @@ describe('Dictation', () => {
     dictation.close();
     clock.advance(COLLECT_AFTER_DROP_MS * 5);
     expect(collectAt).toHaveLength(2);
+  });
+
+  it('closes the turn model with the recogniser it frees for disuse, not while capture is in use, and asks it again after Mic on', async () => {
+    const { dictation, engine, chats, clock, watch, say, quiet, listening, turnClosed } = setup({ turn: () => 0.5, settings: { micIdleMinutes: 120 } });
+
+    await listening();
+    clock.advance(RECOGNISER_IDLE_MS + 1_000);
+    expect(turnClosed()).toBe(0);
+    dictation.mic(false);
+    clock.advance(RECOGNISER_IDLE_MS - 1);
+    expect([engine.freed, turnClosed()]).toEqual([0, 0]);
+    clock.advance(1);
+    expect([engine.freed, turnClosed()]).toEqual([1, 1]);
+
+    clock.advance(WARM_RELEASE_MS);
+    dictation.mic(true);
+    watch.changed!(false, []);
+    await settle();
+    say('fix the build', 100);
+    quiet(500);
+    await settle();
+    expect(chats.length).toBeGreaterThan(0);
+    expect(turnClosed()).toBe(1);
   });
 
   it('frees the recogniser once capture has gone unused for 30 minutes, never while it listens, and counts again from each Mic on', async () => {
