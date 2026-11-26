@@ -500,11 +500,21 @@ it("has xterm.js fit its scrollbar and input textarea to the screen after each f
  * own scrollbar covers the right edge of its screen; and the observer reports each change of the
  * screen's content box, as a browser's does, including the changes the console's own redraws cause.
  */
-function laidOut(box: { width: number; height: number }) {
-  const style = document.createElement('style');
+/** page.css as a style element, made once: jsdom parses a style element's sheet each time it enters the document, some 30 ms for page.css. */
+let pageStyle: HTMLStyleElement | null = null;
 
-  style.textContent = PAGE_ASSETS['page.css']!.body;
-  document.head.replaceChildren(style);
+function laidOut(box: { width: number; height: number }) {
+  if (pageStyle === null) {
+    pageStyle = document.createElement('style');
+    pageStyle.textContent = PAGE_ASSETS['page.css']!.body;
+  }
+
+  // Panes laid out one after another in a test keep the sheet parsed, and only the styles an earlier pane added go.
+  if (pageStyle.parentNode === document.head) {
+    [...document.head.childNodes].filter((node) => node !== pageStyle).forEach((node) => node.remove());
+  } else {
+    document.head.replaceChildren(pageStyle);
+  }
 
   let report: (() => void) | null = null;
   const scaled: Array<() => void> = [];
@@ -552,8 +562,28 @@ function laidOut(box: { width: number; height: number }) {
   const cellWidth = (): number => Math.floor((term.options.fontSize ?? CONSOLE_FONT_PX) * 0.55 * 2 * display.scale) / 2;
   const cellHeight = (): number => Math.ceil((term.options.fontSize ?? CONSOLE_FONT_PX) * 1.2);
   const height = (): number => box.height;
+  // jsdom matches every rule of page.css for a computed style, and the pane reads it many times a step: it is read again only when a class,
+  // inline style or the focus changes on the way from the screen up to the document.
+  let styleKey: string | null = null;
+  let screenCss: Pick<CSSStyleDeclaration, 'paddingLeft' | 'paddingRight' | 'paddingTop' | 'paddingBottom' | 'overflowX' | 'overflowY' | 'scrollbarGutter'> | null = null;
+  const screenStyle = () => {
+    let key = String(screen.contains(document.activeElement));
+
+    for (let element: Element | null = screen; element !== null; element = element.parentElement) {
+      key += `>${element.tagName}.${element.className}[${element.getAttribute('style') ?? ''}]`;
+    }
+
+    if (key !== styleKey) {
+      const { paddingLeft, paddingRight, paddingTop, paddingBottom, overflowX, overflowY, scrollbarGutter } = getComputedStyle(screen);
+
+      styleKey = key;
+      screenCss = { paddingLeft, paddingRight, paddingTop, paddingBottom, overflowX, overflowY, scrollbarGutter };
+    }
+
+    return screenCss!;
+  };
   const layout = () => {
-    const css = getComputedStyle(screen);
+    const css = screenStyle();
     const padX = parseFloat(css.paddingLeft) + parseFloat(css.paddingRight);
     const padY = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
     const width = term.cols * cellWidth();

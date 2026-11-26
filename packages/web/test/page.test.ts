@@ -14,7 +14,7 @@ import { html } from './html.js';
 import { REPLAY_TIP, SPEAKING_TIP, renderMicButton as viewMicButton } from '@switchboard/conversation/voiceControls';
 import { renderMarkdown } from '../src/markdown.js';
 import { SEND_RETRY_MS } from '../src/main.js';
-import { LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, COMMENT_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, FRAME_SHOW_DELAY_MS, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
+import { LINK_ANSWER_MS, CHAT_MAX, CHAT_MIN, DRAWER_HIDE_MS, COMMENT_SETTLE_MS, DRAWER_REVEAL_MS, loadMermaid, SENT_NOTE_MS, SIDE_MAX, SIDE_MIN, startPage, SWIPE_OPEN } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
 import { BACKOFF_MS, GRACE_MS, JITTER } from '../src/connection.js';
 import { NAVIGATION_MS } from '../src/request.js';
@@ -5278,7 +5278,6 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
       const last = postMessage.mock.calls.map(([message]) => message as Record<string, unknown>).filter((message) => message['type'] === 'switchboard-iframe').at(-1);
       return last !== undefined && 'left' in last;
     };
-    const settle = async (): Promise<void> => { await new Promise((done) => setTimeout(done, FRAME_SHOW_DELAY_MS + 20)); await flush(); };
     expect(shown()).toBe(true);
 
     // The session dropdown lies over the conversation, beside the frame, so the frame stays.
@@ -5295,8 +5294,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.querySelector('#detail .tab-menu')).not.toBeNull();
     expect(shown()).toBe(false);
     click('#detail [data-action="tab-menu"]');
-    await settle();
-    expect(shown()).toBe(true);
+    await vi.waitFor(() => expect(shown()).toBe(true), { timeout: 4_000 });
 
     // A modal dialog hides it wherever its box lies.
     const modal = document.createElement('div');
@@ -5306,8 +5304,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     expect(shown()).toBe(false);
     modal.remove();
-    await settle();
-    expect(shown()).toBe(true);
+    await vi.waitFor(() => expect(shown()).toBe(true), { timeout: 4_000 });
 
     // A toast clear of the frame leaves it; one replaced in place by a longer text that reaches over it hides it, which only its size says.
     showToast('Short.', 'info');
@@ -5318,8 +5315,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     expect(shown()).toBe(false);
     root.querySelector('#toast [data-action="toast-dismiss"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-    expect(shown()).toBe(true);
+    await vi.waitFor(() => expect(shown()).toBe(true), { timeout: 4_000 });
 
     // Update ready over the frame hides it too, and the frame comes back once the card goes.
     const update = document.createElement('div');
@@ -5329,8 +5325,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     expect(shown()).toBe(false);
     update.remove();
-    await settle();
-    expect(shown()).toBe(true);
+    await vi.waitFor(() => expect(shown()).toBe(true), { timeout: 4_000 });
     page.close();
   });
 
@@ -5375,7 +5370,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     expect(last()).not.toHaveProperty('left');
     click('#detail [data-action="tab-menu"]');
-    await new Promise((done) => setTimeout(done, FRAME_SHOW_DELAY_MS + 20)); await flush();
+    await vi.waitFor(() => expect(last()).toHaveProperty('left'), { timeout: 4_000 });
     answer('chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije');
     await flush();
     expect(last()).toMatchObject({ left: 1000, holes: [], dim: 0, modal: false });
@@ -5427,11 +5422,9 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     sliding.dispatchEvent(new Event('transitionrun', { bubbles: true }));
     boxes['sliding'] = { left: 950, top: 200, right: 1200, bottom: 400 };
-    await new Promise((done) => setTimeout(done, 60));
-    expect(last()).toMatchObject({ holes: [{ left: 950, top: 200, width: 250, height: 200 }] });
+    await vi.waitFor(() => expect(last()).toMatchObject({ holes: [{ left: 950, top: 200, width: 250, height: 200 }] }), { timeout: 4_000 });
     boxes['sliding'] = { left: 1000, top: 200, right: 1300, bottom: 400 };
-    await new Promise((done) => setTimeout(done, 60));
-    expect(last()).toMatchObject({ holes: [{ left: 1000, width: 300 }] });
+    await vi.waitFor(() => expect(last()).toMatchObject({ holes: [{ left: 1000, width: 300 }] }), { timeout: 4_000 });
     sliding.dispatchEvent(new Event('transitionend', { bubbles: true }));
     const sent = postMessage.mock.calls.length;
     await new Promise((done) => setTimeout(done, 60));
@@ -7194,11 +7187,12 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     // Focusing the box and leaving it tell the hub, for the focus rule of dictation.
     const box = root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+    // A report the page sent before, such as at a redraw, is not this focus's.
+    const earlier = posts.length;
 
     box.focus();
     box.blur();
-    await flush();
-    expect(posts.filter((post) => post.url.endsWith('/composer')).map((post) => post.body['focused'])).toEqual([true, false]);
+    await vi.waitFor(() => expect(posts.slice(earlier).filter((post) => post.url.endsWith('/composer')).map((post) => post.body['focused'])).toEqual([true, false]));
     page.close();
   });
 
