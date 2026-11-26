@@ -142,7 +142,7 @@ const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: n
 const items = [];
 for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
-  items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : i === 28 ? '\\n\\n~~~\\nnpm run build\\n~~~' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
+  items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : i === 28 ? '\\n\\n~~~\\nnpm run build --workspace @switchboard/web && npm run check:shell --workspace @switchboard/web\\n~~~' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
 }
 // The questions views: the first reply asks two questions, so their card is far above the end, where the session waits on a permission in its
 // terminal (questions) or has ended and takes a message, which resumes it (questions-ended, a Codex app-server session).
@@ -440,7 +440,7 @@ const measure = `(() => {
       };
     })(),
     // The conversation's heights: its header, the header and tab strip together, the timeline's pane and the composer.
-    heights: (() => { const tall = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().height) : null; }; return { header: tall('.header'), head: tall('#head'), panel: tall('#panel'), composer: tall('#composer'), notesLine: tall('.list-notes-toggle'), notes: tall('#list-notes') }; })(),
+    heights: (() => { const tall = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().height) : null; }; return { copyOverCode: [...document.querySelectorAll('.code-block')].filter(shown).filter((block) => { const copy = block.querySelector(':scope > .copy'); const pre = block.querySelector(':scope > pre'); if (!copy || !pre || !shown(copy)) return false; const a = copy.getBoundingClientRect(); const b = pre.getBoundingClientRect(); return a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5; }).length, header: tall('.header'), head: tall('#head'), panel: tall('#panel'), composer: tall('#composer'), notesLine: tall('.list-notes-toggle'), notes: tall('#list-notes') }; })(),
     tops: { header: top('.header'), listHeader: top('.list-header'), settingsHead: top('.settings-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
@@ -906,6 +906,8 @@ function failures(view, size, m) {
       if (hs.panel < 270) out.push('the timeline gets ' + hs.panel + ' px of a phone on its side');
     }
   }
+  // On a touch screen a code block's Copy, always shown, lies beside its code, not over it.
+  if (!size.mouse && m.heights.copyOverCode > 0) out.push(m.heights.copyOverCode + ' code blocks\' Copy lies over their code');
   // A phone folds the list's notes into one line, closed until tapped; elsewhere they show whole, with no line.
   if (view === 'list') {
     if (size.phone && (m.heights.notesLine === null || m.heights.notesLine > 46 || (m.heights.notes ?? 0) > 1)) out.push('the list\'s notes are not one closed line on a phone (line ' + m.heights.notesLine + ' px, notes ' + m.heights.notes + ' px)');

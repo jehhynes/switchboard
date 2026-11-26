@@ -849,6 +849,11 @@ body.artifact-window > .artifact-view { height: 100%; }
 @media (hover: none), (pointer: coarse) {
   .code-block > .copy { opacity: 1; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
   .meta .copy { display: none; }
+  /* Copy, always shown, sits beside the code rather than over its first lines; the code scrolls in its own box left of it. */
+  .code-block { display: flex; align-items: flex-start; gap: 4px; }
+  .code-block > pre { flex: 1 1 auto; min-width: 0; }
+  .code-block > .copy { position: static; flex: none; order: 1; margin-top: 8px; background: transparent; }
+  .md-doc .code-block > .copy { margin-top: 1em; }
   button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .question-waiting, .artifact-open, .toast .dismiss, .conn-update button.conn-reload { min-height: 44px; }
   .qc-menu-button { min-width: 44px; }
   .question-waiting { border-radius: 22px; font-size: 13px; }
