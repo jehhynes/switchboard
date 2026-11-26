@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Attachment, HolderClient, HolderError, Viewer } from '../src/client.js';
-import { Raw, TOKEN, startHost, tick } from './fakes.js';
+import { Raw, TOKEN, startHost, until } from './fakes.js';
 import type { TestHost } from './fakes.js';
 import headless from '@xterm/headless';
 import { mouseEncoding } from '../src/host.js';
@@ -65,8 +65,7 @@ describe('handshake', () => {
     raw.send({ type: 'hello', token: 'wrong' });
     await raw.until((m) => m.type === 'error');
     expect(state.host.connections()).toBe(1);
-    await tick(1500);
-    expect(state.host.connections()).toBe(0);
+    await until(() => expect(state.host.connections()).toBe(0));
     expect(raw.messages).toEqual([{ type: 'error', message: 'Wrong token.' }]);
     raw.socket.destroy();
   });
@@ -228,8 +227,7 @@ describe('sessions', () => {
     await client.spawn(spawnRequest('s1'));
     state.ptys[0]!.exit(0);
     expect((await client.list()).length).toBe(1);
-    await tick(200);
-    expect(await client.list()).toEqual([]);
+    await until(async () => expect(await client.list()).toEqual([]));
     client.close();
   });
 
@@ -287,8 +285,7 @@ describe('sessions', () => {
 
     client.onClose((error) => closed.push(error));
     await state.host.close();
-    await tick(50);
-    expect(closed.map((error) => error.message)).toEqual(['The terminal holder closed the connection.']);
+    await until(() => expect(closed.map((error) => error.message)).toEqual(['The terminal holder closed the connection.']));
     await expect(client.list()).rejects.toThrow('The terminal holder closed the connection.');
     current = null;
   });
@@ -307,11 +304,11 @@ describe('watch', () => {
 
     const attachment = await Attachment.open({ port: state.port, token: TOKEN, session: 's1', cols: 100, rows: 30, onData: () => undefined });
 
-    await tick();
+    await until(() => expect(events).toHaveLength(1));
     attachment.close();
-    await tick();
+    await until(() => expect(events).toHaveLength(2));
     state.ptys[0]!.exit(7);
-    await tick();
+    await until(() => expect(events).toHaveLength(3));
     expect(events).toEqual([
       { type: 'attached', session: 's1', clients: 1 },
       { type: 'detached', session: 's1', clients: 0 },
@@ -354,15 +351,13 @@ describe('attach', () => {
 
     const one = await attachTo(state, 's1', 120, 40);
 
-    await tick();
+    await until(() => expect(one.isReplayed()).toBe(true));
     expect(state.ptys[0]!.sizes).toEqual([[120, 40]]);
-    await expect.poll(one.isReplayed).toBe(true);
     expect(one.received.join('')).toContain('hello \u001b[1mworld');
     state.ptys[0]!.emit('more');
     one.attachment.input('\u001b[200~pasted\u001b[201~\r');
-    await tick();
-    expect(one.received.at(-1)).toBe('more');
-    expect(state.ptys[0]!.writes).toEqual(['\u001b[200~pasted\u001b[201~\r']);
+    await until(() => expect(state.ptys[0]!.writes).toEqual(['\u001b[200~pasted\u001b[201~\r']));
+    await until(() => expect(one.received.at(-1)).toBe('more'));
     expect((await client.list())[0]).toMatchObject({ clients: 1, lastInputAt: 9000, lastOutputAt: 9000 });
     one.attachment.close();
     client.close();
@@ -376,20 +371,18 @@ describe('attach', () => {
 
     const wide = await attachTo(state, 's1', 120, 40);
 
-    await tick();
+    await until(() => expect(wide.isReplayed()).toBe(true));
 
     const narrow = await attachTo(state, 's1', 80, 30);
 
-    await tick();
+    await until(() => expect(narrow.isReplayed()).toBe(true));
     state.ptys[0]!.emit('to both');
     wide.attachment.input('k');
-    await tick();
+    await until(() => expect(state.ptys[0]!.writes).toEqual(['k']));
     expect(state.ptys[0]!.sizes).toEqual([[120, 40], [80, 30], [120, 40]]);
-    expect(wide.received.at(-1)).toBe('to both');
-    expect(narrow.received.at(-1)).toBe('to both');
+    await until(() => expect([wide.received.at(-1), narrow.received.at(-1)]).toEqual(['to both', 'to both']));
     narrow.attachment.resize(90, 30);
-    await tick();
-    expect(state.ptys[0]!.sizes.at(-1)).toEqual([90, 30]);
+    await until(() => expect(state.ptys[0]!.sizes.at(-1)).toEqual([90, 30]));
     wide.attachment.close();
     narrow.attachment.close();
     client.close();
@@ -403,12 +396,11 @@ describe('attach', () => {
 
     const one = await attachTo(state, 's1', 100, 30);
 
-    await tick();
+    await until(() => expect(one.isReplayed()).toBe(true));
     state.ptys[0]!.emit('bye\r\n');
     state.ptys[0]!.exit(2);
-    await tick(100);
+    await until(() => expect(one.closes).toEqual([null]));
     expect(one.exits).toEqual([2]);
-    expect(one.closes).toEqual([null]);
     expect(one.received.at(-1)).toBe('bye\r\n');
     client.close();
   });
@@ -429,8 +421,7 @@ describe('attach', () => {
 
       const one = await attachTo(state, `s${index}`, 100, 30);
 
-      await tick();
-      expect(one.isReplayed()).toBe(true);
+      await until(() => expect(one.isReplayed()).toBe(true));
 
       const terminal = new headless.Terminal({ cols: 100, rows: 30, allowProposedApi: true });
 
@@ -463,7 +454,8 @@ describe('attach', () => {
     const late = await attachTo(state, 's1', 100, 30);
 
     late.attachment.input('typed after the exit');
-    await tick(100);
+    // The host closes the attachment after the exit, so the input before it was read and ignored.
+    await until(() => expect(late.closes).toEqual([null]));
     expect(late.received.join('')).toContain('last words');
     expect(late.exits).toEqual([5]);
     expect(state.ptys[0]!.sizes).toEqual([]);
@@ -475,8 +467,7 @@ describe('attach', () => {
     const state = await started();
     const one = await attachTo(state, 'nope', 100, 30);
 
-    await tick(100);
-    expect(one.closes).toEqual(['No session nope is held.']);
+    await until(() => expect(one.closes).toEqual(['No session nope is held.']));
   });
 
   it('sends a replay over 512 KiB as several replay messages in order, each line under 1 MiB, at the pace the client reads', async () => {
@@ -543,7 +534,7 @@ describe('attach', () => {
 
     const one = await attachTo(state, 's1', 40, 5);
 
-    await tick(100);
+    await until(() => expect(one.isReplayed()).toBe(true));
 
     const screen = await client.screen('s1');
 
@@ -601,7 +592,7 @@ describe('attach', () => {
 
     const fast = await attachTo(state, 's1', 100, 30);
 
-    await tick();
+    await until(() => expect(fast.isReplayed()).toBe(true));
 
     // Fill the paused client's kernel buffer, whose size differs by platform, while the reader keeps up.
     let bytes = 0;
@@ -670,7 +661,8 @@ describe('ending a session by closing its terminal', () => {
 
     const killed = client.kill('s1');
 
-    await tick(50);
+    // The terminal is closing; the program exits 300 ms later.
+    await until(() => expect(closes).toEqual([1000]));
     raw.send({ type: 'resize', cols: 90, rows: 20 });
     raw.send({ type: 'input', data: 'typed' });
     expect(await killed).toBe(129);
@@ -808,9 +800,8 @@ describe('snapshot', () => {
     raw.send({ type: 'attach', session: 's1', cols: 30, rows: 3 });
     await raw.until((m) => m.type === 'replayed');
     raw.send({ type: 'input', data: 'x' });
-    await tick();
     // The attach resized the terminal and the client typed.
-    expect((await client.snapshot('s1', 0)).rev).toBe(3);
+    await until(async () => expect((await client.snapshot('s1', 0)).rev).toBe(3));
     raw.socket.destroy();
     client.close();
   });
@@ -866,8 +857,7 @@ describe('write', () => {
     raw.send({ type: 'attach', session: 's1', cols: 20, rows: 3 });
     await raw.until((m) => m.type === 'replayed');
     raw.send({ type: 'input', data: 'x' });
-    await tick();
-    expect((await client.snapshot('s1', 0)).keyAt).toEqual(expect.any(Number));
+    await until(async () => expect((await client.snapshot('s1', 0)).keyAt).toEqual(expect.any(Number)));
     raw.socket.destroy();
     client.close();
   });
@@ -879,7 +869,6 @@ describe('write', () => {
     await expect(client.write('nope', 'x')).rejects.toMatchObject({ message: 'No session nope is held.', refused: true });
     await client.spawn(spawnRequest('s1'));
     state.ptys[0]!.exit(0);
-    await tick();
     await expect(client.write('s1', 'x')).rejects.toThrow('Session s1 has ended.');
     expect(state.ptys[0]!.writes).toEqual([]);
     expect((await client.list()).map((entry) => entry.session)).toEqual(['s1']);
@@ -934,8 +923,7 @@ describe('view', () => {
 
     const one = await viewOf(state, 's1');
 
-    await tick();
-    expect(one.isReplayed()).toBe(true);
+    await until(() => expect(one.isReplayed()).toBe(true));
     expect(one.events[0]).toEqual([80, 24]);
     expect(String(one.events[1])).toContain('hello');
     expect(state.ptys[0]!.sizes).toEqual([]);
@@ -944,10 +932,9 @@ describe('view', () => {
     state.ptys[0]!.emit('old size');
     const attached = await Attachment.open({ port: state.port, token: TOKEN, session: 's1', cols: 120, rows: 40, onData: () => undefined });
 
-    await tick();
+    await until(() => expect(one.events.at(-1)).toEqual([120, 40]));
     state.ptys[0]!.emit('new size');
-    await tick();
-    expect(one.events.slice(-3)).toEqual(['old size', [120, 40], 'new size']);
+    await until(() => expect(one.events.slice(-3)).toEqual(['old size', [120, 40], 'new size']));
     attached.close();
     one.viewer.close();
     client.close();
@@ -1006,10 +993,9 @@ describe('view', () => {
 
     const one = await viewOf(state, 's1');
 
-    await tick();
+    await until(() => expect(one.isReplayed()).toBe(true));
     state.ptys[0]!.exit(3);
-    await tick();
-    expect(one.exits).toEqual([3]);
+    await until(() => expect(one.exits).toEqual([3]));
 
     const raw = await Raw.ready(state.port);
 
@@ -1042,7 +1028,8 @@ describe('view limits', () => {
 
     raw.socket.pause();
     raw.send({ type: 'view', session: 's1' });
-    await tick(300);
+    // The replay has started to arrive, so the output below queues behind it.
+    await until(() => expect(raw.socket.readableLength).toBeGreaterThan(0));
     state.ptys[0]!.emit('y'.repeat(3000));
     state.ptys[0]!.emit('z'.repeat(3000));
     raw.socket.resume();
@@ -1064,7 +1051,6 @@ describe('size', () => {
     expect((await client.list())[0]).toMatchObject({ clients: 0 });
     await expect(client.size('nope', 100, 30)).rejects.toMatchObject({ message: 'No session nope is held.', refused: true });
     state.ptys[0]!.exit(0);
-    await tick();
     await expect(client.size('s1', 90, 30)).rejects.toThrow('Session s1 has ended.');
     client.welcome = { ...client.welcome, features: ['snapshot', 'write'] };
     await expect(client.size('s1', 90, 30)).rejects.toThrow('it is from an older build');

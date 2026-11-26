@@ -1,4 +1,5 @@
 import { connect } from 'node:net';
+import { vi } from 'vitest';
 import type { Socket } from 'node:net';
 import { Host } from '../src/host.js';
 import type { HostOptions, Pty } from '../src/host.js';
@@ -182,4 +183,5 @@ export class Raw {
   }
 }
 
-export const tick = (ms = 30): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/** Waits until `check` passes, within the test's own 5-second timeout, for work the host does on its own sockets and timers. */
+export const until = (check: () => unknown): Promise<unknown> => vi.waitFor(check, { timeout: 4_500, interval: 5 });
