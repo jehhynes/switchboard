@@ -235,14 +235,14 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     await settle();
     // A number's unit follows it rather than sitting in its label.
     expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-unit')?.textContent).toBe('s');
-    expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Replies', 'Diffs'], labels: ['Show alerts in', 'Needs-you sound', 'Fold reply details', 'Layout', 'Wrap long lines'] });
+    expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Conversations', 'Diffs'], labels: ['Show alerts in', 'Needs-you sound', 'Show message times and notes', 'Fold reply details', 'Layout', 'Wrap long lines'] });
     // Spoken alerts are on Spoken replies, which a line in Notifications opens.
     expect(host.querySelector('.settings-link-row')?.textContent).toBe('Spoken alerts are on Spoken replies.Open Spoken replies');
     host.querySelector<HTMLButtonElement>('.settings-link-row button')!.click();
     await settle();
     expect(host.querySelector('.settings-page-title h2')?.firstChild?.textContent).toBe('Spoken replies');
     expect(host.querySelector('.settings-page-title h2 .settings-experimental')?.textContent).toBe('Experimental');
-    expect(host.querySelector('.settings-experimental-note')?.textContent).toBe('Spoken replies may be unreliable. Replies are spoken only after you turn them on in a conversation’s View options; spoken alerts have their own switch below.');
+    expect(host.querySelector('.settings-experimental-note')?.textContent).toBe('Spoken replies may be unreliable. Replies are spoken only while Speak replies is on; spoken alerts have their own switch below.');
     await go('display');
     expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Installed app, else a notification', 'Any open page, else a notification', 'Notifications only']);
     // The diff viewer's layout and wrapping, set once for every page.

@@ -326,195 +326,6 @@ describe('the page', () => {
     page.close();
   });
 
-  it('opens the persona dialog from the view options menu, keeps it open over stream events, and pins the one picked', async () => {
-    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
-      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
-
-      return {
-        status: 200,
-        ok: true,
-        json: async () => (url.endsWith('/personas') ? { personas: [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm and brief.' }, { id: 'iris', name: 'Iris', voice: 'marin', style: 'none', personality: '' }] } : {}),
-        text: async () => '',
-      } as unknown as Response;
-    });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
-    const source = FakeSource.last!;
-
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: false } })], items: [], more: false, state: null, artifacts: [] });
-    // The header has no persona button of its own any more.
-    expect(root.querySelector('button.persona, .persona-anchor')).toBeNull();
-    root.querySelector<HTMLElement>('button.view-options')!.click();
-
-    const row = root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!;
-
-    expect(row.querySelector('.title')?.textContent).toBe('Persona: Nova');
-    expect(row.querySelector('.menu-note')?.textContent).toBe('Pinned');
-    expect(row.querySelector('.codicon-pinned')).not.toBeNull();
-    expect(row.getAttribute('aria-haspopup')).toBe('dialog');
-    row.click();
-    // The menu closes, the dialog opens with the rest of the page inert, and Close has the focus while the roster loads.
-    expect(root.querySelector('.view-options-menu')).toBeNull();
-
-    const dialog = root.querySelector<HTMLElement>('.persona-dialog[role="dialog"]')!;
-
-    expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(dialog.querySelector('.persona-body')?.textContent).toBe('Loading…');
-    expect(document.activeElement?.classList.contains('persona-close')).toBe(true);
-    expect(root.querySelector('#head')?.closest('[inert]')).not.toBeNull();
-    expect(root.querySelector('#panel')?.closest('[inert]')).not.toBeNull();
-    expect(dialog.closest('[inert]')).toBeNull();
-    // The toast stays live over it: a failure is read out and Dismiss works.
-    expect(root.querySelector('#toast')?.closest('[inert]')).toBeNull();
-    await flush();
-    await flush();
-    source.emit('reply', { reply: reply('r1', 1) });
-
-    const options = [...root.querySelectorAll<HTMLElement>('.persona-option')];
-
-    expect(options.map((one) => [one.querySelector('.persona-name')?.textContent, one.getAttribute('aria-current')])).toEqual([
-      ['NovaCurrent, pinned', 'true'],
-      ['Iris', null],
-    ]);
-    expect(options[0]!.textContent).toContain('Voice Cedar · Style Pair');
-    expect(options[0]!.querySelector('.persona-personality')?.textContent).toBe('Warm and brief.');
-    expect(options[1]!.textContent).toContain('No personality');
-    // The current persona takes the focus from Close once the roster shows.
-    expect(document.activeElement).toBe(options[0]);
-    expect(root.querySelector('.persona-bar [data-persona=""]')?.textContent).toBe('Clear pin');
-    root.querySelector<HTMLElement>('.persona-option[data-persona="iris"]')!.click();
-    await flush();
-    expect(posts.find((post) => post.url.endsWith('/persona'))?.body).toMatchObject({ sessionId: 's', personaId: 'iris' });
-    expect(root.querySelector('.persona-backdrop')).toBeNull();
-    expect(root.querySelector('#head')?.closest('[inert]')).toBeNull();
-    expect(document.activeElement?.classList.contains('view-options')).toBe(true);
-    page.close();
-  });
-
-  it('clears a pin from the persona dialog, and closes it on Escape, on Close and on its backdrop but not on a press inside it', async () => {
-    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
-      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
-
-      return { status: 200, ok: true, json: async () => (url.endsWith('/personas') ? { personas: [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: '' }] } : {}), text: async () => '' } as unknown as Response;
-    });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
-    const source = FakeSource.last!;
-    const open = async (): Promise<void> => {
-      root.querySelector<HTMLElement>('button.view-options')!.click();
-      root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!.click();
-      await flush();
-      await flush();
-    };
-
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: true } })], items: [], more: false, state: null, artifacts: [] });
-    await open();
-    expect(root.querySelector('.persona-body .persona-note')?.textContent).toBe("The session takes Nova's tone when it next resumes.");
-    root.querySelector<HTMLElement>('.persona-body')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(root.querySelector('.persona-backdrop')).not.toBeNull();
-    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.querySelector('.persona-backdrop')).toBeNull();
-    expect(document.activeElement?.classList.contains('view-options')).toBe(true);
-    await open();
-    root.querySelector<HTMLElement>('.persona-close')!.click();
-    expect(root.querySelector('.persona-backdrop')).toBeNull();
-    await open();
-    root.querySelector<HTMLElement>('.persona-backdrop')!.click();
-    expect(root.querySelector('.persona-backdrop')).toBeNull();
-    await open();
-    root.querySelector<HTMLElement>('.persona-bar [data-persona=""]')!.click();
-    await flush();
-    expect(posts.find((post) => post.url.endsWith('/persona'))?.body).toMatchObject({ sessionId: 's', personaId: null });
-    expect(root.querySelector('.persona-backdrop')).toBeNull();
-    page.close();
-  });
-
-  it('names the persona the session has, pinned or not, or None, offering it only when it can take a pin, and pins from the dialog', async () => {
-    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
-      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
-
-      return { status: 200, ok: true, json: async () => (url.endsWith('/personas') ? { personas: [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: '' }] } : {}), text: async () => '' } as unknown as Response;
-    });
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
-    const source = FakeSource.last!;
-
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: false })], items: [], more: false, state: null, artifacts: [] });
-    root.querySelector<HTMLElement>('button.view-options')!.click();
-    expect(root.querySelector('.view-options-menu')).not.toBeNull();
-    expect(root.querySelector('.view-options-menu [data-action="persona"]')).toBeNull();
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, state: null, artifacts: [] });
-
-    const row = root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!;
-
-    expect(row.querySelector('.title')?.textContent).toBe('Persona: None');
-    expect(row.querySelector('.menu-note')).toBeNull();
-    // A persona resolved at the start, from the playbook or the pool, is named with no pin.
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'iris', name: 'Iris', pinned: false, tonePending: false }, canPin: true })], items: [], more: false, state: null, artifacts: [] });
-    expect(root.querySelector('.view-options-menu [data-action="persona"] .title')?.textContent).toBe('Persona: Iris');
-    expect(root.querySelector('.view-options-menu [data-action="persona"] .menu-note')).toBeNull();
-    expect(root.querySelector('.view-options-menu [data-action="persona"] .codicon-person')).not.toBeNull();
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, state: null, artifacts: [] });
-    expect(row.title).toBe('No persona. Choose one for this session.');
-    expect(row.querySelector('.codicon-person')).not.toBeNull();
-    row.click();
-    await flush();
-    await flush();
-    expect([...root.querySelectorAll('.persona-option')].map((one) => one.getAttribute('aria-current'))).toEqual([null]);
-    expect(root.querySelector('.persona-bar')).toBeNull();
-    root.querySelector<HTMLElement>('.persona-option[data-persona="nova"]')!.click();
-    await flush();
-    expect(posts.find((post) => post.url.endsWith('/persona'))?.body).toMatchObject({ sessionId: 's', personaId: 'nova' });
-    page.close();
-  });
-
-  it('closes the persona dialog when another conversation replaces it, and drops a roster answer for an earlier opening', async () => {
-    const answers: Array<(value: Response) => void> = [];
-    const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
-      posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
-
-      return url.endsWith('/personas') ? new Promise<Response>((resolve) => answers.push(resolve)) : ({ status: 200, ok: true, json: async () => ({}), text: async () => '' } as unknown as Response);
-    });
-    const roster = (name: string): Response => ({ status: 200, ok: true, json: async () => ({ personas: [{ id: name.toLowerCase(), name, voice: 'cedar', style: 'pair', personality: '' }] }), text: async () => '' }) as unknown as Response;
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
-    const source = FakeSource.last!;
-    const open = (): void => {
-      root.querySelector<HTMLElement>('button.view-options')!.click();
-      root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!.click();
-    };
-
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, state: null, artifacts: [] });
-    open();
-    root.querySelector<HTMLElement>('.persona-close')!.click();
-    open();
-    answers[0]!(roster('Old'));
-    await flush();
-    await flush();
-    expect(root.querySelector('.persona-body')?.textContent).toBe('Loading…');
-    answers[1]!(roster('Nova'));
-    await flush();
-    await flush();
-    expect([...root.querySelectorAll('.persona-option')].map((one) => one.getAttribute('data-persona'))).toEqual(['nova']);
-    // Another conversation replaces the one the dialog opened for, so no pick can pin its session.
-    source.emit('scope', { scope: { ...scope, scopeGen: scope.scopeGen + 1 } });
-    expect(root.querySelector('.persona-backdrop')).toBeNull();
-    expect(root.querySelector('#head')?.closest('[inert]')).toBeNull();
-    expect(posts.some((post) => post.url.endsWith('/persona'))).toBe(false);
-    page.close();
-  });
-
-  it("shows why the persona dialog has no roster", async () => {
-    const fetch = vi.fn(async (url: string) => ({ status: 200, ok: true, json: async () => (url.endsWith('/personas') ? { personas: [] } : {}), text: async () => '' }) as unknown as Response);
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
-    const source = FakeSource.last!;
-
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: null, canPin: true })], items: [], more: false, state: null, artifacts: [] });
-    root.querySelector<HTMLElement>('button.view-options')!.click();
-    root.querySelector<HTMLElement>('.view-options-menu [data-action="persona"]')!.click();
-    await flush();
-    await flush();
-    expect(root.querySelector('.persona-message')?.textContent).toBe('No personas. Add them to voice.personas in settings.json, with voice.enabled on.');
-    expect(root.querySelector('.persona-option')).toBeNull();
-    page.close();
-  });
-
   it('brings the conversation back where the operator left it after the Status tab', () => {
     const { page, source } = start();
 
@@ -556,17 +367,19 @@ describe('the page', () => {
   it('keeps the focus on a voice control over an unrelated stream event, and opens one header menu at a time', () => {
     const { page, source } = start();
 
-    source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session({ persona: { id: 'p', name: 'P', pinned: false, tonePending: false } })], items: [], more: false, state: null, artifacts: [], voice: { enabled: true, here: true, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null } });
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { actions: [{ label: 'Mark done', action: 'done', icon: 'check', group: 'state', confirm: null, input: null }] })])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [], voice: { enabled: true, here: true, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null } });
 
     const control = root.querySelector<HTMLElement>('.voice-controls button')!;
 
     control.focus();
     source.emit('unread', { workItemId: 1, count: 1 });
     expect(document.activeElement).toBe(control);
-    root.querySelector<HTMLElement>('button.view-options')!.click();
+    root.querySelector<HTMLElement>('button.actions')!.click();
     root.querySelector<HTMLElement>('button.picker')!.click();
     expect(root.querySelectorAll('.conversation-menu')).toHaveLength(1);
-    expect(root.querySelector('.view-options-menu')).toBeNull();
+    expect(root.querySelector('.actions-menu')).toBeNull();
+    // The header has no View options button (operator decision 2026-11-26).
+    expect(root.querySelector('button.view-options, .view-options-menu, [data-action="view-menu"]')).toBeNull();
     page.close();
   });
 

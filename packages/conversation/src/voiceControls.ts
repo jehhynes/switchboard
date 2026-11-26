@@ -54,7 +54,7 @@ export function renderVoiceControls(voice: VoiceControlsView | null, live = true
     `<button class="ghost icon" type="button" data-key="voice-${data}" data-voice="${data}" title="${escape(title)}" aria-label="${escape(title)}"${extra}><span class="codicon codicon-${name}" aria-hidden="true"></span></button>`;
   // While this window's session speaks, a click stops the reply: turning Spoken replies off stops it with everything offered (the hub sends `stop`
   // first), and while it is off, a reply still plays only as a Replay or an alert's answer, which the click stops, leaving Spoken replies off.
-  // Spoken replies are experimental and off until turned on in View options, so while off and silent the composer shows no speaker at all.
+  // Spoken replies are experimental and off until turned on in Settings, so while off and silent the composer shows no speaker at all.
   const speaking = voice.here && voice.speaking !== null;
   const speakReplies = voice.speakReplies
     ? icon('unmute', speaking ? SPEAKING_TIP : 'Spoken replies (experimental): on. Click to turn them off.', 'speak-replies', ' aria-pressed="true"')

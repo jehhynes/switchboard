@@ -77,7 +77,7 @@ function Reply({ item, earlier, open: opened, details, stamped: shown, card: car
     );
   }
 
-  // Focused mode, with Collapse details on: a reply shows its primary response first, spoken or not, then the first lines of its
+  // Focused mode, with Fold reply details on: a reply shows its primary response first, spoken or not, then the first lines of its
   // details fading out, and a click or a tap on it, or Enter or Space on the fade, opens it. The newest reply shows whole until a newer one comes. The primary response keeps its place when the whole reply
   // shows; after the operator spoke over it, the part not heard is dimmed.
   // A reply with no [details] line is all primary response, question markup included, which shows no more than the text does.
@@ -92,7 +92,7 @@ function Reply({ item, earlier, open: opened, details, stamped: shown, card: car
   // Only the text that ends the reply can end in the card's questions, which it leaves out; questions before a passage fold into one line.
   const markdownPart = (text: string, last: boolean): string => (card === null ? renderMarkdown(text) : withoutQuestions(text, last ? `reply:${item.id}` : `reply:${item.id}:before`, opened, last));
   const said = item.spoken.state === 'interrupted' ? item.spoken.saidChars : null;
-  // With Collapse details on, details that follow the whole primary response draw in the fade's box, opened or not, so opening the reply, or
+  // With Fold reply details on, details that follow the whole primary response draw in the fade's box, opened or not, so opening the reply, or
   // folding the newest once a newer reply comes, moves none of its lines; only the box's height and mask change. Details around or before a passage show in their places once opened.
   const parts = folded && briefReplies ? spokenParts(opening, passage) : null;
   const trailing = parts !== null && parts.length === 2 && parts[0]!.spoken && !parts[1]!.spoken;
@@ -363,8 +363,7 @@ export function timelineInputs(state: PageState, view: View, now: number): unkno
     state.connected,
     state.more,
     state.briefReplies,
-    view.details,
-    view.briefReplies,
+    state.messageTimes,
     JSON.stringify(view.newDraft),
     JSON.stringify(view.prompt),
     [...view.open].join('\n'),
@@ -399,14 +398,14 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   const shownPrompt = view.prompt !== null && view.prompt.sessionId === state.session.id ? view.prompt : null;
   const spinner = turnRow(state.session, inTurn(state.session) || awaitingReply(state.items, state.session), shownPrompt?.prompt != null) ?? backgroundRow(state.session);
   let lastDay: number | null = null;
-  // The newest reply, not an aside or a note, which Collapse details leaves open until a newer one comes (PRD R96).
+  // The newest reply, not an aside or a note, which Fold reply details leaves open until a newer one comes (PRD R96).
   const newest = [...entries].reverse().find((entry) => entry.type === 'reply' && entry.item.kind === 'reply');
   const latest = newest?.type === 'reply' ? newest.item.id : null;
-  const briefReplies = view.briefReplies ?? state.briefReplies;
+  const briefReplies = state.briefReplies;
   const replyRow = (item: ReplyView, earlier: ReplyView | null, shown: boolean, isLatest: boolean): VNode => {
     const card = item.kind === 'reply' ? cardHtml(`reply:${item.id}`, links, view, state, canAnswer) : null;
 
-    return <KeptReply key={item.id} item={item} earlier={earlier} open={view.open} folds={foldsOf(view.open, item.id, card !== null)} details={view.details} stamped={shown} card={card} briefReplies={briefReplies} latest={isLatest} />;
+    return <KeptReply key={item.id} item={item} earlier={earlier} open={view.open} folds={foldsOf(view.open, item.id, card !== null)} details={state.messageTimes} stamped={shown} card={card} briefReplies={briefReplies} latest={isLatest} />;
   };
   const rows = entries.flatMap((entry) => {
     if (entry.type === 'artifact') {
@@ -427,10 +426,10 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
 
     // The first item after a day's divider shows its time; with message details on, every item does.
     const timed = entry.type === 'message' || entry.item.kind !== 'note';
-    const shown = stamped(timed, view.details, divider !== null);
+    const shown = stamped(timed, state.messageTimes, divider !== null);
     const row =
       entry.type === 'message' ? (
-        <KeptMessage key={entry.item.id} item={entry.item} stamped={shown} details={view.details} answered={links.answers.get(entry.item.id) ?? NONE} />
+        <KeptMessage key={entry.item.id} item={entry.item} stamped={shown} details={state.messageTimes} answered={links.answers.get(entry.item.id) ?? NONE} />
       ) : (
         replyRow(entry.item, entry.earlier, shown, entry.item.id === latest)
       );

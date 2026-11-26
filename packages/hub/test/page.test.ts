@@ -941,7 +941,7 @@ describe('the web page routes', () => {
           return { status: 200, body: { started: true } };
         },
         ...Object.fromEntries(
-          ['row-open', 'row-command', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies', 'page-new-session', 'page-folders'].map((command) => [
+          ['row-open', 'row-command', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'page-new-session', 'page-folders'].map((command) => [
             `/v1/conversation/${command}`,
             async (body: unknown) => {
               posted.push(body);
@@ -1396,10 +1396,10 @@ describe('the web page routes', () => {
     // A code typed on this computer is not a link.
     expect((await send(server.port, 'GET', `/page?code=${code}`, {})).status).toBe(403);
 
-    // A paired device posts from its own origin and may not pair, list devices, drive the browser pane, open a link, a held terminal or VS Code on this computer, restart the holder, use Settings or set Brief replies.
+    // A paired device posts from its own origin and may not pair, list devices, drive the browser pane, open a link, a held terminal or VS Code on this computer, restart the holder, or use Settings.
     expect((await post('page-source', { ...ts, Cookie: phone, Origin: here })).status).toBe(403);
     expect((await post('page-source', { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' })).status).toBe(200);
-    for (const command of ['page-pair', 'page-devices', 'page-device-revoke', 'held-open', 'row-open', 'row-command', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']) {
+    for (const command of ['page-pair', 'page-devices', 'page-device-revoke', 'held-open', 'row-open', 'row-command', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']) {
       const refused = await post(command, { ...ts, Cookie: phone, Origin: 'https://pc.tail.ts.net' });
 
       expect(refused.status).toBe(403);
@@ -1419,11 +1419,11 @@ describe('the web page routes', () => {
     }
 
     // This computer's page still opens links and VS Code, restarts the holder and uses Settings.
-    for (const command of ['held-open', 'row-open', 'row-command', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']) {
+    for (const command of ['held-open', 'row-open', 'row-command', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']) {
       expect((await post(command, { Cookie: localCookie, Origin: here })).status).toBe(200);
     }
 
-    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'row-open', 'row-command', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer', 'brief-replies']);
+    expect([...LOCAL_PAGE_COMMANDS]).toEqual(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'row-open', 'row-command', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']);
 
     const devices = JSON.parse((await post('page-devices', { Cookie: localCookie, Origin: here })).body) as { devices: Array<{ id: string; label: string; host: string | null; login: string | null; current: boolean }> };
 

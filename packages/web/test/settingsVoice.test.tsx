@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { CHECK_DELAY_MS, settings } from '../src/settings.js';
+import type { SettingsDeps } from '../src/settings.js';
 import { getAt } from '../src/settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
@@ -42,13 +43,14 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     vi.useRealTimers();
   });
 
-  const open = async () => {
+  const open = async (deps: Partial<SettingsDeps> = {}) => {
     const pane = settings(host, {
       post: async (name, body) => {
         posts.push({ name, body });
         const answer = answers[name];
         return typeof answer === 'function' ? answer(body) : (answer ?? { status: 404, body: {} });
       },
+      ...deps,
     });
 
     pane.open();
@@ -113,10 +115,10 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
 
     expect(host.querySelector('.settings-page-title h2')?.firstChild?.textContent).toBe('Spoken replies');
     expect(host.querySelector('.settings-page-title h2 .settings-experimental')?.textContent).toBe('Experimental');
-    expect(host.querySelector('.settings-experimental-note')?.textContent).toBe('Spoken replies may be unreliable. Replies are spoken only after you turn them on in a conversation’s View options; spoken alerts have their own switch below.');
+    expect(host.querySelector('.settings-experimental-note')?.textContent).toBe('Spoken replies may be unreliable. Replies are spoken only while Speak replies is on; spoken alerts have their own switch below.');
     expect(host.querySelector('.settings-lede')?.textContent).toBe('Switchboard speaks replies and alerts to you.');
     expect(headings()).toEqual(['Voice', 'Replies', 'Spoken alerts']);
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Use voice', 'Speaker', 'Voice', 'Style', 'Speed', 'Expressive delivery', 'Stop speaking when you are away for', 'Spoken alerts', 'Your name', 'Alert when', 'Answer window']);
+    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Use voice', 'Speaker', 'Speak replies', 'Voice', 'Style', 'Speed', 'Expressive delivery', 'Stop speaking when you are away for', 'Spoken alerts', 'Your name', 'Alert when', 'Answer window']);
     // The three Alert when boxes are one row.
     expect(texts('.settings-row.group .settings-check label:not(.settings-box)')).toEqual(['A turn finishes', 'A question', 'A permission prompt']);
     expect(control<HTMLSelectElement>('voice.voice').value).toBe('cedar');
@@ -131,6 +133,40 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(host.querySelector('.settings-card.dimmed')).toBeNull();
     expect(host.querySelector('.settings-voice-off')).toBeNull();
+  });
+
+  it('SpeakReplies_SwitchToggled_SetsThemAtOnceWithoutSaveAndFollowsTheHubsVoice', async () => {
+    let on: boolean | null = null;
+    const set: boolean[] = [];
+    const pane = await open({ spokenReplies: () => on, setSpokenReplies: (value) => void set.push(value) });
+
+    await go2('spoken-replies');
+    const box = () => host.querySelector<HTMLInputElement>('.settings-speak-replies input[role="switch"]')!;
+    const help = () => host.querySelector('.settings-speak-replies .settings-help')!.textContent;
+
+    // Its row is first under Replies; while the hub has no voice it is off and disabled, saying why.
+    expect(box().closest('.settings-section')?.querySelector('.settings-section-heading')?.textContent).toBe('Replies');
+    expect([box().checked, box().disabled]).toEqual([false, true]);
+    expect(help()).toBe('Available once the voice runs: turn on Use voice and save.');
+
+    // The voice comes on, off as at every hub start: the hub's voice event redraws the switch.
+    on = false;
+    pane.voiceChanged();
+    expect([box().checked, box().disabled]).toEqual([false, false]);
+    expect(help()).toContain('off when Switchboard starts');
+    const before = posts.length;
+
+    box().click();
+    expect(set).toEqual([true]);
+    // It is not a settings.json key: the draft stays clean and nothing is checked or saved.
+    await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS * 2);
+    expect(pane.state()?.dirty).toBe(false);
+    expect(posts.slice(before)).toEqual([]);
+    on = true;
+    pane.voiceChanged();
+    expect(box().checked).toBe(true);
+    box().click();
+    expect(set).toEqual([true, false]);
   });
 
   it("draws Dictation: the microphone with the enrolment, dictation, talking over replies, someone else speaking, and the match threshold under Advanced, without the pitch check's factors", async () => {

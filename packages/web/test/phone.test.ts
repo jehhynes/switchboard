@@ -118,7 +118,7 @@ describe('the page on a phone', () => {
     const touch = /@media \(hover: none\), \(pointer: coarse\) \{\n  :is\(\.header, [^)]*\) :is\(button\.icon, a\.icon, button\.actions\) \{([^}]*)\}\n  :is\([^)]*\) :is\([^)]*\) > \.codicon \{([^}]*)\}/.exec(css);
 
     expect(touch?.[1]).toContain('align-items: center; justify-content: center;');
-    // By descent, not as a child, so the header's View options button inside its menu's anchor is as large as the buttons beside it.
+    // By descent, not as a child, so a header button inside its menu's anchor is as large as the buttons beside it.
     expect(touch?.[1]).toContain('min-width: 44px; min-height: 44px;');
     expect(css).toContain('.header button.icon { justify-content: center; min-width: 26px; height: 26px; }');
     expect(css).not.toContain('.header > button.icon,');

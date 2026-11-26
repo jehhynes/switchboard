@@ -22,7 +22,6 @@ import { cardSteps, currentStep, draftAnswers, moveStep, pickLetter, picked, sen
 import type { CardDraft as SharedDraft, LedgerCard } from '@switchboard/conversation/questions';
 import { cardKeyAction, isAnswerMessage, questionsWaiting } from '@switchboard/conversation/questionCard';
 import { renderArtifacts, renderArtifactView, renderEmpty } from './side.js';
-import { renderPersonaDialog } from './personas.js';
 import { renderSheet } from './sheet.js';
 import { toast } from './toast.js';
 import { composerOptionId, renderComposer, renderComposerMenu, renderDraftNote, renderEndedNote, renderFrame, renderShared } from './composer.js';
@@ -94,12 +93,11 @@ export const SWIPE_OPEN = 40;
 const SIDE_WIDTH = 'switchboard.sideWidth';
 /** Where this device keeps the list unpinned, in the drawer: '1', under the key an earlier page kept the list hidden by its sash. */
 const LIST_UNPINNED = 'switchboard.listCollapsed';
-/** Where the page keeps Show message details. */
-const DETAILS = 'switchboard.messageDetails';
-/** A paired device's own Collapse details, '1' or '0'; this computer's page keeps it in settings.json instead. */
-const BRIEF = 'switchboard.briefReplies';
-/** The Expand replies a paired device kept before Collapse details replaced it, read as its inverse until Collapse details is first toggled there. */
-const EXPAND = 'switchboard.expandReplies';
+/**
+ * Where earlier pages kept Show message times and notes and a paired device's Fold reply details and Expand replies, which follow
+ * `web.messageTimes` and `voice.briefReplies` now (operator decision 2026-11-26); removed on load.
+ */
+const OLD_VIEW_KEYS = ['switchboard.messageDetails', 'switchboard.briefReplies', 'switchboard.expandReplies'];
 /** Where an earlier page kept the conversation's text size, which is now fixed; removed on load. */
 const OLD_TEXT_SCALE = 'switchboard.textScale';
 const CHAT_WIDTH = 'switchboard.chatWidth';
@@ -209,19 +207,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const sheetHost = root.querySelector<HTMLElement>('#sheet')!;
   // The list header's sheets (listHeader.tsx), at the page's root like the others, so no column's stacking or display hides them.
   const listSheet = root.querySelector<HTMLElement>('#list-sheet')!;
-  // The persona dialog over the whole page, as Settings is.
-  const personaHost = root.appendChild(document.createElement('div'));
   // The toast over the page (toast.tsx): every refusal and failure, a copy that worked and the needs-you message.
   const toastHost = root.appendChild(document.createElement('div'));
 
   toastHost.id = 'toast';
 
   const toastBox = toast(toastHost, { open: (workItemId) => void select(workItemId) });
-  // The scope generation the persona dialog opened for, and each opening's number, so a late roster answer fills only the dialog that asked.
-  let personaScope: number | null = null;
   /** The work item and layout More's menu opened in. */
   let tabMenuFor = '';
-  let personaAsks = 0;
   const detailHead = root.querySelector<HTMLElement>('#detail .detail-head')!;
   const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
   // The open work item takes the room first (layout.ts): the list is a column while the operator keeps it pinned, and a drawer otherwise;
@@ -674,8 +667,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   view.collapsed = collapsedGroups(localStorage.getItem(GROUPS_KEY));
 
   try {
-    view.details = localStorage.getItem(DETAILS) === '1';
-    localStorage.removeItem(OLD_TEXT_SCALE);
+    for (const key of [OLD_TEXT_SCALE, ...OLD_VIEW_KEYS]) {
+      localStorage.removeItem(key);
+    }
   } catch {
     // Off without local storage.
   }
@@ -780,52 +774,27 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const settingsHost = root.appendChild(document.createElement('div'));
   // The open dialogs: the page under the top one inert, the focus kept in it and given back to its opener (layers.ts).
   const modals = modalLayers(root);
-  const settingsPane = settings(settingsHost, { post: (name, body) => post(name, body), closed: () => root.querySelector<HTMLElement>('.more-actions')?.focus(), layered: () => modals.sync() });
+  const settingsPane = settings(settingsHost, {
+    post: (name, body) => post(name, body),
+    closed: () => root.querySelector<HTMLElement>('.more-actions')?.focus(),
+    layered: () => modals.sync(),
+    // Spoken replies (PRD R105), off when the hub starts; the composer's speaker also turns them off.
+    spokenReplies: () => (state.voice?.enabled === true ? state.voice.speakReplies : null),
+    // A refusal brings no voice event, so the switch is drawn again from the voice as last heard.
+    setSpokenReplies: (on) =>
+      void command('speak-replies', { on }).then((answer) => {
+        if (answer.status !== 200) {
+          showError(String(answer.body['error'] ?? 'Spoken replies did not change.'));
+          settingsPane.voiceChanged();
+        }
+      }),
+  });
 
   window.addEventListener('focus', () => void settingsPane.reload(), { signal: listening.signal });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && void settingsPane.reload(), { signal: listening.signal });
   const local = deps.local ?? ['127.0.0.1', 'localhost'].includes(location.hostname);
 
 
-  // A paired device may not change settings.json (architecture.md § Remote access), so its Collapse details is its own, following
-  // voice.briefReplies until it is first toggled there.
-  if (!local) {
-    try {
-      const kept = localStorage.getItem(BRIEF);
-      const expand = localStorage.getItem(EXPAND);
-
-      view.briefReplies = kept === '1' ? true : kept === '0' ? false : expand === '1' ? false : expand === '0' ? true : null;
-    } catch {
-      // Follows voice.briefReplies without local storage.
-    }
-  }
-  /**
-   * The value Collapse details was last clicked to, until the hub's `settings` event or a refusal, so a quick second click reverses the
-   * first, and the value of the save in flight; saves go one at a time, so a later click's value is the one the file keeps.
-   */
-  let briefAsked: boolean | null = null;
-  let briefSending: boolean | null = null;
-  const sendBrief = async (): Promise<void> => {
-    let on = briefAsked!;
-
-    for (;;) {
-      briefSending = on;
-      const answer = await post('brief-replies', { on });
-
-      briefSending = null;
-
-      if (answer.status !== 200) {
-        briefAsked = briefAsked === on ? null : briefAsked;
-        showError(String(answer.body['error'] ?? `Fold reply details did not change (status ${answer.status}).`));
-      }
-
-      if (briefAsked === null || briefAsked === on) {
-        return;
-      }
-
-      on = briefAsked;
-    }
-  };
   // Each Mic on tap on a paired device and each leaving of the conversation is counted, so a mic still opening when the page left is not turned
   // on, and a late answer to an older tap leaves a newer tap's mic alone.
   let micTaps = 0;
@@ -2728,12 +2697,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const listed = header.list(state.groups);
     mount(sheetHost, renderSheet(view.sheet, view.acting));
 
-    // The persona dialog belongs to the conversation it opened for, so it closes when another replaces it, before a pick could pin that one's session.
-    if (view.personas !== null && (state.scope === null || state.scope.scopeGen !== personaScope)) {
-      view.personas = null;
-    }
-
-    mount(personaHost, renderPersonaDialog(state.session?.persona, view.personas));
     modals.sync();
     const focused = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) ? document.activeElement : null;
     const focusedRow = focused?.closest<HTMLElement>('.list-row')?.querySelector<HTMLElement>('.row')?.dataset['row'];
@@ -3122,12 +3085,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     view.tabFit = fit;
     return changed;
-  };
-  /** Closes the persona dialog and gives the focus back to the view options button, under which the persona row opened it. */
-  const closePersonas = (): void => {
-    view.personas = null;
-    draw();
-    head.querySelector<HTMLElement>('button.view-options')?.focus();
   };
   /** The connection as the page draws it. */
   const connectionView = (): ConnectionView => ({ state: connection.state, since: connection.since, lastLiveAt: connection.lastLiveAt, nextAt: connection.nextAt, update: connection.update });
@@ -4202,7 +4159,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     root,
     host: root.querySelector<HTMLElement>('.main')!,
     under: drawer,
-    enabled: () => isPhone() && !root.classList.contains('listing') && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop, .persona-backdrop') === null,
+    enabled: () => isPhone() && !root.classList.contains('listing') && document.querySelector('.menu, [role="menu"], [role="listbox"]:not([hidden]), .sheet-backdrop, .settings-backdrop') === null,
     back,
     reducedMotion: () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     nativeEdgeBack: () => browserBackPreview(navigator.userAgent, navigator.platform, navigator.maxTouchPoints, history.length),
@@ -4532,7 +4489,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     listFocus = key;
     closeMenus();
     view.picker = false;
-    view.viewMenu = false;
     view.rowMenu = key;
     rowMenuPoint = point;
     draw();
@@ -4595,7 +4551,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       event.preventDefault();
       return;
     }
-    if (event.key !== 'F8' || event.ctrlKey || event.metaKey || event.altKey || !state.connected || view.sheet !== null || view.personas !== null || settingsPane.isOpen() || root.querySelector('.sheet-backdrop') !== null) return;
+    if (event.key !== 'F8' || event.ctrlKey || event.metaKey || event.altKey || !state.connected || view.sheet !== null || settingsPane.isOpen() || root.querySelector('.sheet-backdrop') !== null) return;
     event.preventDefault();
     const rows = state.groups.flatMap((group) => group.rows.map((row) => ({ group, row })));
     const selected = listFocus ?? (state.scope?.workItemId == null ? null : `item:${state.scope.workItemId}`);
@@ -4745,18 +4701,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         view.picker = !view.picker;
         // One header menu at a time.
         view.actions = false;
-        view.viewMenu = false;
         draw();
-        break;
-      case 'persona':
-        void choosePersona();
-        break;
-      case 'persona-close':
-        // A press on the dialog itself is not one on its backdrop.
-        if (!button!.classList.contains('persona-backdrop') || target === button) {
-          closePersonas();
-        }
-
         break;
       case 'actions':
         view.actions = !view.actions;
@@ -4764,7 +4709,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         view.copyMenu = false;
         view.rowMenu = null;
         view.picker = false;
-        view.viewMenu = false;
         draw();
         break;
       case 'row-action':
@@ -4898,15 +4842,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'prompt-key':
         void pressPromptKey(button!.dataset['promptKey'] ?? '');
         break;
-      case 'persona-pick':
-        // A pick applies at once and closes the dialog.
-        closePersonas();
-
-        if (state.session !== null) {
-          void command('persona', { sessionId: state.session.id, personaId: button!.dataset['persona'] || null }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? 'The persona was not pinned.')));
-        }
-
-        break;
       case 'earlier':
         void earlier();
         break;
@@ -4950,60 +4885,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       case 'artifact-window':
         artifactWindow();
         break;
-      case 'view-menu':
-        view.viewMenu = !view.viewMenu;
-        // One header menu at a time.
-        view.picker = false;
-        view.actions = false;
-        draw();
-        break;
       case 'iframe-open':
         openDoc(`link:${button?.dataset['url'] ?? ''}`);
         break;
       case 'iframe-close':
         closeDoc(`link:${button?.dataset['url'] ?? ''}`);
-        break;
-      case 'toggle-details':
-        view.details = !view.details;
-
-        try {
-          if (view.details) {
-            localStorage.setItem(DETAILS, '1');
-          } else {
-            localStorage.removeItem(DETAILS);
-          }
-        } catch {
-          // A page without local storage keeps the choice until it reloads.
-        }
-
-        draw();
-        break;
-      case 'toggle-spoken-replies':
-        // Spoken replies, experimental and off until turned on here (PRD R105); the voice event redraws the menu's check.
-        void command('speak-replies', { on: state.voice?.speakReplies !== true });
-        break;
-      case 'toggle-brief-replies':
-        if (!local) {
-          view.briefReplies = !(view.briefReplies ?? state.briefReplies);
-
-          try {
-            localStorage.setItem(BRIEF, view.briefReplies ? '1' : '0');
-            localStorage.removeItem(EXPAND);
-          } catch {
-            // A page without local storage keeps the choice until it reloads.
-          }
-
-          draw();
-          break;
-        }
-
-        // On this computer's page, voice.briefReplies in settings.json; the checkbox and the replies follow the hub's `settings` event once the file is reloaded.
-        briefAsked = !(briefAsked ?? state.briefReplies);
-
-        if (briefSending === null) {
-          void sendBrief();
-        }
-
         break;
       case 'card-pick':
         pickCard(button!.dataset['card']!, button!.dataset['slug']!, button!.dataset['letter']!);
@@ -5217,17 +5103,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     }
 
-    if ((view.picker || view.actions || view.viewMenu) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
+    if ((view.picker || view.actions) && !(event.target instanceof Node && head.querySelector('.header')?.contains(event.target) === true)) {
       view.picker = false;
       view.actions = false;
-      view.viewMenu = false;
       draw();
     }
   }, { signal: listening.signal });
   // A press in a website's frame, an artifact's frame or another window sends the page no pointerdown, only its window's blur, so the page's
   // menus close when its window loses the focus, as a desktop app's menus do. Sheets and dialogs stay.
   window.addEventListener('blur', () => {
-    const open = view.picker || view.actions || view.viewMenu || view.rowMenu !== null || view.tabMenu;
+    const open = view.picker || view.actions || view.rowMenu !== null || view.tabMenu;
     const closed = [changes.pointerDown(null), closeCardMenus(null)].includes(true);
 
     // Drop a list still on its way, and close one already drawn.
@@ -5242,7 +5127,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     if (open) {
       view.picker = false;
-      view.viewMenu = false;
       closeMenus();
     }
 
@@ -5349,10 +5233,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A question card's open menu that holds the focus, or whose button does, for Up and Down.
     const cardAnchor = document.activeElement instanceof HTMLElement && document.activeElement.closest('.qc-menu-anchor')?.querySelector('.qc-menu') != null ? document.activeElement.closest<HTMLElement>('.qc-menu-anchor') : null;
 
-    if (event.key === 'Escape' && view.personas !== null) {
-      closePersonas();
-      event.stopImmediatePropagation();
-    } else if (event.key === 'Escape' && view.sheet !== null) {
+    if (event.key === 'Escape' && view.sheet !== null) {
       view.sheet = null;
       draw();
       event.stopImmediatePropagation();
@@ -5370,12 +5251,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
       listRowElement(opener)?.focus();
       event.stopImmediatePropagation();
-    } else if (event.key === 'Escape' && (view.picker || view.actions || view.viewMenu)) {
-      const opener = view.picker ? 'button.picker' : view.actions ? 'button.actions' : 'button.view-options';
+    } else if (event.key === 'Escape' && (view.picker || view.actions)) {
+      const opener = view.picker ? 'button.picker' : 'button.actions';
 
       view.picker = false;
       view.actions = false;
-      view.viewMenu = false;
       draw();
       head.querySelector<HTMLElement>(opener)?.focus();
       event.stopImmediatePropagation();
@@ -5397,7 +5277,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // A console typing into its session stops its keys first (console.ts), so its Escape stays the session's.
       maximizePanel(false);
       event.stopImmediatePropagation();
-    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.viewMenu || view.rowMenu !== null || view.tabMenu || cardAnchor !== null)) {
+    } else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (view.picker || view.actions || view.rowMenu !== null || view.tabMenu || cardAnchor !== null)) {
       // Up and Down move between the open menu's enabled rows.
       const rows = [...(cardAnchor !== null ? cardAnchor.querySelectorAll<HTMLElement>('.qc-menu [role="menuitem"]:not(:disabled)') : view.rowMenu !== null ? list.querySelectorAll<HTMLElement>('.row-menu .menu-row:not(:disabled)') : view.tabMenu ? root.querySelectorAll<HTMLElement>('.tab-menu .menu-row') : head.querySelectorAll<HTMLElement>('.header .menu .menu-row:not(:disabled)'))];
       const at = rows.indexOf(document.activeElement as HTMLElement);
@@ -5936,38 +5816,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     return false;
   };
 
-  /** The view options menu's persona row: the roster in the persona dialog, from which a pick pins a persona to the session. */
-  const choosePersona = async (): Promise<void> => {
-    view.viewMenu = false;
-    view.picker = false;
-    view.actions = false;
-    personaScope = state.scope?.scopeGen ?? null;
-    view.personas = { items: null, error: null };
-    draw();
-    personaHost.querySelector<HTMLElement>('.persona-close')?.focus();
-
-    const ask = ++personaAsks;
-    const answer = await command('personas');
-
-    // The dialog closed, or closed and opened again, or its conversation changed (drawRegions closes it then).
-    if (view.personas === null || ask !== personaAsks || personaScope !== state.scope?.scopeGen) {
-      return;
-    }
-
-    view.personas = answer.status === 200 ? { items: (answer.body['personas'] as NonNullable<View['personas']>['items']) ?? [], error: null } : { items: null, error: String(answer.body['error'] ?? 'Switchboard did not answer.') };
-
-    if (view.personas.items?.length === 0) {
-      view.personas = { items: null, error: 'No personas. Add them to voice.personas in settings.json, with voice.enabled on.' };
-    }
-
-    draw();
-
-    // The current persona, else the first, takes the focus from Close once the roster shows, unless the operator moved it.
-    if (document.activeElement === personaHost.querySelector('.persona-close')) {
-      personaHost.querySelector<HTMLElement>('.persona-option.current, .persona-option')?.focus();
-    }
-  };
-
   // ---- Embedded link tabs ----
   const toExtension =
     deps.toExtension ??
@@ -6027,7 +5875,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (slot === null) return undefined;
     const layers: Element[] = [...root.querySelectorAll('.glass:not([hidden]), [role="menu"], [role="dialog"], [role="alertdialog"], #toast .toast, #connection .conn-update')];
     if (view.drawer !== null) layers.push(drawer);
-    return frameCover(slot, layers, root.querySelectorAll('.drawer-backdrop, .sheet-backdrop, .settings-backdrop, .persona-backdrop'), root.querySelector('[aria-modal="true"], [role="alertdialog"]') !== null);
+    return frameCover(slot, layers, root.querySelectorAll('.drawer-backdrop, .sheet-backdrop, .settings-backdrop'), root.querySelector('[aria-modal="true"], [role="alertdialog"]') !== null);
   };
   const overlaps = (a: DOMRect, b: DOMRect): boolean => a.width > 0 && a.height > 0 && b.width > 0 && b.height > 0 && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
   const floating = (): boolean => {
@@ -6291,17 +6139,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }, HISTORY_CHANGE_MS);
       }
 
+      // Spoken replies' switch in Settings follows the hub's voice.
+      if (type === 'voice' || type === 'hello') {
+        settingsPane.voiceChanged();
+      }
+
       // Another device ticked a changed file viewed, or cleared its tick (architecture.md § Web page).
       if (type === 'viewed') {
         changes.viewedEvent(data);
       }
 
       // settings.json changed on disk: Settings reads it again, keeping unsaved edits under the changed-on-disk warning (PRD R54).
-      // With no save in flight, the hub's settings hold what Collapse details asked for, or a newer change.
-      if ((type === 'settings' || type === 'hello') && briefSending === null) {
-        briefAsked = null;
-      }
-
       if (type === 'config') {
         void settingsPane.reload();
       }

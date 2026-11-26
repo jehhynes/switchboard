@@ -6,7 +6,7 @@ import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store, ton
 import type { ConversationMessage, Interruption, Session as StoredSession } from '@switchboard/core';
 import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, refusal, sessionView, typedText } from '../src/conversation.js';
-import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
+import type { ConversationServiceDeps, ConversationVoice } from '../src/conversation.js';
 import type { ConversationAdapter, ConversationChanged } from '../src/conversationAdapter.js';
 import type { InputOutcome } from '@switchboard/conversation';
 import { dockView, windowOf } from '../src/dock.js';

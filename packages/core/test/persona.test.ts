@@ -137,7 +137,7 @@ describe('personas in the flow (architecture.md § Personas)', () => {
     const action = adhoc(h);
 
     expect(action.tone).toBeUndefined();
-    expect(h.store.session(action.sessionId)).toMatchObject({ personaId: null, personaVersion: null, personaPinned: false });
+    expect(h.store.session(action.sessionId)).toMatchObject({ personaId: null, personaVersion: null });
   });
 
   it("resolves a Code Mode session's persona at its start: the playbook's, else a free one from the pool", () => {
@@ -147,7 +147,7 @@ describe('personas in the flow (architecture.md § Personas)', () => {
     const asked = question(h, '7');
 
     expect(first.tone).toBe(toneSection(nova));
-    expect(h.store.session(first.sessionId)).toMatchObject({ personaId: 'nova', personaVersion: toneVersion(toneSection(nova)), personaPinned: false });
+    expect(h.store.session(first.sessionId)).toMatchObject({ personaId: 'nova', personaVersion: toneVersion(toneSection(nova)) });
     expect(h.store.session(second.sessionId)?.personaId).toBe('orion');
     expect(h.store.session(asked.sessionId)?.personaId).toBe('orion');
     expect(asked.tone).toBe(toneSection(orion));
@@ -171,57 +171,18 @@ describe('personas in the flow (architecture.md § Personas)', () => {
     expect(h.store.session(action.sessionId)?.personaId).not.toBeNull();
   });
 
-  it('pins a persona to a session, and clearing the pin resolves it again', () => {
-    const h = new Harness({ settings: withRoster() });
-    const action = adhoc(h);
-
-    h.act({ type: 'persona', sessionId: action.sessionId, personaId: 'orion' });
-    // The tone section waits for a resume or compaction; the version still names what the prompt got.
-    expect(h.store.session(action.sessionId)).toMatchObject({ personaId: 'orion', personaPinned: true, personaVersion: toneVersion(toneSection(nova)) });
-
-    h.act({ type: 'persona', sessionId: action.sessionId, personaId: null });
-    expect(h.store.session(action.sessionId)).toMatchObject({ personaId: 'nova', personaPinned: false });
-  });
-
-  it('refuses a pin of an unknown persona or on a background session', () => {
-    const h = new Harness({ settings: withRoster() });
-    const action = adhoc(h);
-
-    expect(h.send({ type: 'persona', sessionId: action.sessionId, personaId: 'vega' }).refused).toBe('No persona vega in voice.personas.');
-    expect(h.send({ type: 'persona', sessionId: 'nope', personaId: 'nova' }).refused).toBe('Unknown session nope.');
-
-    // A persona menu shown before voice was turned off pins nothing.
-    h.settings = withRoster(false);
-    expect(h.send({ type: 'persona', sessionId: action.sessionId, personaId: 'orion' }).refused).toBe('Voice is off (voice.enabled).');
-    expect(h.store.session(action.sessionId)?.personaId).toBe('nova');
-    h.settings = withRoster();
-
-    h.store.updateSession(action.sessionId, { codeMode: false });
-    expect(h.send({ type: 'persona', sessionId: action.sessionId, personaId: 'nova' }).refused).toBe('Only a Code Mode or Codex app-server session has a persona.');
-  });
-
   it('records the tone section a resume or the contract hook delivers', () => {
     const h = new Harness({ settings: withRoster() });
     const action = adhoc(h);
 
-    h.act({ type: 'persona', sessionId: action.sessionId, personaId: 'orion' });
+    // A session pinned to another persona before pins were removed keeps it (store migration 2026-11-26).
+    h.store.updateSession(action.sessionId, { personaId: 'orion' });
     h.act({ type: 'persona-delivered', sessionId: action.sessionId });
     expect(h.store.session(action.sessionId)?.personaVersion).toBe(toneVersion(toneSection(orion)));
 
-    h.act({ type: 'persona', sessionId: action.sessionId, personaId: 'nova' });
+    h.store.updateSession(action.sessionId, { personaId: 'nova' });
     h.store.updateSession(action.sessionId, { state: 'ended' });
     h.act({ type: 'held-resuming', sessionId: action.sessionId, launchId: 'launch-2' });
     expect(h.store.session(action.sessionId)).toMatchObject({ launchId: 'launch-2', personaVersion: toneVersion(toneSection(nova)) });
-  });
-
-  it('logs a pin as the operator', () => {
-    const h = new Harness({ settings: withRoster() });
-    const action = adhoc(h);
-
-    h.act({ type: 'persona', sessionId: action.sessionId, personaId: 'orion' });
-
-    const events = h.store.ticketHistory(1)?.events ?? [];
-
-    expect(events.at(-1)).toMatchObject({ type: 'persona', actor: 'operator', detail: { personaId: 'orion' } });
   });
 });

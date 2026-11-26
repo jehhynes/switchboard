@@ -74,7 +74,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
       stop: () => void stops++,
     },
     settings: () => settings,
-    viewSettings: () => ({ briefReplies: settings.briefReplies, expandReplies: !settings.briefReplies, diffLayout: 'stacked', diffWrap: 'on' }),
+    viewSettings: () => ({ briefReplies: settings.briefReplies, expandReplies: !settings.briefReplies, diffLayout: 'stacked', diffWrap: 'on', messageTimes: true }),
     store: {
       reply: (id) => replies.get(id) ?? null,
       updateReply: (id, patch) => void replies.set(id, { ...replies.get(id)!, ...patch }),
@@ -150,7 +150,7 @@ function setup(patch: Partial<VoiceSettings> = { enabled: true }) {
 }
 
 describe('VoiceControl', () => {
-  it('starts with spoken replies off, so no message asks for a spoken reply until View options turns them on, since they are experimental', async () => {
+  it('starts with spoken replies off, so no message asks for a spoken reply until Settings turns them on, since they are experimental', async () => {
     const { spokenAtStart, control, connections, windows, settle } = setup();
 
     expect(spokenAtStart).toBe(false);
@@ -652,7 +652,7 @@ describe('VoiceControl', () => {
     expect(connections[0]!.sent.filter((one) => one.type === 'settings').at(-1)).toMatchObject({ settings: { voice: 'cedar' } });
     expect(notified.filter((one) => one.type === 'settings').map((one) => one.key)).toEqual(['k1', 'k2']);
     // Each window and page gets every setting it reads, the diff viewer's too.
-    expect(notified.filter((one) => one.type === 'settings').at(-1)).toMatchObject({ payload: { settings: { briefReplies: true, diffLayout: 'stacked', diffWrap: 'on' } } });
+    expect(notified.filter((one) => one.type === 'settings').at(-1)).toMatchObject({ payload: { settings: { briefReplies: true, diffLayout: 'stacked', diffWrap: 'on', messageTimes: true } } });
     expect(connections[0]!.sent.filter((one) => one.type === 'stop')).toEqual([]);
 
     // Turning voice off stops what plays.

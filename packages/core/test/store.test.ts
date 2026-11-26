@@ -196,6 +196,25 @@ describe('Store', () => {
     store.close();
   });
 
+  it('drops a pinned persona\'s pin when upgrading, keeping the persona it had (operator decision 2026-11-26)', () => {
+    const version = MIGRATIONS.indexOf('ALTER TABLE sessions DROP COLUMN personaPinned;');
+    const path = join(dir, 'pinned.db');
+    const raw = legacyDb(path);
+    raw.exec(MIGRATIONS.slice(0, version).join(';'));
+    raw.exec(`PRAGMA user_version = ${version};
+      INSERT INTO tickets (id, source, sourceKey, title, url, assigned, repoRoot) VALUES (1, 'adhoc', '1', 'One', '', 1, '');
+      INSERT INTO workItems (id, ticketId, status, createdAt, statusAt) VALUES (1, 1, 'running', 1, 1);
+      INSERT INTO sessions (id, workItemId, kind, provider, cwd, state, stateAt, startedAt, released, personaId, personaPinned) VALUES ('s1', 1, 'task', 'claude', 'D:/a', 'idle', 1, 1, 0, 'orion', 1);`);
+    raw.close();
+
+    expect(version).toBeGreaterThan(0);
+    const store = Store.open(path);
+
+    expect(store.session('s1')).toMatchObject({ personaId: 'orion' });
+    expect(store.session('s1')).not.toHaveProperty('personaPinned');
+    store.close();
+  });
+
   it('migrates a new file to the current version, in WAL mode, and reopens it without migrating again', () => {
     const path = join(dir, 'switchboard.db');
     const store = Store.open(path);

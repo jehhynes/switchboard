@@ -63,7 +63,7 @@ const RELOAD_DEBOUNCE_MS = 300;
 export const PHONE_LOST_NOTE = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or Talk here on this computer.';
 
 /** Operator events a page's row controls may post (PRD R27). */
-const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position', 'persona']);
+const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position']);
 
 /** What a spoken alert reads of a state when the reply has no text: its body, else its headline. */
 const stateText = (state: { headline: string; body: string | null } | null): string | null => (state === null ? null : (state.body ?? state.headline));
@@ -170,13 +170,6 @@ export function parseAction(body: unknown): FlowEvent | null {
 
   if ((body['type'] === 'start' || body['type'] === 'pick') && ((body['guidance'] != null && typeof body['guidance'] !== 'string') || (body['playbook'] != null && typeof body['playbook'] !== 'string') || (body['prompt'] != null && typeof body['prompt'] !== 'string'))) {
     return null;
-  }
-
-  // Pins a persona to a session, or clears the pin (architecture.md § Personas).
-  if (body['type'] === 'persona') {
-    const { sessionId, personaId } = body;
-
-    return typeof sessionId === 'string' && (personaId === null || typeof personaId === 'string') ? { type: 'persona', sessionId, personaId } : null;
   }
 
   if (body['type'] === 'run-schedule') {
@@ -439,7 +432,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   // The window in front, which the voice follows (architecture.md § Voice).
   let focusedWindow: string | null = null;
   // What a window's view and the web page read of the settings, in each `hello` and again when settings.json is reloaded.
-  const viewSettings = (): ViewSettings => ({ briefReplies: config.settings.voice.briefReplies, expandReplies: !config.settings.voice.briefReplies, diffLayout: config.settings.web.diffLayout, diffWrap: config.settings.web.diffWrap, iframeBrowser: config.settings.web.iframeBrowser });
+  const viewSettings = (): ViewSettings => ({ briefReplies: config.settings.voice.briefReplies, expandReplies: !config.settings.voice.briefReplies, diffLayout: config.settings.web.diffLayout, diffWrap: config.settings.web.diffWrap, messageTimes: config.settings.web.messageTimes, iframeBrowser: config.settings.web.iframeBrowser });
   // The page's list and header, sent again when the voice changes a row's mark or the notes; set once the conversation service exists.
   let pageListChanged = (): void => {};
   const builtNow = (): void => pageListChanged();
@@ -671,8 +664,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       micTiming: (key, steps, outcome) => voice.micTiming(key, steps, outcome),
       composer: (key, focused, draft, listen, seq, heard) => voice.composer(key, focused, draft, listen, seq, heard),
     },
-    personas: () => config.settings.voice,
-    pinPersona: (sessionId, personaId) => runtime.send({ type: 'persona', sessionId, personaId }).refused,
     ...claudePaths(claudeRoot, homedir(), Boolean(process.env['CLAUDE_CONFIG_DIR'])),
     codexHome: runtime.codexHome,
     screen: (session, scrollback) => runtime.heldScreen(session, scrollback),
@@ -1004,35 +995,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       return result.errors.length === 0 ? { status: 200, body: { saved: true, version: result.version } } : { status: 409, body: { errors: result.errors } };
     },
-    // The view options menu's Collapse details (architecture.md § Conversation view): sets `voice.briefReplies` in settings.json as a
-    // Settings save would, leaving the rest of the file as it is but the `voice.expandReplies` it replaced; the reload sends every window and
-    // page the new value.
-    briefReplies: async (body: unknown) => {
-      const on = isRecord(body) ? body['on'] : undefined;
-
-      if (typeof on !== 'boolean') {
-        return { status: 400, body: { error: 'Expected {on}.' } };
-      }
-
-      const file = readConfigFile(configDir);
-
-      if (file.error !== null || !isRecord(file.value)) {
-        return { status: 409, body: { error: file.error ?? 'settings.json is not a JSON object. Fix it in Settings.' } };
-      }
-
-      // A file Settings could not save is left for Settings to fix, so no invalid entry, such as a voice that is not an object, is dropped here.
-      const invalid = checkSettings(file.value, runtime.enabledSources(), store.homeRepos(), plugins.current);
-
-      if (invalid.length > 0) {
-        return { status: 409, body: { error: invalid.join(' ') } };
-      }
-
-      const voiceIn = file.value['voice'];
-      const value = { ...file.value, voice: { ...(isRecord(voiceIn) ? voiceIn : {}), briefReplies: on } };
-      const result = saveSettings(configDir, value, file.version, runtime.enabledSources(), store.homeRepos(), plugins.current);
-
-      return result.errors.length === 0 ? { status: 200, body: { briefReplies: on } } : { status: 409, body: { error: result.errors.join(' ') } };
-    },
   };
 
   const debriefTimer = setInterval(() => void debriefs.scan(), DEBRIEF_SCAN_MS);
@@ -1198,7 +1160,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/v1/conversation/stop-speaking': async (body) => (isRecord(body) ? conversation.voiceCommand('stop-speaking', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/speak-replies': async (body) => (isRecord(body) ? conversation.voiceCommand('speak-replies', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/replay': async (body) => (isRecord(body) ? conversation.voiceCommand('replay', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } }),
-      '/v1/conversation/personas': async (body) => (isRecord(body) ? conversation.personaCommand('personas', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/row-action': async (body) => (isRecord(body) ? conversation.rowAction(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, workItemId, label}.' } }),
       '/v1/conversation/prompt': async (body) => (isRecord(body) ? conversation.prompt(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/console-input': async (body) => (isRecord(body) ? pageConsole.input(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, launch, data, cols?, rows?}.' } }),
@@ -1235,7 +1196,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/v1/conversation/page-tabs': async (body) => (isRecord(body) ? conversation.pageTabs(body) : { status: 400, body: { error: 'Expected {window, workItemId, tab?, close?, reopen?, openOn?}.' } }),
       '/v1/conversation/page-source': async (body) => (isRecord(body) ? conversation.pageSource(body) : { status: 400, body: { error: 'Expected {window, name, enabled}.' } }),
       '/v1/conversation/page-focus': async (body) => (isRecord(body) ? conversation.pageFocus(body) : { status: 400, body: { error: 'Expected {window, focused}.' } }),
-      '/v1/conversation/persona': async (body) => (isRecord(body) ? conversation.personaCommand('persona', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } }),
       '/v1/conversation/mic': async (body) => (isRecord(body) ? conversation.voiceCommand('mic', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/mic-timing': async (body) => (isRecord(body) ? conversation.voiceCommand('mic-timing', body) : { status: 400, body: { error: 'Expected {window, steps, outcome}.' } }),
       '/v1/conversation/composer': async (body) => (isRecord(body) ? conversation.voiceCommand('composer', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, focused, draft}.' } }),
@@ -1245,7 +1205,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/v1/conversation/page-settings-check': settingsRoutes.check,
       '/v1/conversation/page-settings-save': settingsRoutes.save,
       // Collapse details, from this computer's page's view options menu.
-      '/v1/conversation/brief-replies': settingsRoutes.briefReplies,
     },
     snapshot: () => runtime.snapshot(),
     windowClosed: (key) => {

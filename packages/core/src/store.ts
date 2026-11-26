@@ -597,6 +597,8 @@ export const MIGRATIONS = [
   ALTER TABLE workItems DROP COLUMN stage;
   ALTER TABLE workItems DROP COLUMN stageAt;
   ALTER TABLE sessions ADD COLUMN turnAt INTEGER;`,
+  // A persona can no longer be pinned to a session (operator decision 2026-11-26); a pinned session keeps the persona it had.
+  `ALTER TABLE sessions DROP COLUMN personaPinned;`,
 ];
 
 /**
@@ -641,7 +643,7 @@ const REPLY_PLACE = "(source = 'screen' AND withdrawn = 0)";
 /** A reply that counts as unread (`countsUnread`) and was not seen. */
 const UNREAD_REPLY = "seenAt IS NULL AND withdrawn = 0 AND rewrittenBy IS NULL AND kind <> 'note' AND opening <> ''";
 
-const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless', 'personaPinned', 'registered', 'withoutCodeMode', 'interactive']);
+const BOOLEANS = new Set(['assigned', 'pool', 'snoozed', 'released', 'releasing', 'approvalHeld', 'external', 'mentioned', 'codeMode', 'promptless', 'registered', 'withoutCodeMode', 'interactive']);
 /** Stored as comma-separated text. */
 const LISTS = new Set(['reports', 'retiredIds']);
 /** Stored as JSON text. */
@@ -814,8 +816,8 @@ const UNLOGGED: Record<string, ReadonlySet<string>> = {
   // The background event and its result name a move (PRD R89); its fields are bookkeeping.
   // The session-started event names a Code Mode session; its launch and last process tree are bookkeeping (PRD R93, R95).
   // The register event names a registered session, and the resume that holds it says whether it runs without Code Mode (PRD R81).
-  // The persona event names a pin; the version of the tone section a prompt got is bookkeeping (architecture.md § Personas).
-  sessions: new Set(['stateAt', 'turnAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'personaPinned', 'instructionsHash', 'instructionsCompactionId', 'rateLimit', 'registered', 'withoutCodeMode']),
+  // The version of the tone section a prompt got is bookkeeping (architecture.md § Personas).
+  sessions: new Set(['stateAt', 'turnAt', 'releasing', 'question', 'retiredIds', 'external', 'move', 'movedAt', 'codeMode', 'launchId', 'lastTree', 'promptless', 'personaVersion', 'instructionsHash', 'instructionsCompactionId', 'rateLimit', 'registered', 'withoutCodeMode']),
   triages: new Set(),
   worktrees: new Set(),
   links: new Set(['reportedAt']),

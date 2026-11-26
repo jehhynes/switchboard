@@ -143,38 +143,6 @@ describe('createHubApp', () => {
     }
   });
 
-  it("pins a session's persona and clears the pin, refusing an unknown persona and any while voice is off (architecture.md § Personas)", async () => {
-    const personas = [
-      { id: 'nova', name: 'Nova', personality: 'Warm.' },
-      { id: 'orion', name: 'Orion' },
-    ];
-
-    writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: true, personas } });
-    const app = await start(() => {});
-
-    app.runtime.send({ type: 'adhoc', prompt: 'Primary', repoRoot: 'D:/scratch', start: true });
-    await app.runtime.settled();
-
-    const sessionId = app.runtime.snapshot().workItems[0]!.sessions.at(-1)!.id;
-    const persona = () => {
-      const session = app.runtime['deps'].store.session(sessionId)!;
-
-      return [session.personaId, session.personaPinned === true];
-    };
-
-    expect(persona()).toEqual(['nova', false]);
-    expect(app.runtime.send({ type: 'persona', sessionId, personaId: 'orion' }).refused).toBeNull();
-    expect(persona()).toEqual(['orion', true]);
-    expect(app.runtime.send({ type: 'persona', sessionId, personaId: null }).refused).toBeNull();
-    expect(persona()[1]).toBe(false);
-    expect(app.runtime.send({ type: 'persona', sessionId, personaId: 'vega' }).refused).toBe('No persona vega in voice.personas.');
-
-    // Personas are part of voice.
-    writeSettings({ sessions: { installHooks: false, codeMode: true }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: false, personas } });
-    await until(() => (app.runtime.send({ type: 'persona', sessionId, personaId: 'orion' }).refused !== null ? true : null));
-    expect(app.runtime.send({ type: 'persona', sessionId, personaId: 'orion' }).refused).toBe('Voice is off (voice.enabled).');
-  });
-
   it('attaches to a held session through the server, refusing a request without the token, a bad body and an unknown session (PRD R95)', async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
     const logs: string[] = [];

@@ -2,11 +2,11 @@ import { appendFileSync, closeSync, mkdirSync, mkdtempSync, readFileSync, realpa
 import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store, toneSection, toneVersion } from '@switchboard/core';
+import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store } from '@switchboard/core';
 import type { ConversationMessage, Interruption, Session as StoredSession } from '@switchboard/core';
 import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, refusal, sessionView, typedText } from '../src/conversation.js';
-import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
+import type { ConversationServiceDeps, ConversationVoice } from '../src/conversation.js';
 import type { ConversationAdapter, ConversationChanged } from '../src/conversationAdapter.js';
 import { SessionConversation } from '@switchboard/conversation';
 import type { InputOutcome } from '@switchboard/conversation';
@@ -628,37 +628,11 @@ describe('sessionView', () => {
     expect(sessionView(session({ codeMode: true, state: 'failed', rateLimit: { ...limit, kind: 'throttle' } }), true, true).limit).toEqual({ until: NOW + 3_600_000, retry: false, throttle: true });
   });
 
-  it("shows the session's persona while voice is on, and its tone section pending until the prompt has the current one (architecture.md § Personas)", () => {
-    const nova = { id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm.' } as const;
-    const settings: PersonaView = { enabled: true, personas: [nova], playbookPersonas: {} };
-    const delivered = toneVersion(toneSection(nova));
+  it('sends no persona or pin with a session, since pins were removed (operator decision 2026-11-26)', () => {
+    const view = sessionView(session({ codeMode: true, personaId: 'nova' }), true, true);
 
-    expect(sessionView(session({ codeMode: true, personaId: 'nova', personaVersion: delivered }), true, true, settings).persona).toEqual({ id: 'nova', name: 'Nova', pinned: false, tonePending: false });
-    expect(sessionView(session({ codeMode: true, personaId: 'nova', personaVersion: null, personaPinned: true }), true, true, settings).persona).toEqual({ id: 'nova', name: 'Nova', pinned: true, tonePending: true });
-    // An ended session gets the current section when it resumes.
-    expect(sessionView(session({ codeMode: true, state: 'ended', personaId: 'nova', personaVersion: null }), true, true, settings).persona?.tonePending).toBe(false);
-    // None with voice off, no persona, one gone from the roster, or no settings.
-    expect(sessionView(session({ codeMode: true, personaId: 'nova' }), true, true, { ...settings, enabled: false }).persona).toBeNull();
-    expect(sessionView(session({ codeMode: true, personaId: null }), true, true, settings).persona).toBeNull();
-    expect(sessionView(session({ codeMode: true, personaId: 'vega' }), true, true, settings).persona).toBeNull();
-    expect(sessionView(session({ codeMode: true, personaId: 'nova' }), true, true).persona).toBeNull();
-  });
-
-  it('lets the header pin a persona to a Code Mode or app-server session without one, only with voice on and a roster (architecture.md § Personas)', () => {
-    const nova = { id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm.' } as const;
-    const settings: PersonaView = { enabled: true, personas: [nova], playbookPersonas: {} };
-
-    // A session from before the roster, an app-server one, an ended one and one whose persona left the roster can take a pin.
-    expect(sessionView(session({ codeMode: true, personaId: null }), true, true, settings)).toMatchObject({ persona: null, canPin: true });
-    expect(sessionView(session({ execution: 'app-server', personaId: null }), true, true, settings)).toMatchObject({ persona: null, canPin: true });
-    expect(sessionView(session({ codeMode: true, state: 'ended', personaId: null }), true, true, settings).canPin).toBe(true);
-    expect(sessionView(session({ codeMode: true, personaId: 'vega' }), true, true, settings)).toMatchObject({ persona: null, canPin: true });
-    expect(sessionView(session({ codeMode: true, personaId: 'nova' }), true, true, settings).canPin).toBe(true);
-    // Not a background or registered session, which the flow refuses to pin, nor with voice off, an empty roster or no settings.
-    expect(sessionView(session({ personaId: null }), true, true, settings).canPin).toBe(false);
-    expect(sessionView(session({ codeMode: true }), true, true, { ...settings, enabled: false }).canPin).toBe(false);
-    expect(sessionView(session({ codeMode: true }), true, true, { ...settings, personas: [] }).canPin).toBe(false);
-    expect(sessionView(session({ codeMode: true }), true, true).canPin).toBe(false);
+    expect(view).not.toHaveProperty('persona');
+    expect(view).not.toHaveProperty('canPin');
   });
 });
 

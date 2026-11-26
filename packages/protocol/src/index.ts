@@ -20,9 +20,6 @@ export interface SessionView {
   current: boolean;
   conversation: 'full' | 'read-only' | 'none';
   reason: string | null;
-  persona: { id: string; name: string; pinned: boolean; tonePending: boolean } | null;
-  /** The operator can pin a persona to the session, so the header shows a plain persona button while it has none. */
-  canPin?: boolean;
   /** `codex` for a Codex app-server session, whose native questions and approvals come as `requests`. */
   provider?: string;
   requests?: NativeRequest[];

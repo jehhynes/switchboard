@@ -15,7 +15,7 @@ const css = PAGE_ASSETS['page.css']!.body;
 /** Room for `n` tabs of 100 px beside a 50 px More. */
 const room = (n: number): TabFit => ({ width: n * 100 + 50, more: 50, plain: 100, closable: 100, measured: {} });
 const artifact = (n: number): ArtifactView => ({ path: `chat/a${n}.${n % 2 === 0 ? 'md' : 'png'}`, owner: 'o', kind: 'notes', title: `A ${n}`, ext: n % 2 === 0 ? 'md' : 'png', type: n % 2 === 0 ? 'markdown' : 'image', updatedAt: n });
-const session: SessionView = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
+const session: SessionView = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null };
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
 const state: PageState = { ...EMPTY, connected: true, scope, session, artifacts: [1, 2, 3, 4].map(artifact), state: { id: 'st', sessionId: 's', at: 1, headline: 'Done', body: null, stale: null, unread: true } };
 const changes = { ...newChanges(), list: { total: 2, rows: [] } as never };
@@ -190,7 +190,7 @@ describe('the label beside an icon', () => {
     const hosts = [
       draw(renderTabs(newView(), state, true, { open: null, fit: room(3), menu: true, now: 0, changes }, true)),
       draw(renderHeader(state, { ...newView(), picker: true })),
-      draw(renderHeader(state, { ...newView(), viewMenu: true })),
+      draw(renderHeader(state, { ...newView(), actions: true })),
     ];
     const rows = hosts.flatMap((host) => [...host.querySelectorAll<HTMLElement>('.menu-row, .tab, .tab-open, button.picker')].filter((row) => row.querySelector(':scope > .codicon, :scope > .file-icon, :scope > .menu-gutter')));
     // The picker's title and session name stand in one column beside its icons, each a text of its own.

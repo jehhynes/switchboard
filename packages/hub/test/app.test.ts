@@ -183,6 +183,8 @@ describe('parseReport and reportBody', () => {
     expect(parseAction({ type: 'comment', workItemId: 3 })).toBeNull();
     expect(parseAction({ type: 'comment', workItemId: '3', text: 'Hi' })).toBeNull();
     expect(parseAction({ type: 'icebox', ticketId: 1 })).toBeNull();
+    // Pinning a persona was removed (operator decision 2026-11-26).
+    expect(parseAction({ type: 'persona', sessionId: 's1', personaId: 'nova' })).toBeNull();
     expect(parseAction({ type: 'restore', ticketId: 1 })).toEqual({ type: 'restore', ticketId: 1 });
     expect(parseAction({ type: 'run-schedule', name: 'cleanup', workItemId: 3 })).toEqual({ type: 'run-schedule', name: 'cleanup' });
     expect(parseAction({ type: 'run-schedule', name: 3 })).toBeNull();

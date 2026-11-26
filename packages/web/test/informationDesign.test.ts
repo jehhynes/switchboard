@@ -18,7 +18,7 @@ const rule = (sheet: string, selector: string): string => {
 };
 const message = (id: string, at: number): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at, ord: at, provisional: false, withdrawn: false, origin: 'typed', text: id, delivery: 'sent', error: null });
 const artifact = (path: string, updatedAt: number): ArtifactView => ({ path, owner: 'chat', kind: 'page', title: path, ext: 'md', type: 'markdown', updatedAt });
-const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, ...patch });
+const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, ...patch });
 /** A page showing work item 1, whose current session started at 300 after earlier sessions e2 (200) and e1 (100), shown as `shown`. */
 const showing = (shown: string | null, current: { sessionStartedAt?: number } = { sessionStartedAt: 300 }): PageState => ({
   ...EMPTY,

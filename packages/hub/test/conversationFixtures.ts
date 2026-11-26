@@ -6,7 +6,7 @@ import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store, ton
 import type { ConversationMessage, Interruption, Session as StoredSession } from '@switchboard/core';
 import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, refusal, sessionView, typedText } from '../src/conversation.js';
-import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
+import type { ConversationServiceDeps, ConversationVoice } from '../src/conversation.js';
 import type { ConversationAdapter, ConversationChanged } from '../src/conversationAdapter.js';
 import type { InputOutcome } from '@switchboard/conversation';
 import { dockView, windowOf } from '../src/dock.js';
@@ -191,7 +191,7 @@ export function fakeVoice(spoken = { spoken: true, expressive: false }) {
   const calls: string[] = [];
   const voice: ConversationVoice = {
     shown: (key) => ({ enabled: true, here: key === 'k1', mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null }),
-    settings: () => ({ briefReplies: true, expandReplies: false, diffLayout: 'auto', diffWrap: 'auto' }),
+    settings: () => ({ briefReplies: true, expandReplies: false, diffLayout: 'auto', diffWrap: 'auto', messageTimes: false }),
     spokenFor: (sessionId, command, key) => {
       calls.push(`spokenFor ${sessionId} ${command} ${key ?? 'none'}`);
       return command ? { spoken: false, expressive: false } : spoken;

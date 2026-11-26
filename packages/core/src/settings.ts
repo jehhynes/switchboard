@@ -115,8 +115,10 @@ export type DiffWrapSetting = (typeof DIFF_WRAPS)[number];
 /** The settings the web page reads, in a stream's `hello` and its `settings` event. */
 export interface ViewSettings {
   iframeBrowser?: boolean;
-  /** Collapse details (`voice.briefReplies`). */
+  /** Fold reply details (`voice.briefReplies`). */
   briefReplies: boolean;
+  /** Show message times and notes (`web.messageTimes`). */
+  messageTimes: boolean;
   /** The inverse of `briefReplies`, which builds of the retired VS Code extension from before Brief replies read. */
   expandReplies: boolean;
   diffLayout: DiffLayoutSetting;
@@ -142,6 +144,8 @@ export interface WebSettings {
   diffLayout: DiffLayoutSetting;
   /** The diff viewer's line wrapping on every page; `auto` by default. */
   diffWrap: DiffWrapSetting;
+  /** Every message's line on every page shows its time and its optional marks (PRD R96); off by default. */
+  messageTimes: boolean;
 }
 
 /** A DNS name with at least two labels, lowercase, that is not an IP address: the form a remote host takes. */
@@ -162,7 +166,7 @@ export const SPEECH_SPEED = { min: 0.25, max: 1.5 } as const;
 
 /**
  * A persona (architecture.md § Personas): a name, a personality and a voice with its speaking style. The personality sets the speaking style's
- * delivery and the tone section of a Code Mode session's prompt; `id` names it in `playbookPersonas`, a pin and the store.
+ * delivery and the tone section of a Code Mode session's prompt; `id` names it in `playbookPersonas` and the store.
  */
 export interface Persona {
   id: string;
@@ -230,7 +234,7 @@ export interface VoiceSettings {
   roomHoldSeconds: number;
   /** The persona roster; empty, the default, leaves every session with `voice` and `style` and no tone section. */
   personas: Persona[];
-  /** A persona ID by playbook name, which that playbook's sessions take unless one is pinned. */
+  /** A persona ID by playbook name, which that playbook's sessions take. */
   playbookPersonas: Record<string, string>;
   /** Spoken alerts (architecture.md § Spoken alerts): the voice calls the operator when a session that is not the voice target needs them. */
   spokenAlerts: boolean;
@@ -263,7 +267,7 @@ export const DEFAULT_SETTINGS: Settings = {
   schedules: {},
   alerts: { surface: 'auto' },
   voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, briefReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
-  web: { port: 47616, iframeBrowser: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto' },
+  web: { port: 47616, iframeBrowser: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto', messageTimes: false },
 };
 
 /** A source's or schedule's name: it keys tickets in the store and History. */
@@ -642,7 +646,7 @@ export function parseSettings(text: string): SettingsResult {
   voice.playbookPersonas = parsePlaybookPersonas(read, voiceIn['playbookPersonas'], voice.personas);
 
   const webIn = read.section(root, 'web', 'web');
-  read.unknown(webIn, ['port', ...RETIRED_WEB_KEYS, 'iframeBrowser', 'remoteHosts', 'remoteLogins', 'tailscale', 'diffLayout', 'diffWrap'], 'web');
+  read.unknown(webIn, ['port', ...RETIRED_WEB_KEYS, 'iframeBrowser', 'remoteHosts', 'remoteLogins', 'tailscale', 'diffLayout', 'diffWrap', 'messageTimes'], 'web');
   const web: WebSettings = {
     port: read.integer(webIn, 'port', 'web', defaults.web.port, 0, 65535),
     iframeBrowser: read.boolean(webIn, 'iframeBrowser', 'web', defaults.web.iframeBrowser),
@@ -651,6 +655,7 @@ export function parseSettings(text: string): SettingsResult {
     tailscale: read.boolean(webIn, 'tailscale', 'web', defaults.web.tailscale),
     diffLayout: read.choice(webIn, 'diffLayout', 'web', DIFF_LAYOUTS, defaults.web.diffLayout),
     diffWrap: read.choice(webIn, 'diffWrap', 'web', DIFF_WRAPS, defaults.web.diffWrap),
+    messageTimes: read.boolean(webIn, 'messageTimes', 'web', defaults.web.messageTimes),
   };
 
   return read.errors.length > 0 ? { errors: read.errors } : { settings: { plugins, sessions, triage, sources, schedules, alerts, voice, web }, warnings: settingsWarnings(root) };

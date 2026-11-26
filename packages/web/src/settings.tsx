@@ -17,6 +17,10 @@ export interface SettingsDeps {
   closed?(): void;
   /** Called once Settings or its question is drawn or removed, so the page makes what lies under the top dialog inert (layers.ts). */
   layered?(): void;
+  /** Whether Spoken replies are on (PRD R105), or null while the hub has no voice; Spoken replies' switch shows it. */
+  spokenReplies?(): boolean | null;
+  /** Turns Spoken replies on or off at once; the hub's voice event then redraws the switch (`voiceChanged`). */
+  setSpokenReplies?(on: boolean): void;
 }
 
 
@@ -56,6 +60,8 @@ interface View {
   enrollError: string | null;
   /** Devices' paired devices and Pair a device (architecture.md § Remote access). */
   remote: RemoteView;
+  /** Spoken replies as the page last heard, read at each draw; null while the hub has no voice. */
+  spokenReplies: boolean | null;
 }
 
 /** The paired devices as the hub last listed them, or null before Devices asked; the pairing link shown, or null; and a refusal. */
@@ -80,11 +86,13 @@ export interface Settings {
   state(): EditorState | null;
   /** Reads settings.json again, as when the page comes back into view. */
   reload(): Promise<void>;
+  /** Draws Spoken replies' switch anew after the hub's voice event. */
+  voiceChanged(): void;
 }
 
 /** Settings drawn into `host`: the navigation, the page and the bar, and a phone's list that drills into each page. */
 export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
-  const view: View = { open: false, drill: 'nav', navPath: [], expanded: new Set(), collapsed: new Set(), error: null, notice: null, opened: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE() };
+  const view: View = { open: false, drill: 'nav', navPath: [], expanded: new Set(), collapsed: new Set(), error: null, notice: null, opened: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE(), spokenReplies: null };
   let state: EditorState | null = null;
   let loads = 0;
   let seq = 0;
@@ -222,6 +230,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       void enroll('status');
     }
 
+    view.spokenReplies = deps.spokenReplies?.() ?? null;
     mount(host, renderSettings(state, view, handlers));
 
     // While a question is open, the editor behind it takes no focus or clicks.
@@ -859,6 +868,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     discard: closeNow,
     editCell,
     enroll: (action) => void enroll(action),
+    speakReplies: (on) => deps.setSpokenReplies?.(on),
     voiceSwitch: () => {
       navigate('spoken-replies');
       host.querySelector<HTMLElement>('[data-path="voice.enabled"] input')?.focus();
@@ -974,6 +984,11 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
       return load();
     },
+    voiceChanged: () => {
+      if (view.open) {
+        draw();
+      }
+    },
   };
 }
 
@@ -996,6 +1011,7 @@ interface Handlers {
   /** Opens Spoken replies with the focus on the voice's switch. */
   voiceSwitch(): void;
   enroll(action: string): void;
+  speakReplies(on: boolean): void;
   pair(): void;
   signOut(id: string): void;
   /** Allows or forbids voice on a paired device. */
@@ -1214,6 +1230,7 @@ function SectionBlock({ state, section, pageOff, view, on }: { state: EditorStat
         {/* A page the voice needs as a whole says it is off once, above its sections. */}
         {section.dimmed && !pageOff ? <VoiceOff on={on} /> : null}
         <div class={`settings-card${section.dimmed ? ' dimmed' : ''}`}>
+          {section.block === 'speak-replies' ? <SpeakRepliesRow on={view.spokenReplies} handlers={on} /> : null}
           {rows}
           {section.block === 'enroll' ? <EnrollRow view={view} on={on} /> : null}
           {section.block === 'devices' ? <DevicesBlock remote={view.remote} on={on} /> : null}
@@ -1424,6 +1441,32 @@ function FileBlock({ state }: { state: EditorState }) {
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Spoken replies' switch (PRD R105): not a settings.json key, so it applies at once, needs no Save, and is off again when the hub starts but for a
+ * restart onto a new build; disabled
+ * while the hub has no voice.
+ */
+function SpeakRepliesRow({ on, handlers }: { on: boolean | null; handlers: Handlers }) {
+  const id = 'settings-speak-replies';
+
+  return (
+    <div class="settings-row boolean settings-speak-replies">
+      <div class="settings-caption">
+        <label for={id}>Speak replies</label>
+        <p class="settings-help" id={`${id}-help`}>
+          {on === null ? 'Available once the voice runs: turn on Use voice and save.' : 'Switchboard speaks the replies to messages you send to the session the voice is on. Applies at once, with no save; off when Switchboard starts, though an update to a new build keeps it.'}
+        </p>
+      </div>
+      <div class="settings-input">
+        <label class="settings-box settings-switch">
+          <input type="checkbox" role="switch" id={id} checked={on === true} disabled={on === null} aria-describedby={`${id}-help`} onChange={(event) => handlers.speakReplies((event.currentTarget as HTMLInputElement).checked)} />
+          <span class="settings-switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
+    </div>
   );
 }
 

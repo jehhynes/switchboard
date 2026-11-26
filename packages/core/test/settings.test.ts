@@ -12,7 +12,7 @@ describe('parseSettings', () => {
         schedules: {},
         alerts: { surface: 'auto' },
         voice: { enabled: false, voice: 'marin', style: 'none', speed: 1, expressive: false, briefReplies: false, awayMinutes: 2, needsYouSound: true, outputDevice: null, micIdleMinutes: 10, endPauseMs: 3000, inputDevice: null, halfDuplexTailMs: 800, duplex: { local: 'auto', remote: 'auto' }, matchThreshold: 0.6, pitchLowFactor: 1.22, pitchMinLowShare: 0.2, roomHold: true, roomHoldSeconds: 60, personas: [], playbookPersonas: {}, spokenAlerts: true, alertOn: { finished: true, question: true, permission: true }, alertAnswerSeconds: 10, operatorName: '' },
-        web: { port: 47616, iframeBrowser: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto' },
+        web: { port: 47616, iframeBrowser: false, remoteHosts: [], remoteLogins: [], tailscale: false, diffLayout: 'auto', diffWrap: 'auto', messageTimes: false },
       },
       warnings: [],
     });
@@ -39,7 +39,7 @@ describe('parseSettings', () => {
         },
         alerts: { surface: 'web' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, briefReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: ' Alex ' },
-        web: { port: 0, iframeBrowser: true, remoteHosts: ['PC.tailnet.ts.net', 'pc.tailnet.ts.net '], remoteLogins: ['Alex@Example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off' },
+        web: { port: 0, iframeBrowser: true, remoteHosts: ['PC.tailnet.ts.net', 'pc.tailnet.ts.net '], remoteLogins: ['Alex@Example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off', messageTimes: true },
       }),
     );
 
@@ -62,7 +62,7 @@ describe('parseSettings', () => {
         schedules: {},
         alerts: { surface: 'web' },
         voice: { enabled: true, voice: 'cedar', style: 'pair', speed: 1.25, expressive: true, briefReplies: true, awayMinutes: 5, needsYouSound: false, outputDevice: 'Speakers', micIdleMinutes: 0, endPauseMs: 2500, inputDevice: 'Headset', halfDuplexTailMs: 450, duplex: { local: 'full', remote: 'half' }, matchThreshold: 0.7, pitchLowFactor: 1.5, pitchMinLowShare: 0, roomHold: false, roomHoldSeconds: 120, personas: [], playbookPersonas: {}, spokenAlerts: false, alertOn: { finished: false, question: true, permission: false }, alertAnswerSeconds: 20, operatorName: 'Alex' },
-        web: { port: 0, iframeBrowser: true, remoteHosts: ['pc.tailnet.ts.net'], remoteLogins: ['alex@example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off' },
+        web: { port: 0, iframeBrowser: true, remoteHosts: ['pc.tailnet.ts.net'], remoteLogins: ['alex@example.com'], tailscale: true, diffLayout: 'stacked', diffWrap: 'off', messageTimes: true },
       },
       warnings: [],
     });
@@ -90,6 +90,7 @@ describe('parseSettings', () => {
     expect(parseSettings('{"web":{"port":1.5}}')).toEqual({ errors: ['web.port must be a whole number from 0 to 65535.'] });
     expect(parseSettings('{"web":{"iframeBrowser":"yes"}}')).toEqual({ errors: ['web.iframeBrowser must be true or false.'] });
     expect(parseSettings('{"web":{"diffLayout":"inline","diffWrap":true}}')).toEqual({ errors: ['web.diffLayout must be one of auto, split, stacked.', 'web.diffWrap must be a string.'] });
+    expect(parseSettings('{"web":{"messageTimes":1}}')).toEqual({ errors: ['web.messageTimes must be true or false.'] });
   });
 
   it('refuses a remote host with a port, a scheme, an IP address or one label, a login with spaces, and a tailscale that is not true or false', () => {

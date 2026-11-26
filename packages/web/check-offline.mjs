@@ -29,7 +29,7 @@ const row = (id, title) => ({ workItemId: id, ticketId: id, title, priority: nul
 const titles = ['Fix the login redirect', 'Add the export button', 'Tidy the settings page'];
 const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: titles.map((title, index) => row(index + 1, title)) }];
 const scopeOf = (id) => ({ kind: 'page', key: 'k', folder: 'D:/w', title: titles[id - 1], scopeGen: id, conversations: [{ workItemId: id, title: titles[id - 1], primary: true, sessionId: 's' + id, state: 'idle', conversation: 'full', unread: 0 }], workItemId: id, cwd: 'D:/w', sessionId: 's' + id });
-const session = (id) => ({ id: 's' + id, title: 'Task session', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, canPin: true });
+const session = (id) => ({ id: 's' + id, title: 'Task session', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null });
 const items = (id) => Array.from({ length: 30 }, (_, i) => [
   { type: 'message', id: 'm' + id + '-' + i, sessionId: 's' + id, workItemId: id, at: now - 100_000 + i * 2_000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Work item ' + id + ': message ' + i, delivery: 'sent', error: null },
   { type: 'reply', id: 'r' + id + '-' + i, sessionId: 's' + id, at: now - 99_000 + i * 2_000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ' about ' + titles[id - 1] + '.', rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } },
@@ -451,8 +451,8 @@ try {
       await wait(2_000);
       if (!(await marked())) found.push('another build reloaded the page by itself');
       await shot('update-ready');
-      // Update ready lies over every dialog, so Reload still takes a press while Settings or the persona dialog is open.
-      for (const [name, dialog, steps] of [['Settings', '.settings[role=dialog]', ['[data-action=list-more]', '[data-action=list-settings]']], ['the persona dialog', '.persona-dialog[role=dialog]', ['[data-action=view-menu]', '[data-action=persona]']]]) {
+      // Update ready lies over every dialog, so Reload still takes a press while Settings is open.
+      for (const [name, dialog, steps] of [['Settings', '.settings[role=dialog]', ['[data-action=list-more]', '[data-action=list-settings]']]]) {
         for (const step of steps) {
           await evaluate('document.querySelector(' + JSON.stringify(step) + ')?.click()');
           await wait(200);
@@ -472,7 +472,7 @@ try {
         })()`);
 
         if (top !== null) found.push('Update ready is under ' + name + ': ' + top + ' is topmost at Reload');
-        await shot('update-ready-' + (name === 'Settings' ? 'settings' : 'persona'));
+        await shot('update-ready-settings');
         await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
         await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
         if (!(await until('document.querySelector("[role=dialog][aria-modal=true]") === null', 5_000))) found.push(name + ' did not close on Escape');

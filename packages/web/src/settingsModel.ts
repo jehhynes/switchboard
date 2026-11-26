@@ -46,7 +46,7 @@ export interface Section {
   fields: readonly Field[];
   advanced?: boolean;
   summary?: string;
-  block?: 'devices' | 'file' | 'enroll' | 'used-by';
+  block?: 'devices' | 'file' | 'enroll' | 'used-by' | 'speak-replies';
   /** For a persona's Used by, the playbooks that take it. */
   usedBy?: string[];
   /** Whether its settings do nothing while the voice is off, so it is dimmed then. */
@@ -254,12 +254,12 @@ export const HOME = 'sessions';
 const PAGES: Readonly<Record<string, { title: string; lede: string; experimental?: string; sections: (state: EditorState) => Section[]; needsVoice?: boolean }>> = {
   sessions: { title: 'Sessions', lede: 'How playbook and ad-hoc sessions run. A playbook can set its own agent, model and permission mode.', sections: (state) => sessionsFields(state) },
   triage: { title: 'Triage', lede: 'How Switchboard chooses a playbook for each new ticket.', sections: () => triageFields() },
-  display: { title: 'Alerts and display', lede: 'How the pages on this computer tell you that work needs you, and how they show diffs.', sections: () => displayFields() },
+  display: { title: 'Alerts and display', lede: 'How the pages tell you that work needs you, and how they show conversations and diffs.', sections: () => displayFields() },
   devices: { title: 'Devices', lede: 'Phones and other computers that open this page through your tailnet.', sections: () => devicesFields() },
   advanced: { title: 'Advanced', lede: 'Experiments, the programs Switchboard runs, and where settings.json is.', sections: () => advancedFields() },
-  'spoken-replies': { title: 'Spoken replies', lede: 'Switchboard speaks replies and alerts to you.', experimental: 'Spoken replies may be unreliable. Replies are spoken only after you turn them on in a conversation’s View options; spoken alerts have their own switch below.', sections: (state) => spokenRepliesFields(state) },
+  'spoken-replies': { title: 'Spoken replies', lede: 'Switchboard speaks replies and alerts to you.', experimental: 'Spoken replies may be unreliable. Replies are spoken only while Speak replies is on; spoken alerts have their own switch below.', sections: (state) => spokenRepliesFields(state) },
   dictation: { title: 'Dictation', lede: 'You speak to Switchboard: the microphone, dictation and your voice.', sections: () => dictationFields(), needsVoice: true },
-  personas: { title: 'Personas', lede: 'The persona each playbook’s sessions take, unless one is pinned to the session.', sections: (state) => personasFields(state), needsVoice: true },
+  personas: { title: 'Personas', lede: 'The persona each playbook’s sessions take.', sections: (state) => personasFields(state), needsVoice: true },
 };
 
 export class EditorState {
@@ -610,8 +610,8 @@ export function personaField(state: EditorState, playbook: string, label: string
 }
 
 /**
- * The Spoken replies page (PRD R105): the voice process's switch and the speaker, how replies are read, and the spoken alerts, which need the voice
- * on. Needs-you sound is on Alerts and display, since the page and system notifications play it too.
+ * The Spoken replies page (PRD R105): the voice process's switch and the speaker, Speak replies and how replies are read, and the spoken alerts,
+ * which need the voice on. Needs-you sound is on Alerts and display, since the page and system notifications play it too.
  */
 export function spokenRepliesFields(state: EditorState): Section[] {
   const value = state.value ?? undefined;
@@ -626,6 +626,7 @@ export function spokenRepliesFields(state: EditorState): Section[] {
     },
     {
       heading: 'Replies',
+      block: 'speak-replies',
       fields: [
         { path: 'voice.voice', label: 'Voice', kind: 'select', help: 'Used when no persona applies. OpenAI recommends Marin and Cedar.', placeholder: 'marin', options: withCurrent(choices(TTS_VOICES), getAt(value, 'voice.voice')) },
         { path: 'voice.style', label: 'Style', kind: 'select', help: 'Used when no persona applies, unless Expressive delivery is on.', placeholder: 'none', options: withCurrent(choices(SPEECH_STYLES), getAt(value, 'voice.style')) },
@@ -731,7 +732,7 @@ export function personaFields(state: EditorState, index: number): Section[] {
     {
       heading: '',
       fields: [
-        { path: `${path}.name`, label: 'Name', kind: 'text', help: '1 to 40 characters, shown in the conversation’s View options.' },
+        { path: `${path}.name`, label: 'Name', kind: 'text', help: '1 to 40 characters, said in spoken alerts.' },
         { path: `${path}.voice`, label: 'Voice', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Spoken replies: ${capitalized(voice)}` }, ...choices(TTS_VOICES)], getAt(value, `${path}.voice`)) },
         { path: `${path}.style`, label: 'Style', kind: 'select', help: '', options: withCurrent([{ value: '', label: `From Spoken replies: ${capitalized(style)}` }, ...choices(SPEECH_STYLES)], getAt(value, `${path}.style`)) },
         { path: `${path}.personality`, label: 'Personality', kind: 'prompt', help: 'At most 600 characters. How its spoken replies sound; it never changes how its sessions work.' },
@@ -1296,7 +1297,7 @@ export function triageFields(): Section[] {
   ];
 }
 
-/** The Alerts and display page: where needs-you alerts show, and how diffs show on every page. */
+/** The Alerts and display page: where needs-you alerts show, how conversations show replies and message times, and how diffs show on every page. */
 export function displayFields(): Section[] {
   return [
     {
@@ -1319,9 +1320,10 @@ export function displayFields(): Section[] {
       ],
     },
     {
-      heading: 'Replies',
+      heading: 'Conversations',
       fields: [
-        { path: 'voice.briefReplies', label: 'Fold reply details', kind: 'boolean', help: "Fold a reply's details under a fade until you open it; the newest reply shows in full. A paired device keeps its own choice.", fallback: false },
+        { path: 'web.messageTimes', label: 'Show message times and notes', kind: 'boolean', help: "Every message shows its time and its marks: dictated, a reply's tone, and a reply that was not spoken. Off, only the first message after each day's divider shows its time.", fallback: false },
+        { path: 'voice.briefReplies', label: 'Fold reply details', kind: 'boolean', help: "Fold a reply's details under a fade until you open it; the newest reply shows in full.", fallback: false },
       ],
     },
     {
@@ -1882,7 +1884,7 @@ export interface FieldView {
 export interface SectionView {
   heading: string;
   advanced: boolean;
-  block?: 'devices' | 'file' | 'enroll' | 'used-by';
+  block?: 'devices' | 'file' | 'enroll' | 'used-by' | 'speak-replies';
   usedBy?: string[];
   link?: { text: string; label: string; page: string };
   /** Dimmed, since the voice is off and its settings need it. */
@@ -2110,7 +2112,7 @@ function personaPage(state: EditorState, at: string): PageView {
 export function playbookPageSections(state: EditorState, playbook: PlaybookFields, name: string | null = null): Section[] {
   // A saved task playbook's persona, kept under voice.playbookPersonas, which the Personas page edits too.
   // It shows with no roster too while the playbook has an assignment, so None can remove one that names a missing persona.
-  const persona = name !== null && playbook.kind === 'task' && (state.personaIds.length > 0 || getAt(state.value ?? undefined, `${ASSIGNMENTS}${name}`) !== undefined) ? [personaField(state, name, 'Persona', 'Its sessions take this persona unless one is pinned to the session.')] : [];
+  const persona = name !== null && playbook.kind === 'task' && (state.personaIds.length > 0 || getAt(state.value ?? undefined, `${ASSIGNMENTS}${name}`) !== undefined) ? [personaField(state, name, 'Persona', 'Its sessions take this persona.')] : [];
   const fields = [...playbookFields(state, playbook), ...persona];
   const pick = (test: (path: string) => boolean): Field[] => fields.filter((field) => test(field.path));
   const of = (...paths: string[]): Field[] => paths.flatMap((path) => fields.filter((field) => field.path === path));

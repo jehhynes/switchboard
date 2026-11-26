@@ -92,19 +92,37 @@ describe('the page in use', () => {
     click('[data-voice="stop"]');
     await flush();
     expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(true);
-    // Off and silent, the composer has no speaker at all: experimental spoken replies are turned on in View options (PRD R105).
+    // Off and silent, the composer has no speaker at all: experimental spoken replies are turned on in Settings (PRD R105).
     source.emit('voice', { voice: { enabled: true, here: true, speaking: null, speakReplies: false, error: null } });
     expect(root.querySelector('.voice-controls [data-voice]')).toBeNull();
     expect(root.querySelector('.composer-mic [data-voice="mic"]')).not.toBeNull();
-    click('.header button.view-options');
-    expect(root.querySelector('[data-action="toggle-spoken-replies"]')!.getAttribute('aria-checked')).toBe('false');
-    expect(root.querySelector('[data-action="toggle-spoken-replies"] .menu-note')!.textContent).toBe('Experimental');
-    click('[data-action="toggle-spoken-replies"]');
+    // Settings › Spoken replies turns them on at once, with no Save; the hub's voice event redraws its switch.
+    expect(root.querySelector('.header [data-action="toggle-spoken-replies"], .header button.view-options')).toBeNull();
+    answers['page-settings-read'] = { status: 200, body: { settings: { path: 'C:/home/.switchboard/settings.json', version: 'v1', value: { voice: { enabled: true } }, error: null }, permissionModes: [], codexPermissionModes: [], providers: [], templateVariables: [], sourceKinds: [], inUse: {}, enabled: {}, configDir: 'C:/home/.switchboard' } };
+    click('.more-actions');
+    click('.more-menu [data-action="list-settings"]');
+    await flush();
+    click('.settings-nav-entry[data-key="spoken-replies"]');
+    await flush();
+    const speak = () => root.querySelector<HTMLInputElement>('.settings-speak-replies input[role="switch"]')!;
+
+    expect([speak().checked, speak().disabled]).toEqual([false, false]);
+    speak().click();
     await flush();
     expect(posts.filter((post) => post.url.endsWith('/speak-replies')).map((post) => post.body['on'])).toEqual([false, true]);
     source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
-    expect(root.querySelector('[data-action="toggle-spoken-replies"]')!.getAttribute('aria-checked')).toBe('true');
-    click('.header button.view-options');
+    expect(speak().checked).toBe(true);
+    // A refusal says why and draws the switch from the voice as last heard, since no voice event follows it.
+    answers['/speak-replies'] = { status: 409, body: { error: 'Voice is off (voice.enabled).' } };
+    speak().click();
+    expect(speak().checked).toBe(false);
+    await flush();
+    expect(speak().checked).toBe(true);
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Voice is off (voice.enabled).');
+    delete answers['/speak-replies'];
+    root.querySelector<HTMLButtonElement>('.settings-close')!.click();
+    await flush();
+    delete answers['page-settings-read'];
 
     // The mic is packages/conversation's button, and drives the computer's voice process.
     expect(root.querySelector('.composer-mic')!.innerHTML).toBe(renderMicButton({ enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null }));

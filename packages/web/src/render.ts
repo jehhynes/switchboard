@@ -150,8 +150,6 @@ export interface View {
   artifact: string | null;
   /** What the operator picked or typed for a Codex request's questions, by `<request ID>:<question ID>`. */
   requestValues: Map<string, string>;
-  /** The persona dialog while open: the roster, null while it loads, or why it could not. */
-  personas: { items: Array<{ id: string; name: string; voice?: string; style?: string; personality?: string }> | null; error: string | null } | null;
   /** The list's collapsed groups, by key. */
   collapsed: Set<string>;
   /** The Done bands the operator opened or closed, by `<group>:<band>`; the rest follow `OPEN_BANDS`. Kept until the page reloads. */
@@ -173,15 +171,6 @@ export interface View {
   acting: boolean;
   /** What the column right of the conversation shows on a wide screen. */
   side: SideTab;
-  /** Whether the view options menu is open. */
-  viewMenu: boolean;
-  /** Whether each message's line shows its time and its optional marks (dictated, tone), kept in local storage. */
-  details: boolean;
-  /**
-   * A paired device's own Collapse details, kept in its local storage, since only this computer's page may change settings.json; null follows
-   * `voice.briefReplies`, as this computer's page always does.
-   */
-  briefReplies: boolean | null;
   /**
    * New conversation…'s draft in the shown work item (architecture.md § Web page), which starts nothing until its first message is sent; null
    * while the page shows a session.
@@ -215,7 +204,7 @@ export type Sheet =
   | { kind: 'snooze'; row: string; label: string; title: string; choices: SnoozeChoice[]; picked: string; date: string; comment: string }
   | { kind: 'text'; title: string; text: string };
 
-export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), personas: null, collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, newDraft: null, side: 'history', viewMenu: false, details: false, briefReplies: null, tabFit: UNMEASURED, tabMenu: false });
+export const newView = (): View => ({ tab: 'conversation', open: new Set(), picker: false, cards: new Map(), artifact: null, requestValues: new Map(), collapsed: new Set(COLLAPSED_GROUPS), bands: new Map(), list: false, drawer: null, actions: false, linkMenu: false, copyMenu: false, rowMenu: null, sheet: null, acting: false, prompt: null, newDraft: null, side: 'history', tabFit: UNMEASURED, tabMenu: false });
 
 /** The longest menu label for a link, carried over from the retired dock; a longer one is cut with an ellipsis and shown whole in its tooltip. */
 export const LINK_LABEL_MAX = 48;

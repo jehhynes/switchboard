@@ -2,8 +2,8 @@ import type { LogLevel } from '@switchboard/core';
 import { plainError, RepeatedLog, seconds } from '@switchboard/core';
 import { countsUnread, inTranscript, stateStale, summarizeMessage } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationState, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
-import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
-import type { BackgroundCounts, PersonaSettings, ViewSettings } from '@switchboard/core';
+import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, resumesHeld, START_PROMPT, waitsOnLimit } from '@switchboard/core';
+import type { BackgroundCounts, ViewSettings } from '@switchboard/core';
 import { ArtifactFolder, realInside, EXTERNAL_NAME, ExternalArtifacts, externalFile, externalName, inGit, joinMessages, MAX_MESSAGE_CHARS, NotWritten, answerMessage, cardSteps, cardUtterance, currentStep, draftAnswers, interruptNote, messageTags, moveStep, pasteText, picked, pickLetter, questionKey, questionSpeech, resolveAnswers, setComment, SLUG } from '@switchboard/conversation';
 import type { CardDraft, CarriedQuestion, LedgerCard, LedgerQuestion, QuestionLedger } from '@switchboard/conversation';
 import type { MessageAnswer } from '@switchboard/core';
@@ -68,16 +68,6 @@ export interface SessionView {
   reason: string | null;
   requests?: NativeRequest[];
   /**
-   * The session's persona while `voice.enabled` is on (architecture.md § Personas), else null. `pinned`: the operator pinned it; `tonePending`:
-   * the live session's prompt has another tone section until its next resume or compaction.
-   */
-  persona: { id: string; name: string; pinned: boolean; tonePending: boolean } | null;
-  /**
-   * The operator can pin a persona to the session from the header, with or without one now: `voice.enabled` is on, the roster is not empty, and
-   * it is a Code Mode or app-server session. Absent from an older hub.
-   */
-  canPin?: boolean;
-  /**
    * While the session waits for a usage or rate limit to reset (architecture.md § Rate limits): when it resumes, and `retry` when that is the hub's
    * next attempt rather than the reset. Absent from an older hub.
    */
@@ -90,9 +80,6 @@ export interface SessionView {
    */
   background?: BackgroundCounts | null;
 }
-
-/** The voice settings a session's persona is read from. */
-export type PersonaView = PersonaSettings & { enabled: boolean };
 
 /** A message names its work item, so a window that hears one was not sent puts it back in that conversation's draft only. */
 export type MessageView = { type: 'message' } & Omit<ConversationMessage, 'transcriptUuid' | 'opId' | 'pastedAt' | 'launch'>;
@@ -155,7 +142,7 @@ export function stateView(state: ConversationState, session: Session | null, own
   };
 }
 
-export function sessionView(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {
+export function sessionView(session: Session, current: boolean, hooks: boolean): SessionView {
   const state = session.state === 'failed' ? 'idle' : session.state;
   const waitingFor = session.state !== 'waiting' ? null : session.stateDetail === PERMISSION_PROMPT ? 'permission' : session.stateDetail === START_PROMPT ? 'start-prompt' : 'question';
   // A message to an ended app-server session resumes its thread first (PRD R107); an ended Code Mode session resumes through its attach terminal.
@@ -189,8 +176,6 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
     current,
     conversation,
     reason,
-    persona: personaOf(session, personas),
-    canPin: personas !== null && personas.enabled && personas.personas.length > 0 && (session.codeMode === true || session.execution === 'app-server'),
     limit: limitOf(session),
     background: backgroundCounts(session),
   };
@@ -207,19 +192,6 @@ function limitOf(session: Session): { until: number; retry: boolean; throttle?: 
   const throttle = limit.kind === 'throttle' ? { throttle: true } : {};
 
   return limit.cli && limit.resetsAt !== null && limit.attempts === 0 ? { until: limit.resetsAt, retry: false, ...throttle } : { until: limit.nextAt, retry: limit.resetsAt === null || limit.attempts > 0, ...throttle };
-}
-
-/** A session's persona as its view shows it, or null with voice off, an empty roster or a persona no longer in it. */
-function personaOf(session: Session, settings: PersonaView | null): SessionView['persona'] {
-  const persona = settings === null || !settings.enabled ? null : personaById(settings, session.personaId);
-
-  if (persona === null || settings === null) {
-    return null;
-  }
-
-  const tonePending = session.state !== 'ended' && toneVersion(sessionTone(settings, session)) !== (session.personaVersion ?? null);
-
-  return { id: persona.id, name: persona.name, pinned: session.personaPinned === true, tonePending };
 }
 
 export function itemView(item: ({ type: 'message' } & ConversationMessage) | ({ type: 'reply' } & ConversationReply)): ItemView {
@@ -321,10 +293,6 @@ export interface ConversationServiceDeps {
   resume?(sessionId: string): Promise<string | null>;
   /** Speech out (architecture.md § Voice); without it no window has voice. */
   voice?: ConversationVoice;
-  /** The voice settings personas are read from (architecture.md § Personas); without them no session has a persona. */
-  personas?(): PersonaView;
-  /** Pins a persona to a session, or clears its pin with null; why not, or null. */
-  pinPersona?(sessionId: string, personaId: string | null): string | null;
   /** The web page's list, in the list view's groups (architecture.md § Web page); without it a page lists nothing. */
   pageList?(): PageListGroup[];
   /** The web page's list header: the configured sources (architecture.md § Web page). */
@@ -646,9 +614,9 @@ export class ConversationService {
 
   #adapter(session: Session): ConversationAdapter | undefined { return this.#adapters.find(adapter => adapter.supports(session)); }
 
-  #view(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {
+  #view(session: Session, current: boolean, hooks: boolean): SessionView {
     const adapter = this.#adapter(session);
-    const view = { ...sessionView(session, current, hooks, personas), context: adapter?.context?.(session) ?? null };
+    const view = { ...sessionView(session, current, hooks), context: adapter?.context?.(session) ?? null };
     if (session.execution !== 'app-server') return view;
     return { ...view, provider: 'codex', requests: adapter?.requests?.(session) ?? [], reason: adapter?.cannotSend(session) ?? view.reason };
   }
@@ -1023,7 +991,7 @@ export class ConversationService {
       return { refused: SESSION_ENDED };
     }
 
-    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+    const view = this.#view(session, true, this.deps.hooks());
 
     if (view.conversation !== 'full') {
       return { refused: view.reason ?? SESSION_ENDED };
@@ -1206,7 +1174,7 @@ export class ConversationService {
 
       const all = this.deps.store.sessionsFor(item.id);
       const session = all.at(-1) ?? null;
-      const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+      const view = session === null ? null : this.#view(session, true, this.deps.hooks());
       const earlier = all.slice(0, -1).reverse().map((one) => sessionEntry(one, this.#sessionName(one)));
 
       return [
@@ -1941,7 +1909,7 @@ export class ConversationService {
       return { status: 409, body: { error: EARLIER_SESSION } };
     }
 
-    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+    const view = this.#view(session, true, this.deps.hooks());
 
     if (view.conversation !== 'full') {
       return { status: 409, body: { error: view.reason ?? SESSION_ENDED } };
@@ -2551,15 +2519,15 @@ export class ConversationService {
     this.deps.voice?.update();
   }
 
-  /** The session a window shows, as it is sent: an earlier session the page chose is read-only, with no persona pin or request to answer. */
+  /** The session a window shows, as it is sent: an earlier session the page chose is read-only, with no request to answer. */
   #shownView(scope: WindowScope, session: Session): SessionView {
-    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+    const view = this.#view(session, true, this.deps.hooks());
 
     if (scope.earlier !== true) {
       return view;
     }
 
-    return { ...view, conversation: view.conversation === 'none' ? 'none' : 'read-only', reason: view.conversation === 'none' ? view.reason : EARLIER_SESSION, canPin: false, ...(view.requests === undefined ? {} : { requests: [] }) };
+    return { ...view, conversation: view.conversation === 'none' ? 'none' : 'read-only', reason: view.conversation === 'none' ? view.reason : EARLIER_SESSION, ...(view.requests === undefined ? {} : { requests: [] }) };
   }
 
   /** Sends each window its current session when its view differs from the one it was last sent. */
@@ -2643,7 +2611,7 @@ export class ConversationService {
       return this.#outside(window);
     }
 
-    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+    const view = this.#view(session, true, this.deps.hooks());
 
     if (view.conversation !== 'full') {
       return { status: 409, body: { error: view.reason ?? SESSION_ENDED } };
@@ -2696,7 +2664,7 @@ export class ConversationService {
       return SESSION_ENDED;
     }
 
-    const view = this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+    const view = this.#view(session, true, this.deps.hooks());
 
     if (view.conversation !== 'full') {
       return view.reason ?? SESSION_ENDED;
@@ -2808,7 +2776,7 @@ export class ConversationService {
   dictate(key: string, sessionId: string, text: string, pieces: Piece[], partial: boolean, interrupted: Interruption | null = null): { message: ConversationMessage } | { refused: string } {
     const scope = this.deps.windows.scope(key);
     const session = this.deps.store.session(sessionId);
-    const view = session === null ? null : this.#view(session, true, this.deps.hooks(), this.deps.personas?.() ?? null);
+    const view = session === null ? null : this.#view(session, true, this.deps.hooks());
     const refused =
       scope === null || scope.sessionId !== sessionId || session === null || view === null
         ? "The voice's session is no longer this window's."
@@ -2998,8 +2966,8 @@ export class ConversationService {
 
   /**
    * The voice commands (architecture.md § Voice): `talk-here` moves the voice to the window's selected conversation's session, `stop-speaking`
-   * and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Spoken replies on or off. Refused with 403 outside the
-   * window's scope, 409 for a stale `scopeGen` and with the voice's refusal, and 404 while voice is not part of this hub.
+   * and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Spoken replies on or off for the whole hub, at any scope. Refused
+   * with 403 outside the window's scope, 409 for a stale `scopeGen` and with the voice's refusal, and 404 while voice is not part of this hub.
    */
   voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic' | 'mic-timing' | 'composer', body: Record<string, unknown>): { status: number; body: unknown } {
     const { window, scopeGen, opId, on, replyId, focused, draft, listen, steps, outcome, seq, heard } = body;
@@ -3036,7 +3004,9 @@ export class ConversationService {
       return { status: 400, body: { error: `Expected {window, scopeGen, opId${fields}}.` } };
     }
 
-    const refused = refusal(this.#page(window), scopeGen, null);
+    // Spoken replies are the hub's, not a conversation's, so Settings turns them on or off with no work item open.
+    const page = this.#page(window);
+    const refused = name === 'speak-replies' ? (page.known ? null : outOfScope(page.known, page.scope)) : refusal(page, scopeGen, null);
 
     if (refused !== null) {
       return refused;
@@ -3067,66 +3037,6 @@ export class ConversationService {
     const why = name === 'talk-here' ? voice.talkHere(window) : name === 'stop-speaking' ? voice.stopSpeaking(window) : voice.replay(window, replyId as string);
 
     return why === null ? { status: 200, body: { done: true } } : { status: why === REPLY_NOT_SHOWN ? 403 : 409, body: { error: why } };
-  }
-
-  /**
-   * `personas` (architecture.md § Personas): the roster the header offers, `[{id, name, voice, style, personality}]`, empty while `voice.enabled` is off. `persona
-   * {sessionId, personaId | null}` pins a persona to the window's selected conversation's current session, or clears its pin; refused with 403
-   * outside the scope, 409 for a stale `scopeGen`, while voice is off and with the flow's refusal.
-   */
-  /** Each `persona` command's answer, by window key and `opId`. */
-  readonly #pinned = new Map<string, { status: number; body: unknown }>();
-
-  personaCommand(name: 'personas' | 'persona', body: Record<string, unknown>): { status: number; body: unknown } {
-    const { window, scopeGen, opId, sessionId, personaId } = body;
-
-    if (typeof window !== 'string' || typeof scopeGen !== 'number' || typeof opId !== 'string' || (name === 'persona' && (typeof sessionId !== 'string' || !(personaId === null || typeof personaId === 'string')))) {
-      return { status: 400, body: { error: name === 'persona' ? 'Expected {window, scopeGen, opId, sessionId, personaId}.' : 'Expected {window, scopeGen, opId}.' } };
-    }
-
-    const refused = refusal(this.#page(window), scopeGen, name === 'persona' ? (sessionId as string) : null);
-
-    if (refused !== null) {
-      return refused;
-    }
-
-    const settings = this.deps.personas?.() ?? null;
-
-    if (name === 'personas') {
-      return { status: 200, body: { personas: settings === null || !settings.enabled ? [] : settings.personas.map((persona) => ({ id: persona.id, name: persona.name, voice: persona.voice, style: persona.style, personality: persona.personality })) } };
-    }
-
-    if (settings === null || !settings.enabled || this.deps.pinPersona === undefined) {
-      return { status: 409, body: { error: 'Voice is off (voice.enabled).' } };
-    }
-
-    // A repeated opId answers the first result and pins nothing again, so a retried Clear pin cannot resolve another persona.
-    const done = `${window} ${opId}`;
-    const first = this.#pinned.get(done);
-
-    if (first !== undefined) {
-      return first;
-    }
-
-    const why = this.deps.pinPersona(sessionId as string, personaId as string | null);
-    let answer: { status: number; body: unknown };
-
-    if (why !== null) {
-      answer = { status: 409, body: { error: why } };
-    } else {
-      // The header shows the pin at once, before the next snapshot.
-      this.sessionsChanged();
-      answer = { status: 200, body: { persona: this.#view(this.deps.store.session(sessionId as string)!, true, this.deps.hooks(), settings).persona } };
-    }
-
-    this.#pinned.set(done, answer);
-
-    // Kept for the newest commands only.
-    if (this.#pinned.size > 200) {
-      this.#pinned.delete(this.#pinned.keys().next().value!);
-    }
-
-    return answer;
   }
 
   /**

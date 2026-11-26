@@ -11,7 +11,7 @@ import { focusUrl } from './focus.js';
 import type { Anchor, SourceLink } from './source.js';
 import type { Actor, EventRecord, NewWorkItem, Store } from './store.js';
 import { renderTaskPrompt, sessionContract, sessionPrompt, triagePrompt } from './template.js';
-import { personaById, resolvePersona, sessionTone, toneVersion } from './persona.js';
+import { resolvePersona, sessionTone, toneVersion } from './persona.js';
 import type { PlaybookChoice, TemplateVariable } from './template.js';
 
 export const ADHOC_SOURCE = 'adhoc';
@@ -237,8 +237,6 @@ export type FlowEvent =
    */
   | { type: 'item-session'; workItemId: number; prompt: string; provider?: Provider }
   | { type: 'conversation-title'; workItemId: number; text: string; origin?: 'provider-manual' | 'provider-auto' }
-  /** The operator pins a persona to a Code Mode session, or clears its pin with null (architecture.md § Personas). */
-  | { type: 'persona'; sessionId: string; personaId: string | null }
   /** The contract hook gave a Code Mode session's prompt its tone section as the settings have it now (architecture.md § Personas). */
   | { type: 'persona-delivered'; sessionId: string }
   /** A live Claude session the operator started outside Switchboard, as the roster lists it (PRD R81). */
@@ -413,7 +411,7 @@ function textOf(text: string | null | undefined): string | null {
   return text?.trim() || null;
 }
 
-const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-session', 'item-session', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position', 'persona']);
+const OPERATOR_EVENTS: ReadonlySet<FlowEvent['type']> = new Set(['adhoc', 'new-session', 'item-session', 'register', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'restore', 'snooze', 'comment', 'move', 'reset-position']);
 
 /**
  * Events logged even when they change nothing, because they record a request or a report (PRD R59). The rest, such as polls and
@@ -534,8 +532,6 @@ function detailOf(store: Store, event: FlowEvent): Record<string, unknown> | nul
       return { repoRoot: event.repoRoot, provider: event.provider ?? null, model: event.model ?? null };
     case 'item-session':
       return { provider: event.provider ?? null };
-    case 'persona':
-      return { personaId: event.personaId };
     case 'register':
       return { cwd: event.cwd };
     case 'ticket':
@@ -742,8 +738,6 @@ class Flow {
         return this.itemSession(this.openItem(event.workItemId), event.prompt, event.provider);
       case 'conversation-title':
         return this.conversationTitle(event.workItemId, event.text, event.origin);
-      case 'persona':
-        return this.pinPersona(event.sessionId, event.personaId);
       case 'persona-delivered':
         return this.personaDelivered(event.sessionId);
       case 'register':
@@ -2128,37 +2122,6 @@ class Flow {
       .map((session) => session.personaId);
   }
 
-  /**
-   * Pins a persona to a Code Mode or Codex app-server session, or clears its pin, which gives it the persona a start would resolve now (architecture.md § Personas).
-   * Its voice changes from the next spoken reply; its tone section waits for the next resume or compaction.
-   */
-  private pinPersona(sessionId: string, personaId: string | null): void {
-    const session = this.session(sessionId);
-    const voice = this.context.settings.voice;
-
-    if (!persistent(session)) {
-      throw new Refusal('Only a Code Mode or Codex app-server session has a persona.');
-    }
-
-    // Personas are part of voice, so a persona menu shown before voice was turned off pins nothing.
-    if (!voice.enabled) {
-      throw new Refusal('Voice is off (voice.enabled).');
-    }
-
-    if (personaId !== null) {
-      if (personaById(voice, personaId) === null) {
-        throw new Refusal(`No persona ${personaId} in voice.personas.`);
-      }
-
-      this.store.updateSession(sessionId, { personaId, personaPinned: true });
-      return;
-    }
-
-    const item = this.store.workItem(session.workItemId);
-
-    this.store.updateSession(sessionId, { personaId: resolvePersona(voice, item?.playbook ?? null, this.livePersonas(sessionId))?.id ?? null, personaPinned: false });
-  }
-
   private personaDelivered(sessionId: string): void {
     const session = this.store.session(sessionId);
 
@@ -3022,7 +2985,6 @@ class Flow {
       promptless: hosted && prompt === '',
       personaId: persona?.id ?? null,
       personaVersion: toneVersion(tone),
-      personaPinned: false,
     });
     this.setStatus(item.id, { status: kind === 'task' ? 'running' : 'setup', queuedAt: null, error: null });
     // An older app-server thread leaves its subscription (PRD R39); an older held Code Mode session keeps running (PRD R95).

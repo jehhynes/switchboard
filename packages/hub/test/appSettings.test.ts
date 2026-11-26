@@ -289,36 +289,15 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/page-voice-computer']!({ window: 'page-unknown' })).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
   });
 
-  it('sets voice.briefReplies in settings.json for Brief replies, keeping the rest of the file but the old voice.expandReplies, and refuses a file it cannot save', async () => {
-    writeSettings({ sessions: { installHooks: false }, voice: { voice: 'cedar' } });
+  it('serves no Fold reply details or persona commands, which Settings replaced and the header dropped (operator decision 2026-11-26)', async () => {
+    writeSettings({ sessions: { installHooks: false } });
     const app = await start();
-    const path = join(temp.home, '.switchboard', 'settings.json');
-    const file = () => JSON.parse(readFileSync(path, 'utf8'));
-    const expand = app.post['/v1/conversation/brief-replies']!;
 
-    expect(await expand({ window: 'page-1', on: true })).toEqual({ status: 200, body: { briefReplies: true } });
-    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', briefReplies: true } });
-    expect(await expand({ on: false })).toEqual({ status: 200, body: { briefReplies: false } });
-    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', briefReplies: false } });
-    // A file that still has the key Brief replies replaced loses it.
-    writeSettings({ sessions: { installHooks: false }, voice: { voice: 'cedar', expandReplies: true } });
-    expect(await expand({ on: true })).toEqual({ status: 200, body: { briefReplies: true } });
-    expect(file()).toEqual({ sessions: { installHooks: false }, voice: { voice: 'cedar', briefReplies: true } });
-    expect(await expand({ on: 'yes' })).toEqual({ status: 400, body: { error: 'Expected {on}.' } });
-    expect(await expand(null)).toEqual({ status: 400, body: { error: 'Expected {on}.' } });
+    for (const route of ['/v1/conversation/brief-replies', '/v1/conversation/personas', '/v1/conversation/persona']) {
+      expect(app.post[route]).toBeUndefined();
+    }
 
-    // A file Settings could not save either is left as it is.
-    writeSettings({ sessions: { installHooks: false, concurrency: 11 } });
-    expect(await expand({ on: true })).toMatchObject({ status: 409, body: { error: expect.stringContaining('sessions.concurrency') } });
-    expect(file()).toEqual({ sessions: { installHooks: false, concurrency: 11 } });
-    writeSettings('{ not json');
-    expect(await expand({ on: true })).toMatchObject({ status: 409, body: { error: expect.stringContaining('settings.json is not valid JSON') } });
-    expect(readFileSync(path, 'utf8')).toBe('{ not json');
-    writeSettings({ sessions: { installHooks: false }, voice: [] });
-    expect(await expand({ on: true })).toMatchObject({ status: 409, body: { error: expect.stringContaining('voice') } });
-    expect(file()).toEqual({ sessions: { installHooks: false }, voice: [] });
-    writeSettings('[]');
-    expect(await expand({ on: true })).toEqual({ status: 409, body: { error: 'settings.json is not a JSON object. Fix it in Settings.' } });
+    expect(app.post['/v1/conversation/speak-replies']).toBeDefined();
   });
 
 });

@@ -38,7 +38,7 @@ function markupText(tree: ComponentChild): string[] {
 const AT = Date.UTC(2026, 10, 20, 19, 3, 41);
 const message = (id: string, patch: Partial<MessageView> = {}): MessageView => ({ type: 'message', id, sessionId: 's', workItemId: 1, at: AT, ord: 1, provisional: false, withdrawn: false, origin: 'typed', text: `text ${id}`, delivery: 'sent', error: null, ...patch });
 const reply = (id: string, patch: Partial<ReplyView> = {}): ReplyView => ({ type: 'reply', id, sessionId: 's', at: AT, ord: 2, provisional: false, kind: 'reply', answers: null, opening: `reply ${id}`, rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null }, ...patch });
-const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, ...patch });
+const session = (patch: Partial<SessionView> = {}): SessionView => ({ id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, ...patch });
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0, provider: 'codex' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
 const workState = (patch: Partial<StateView> = {}): StateView => ({ id: 'st-1', sessionId: 's', at: AT, headline: 'Done', body: '\`\`\`\ncode\n\`\`\`\n\nPick:\n- A) x\n- B) y', stale: null, unread: true, ...patch });
 const state = (patch: Partial<PageState> = {}): PageState => ({ ...EMPTY, connected: true, scope, session: session({ provider: 'codex' } as Partial<SessionView>), ...patch });
@@ -75,7 +75,7 @@ describe('HTML from the shared renderers', () => {
     ];
 
     for (const details of [true, false]) {
-      expect(markupText(renderTimeline(state({ items }), { ...newView(), details }, AT))).toEqual([]);
+      expect(markupText(renderTimeline({ ...state({ items }), messageTimes: details }, newView(), AT))).toEqual([]);
     }
   });
 

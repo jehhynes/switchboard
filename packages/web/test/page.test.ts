@@ -278,7 +278,7 @@ describe('drawing', () => {
     expect(host.querySelector('li[data-id="m3"] .meta')).toBeNull();
     expect(host.querySelector('li[data-id="m3"] .bubble')!.getAttribute('title')).toMatch(/^2026-11-20 11:00:00 /);
 
-    host.innerHTML = html(renderTimeline(pageState(items), { ...newView(), details: true }, at(12)));
+    host.innerHTML = html(renderTimeline({ ...pageState(items), messageTimes: true }, newView(), at(12)));
     expect(stamps()).toEqual(['m1:9:00 AM', 'r1:9:05 AM', 'm2:10:00 AM', 'm3:11:00 AM']);
     expect(host.querySelector('li[data-id="m1"] .voice-mark')!.textContent).toBe('dictated');
     expect(host.querySelector('li[data-id="m1"] .voice-mark')!.getAttribute('title')).toBe('Dictated in 1 piece:\nhello there · match 0.91 · 140 Hz');
@@ -289,7 +289,7 @@ describe('drawing', () => {
   it("puts a message's and a reply's metadata on one line under it, the reply's copy button first and the time at the right", () => {
     const host = document.createElement('div');
 
-    host.innerHTML = html(renderTimeline(pageState([message('m1', 1, { delivery: 'uncertain', error: 'Check the terminal.' }), reply('r1', 120_000, { tone: 'calm', spoken: { state: 'failed', atMs: null, saidChars: null } })]), { ...newView(), details: true }));
+    host.innerHTML = html(renderTimeline({ ...pageState([message('m1', 1, { delivery: 'uncertain', error: 'Check the terminal.' }), reply('r1', 120_000, { tone: 'calm', spoken: { state: 'failed', atMs: null, saidChars: null } })]), messageTimes: true }, newView()));
     expect([...host.querySelector('li[data-id="m1"] > .bubble')!.children].map((child) => child.className)).toEqual(['box', 'meta']);
     expect([...host.querySelector('li[data-id="m1"] .meta')!.children].map((child) => child.className)).toEqual(['meta-marks', 'stamp']);
     expect([...host.querySelector('li[data-id="r1"]')!.children].map((child) => child.className)).toEqual(['dot', 'body', 'meta']);
@@ -298,7 +298,7 @@ describe('drawing', () => {
   });
 
   it('dims the part of an interrupted passage not heard, and says Not spoken only when speech failed, with message details on', () => {
-    const spoken = (state: ReplyView['spoken']['state'], details = true) => html(renderTimeline(pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), { ...newView(), details }));
+    const spoken = (state: ReplyView['spoken']['state'], details = true) => html(renderTimeline({ ...pageState([reply('r1', 1, { opening: 'Fixed it. More.', speak: 'Fixed it.', spoken: { state, atMs: 7_400, saidChars: 3 } })]), messageTimes: details }, newView()));
 
     expect(spoken('interrupted')).toContain('<div class="reply-primary"><p class="passage">Fix<span class="unheard">ed it.</span></p></div>');
     expect(spoken('interrupted')).not.toContain('0:07');
@@ -1151,7 +1151,7 @@ describe("the list's CSS", () => {
 
   it('stacks the page\'s layers by one scale: the sashes over the top bars, a bar\'s open menu over the sashes, the drawer and its backdrop over all of them, and Update ready and the toast over every sheet and dialog', () => {
     const scale = Object.fromEntries([...css.matchAll(/--sb-z-([a-z-]+): (\d+);/g)].map(([, name, value]) => [name, Number(value)]));
-    const order = ['bar', 'sash', 'bar-menu', 'sliver', 'drawer-backdrop', 'drawer', 'maximized', 'sheet', 'persona', 'settings', 'settings-sheet', 'update', 'toast', 'top-line', 'top-band'];
+    const order = ['bar', 'sash', 'bar-menu', 'sliver', 'drawer-backdrop', 'drawer', 'maximized', 'sheet', 'settings', 'settings-sheet', 'update', 'toast', 'top-line', 'top-band'];
 
     expect(Object.keys(scale).sort()).toEqual([...order].sort());
     expect(order.map((name) => scale[name])).toEqual(order.map((name) => scale[name]).sort((a, b) => a! - b!));
@@ -1166,7 +1166,7 @@ describe("the list's CSS", () => {
     // Update ready stays clickable while Settings, the persona dialog or a sheet is open, as #connection stays live over them (layers.ts).
     expect(declarationsOf((selector) => selector === '.conn-update')).toEqual([expect.stringContaining('z-index: var(--sb-z-update)')]);
     // No page-level layer keeps a number of its own outside the scale.
-    expect(css).not.toMatch(/\.(sash|sliver|sheet-backdrop|persona-backdrop|composer-menu|conn-update)\b[^{]*\{[^}]*z-index: \d/);
+    expect(css).not.toMatch(/\.(sash|sliver|sheet-backdrop|composer-menu|conn-update)\b[^{]*\{[^}]*z-index: \d/);
   });
 
   it('makes every box in a scrolling pane a touch target, so a drag starting just under a tab strip scrolls the pane, not the strip', () => {

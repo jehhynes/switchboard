@@ -15,7 +15,7 @@ const parse = (markup: string): HTMLElement => {
 
   return root;
 };
-const session: SessionView = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null };
+const session: SessionView = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null };
 const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle' as const, conversation: 'full' as const, unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
 const message: MessageView = { type: 'message', id: 'm1', sessionId: 's', workItemId: 1, at: 500, ord: 1, provisional: false, withdrawn: false, origin: 'typed', text: 'Write the plan', delivery: 'sent', error: null };
 

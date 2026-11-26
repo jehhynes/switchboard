@@ -6,7 +6,7 @@ import { backgroundDetail, CONVERSATION_RETENTION, PERMISSION_PROMPT, Store, ton
 import type { ConversationMessage, Interruption, Session as StoredSession } from '@switchboard/core';
 import { BACKGROUND_DETAIL, projectSlug } from '@switchboard/claude';
 import { ConversationService, MIC_TIMING_MAX_MS, MIC_TIMING_STEPS, refusal, sessionView, typedText } from '../src/conversation.js';
-import type { ConversationServiceDeps, ConversationVoice, PersonaView } from '../src/conversation.js';
+import type { ConversationServiceDeps, ConversationVoice } from '../src/conversation.js';
 import type { ConversationAdapter, ConversationChanged } from '../src/conversationAdapter.js';
 import type { InputOutcome } from '@switchboard/conversation';
 import { dockView, windowOf } from '../src/dock.js';
@@ -98,53 +98,6 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(held.writes[2]).toBe('\u001b[200~/compact\u001b[201~');
     // A typed message names the window it came from, which can take the voice back to this computer.
     expect(calls.filter((call) => call.startsWith('spokenFor'))).toEqual([`spokenFor s2 false ${mine.key}`, `spokenFor s2 true ${mine.key}`]);
-  });
-
-  it("lists the personas and pins one to the window's session only, with the header showing it at once (architecture.md § Personas)", () => {
-    const nova = { id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm.' } as const;
-    let personas: PersonaView = { enabled: true, personas: [nova], playbookPersonas: {} };
-    const pins: string[] = [];
-    let store!: Store;
-    const { service, open, view, ...rest } = setupSend(new FakeHeld(), undefined, undefined, {
-      personas: () => personas,
-      pinPersona: (sessionId, personaId) => {
-        if (personaId === 'vega') {
-          return 'No persona vega in voice.personas.';
-        }
-
-        pins.push(`${sessionId} ${personaId}`);
-        store.updateSession(sessionId, { personaId, personaPinned: personaId !== null });
-        return null;
-      },
-    });
-
-    store = rest.store;
-
-    const mine = open(2);
-    const theirs = open(3);
-    let op = 0;
-    const command = (name: 'persona' | 'personas', patch: Record<string, unknown> = {}, window = mine.key) => service.personaCommand(name, { window, scopeGen: 1, opId: `o${++op}`, ...patch });
-
-    expect(mine.frames[0]).toMatchObject({ type: 'hello', sessions: [{ id: 's2', persona: null }] });
-    expect(command('personas')).toEqual({ status: 200, body: { personas: [{ id: 'nova', name: 'Nova', voice: 'cedar', style: 'pair', personality: 'Warm.' }] } });
-    expect(command('persona', { sessionId: 's2', personaId: 'nova' })).toEqual({ status: 200, body: { persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: true } } });
-    expect(mine.frames.at(-1)).toMatchObject({ type: 'session', session: { id: 's2', persona: { name: 'Nova', pinned: true } } });
-    expect(theirs.frames.filter((frame) => frame.type === 'session')).toMatchObject([{ session: { id: 's3', persona: null } }]);
-    expect(command('persona', { sessionId: 's2', personaId: null })).toMatchObject({ status: 200, body: { persona: null } });
-    // A repeated opId answers the first result and pins nothing again.
-    expect(command('persona', { sessionId: 's2', personaId: 'nova', opId: 'o2' })).toEqual({ status: 200, body: { persona: { id: 'nova', name: 'Nova', pinned: true, tonePending: true } } });
-    expect(store.session('s2')).toMatchObject({ personaId: null, personaPinned: false });
-
-    // Another window's session, a stale generation, an unknown persona, a malformed body and voice off are refused.
-    expect(command('persona', { sessionId: 's3', personaId: 'nova' })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } });
-    expect(command('persona', { sessionId: 's3', personaId: 'nova' }, theirs.key)).toMatchObject({ status: 200 });
-    expect(command('persona', { sessionId: 's2', personaId: 'nova', scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
-    expect(command('persona', { sessionId: 's2', personaId: 'vega' })).toEqual({ status: 409, body: { error: 'No persona vega in voice.personas.' } });
-    expect(command('persona', { sessionId: 's2' })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, personaId}.' } });
-    personas = { ...personas, enabled: false };
-    expect(command('personas')).toEqual({ status: 200, body: { personas: [] } });
-    expect(command('persona', { sessionId: 's2', personaId: 'nova' })).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
-    expect(pins).toEqual(['s2 nova', 's2 null', 's3 nova']);
   });
 
   it('gives the fragments log a dictated message the transcript confirmed before its typing ended', async () => {
@@ -376,6 +329,10 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(command('talk-here', { scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(command('stop-speaking')).toEqual({ status: 409, body: { error: "Voice is not on this page's session. Select Talk here to use it." } });
     expect(command('speak-replies', { on: false })).toEqual({ status: 200, body: { on: false } });
+    // Spoken replies are the hub's: Settings turns them on at any scope, but not from a page the hub does not know.
+    expect(command('speak-replies', { on: true, scopeGen: -1 })).toEqual({ status: 200, body: { on: true } });
+    expect(command('speak-replies', { on: true }, 'forged')).toMatchObject({ status: 403 });
+    expect(calls.filter((call) => call.startsWith('speak-replies'))).toEqual(['speak-replies false', 'speak-replies true']);
     expect(command('speak-replies')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } });
     expect(command('replay', { replyId: 'r-1' })).toEqual({ status: 200, body: { done: true } });
     // The mic and the composer reach the voice; a hub with no mic says so.

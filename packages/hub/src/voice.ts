@@ -1943,7 +1943,7 @@ export class VoiceControl {
     const gen = this.#target.gen;
 
     const settings = this.deps.settings();
-    // The persona is read at each offer, so a pin changes the voice from the next spoken reply.
+    // The persona is read at each offer, so a roster change reaches the voice from the next spoken reply.
     const persona = this.deps.persona?.(reply.sessionId) ?? null;
 
     const voice = persona?.voice ?? settings.voice;

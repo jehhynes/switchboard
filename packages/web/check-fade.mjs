@@ -51,7 +51,6 @@ const REPLIES = [
 const fake = '<script>' + String.raw`
 localStorage.removeItem('switchboard.route');
 ${linear ? "document.head.append(Object.assign(document.createElement('style'), { textContent: '.reply-fade { --sb-fade-curve: linear-gradient(to bottom, #000 var(--sb-fade-from), transparent calc(var(--sb-fade-from) + 3lh)) !important; }' }));" : ''}
-localStorage.removeItem('switchboard.briefReplies');
 sessionStorage.removeItem('switchboard.scroll');
 const now = Date.now();
 const replies = ${JSON.stringify(REPLIES)};
@@ -59,7 +58,7 @@ const primary = ${JSON.stringify(PRIMARY)};
 const row = { workItemId: 1, ticketId: 1, title: 'Fix it', priority: null, time: null, ticket: 'gh 1', sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null };
 const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row] }];
 const scope = { kind: 'page', key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 3, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' };
-const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, persona: null, canPin: true };
+const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null };
 const items = replies.flatMap((reply, i) => [
   { type: 'message', id: 'm-' + reply.id, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Where are we?', delivery: 'sent', error: null },
   { type: 'reply', id: reply.id, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: primary + '\n\n' + reply.details, rewrittenBy: null, withdrawn: false, unread: false, speak: primary, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } },

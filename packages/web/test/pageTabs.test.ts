@@ -865,11 +865,11 @@ describe('the page in use', () => {
   it("opens the header's menus down and to the right of their buttons, and the other way only where the page has no room", () => {
     vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(800);
     vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(600);
-    let gear = 770;
+    let edge = 770;
     const rect = (element: HTMLElement): DOMRect => {
       // A menu in its default place: under its anchor, left edges lined up.
       const anchor = element.classList.contains('menu') ? rect(element.parentElement!) : null;
-      const left = anchor?.left ?? (element.classList.contains('view-options-anchor') ? gear : 40);
+      const left = anchor?.left ?? (element.classList.contains('actions-anchor') ? edge : 40);
       const top = anchor === null ? 8 : anchor.bottom + 2;
       const [width, height] = anchor === null ? [24, 24] : [200, 120];
 
@@ -881,23 +881,24 @@ describe('the page in use', () => {
     });
 
     const { page, source } = start();
+    const actions = [{ label: 'Mark done', action: 'done', icon: 'check', group: 'state' as const, confirm: null, input: null }];
 
-    hello(source);
+    hello(source, { groups: [listGroup('progress', [listRow(1, { actions })])] });
     click('.header button.picker');
     expect(root.querySelector('.conversation-menu')!.className).toBe('glass menu conversation-menu');
     expect(root.querySelector<HTMLElement>('.conversation-menu')!.style.maxWidth).toBe('360px');
-    click('.header button.view-options');
-    expect(root.querySelector('.view-options-menu')!.className).toBe('glass menu view-options-menu flip-x');
+    click('.header button.actions');
+    expect(root.querySelector('.actions-menu')!.className).toBe('glass menu actions-menu flip-x');
     // A scroll that moves the button is followed; the menu's own scrolling is not.
-    gear = 40;
-    root.querySelector('.view-options-menu')!.dispatchEvent(new Event('scroll'));
-    expect(root.querySelector('.view-options-menu')!.className).toBe('glass menu view-options-menu flip-x');
+    edge = 40;
+    root.querySelector('.actions-menu')!.dispatchEvent(new Event('scroll'));
+    expect(root.querySelector('.actions-menu')!.className).toBe('glass menu actions-menu flip-x');
     root.querySelector('#panel')!.dispatchEvent(new Event('scroll'));
-    expect(root.querySelector('.view-options-menu')!.className).toBe('glass menu view-options-menu');
+    expect(root.querySelector('.actions-menu')!.className).toBe('glass menu actions-menu');
     page.close();
   });
 
-  it("keeps the conversation's text at fixed sizes: drops the old text size key, leaves Ctrl+=, Ctrl+- and Ctrl+0 to the browser, and offers no text size in View options", () => {
+  it("keeps the conversation's text at fixed sizes: drops the old text size key, leaves Ctrl+=, Ctrl+- and Ctrl+0 to the browser, and offers no View options in the header", () => {
     localStorage.setItem('switchboard.textScale', '1.25');
 
     const { page, source } = start();
@@ -913,40 +914,10 @@ describe('the page in use', () => {
       expect(event.defaultPrevented).toBe(false);
     }
 
-    expect(root.querySelector('.view-options-menu')).toBeNull();
-    click('.header button.view-options');
-    expect(root.querySelector('.header button.view-options')!.getAttribute('title')).toBe('View options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim())).toEqual(['Show message times and notes', 'Fold reply details', 'Spoken repliesExperimental']);
-    expect(root.querySelector('.view-options-menu .menu-separator')).toBeNull();
-    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(root.querySelector('.view-options-menu')).toBeNull();
-    expect(document.activeElement).toBe(root.querySelector('.header button.view-options'));
-
-    // One header menu at a time: View options closes the dropdown, and the dropdown View options.
-    click('.header button.picker');
-    click('.header button.view-options');
-    expect(root.querySelector('.header button.picker')!.getAttribute('aria-expanded')).toBe('false');
-    expect(root.querySelector('.view-options-menu')).not.toBeNull();
-    click('.header button.picker');
-    expect(root.querySelector('.view-options-menu')).toBeNull();
-    click('.header button.picker');
-
-    // Show message details, in the same menu, kept.
-    click('.header button.view-options');
-    expect(root.querySelector('[data-action="toggle-details"]')!.getAttribute('aria-checked')).toBe('false');
-    click('[data-action="toggle-details"]');
-    expect(localStorage.getItem('switchboard.messageDetails')).toBe('1');
-    expect(root.querySelector('[data-action="toggle-details"]')!.getAttribute('aria-checked')).toBe('true');
+    // Its items are in Settings (operator decision 2026-11-26).
+    expect(root.querySelector('.header button.view-options, .header [data-action="view-menu"], .view-options-menu')).toBeNull();
+    expect(root.querySelector('.header .codicon-settings')).toBeNull();
     page.close();
-
-    const again = start();
-
-    hello(again.source);
-    click('.header button.view-options');
-    expect(root.querySelector('[data-action="toggle-details"]')!.getAttribute('aria-checked')).toBe('true');
-    click('[data-action="toggle-details"]');
-    expect(localStorage.getItem('switchboard.messageDetails')).toBeNull();
-    again.page.close();
   });
 
   it("resizes the work items from their sash by dragging and the arrow keys, within limits, keeps the width, and resets it on a double-click", () => {

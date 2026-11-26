@@ -362,8 +362,8 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(starts[0]?.tone).toBe(toneSection(nova));
     expect(context.runtime.contract(session.nativeSessionId!, 'resume')).toMatch(/\n\n## Persona\nIn this session you are Nova\. Warm and direct\.\n[^#]*$/);
 
-    // A pin waits for the hook, which records the section it gave.
-    context.runtime.send({ type: 'persona', sessionId: session.id, personaId: 'orion' });
+    // A persona changed since the launch, as an older hub's pin left it, waits for the hook, which records the section it gave.
+    context.store.updateSession(session.id, { personaId: 'orion' });
     expect(context.store.session(session.id)?.personaVersion).toBe(toneVersion(toneSection(nova)));
     expect(context.runtime.contract(session.nativeSessionId!, 'compact')).toContain('In this session you are Orion. Terse.');
     expect(context.store.session(session.id)?.personaVersion).toBe(toneVersion(toneSection(orion)));
