@@ -308,11 +308,12 @@ describe('the Changes tree', () => {
   it('ticks an uncommitted file viewed from the tree for the uncommitted range, and the list to disk follows', async () => {
     start();
     await openTab();
+    expect(root.querySelector('.changes-tab .unread-dot')).not.toBeNull();
     row('pool.ts').querySelector<HTMLInputElement>('[data-action="tree-viewed"]')!.click();
     await flush();
     expect(posts).toEqual([expect.objectContaining({ path: 'src/match/pool.ts', hash: 'h-pool', viewed: true, from: 'HEAD', to: 'worktree' })]);
     expect(row('pool.ts').classList.contains('viewed')).toBe(true);
-    expect(root.querySelector('.changes-tab .tab-badge')!.textContent).toBe('1/1');
+    expect(root.querySelector('.changes-tab .unread-dot')).toBeNull();
   });
 
   it("ticks a file from the tree as its diff's tick does while the diffs show the uncommitted changes, collapsing it, and keeps the last choice", async () => {

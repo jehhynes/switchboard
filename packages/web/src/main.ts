@@ -3081,14 +3081,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const fixed = tab.querySelector(':scope > .tab-label');
       const cut = fixed !== null && width(tab) > 0 ? null : (fixed ?? tab.querySelector('.tab-open > .tab-label'));
 
-      // A tab cut to its least label is never narrower than its own min-width, as the Changes tab's, whose count may not show yet.
+      // A tab cut to its least label is never narrower than its own min-width.
       measured[tab.dataset['id']!] = Math.ceil(Math.max(width(tab) - width(cut) + (cut === null ? 0 : label), read(tab, 'min-width', 0)));
     }
 
-    // The icon, its gap and the border with the label; More's icon, gap and count before it is drawn.
+    // The icon, its gap and the border with the label; More's 44 px before it is drawn, its touch target and more than its icon and padding.
     const fit: TabFit = {
       width: Math.floor(width(strip) - [...strip.querySelectorAll(':scope > .panel-max')].reduce((sum, one) => sum + width(one), 0)),
-      more: Math.ceil(width(strip.querySelector(':scope > .tab-more')) || 2 * pad + 43),
+      more: Math.ceil(width(strip.querySelector(':scope > .tab-more')) || 44),
       plain: Math.ceil(2 * pad + 23 + label),
       closable: Math.ceil(pad + 23 + label + close),
       measured,

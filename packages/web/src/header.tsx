@@ -9,7 +9,7 @@ import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
 import { ago, LINK_LABEL_MAX, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
-import { changesTab } from './changes.js';
+import { changesTab, changesUnviewed } from './changes.js';
 import type { ChangesView } from './changes.js';
 import { LocalTabButton, localTabName } from './localFiles.js';
 import type { LocalFilesView } from './localFiles.js';
@@ -282,14 +282,14 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
 
 /**
  * A tab, drawn alike in the strip and in the side column's switch: its codicon and its label, cut but never hidden (page.css), its name also its
- * tooltip and accessible name; with the unread dot ([Unread](architecture.md § Unread)) while `unread`.
+ * tooltip and accessible name; with the unread dot ([Unread](architecture.md § Unread)) on its icon's corner while `unread`.
  */
 function TabButton({ selected, label, icon, unread = false, attrs }: { selected: boolean; label: string; icon: string; unread?: boolean; attrs: Record<string, string> }) {
   return (
     <button class={`tab${selected ? ' selected' : ''}`} type="button" role="tab" {...attrs} aria-selected={selected} tabindex={selected ? 0 : -1} title={label} aria-label={unread ? `${label}, unread` : label}>
       <span class={`codicon codicon-${icon}`} aria-hidden="true"></span>
-      <span class="tab-label">{label}</span>
       {unread ? <UnreadDot /> : null}
+      <span class="tab-label">{label}</span>
     </button>
   );
 }
@@ -323,15 +323,15 @@ export interface ArtifactStrip {
 
 /**
  * An artifact's tab: its file type icon, its title, and a close mark beside it in one cell, so each takes the keyboard on its own; with the unread
- * dot after its title while this device has not shown its version (`unreadArtifacts`). Its tooltip names its title, its type and when it changed.
+ * dot on its icon's corner while this device has not shown its version (`unreadArtifacts`). Its tooltip names its title, its type and when it changed.
  */
 function ArtifactTab({ artifact, selected, unread, now }: { artifact: ArtifactView; selected: boolean; unread: boolean; now: number }) {
   return (
     <span class={`tab artifact-tab${selected ? ' selected' : ''}`} role="presentation" data-action="artifact" data-path={artifact.path}>
       <button class="tab-open" type="button" role="tab" aria-selected={selected} tabindex={selected ? 0 : -1} title={`${artifact.title} · ${artifactType(artifact).name} · ${ago(artifact.updatedAt, now)}`} aria-label={unread ? `${artifact.title}, unread` : artifact.title}>
         <FileIcon path={artifact.path} />
-        <span class="tab-label">{artifact.title}</span>
         {unread ? <UnreadDot /> : null}
+        <span class="tab-label">{artifact.title}</span>
       </button>
       <button class="tab-close" type="button" data-action="close-artifact" data-path={artifact.path} aria-label={`Close ${artifact.title}`} title="Close" tabindex={selected ? 0 : -1}>
         <span class="codicon codicon-close" aria-hidden="true"></span>
@@ -357,8 +357,8 @@ function MenuRow({ attrs, icon, label, type = '', note = '', unread = false, tit
 }
 
 /**
- * More, at the strip's end while some tabs do not fit or some artifacts are closed: its count, with the unread dot on the count's corner while a
- * row is unread. Its menu lists each tab the strip does not show, in strip order, then the closed artifacts newest first; a row does what its
+ * More, at the strip's end while some tabs do not fit or some artifacts are closed: its icon, with the unread dot on its corner while a row is
+ * unread, as a tab's, and how many rows it holds in its name and tooltip. Its menu lists each tab the strip does not show, in strip order, then the closed artifacts newest first; a row does what its
  * tab does, and choosing a closed artifact opens its tab again.
  */
 function MoreMenu({ hidden, closed, strip, attr }: { hidden: DocTab[]; closed: ArtifactView[]; strip: ArtifactStrip; attr: 'data-side' | 'data-tab' }) {
@@ -384,20 +384,18 @@ function MoreMenu({ hidden, closed, strip, attr }: { hidden: DocTab[]; closed: A
         return <MenuRow attrs={{ 'data-action': 'local-tab', 'data-local': String(tab.file.id) }} icon={dir ? <span class="codicon codicon-folder" /> : <FileIcon path={name} />} label={name} type={dir ? 'folder' : 'file'} title={tab.id.slice('file:'.length)} />;
       }
       case 'changes':
-        return <MenuRow attrs={{ 'data-action': 'diff-tab' }} icon={<span class="codicon codicon-diff-multiple" />} label="Changes" />;
+        return <MenuRow attrs={{ 'data-action': 'diff-tab' }} icon={<span class="codicon codicon-diff-multiple" />} label="Changes" unread={strip.changes !== undefined && changesUnviewed(strip.changes)} />;
     }
   };
   const count = hidden.length + closed.length;
-  const unreadCount = hidden.filter((tab) => (tab.kind === 'fixed' && tab.unread) || (tab.kind === 'artifact' && unread.has(tab.artifact.path))).length + closed.filter((artifact) => unread.has(artifact.path)).length;
+  const title = `${count} more ${count === 1 ? 'tab' : 'tabs'}`;
+  const unreadCount = hidden.filter((tab) => (tab.kind === 'fixed' && tab.unread) || (tab.kind === 'changes' && strip.changes !== undefined && changesUnviewed(strip.changes)) || (tab.kind === 'artifact' && unread.has(tab.artifact.path))).length + closed.filter((artifact) => unread.has(artifact.path)).length;
 
   return (
     <span class="tab-more">
-      <button class={`tab tab-more-button${strip.menu ? ' open' : ''}`} type="button" data-action="tab-menu" aria-haspopup="menu" aria-expanded={strip.menu} aria-label={`More tabs, ${count}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`} title="More tabs">
+      <button class={`tab tab-more-button${strip.menu ? ' open' : ''}`} type="button" data-action="tab-menu" aria-haspopup="menu" aria-expanded={strip.menu} aria-label={`${title}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`} title={title}>
         <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
-        <span class="tab-badge muted">
-          {count}
-          {unreadCount > 0 ? <span class="unread-dot" aria-hidden="true"></span> : null}
-        </span>
+        {unreadCount > 0 ? <span class="unread-dot" aria-hidden="true"></span> : null}
       </button>
       {strip.menu ? (
         <div class="menu glass tab-menu" role="menu" aria-label="More tabs">

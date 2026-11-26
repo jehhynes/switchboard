@@ -274,7 +274,7 @@ describe('the Changes list', () => {
   it('ChangesTab_Chosen_ReadsTheListAndItsFilesMenuDrawsEachRowWithItsNameFolderCountsAndStatus', async () => {
     start();
     expect(root.querySelectorAll('.changes-tab')).toHaveLength(1);
-    expect(button().querySelector('.tab-badge')).toBeNull();
+    expect(button().querySelector('.unread-dot')).toBeNull();
     expect(gets).toEqual([]);
 
     button().click();
@@ -298,7 +298,9 @@ describe('the Changes list', () => {
     expect(root.querySelector('.changes-note')!.textContent).toBe('3 files · +3 −1');
     expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('All changes since the base, 0123456');
     expect([...root.querySelectorAll<HTMLInputElement>('.change-viewed input')].map((box) => box.checked)).toEqual([false, true, false]);
-    expect(button().querySelector('.tab-badge')!.textContent).toBe('1/3');
+    // Two of the three not viewed: the unread dot on the icon's corner, the counts in its name and tooltip.
+    expect(button().querySelector('.codicon + .unread-dot')!.getAttribute('aria-hidden')).toBe('true');
+    expect(button().title).toBe("Every changed file's diff since the base\n1 of 3 files viewed");
     expect(button().getAttribute('aria-label')).toBe('Changes, 1 of 3 files viewed');
   });
 
@@ -361,7 +363,7 @@ describe('the Changes list', () => {
     const { source } = start();
 
     await openList();
-    expect(button().title).toBe("Every changed file's diff since the base");
+    expect(button().title).toBe("Every changed file's diff since the base\n1 of 3 files viewed");
 
     await pick('Uncommitted changes');
     expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk&from=HEAD&to=worktree');
@@ -371,7 +373,7 @@ describe('the Changes list', () => {
     expect(root.querySelectorAll('.change-row')).toHaveLength(2);
     expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Uncommitted changes, against the last commit');
     expect(button().getAttribute('aria-label')).toBe('Changes, 1 of 2 uncommitted files viewed');
-    expect(button().title).toBe("Every uncommitted file's diff");
+    expect(button().title).toBe("Every uncommitted file's diff\n1 of 2 uncommitted files viewed");
 
     // A tick names the range it was shown in.
     root.querySelectorAll<HTMLElement>('.change-viewed input')[0]!.click();
@@ -405,7 +407,8 @@ describe('the Changes list', () => {
     expect(scopeButton().textContent).toBe('fedcba9 Second change');
     expect(scopeButton().querySelector('.codicon-git-commit')).not.toBeNull();
     expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Commit fedcba9: Second change');
-    expect(button().title).toBe("Every changed file's diff: Commit fedcba9: Second change");
+    // One file, named in the singular.
+    expect(button().title).toBe("Every changed file's diff: Commit fedcba9: Second change\n0 of 1 file viewed");
 
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
@@ -462,7 +465,7 @@ describe('the Changes list', () => {
     source.emit('scope', { scope: scope(4, 2) });
     source.emit('hello', { key: 'pk', groups: [], scope: scope(4, 2), sessions: [session], items: [], more: false, status: null, artifacts: [], unread: 0 });
     expect(root.querySelector('.changes-menu')).toBeNull();
-    expect(button().querySelector('.tab-badge')).toBeNull();
+    expect(button().querySelector('.unread-dot')).toBeNull();
 
     // A read that answers after the page left its conversation is dropped.
     answers.push({ status: 200, body: LIST, wait: held });
@@ -472,7 +475,7 @@ describe('the Changes list', () => {
     await flush();
     await flush();
     expect(listGets()).toHaveLength(2);
-    expect(button().querySelector('.tab-badge')).toBeNull();
+    expect(button().querySelector('.unread-dot')).toBeNull();
   });
 
   it("reads an opened Changes tab's list again when the session's turn ends", async () => {
@@ -557,7 +560,7 @@ describe('the Changes list', () => {
     await openRow(0);
     source.emit('hello', { key: 'pk', groups: [], scope: scope(4, 2), sessions: [session], items: [], more: false, status: null, artifacts: [], unread: 0 });
     expect(root.querySelector('.changes-tab.selected')).toBeNull();
-    expect(root.querySelector('.changes-tab .tab-badge')).toBeNull();
+    expect(root.querySelector('.changes-tab .unread-dot')).toBeNull();
     expect(root.querySelector('.diff-view')).toBeNull();
     expect(changesMounts[0]!.disposed).toBe(true);
   });

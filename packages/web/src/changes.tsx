@@ -212,22 +212,28 @@ function totals(list: ChangesList): { viewed: number; additions: number; deletio
   return list.rows.reduce((sum, row) => ({ viewed: sum.viewed + (row.viewed === true ? 1 : 0), additions: sum.additions + (row.additions ?? 0), deletions: sum.deletions + (row.deletions ?? 0) }), { viewed: 0, additions: 0, deletions: 0 });
 }
 
+/** Whether a read list has a row not ticked viewed, which marks the Changes tab, or More while it holds the tab, with the unread dot. */
+export const changesUnviewed = (changes: ChangesView): boolean => changes.list?.rows.some((row) => row.viewed !== true) === true;
+
 /**
- * The Changes tab, the strip's one Changes item, first after Chat (tabs.ts): how many files are viewed of all once the list
- * was read. Choosing it opens the diffs; it has no close mark, as the other fixed tabs have none.
+ * The Changes tab, the strip's one Changes item, first after Chat (tabs.ts): once the list was read, the unread dot on its icon's corner while a
+ * changed file is not ticked viewed, and how many are in its name and tooltip. Choosing it opens the diffs; it has no close mark, as the other fixed tabs have none.
  */
 export function changesTab(changes: ChangesView, shown: boolean): VNode {
   const list = changes.list;
   const viewed = list === null ? 0 : totals(list).viewed;
   const kind = scopeKind(changes.range, list?.commits ?? [], list?.base ?? null);
-  const files = kind === 'uncommitted' ? 'uncommitted files' : 'files';
-  const title = kind === 'all' ? "Every changed file's diff since the base" : kind === 'uncommitted' ? "Every uncommitted file's diff" : `Every changed file's diff: ${scopeTitle(changes.range, list?.commits ?? [], list?.base ?? null)}`;
+  const files = `${kind === 'uncommitted' ? 'uncommitted ' : ''}${list?.total === 1 ? 'file' : 'files'}`;
+  const scope = kind === 'all' ? "Every changed file's diff since the base" : kind === 'uncommitted' ? "Every uncommitted file's diff" : `Every changed file's diff: ${scopeTitle(changes.range, list?.commits ?? [], list?.base ?? null)}`;
+  // A list cut short holds only the first rows, so its counts say so; the rows left out are not known viewed or not.
+  const counts = list === null ? null : list.rows.length < list.total ? `${viewed} of the first ${list.rows.length} of ${list.total} ${files} viewed` : `${viewed} of ${list.total} ${files} viewed`;
+  const title = counts === null ? scope : `${scope}\n${counts[0]!.toUpperCase()}${counts.slice(1)}`;
 
   return (
-    <button class={`tab changes-tab${shown ? ' selected' : ''}`} type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title={title} aria-label={list === null ? 'Changes' : `Changes, ${viewed} of ${list.total} ${files} viewed`}>
+    <button class={`tab changes-tab${shown ? ' selected' : ''}`} type="button" role="tab" data-action="diff-tab" aria-selected={shown} tabindex={shown ? 0 : -1} title={title} aria-label={counts === null ? 'Changes' : `Changes, ${counts}`}>
       <span class="codicon codicon-diff-multiple" aria-hidden="true"></span>
+      {changesUnviewed(changes) ? <span class="unread-dot" aria-hidden="true"></span> : null}
       <span class="tab-label">Changes</span>
-      {list === null ? null : <span class="tab-badge muted">{`${viewed}/${list.total}`}</span>}
     </button>
   );
 }
@@ -2117,7 +2123,7 @@ export class ChangesController {
     }
   }
 
-  /** A tick changed: the tab's count follows, and with viewed files hidden, so do its rows. */
+  /** A tick changed: the tab's dot and counts follow, and with viewed files hidden, so do its rows. */
   #viewedChanged(): void {
     if (this.view.hideViewed) {
       this.#syncRows();

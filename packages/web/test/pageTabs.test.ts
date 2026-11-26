@@ -172,7 +172,7 @@ describe('the page in use', () => {
     const dotted = () => [...root.querySelectorAll<HTMLElement>('#detail .tab-menu .menu-row[data-path]')].filter((row) => row.querySelector('.title > .unread-dot') !== null).map((row) => row.dataset['path']);
 
     // More carries the dot while a row in it is unread.
-    expect(root.querySelector('#detail .tab-more-button .tab-badge > .unread-dot')).not.toBeNull();
+    expect(root.querySelector('#detail .tab-more-button > .codicon + .unread-dot')).not.toBeNull();
     click('#detail [data-action="tab-menu"]');
     expect(dotted()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a4.md']);
     expect(root.querySelector('#detail .tab-menu [data-path="chat/a4.md"]')!.getAttribute('aria-label')).toBe('Note 4, unread, Markdown document, just now');
@@ -203,7 +203,7 @@ describe('the page in use', () => {
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     click('#detail [data-side="history"]');
     source.emit('artifact', { artifact: { path: 'chat/a4.md', owner: 'chat', kind: 'note', title: 'Note 4', ext: 'md', type: 'markdown', updatedAt: 20_000 } });
-    const tabDot = (path: string) => root.querySelector(`#detail .artifact-tab[data-path="${path}"] .tab-open > .tab-label + .unread-dot`);
+    const tabDot = (path: string) => root.querySelector(`#detail .artifact-tab[data-path="${path}"] .tab-open > :is(.codicon, .file-icon) + .unread-dot`);
 
     expect(tabDot('chat/a4.md')).not.toBeNull();
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/a4.md"] .tab-open')!.getAttribute('aria-label')).toBe('Note 4, unread');
@@ -236,7 +236,7 @@ describe('the page in use', () => {
     source.emit('artifact', { artifact: artifact('chat/plan.md', 'markdown', 'md') });
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).toBeNull();
     source.emit('artifact', { artifact: { ...artifact('chat/plan.md', 'markdown', 'md'), updatedAt: 2_000 } });
-    expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"] .tab-open > .tab-label + .unread-dot')).not.toBeNull();
+    expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"] .tab-open > :is(.codicon, .file-icon) + .unread-dot')).not.toBeNull();
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/p.html"] .unread-dot')).toBeNull();
     page.close();
   });
@@ -342,15 +342,15 @@ describe('the page in use', () => {
     expect(paths()).toHaveLength(10);
     expect(root.querySelector('#detail .tab-more')).toBeNull();
 
-    // A 400 px strip. jsdom draws every tab 0 wide, so each measures as its 44 px least label alone, and More as page.css's 71 px: 329 px keep
+    // A 373 px strip. jsdom draws every tab 0 wide, so each measures as its 44 px least label alone, and More as its 44 px before it is drawn: 329 px keep
     // seven tabs, Console chosen, Changes, History, then the four newest artifacts.
-    const narrow = vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 400 } as DOMRect);
+    const narrow = vi.spyOn(root.querySelector('#detail .tabs')!, 'getBoundingClientRect').mockReturnValue({ width: 373 } as DOMRect);
 
     click('#detail [data-side="console"]');
     expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md']);
     expect(root.querySelector('#detail .side-switch > .changes-tab')).not.toBeNull();
     expect(root.querySelector('#detail .side-switch > [data-side="history"]')).not.toBeNull();
-    expect(root.querySelector('#detail .tab-more-button .tab-badge')!.textContent).toBe('6');
+    expect(root.querySelector('#detail .tab-more-button')!.getAttribute('title')).toBe('6 more tabs');
 
     // More lists the rest in strip order, the older artifacts; picking one chooses it, closes the menu, and gives it a tab in place of Console,
     // which More now holds.
@@ -375,7 +375,7 @@ describe('the page in use', () => {
     click('#detail .tab-menu [data-action="diff-tab"]');
     expect(root.querySelector('#detail .changes-tab.selected')).not.toBeNull();
     expect(root.querySelector('#detail .tab-menu')).toBeNull();
-    narrow.mockReturnValue({ width: 400 } as DOMRect);
+    narrow.mockReturnValue({ width: 373 } as DOMRect);
 
     // Up and Down move through the menu's rows; Escape closes it and gives the focus back to More; so does a press elsewhere.
     click('#detail [data-action="tab-menu"]');
@@ -400,12 +400,12 @@ describe('the page in use', () => {
     // A narrower strip keeps the chosen tab and Changes, the rest going into More.
     click('#detail [data-action="tab-menu"]');
     click('#detail .tab-menu [data-path="chat/a1.md"]');
-    narrow.mockReturnValue({ width: 200 } as DOMRect);
+    narrow.mockReturnValue({ width: 173 } as DOMRect);
     click('#detail .artifact-tab[data-path="chat/a1.md"] .tab-open');
     expect(paths()).toEqual(['chat/a1.md']);
     expect(selected()!.dataset['path']).toBe('chat/a1.md');
     expect([...root.querySelectorAll<HTMLElement>('#detail .side-switch > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(['changes', 'artifact:chat/a1.md']);
-    narrow.mockReturnValue({ width: 400 } as DOMRect);
+    narrow.mockReturnValue({ width: 373 } as DOMRect);
     click('#detail .artifact-tab[data-path="chat/a1.md"] .tab-open');
 
     // Left, Right, Home and End move between the strip's tabs, the artifact tabs among them, in the strip's order (tabs.ts) as on screen.

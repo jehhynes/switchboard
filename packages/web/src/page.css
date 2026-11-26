@@ -68,7 +68,7 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
    0.06 em above its capitals, so text drew about 1 px low beside every icon. Padding above and below makes the box its line's height again,
    so descenders and accents stay inside a text that clips its overflow and the row lays out as before, at the same pixel positions, which
    keeps Chrome's text snapping at 125% scale from undoing the shift. A browser without text-box draws the texts as before. */
-@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, button.picker > .picker-text, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .tab-menu .title, .provider-option, .opening-note, .hist-now-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .picker-text, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
+@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, button.picker > .picker-text, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .tab-menu .title, .provider-option, .opening-note, .hist-now-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .count, .group-count, .picker-text, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
 /* A spinner (a codicon-modifier-spin codicon or the mic's starting ring): its box stands still and clips its paint, and only its ::before turns,
    smoothly, on its own compositor layer. Chrome takes a turning layer to overlap everything painted after it up to its nearest clip, and moves
    that content onto layers of its own, where text loses its subpixel antialiasing and may shift as the layers change (mechanics.md M141);
@@ -492,7 +492,7 @@ button.picker > .codicon-chevron-down { order: 2; }
 /* One sizing rule for every tab, fixed, link, History, artifact and file tabs alike: each starts from nothing and grows evenly, up to its own
    content (max-content), so a strip with room draws each tab whole, and a crowded one takes room from the widest tabs first until all are as
    wide, then shrinks them all alike, cutting their labels with an ellipsis, but never below its least width (min-width): its padding, icon,
-   border, close mark (--sb-tab-close-room) or the Changes count, and a label of --sb-tab-label-least, about five characters and the ellipsis. The strip shows only the tabs whose least widths fit it
+   border, close mark (--sb-tab-close-room), and a label of --sb-tab-label-least, about five characters and the ellipsis. The strip shows only the tabs whose least widths fit it
    (fitTabs in tabs.ts, measured by main.ts from these numbers), and More lists the rest, so no label is ever hidden and no tab passes the strip.
    Every tab has the same padding, --sb-tab-pad, at its sides, and a tab of two buttons (an artifact's, a link's, History, a file's) reaches its
    open button and close mark into it, so the tabs grow from the same width. A label is cut at --sb-tab-label-max. */
@@ -505,7 +505,6 @@ button.picker > .codicon-chevron-down { order: 2; }
 .main, .detail { --sb-tab-strip: color-mix(in srgb, var(--sb-tab-surface), #000 var(--sb-tab-shade)); }
 /* An artifact's tab has its kind's icon, its title cut with an ellipsis, and a close mark. */
 .tab:has(> .tab-close) { min-width: calc(var(--sb-tab-pad) + 23px + var(--sb-tab-label-least) + var(--sb-tab-close-room)); }
-.tab.changes-tab { min-width: calc(2 * var(--sb-tab-pad) + 67px + var(--sb-tab-label-least)); }
 .tab-open { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; height: 100%; margin-left: calc(-1 * var(--sb-tab-pad)); padding: 0 0 0 var(--sb-tab-pad); border: none; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .tab .tab-label { min-width: var(--sb-tab-label-least); max-width: var(--sb-tab-label-max); overflow: hidden; text-overflow: ellipsis; }
 .tab-open .tab-label { flex: 1 1 auto; }
@@ -515,9 +514,11 @@ button.picker > .codicon-chevron-down { order: 2; }
 .tab:not(.tab-more-button, .changes-tab):has(> .tab-label) { min-width: 0; }
 .tab > .tab-label { min-width: max-content; }
 .tab .codicon { flex: none; font-size: 14px; }
-/* A tab's unread dot sits at its label's top-right, as a superscript, whether the label is cut or not. Its margins cancel the gap before it and its
-   own width, so it is drawn over the gap after the label and changes neither the tab's width nor where its label or close mark sits. */
-.tab .tab-label + .unread-dot { flex: none; position: relative; top: -6px; margin: 0 -7px 0 -6px; }
+/* A tab's unread dot, More's included, is a badge on its icon's top-right corner, ringed in the tab's own fill (operator decision 2026-11-26). Its
+   margins cancel the gap before it, its width and the gap after it, so it reaches 4 px past the icon and changes neither the tab's width nor
+   where its label or close mark sits. */
+.tab :is(.codicon, .file-icon) + .unread-dot { flex: none; position: relative; top: -7px; margin: 0 -4px 0 -9px; box-shadow: 0 0 0 1.5px var(--sb-tab-strip); }
+.tab:is(.selected, :hover, .open) :is(.codicon, .file-icon) + .unread-dot { box-shadow: 0 0 0 1.5px var(--sb-tab-surface); }
 /* A file's type icon (fileIcons.tsx): its Seti character at 150% of the text, centred in a 16-pixel box, as VS Code's Explorer and tabs draw it. */
 .file-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; }
 .file-icon::before { font-family: seti; font-size: 150%; font-style: normal; font-weight: normal; line-height: 1; -webkit-font-smoothing: antialiased; }
@@ -528,16 +529,13 @@ button.picker > .codicon-chevron-down { order: 2; }
   .tab { --sb-tab-close-room: 50px; }
   .tab-close { width: 44px; height: 44px; margin-right: calc(-1 * var(--sb-tab-pad)); border-radius: 0; }
 }
-/* More and its count, at the strip's end after its tabs, while some tabs do not fit or some artifacts are closed, opening a menu of them. It and
+/* More, its icon alone, at the strip's end after its tabs, while some tabs do not fit or some artifacts are closed, opening a menu of them. It and
    the maximize button have no border of their own, so the last tab's border is the only line between them, whether or not they touch. */
 .tab-more { position: relative; display: flex; flex: none; margin-left: auto; }
 .tab-more > .tab { --sb-tab-pad: 12px; flex: none; min-width: 0; max-width: none; border-right: none; }
-/* Its count carries the unread dot on its top-right corner, as a notification badge; the button has no caret, its menu named by aria-haspopup. */
-.tab.tab-more-button .tab-badge { position: relative; }
-.tab.tab-more-button .tab-badge > .unread-dot { position: absolute; top: -3px; right: -3px; box-shadow: 0 0 0 1.5px var(--sb-tab-strip); }
-.tab.tab-more-button.open .tab-badge > .unread-dot { box-shadow: 0 0 0 1.5px var(--sb-tab-surface); }
+/* It has no caret, its menu named by aria-haspopup; on a touch screen it is a 44 px target. */
+@media (hover: none), (pointer: coarse) { .tab.tab-more-button { min-width: 44px; justify-content: center; } }
 .tab.tab-more-button.open { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
-.tab-badge.muted { color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
 /* Under 480 px, as on a phone, the tabs' padding shrinks, so a strip there keeps more of them. */
 @container (max-width: 480px) {
   .tab { --sb-tab-pad: 9px; }
@@ -552,7 +550,6 @@ button.picker > .codicon-chevron-down { order: 2; }
 .tab-menu .title { display: flex; align-items: center; gap: 6px; padding-block: 0; }
 .tab-menu .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tab-menu .menu-gutter { margin-right: 6px; }
-.tab-badge { box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 8px; font-size: 11px; line-height: 16px; text-align: center; text-transform: none; color: var(--vscode-activityBarBadge-foreground); background: var(--vscode-activityBarBadge-background); }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 20px calc(16px + var(--sb-end)); touch-action: pan-y pinch-zoom; }
 /* Chrome and Edge move a touch that starts near a box with a :hover or :active style, such as a tab strip, onto that box (touch adjustment),
    so a drag starting just under a tab strip panned the strip, which does not scroll, rather than the pane under the finger. A :hover rule on

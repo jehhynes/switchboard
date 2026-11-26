@@ -3,7 +3,7 @@
 // groups' headings at 14 px, and its pinned state on the first screen), History's filter and the Changes tree's search box (each at least 160 px
 // wide and covered by nothing else of its bar, with History's chips shown and the search's options menu open), Settings, the drawer, a sheet,
 // a work item with more tabs than fit, the composer under each other tab and a maximized column with the mic on, a conversation with questions waiting, the long Actions, More actions, row and More tabs menus, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
-// a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, two unselected tabs side by side show a line or fills
+// a tab's unread dot, More's included, is a badge on its icon's top-right corner ringed in the tab's fill, clear of its label and close mark and taking no width, two unselected tabs side by side show a line or fills
 // at 1.25:1 between them, and the More menu lies above everything under it. Line 2 is one line, never wrapping and its items never
 // below one another, at several list widths down to 200 px; its playbook or host is cut, with an ellipsis and a tooltip naming it whole, only
 // where it does not fit beside the comment icon and the key; a key shows its source's logo, GitHub's, Zoho's or a plugin's, in place of its source's label; every pill, the key included, shows its text where line 2 is 300 px wide or more and its icon alone under that,
@@ -379,6 +379,7 @@ const measure = `(() => {
       return {
         tabs: tabs.length,
         more: strip.querySelector('.tab-more') !== null,
+        moreUnread: (strip.querySelector('.tab-more-button')?.getAttribute('aria-label') ?? '').includes('unread'),
         // Whether History shows, and how many artifact tabs show besides the one chosen: the tabs whose unread dots the tabs view expects.
         history: tabs.some((tab) => tab.dataset.id === 'history'),
         artifacts: tabs.filter((tab) => (tab.dataset.id ?? '').startsWith('artifact:') && !tab.classList.contains('selected') && tab.querySelector('[aria-selected="true"]') === null).length,
@@ -403,17 +404,20 @@ const measure = `(() => {
           const label = (tab) => ratio(over(getComputedStyle(tab).color, fill(tab)), fill(tab));
           return { seams, contrast: { selectedFill: selected ? ratio(fill(selected), strip0) : null, selectedTop: selected ? ratio(over(getComputedStyle(selected).borderTopColor, fill(selected)), strip0) : null, selectedLabel: selected ? label(selected) : null, labels: Math.min(...row.filter((tab) => !chosen(tab)).map(label)), more: row.filter((tab) => tab.matches('.tab-more-button')).map(label)[0] ?? null } };
         })(),
-        // Each unread dot of a tab: where it lies against its label, its tab and its close mark, and whether hiding it changes the tab's width.
-        dots: [...strip.querySelectorAll('.tab .unread-dot:not(.tab-badge > *)')].filter(shown).map((dot) => {
+        // Each unread dot of a tab, More's included: where it lies against its icon, its label, its tab and its close mark, whether its ring is the
+        // tab's fill, and whether hiding it changes the tab's width.
+        dots: [...strip.querySelectorAll('.tab .unread-dot')].filter(shown).map((dot) => {
           const tab = dot.closest('.tab');
-          const label = dot.previousElementSibling?.classList.contains('tab-label') ? dot.previousElementSibling.getBoundingClientRect() : null;
+          const icon = dot.previousElementSibling?.matches('.codicon, .file-icon') ? dot.previousElementSibling.getBoundingClientRect() : null;
+          const label = dot.nextElementSibling?.matches('.tab-label') ? dot.nextElementSibling.getBoundingClientRect() : null;
+          const fill = getComputedStyle(tab).backgroundColor;
           const box = dot.getBoundingClientRect();
           const close = tab.querySelector('.tab-close .codicon')?.getBoundingClientRect() ?? null;
           const tabBox = tab.getBoundingClientRect();
           const cut = tab.querySelector('.tab-label');
           // The tab's width and its label's as drawn, as fitStripTabs measures them, and the tab's own widest, unconstrained by the strip.
           const widths = () => {
-            const drawn = [tab.getBoundingClientRect().width, cut.getBoundingClientRect().width];
+            const drawn = [tab.getBoundingClientRect().width, cut?.getBoundingClientRect().width ?? 0];
 
             tab.style.flex = 'none';
             tab.style.width = 'max-content';
@@ -429,7 +433,7 @@ const measure = `(() => {
           const without = widths();
 
           dot.style.display = '';
-          return { tab: tab.querySelector('.tab-label')?.textContent, cut: (tab.querySelector('.tab-label')?.scrollWidth ?? 0) > (tab.querySelector('.tab-label')?.clientWidth ?? 0), closable: close !== null, label: label && { left: label.left, right: label.right, top: label.top, bottom: label.bottom }, dot: { left: box.left, right: box.right, top: box.top, bottom: box.bottom }, tabBox: { top: tabBox.top, right: tabBox.right }, close: close && { left: close.left, right: close.right, top: close.top, bottom: close.bottom }, widthChange: Math.max(...width.map((one, i) => Math.abs(one - without[i]))) };
+          return { tab: tab.querySelector('.tab-label')?.textContent ?? tab.title, more: tab.matches('.tab-more-button'), cut: (tab.querySelector('.tab-label')?.scrollWidth ?? 0) > (tab.querySelector('.tab-label')?.clientWidth ?? 0), closable: close !== null, icon: icon && { left: icon.left, right: icon.right, top: icon.top, bottom: icon.bottom }, label: label && { left: label.left }, ring: getComputedStyle(dot).boxShadow.startsWith(fill) ? null : getComputedStyle(dot).boxShadow + ' on ' + fill, dot: { left: box.left, right: box.right, top: box.top, bottom: box.bottom }, tabBox: { top: tabBox.top, right: tabBox.right }, close: close && { left: close.left, right: close.right, top: close.top, bottom: close.bottom }, widthChange: Math.max(...width.map((one, i) => Math.abs(one - without[i]))) };
         }),
       };
     }),
@@ -900,18 +904,21 @@ function failures(view, size, m) {
   for (const seam of m.strips.flatMap((strip) => strip.seams)) {
     if (Math.max(seam.line ?? 1, seam.fills) < SEAM_MIN) out.push('the tabs ' + seam.left + ' and ' + seam.right + ' run together: their line is ' + seam.line + ':1 and their fills ' + seam.fills + ':1, under ' + SEAM_MIN + ':1');
   }
-  // A tab's unread dot sits at its label's top-right, inside its tab, clear of its close mark, and takes no width.
+  // A tab's unread dot is a badge on its icon's top-right corner, inside its tab, ringed in its fill, clear of its label and close mark, and takes no width.
   const dots = m.strips.flatMap((strip) => strip.dots);
 
   for (const one of dots) {
     const where = 'the unread dot of the tab ' + (one.tab ?? '?');
 
-    if (one.label === null) {
-      out.push(where + ' does not follow its label');
+    if (one.icon === null || (one.label === null && !one.more)) {
+      out.push(where + ' does not sit between its icon and its label');
       continue;
     }
-    if (one.dot.left < one.label.right - 1 || one.dot.left > one.label.right + 2) out.push(where + ' starts at ' + one.dot.left + ', not at its label\'s end, ' + one.label.right);
-    if (one.dot.bottom > (one.label.top + one.label.bottom) / 2 || one.dot.top < one.tabBox.top) out.push(where + ' is not at its label\'s top: ' + one.dot.top + ' to ' + one.dot.bottom + ' for a label ' + one.label.top + ' to ' + one.label.bottom);
+    // A badge on the icon's top-right corner: across the icon's right edge and its top, clear of the label.
+    if (one.dot.left > one.icon.right - 1 || one.dot.right < one.icon.right + 1) out.push(where + ' is not across its icon\'s right edge: ' + one.dot.left + ' to ' + one.dot.right + ' for an icon ending at ' + one.icon.right);
+    if (one.dot.top > one.icon.top + 1 || one.dot.bottom < one.icon.top + 1 || one.dot.top < one.tabBox.top) out.push(where + ' is not on its icon\'s top: ' + one.dot.top + ' to ' + one.dot.bottom + ' for an icon from ' + one.icon.top);
+    if (one.label !== null && one.dot.right > one.label.left + 0.5) out.push(where + ' covers its label');
+    if (one.ring !== null) out.push(where + ' is not ringed in its tab\'s fill: ' + one.ring);
     if (one.dot.right > one.tabBox.right + 0.5) out.push(where + ' passes its tab');
     if (one.close !== null && one.dot.right > one.close.left - 0.5 && one.dot.left < one.close.right + 0.5 && one.dot.bottom > one.close.top - 0.5 && one.dot.top < one.close.bottom + 0.5) out.push(where + ' covers its close mark');
     if (Math.abs(one.widthChange) > 0.5) out.push(where + ' changes its tab\'s or label\'s width by ' + one.widthChange + ' px');
@@ -919,12 +926,15 @@ function failures(view, size, m) {
   // The tabs view's state and artifacts are unread: History's dot, a tab without a close mark, shows wherever History has room after Changes,
   // and an artifact's, with a close mark, cut or not, wherever the strip has room for an artifact tab besides the one shown.
   if (view === 'tabs') {
-    if (m.strips.some((strip) => strip.history) && !dots.some((one) => !one.closable)) out.push('no unread dot on a tab without a close mark');
+    if (m.strips.some((strip) => strip.history) && !dots.some((one) => !one.closable && !one.more)) out.push('no unread dot on a tab without a close mark');
     if (m.strips.some((strip) => strip.artifacts > 0) && !dots.some((one) => one.closable)) out.push('no unread dot on an artifact tab');
     if (size.device === 'ipad' && !(dots.some((one) => one.closable && one.cut) && dots.some((one) => one.closable && !one.cut))) out.push('no unread dot on both a cut and a whole artifact title');
   }
-  // The tabs view's strip has more tabs than fit, so More holds the rest.
+  // The tabs view's strip has more tabs than fit, so More holds the rest; More shows its dot exactly while its name says a row is unread.
   if (view === 'tabs' && !m.strips.some((strip) => strip.more)) out.push('no strip shows More for a work item with more tabs than fit');
+  for (const strip of m.strips.filter((one) => one.more)) {
+    if (strip.moreUnread !== strip.dots.some((one) => one.more)) out.push(strip.moreUnread ? 'More holds an unread row but shows no dot' : 'More shows a dot with no unread row');
+  }
   // The header keeps one line with its main control: on a phone its icon alone, a 44 px target named by its label; elsewhere with its label.
   if (m.header !== null) {
     const h = m.header;

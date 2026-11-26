@@ -146,7 +146,7 @@ describe('the tab strips', () => {
 
   it('TabStrip_EveryTab_GrowsEvenlyToItsContentAndNeverBelowItsLeastWidth', () => {
     // One rule for every tab: grown evenly from nothing, never past the tab's own content, never below its least width: its padding, 16 px icon,
-    // 6 px gap, 1 px border and a 44 px label, with its close mark's room or the Changes count's.
+    // 6 px gap, 1 px border and a 44 px label, with its close mark's room.
     expect(css).toContain('\n.tab { --sb-tab-pad: 14px; --sb-tab-close-room: 32px; box-sizing: border-box; flex: 1 1 0; min-width: calc(2 * var(--sb-tab-pad) + 23px + var(--sb-tab-label-least)); max-width: max-content; position: relative;');
     expect(css).toContain('.tab:has(> .tab-close) { min-width: calc(var(--sb-tab-pad) + 23px + var(--sb-tab-label-least) + var(--sb-tab-close-room)); }');
     expect(css).toMatch(/\n\.tab \{[^}]*overflow: hidden;[^}]*padding: 0 var\(--sb-tab-pad\);/);
@@ -162,7 +162,7 @@ describe('the tab strips', () => {
       .map(([, selector]) => selector!.trim());
 
     // (The close-mark rule above is left out by its .tab-close.)
-    expect(own).toEqual(['.tab', '.tab.changes-tab']);
+    expect(own).toEqual(['.tab']);
   });
 
   it('NarrowStrip_AnyWidth_KeepsEveryLabelAndIcon', () => {
@@ -194,13 +194,12 @@ describe('the label beside an icon', () => {
     ];
     const rows = hosts.flatMap((host) => [...host.querySelectorAll<HTMLElement>('.menu-row, .tab, .tab-open, button.picker')].filter((row) => row.querySelector(':scope > .codicon, :scope > .file-icon, :scope > .menu-gutter')));
     // The picker's title and session name stand in one column beside its icons, each a text of its own.
-    const texts = rows.flatMap((row) => [...row.children].flatMap((child) => (child.matches('.picker-text') ? [...child.children] : [child])).filter((child) => !child.matches('.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .tab-open, .tab-close, .provider, svg') && (child.textContent ?? '').trim() !== ''));
+    const texts = rows.flatMap((row) => [...row.children].flatMap((child) => (child.matches('.picker-text') ? [...child.children] : [child])).filter((child) => !child.matches('.codicon, .file-icon, .menu-gutter, .unread-dot, .count, .tab-open, .tab-close, .provider, svg') && (child.textContent ?? '').trim() !== ''));
 
     expect(rows.length).toBeGreaterThan(10);
     expect(texts.length).toBeGreaterThan(10);
     expect(texts.filter((text) => !text.matches(selector)).map((text) => text.outerHTML)).toEqual([]);
-    // A badge keeps its own box, and an icon is never trimmed.
-    expect(hosts[0]!.querySelector('.tab-badge')!.matches(selector)).toBe(false);
+    // An icon is never trimmed.
     expect(hosts[0]!.querySelector('.tab .codicon')!.matches(selector)).toBe(false);
   });
 

@@ -121,9 +121,9 @@ describe('the strips drawn from stripTabs', () => {
 
     mount(host, renderSideSwitch('history', state, true, { ...strip, fit }, true));
     expect(draw(renderSideSwitch('history', state, true, { ...strip, fit }, true)).map(name)).toEqual(drawnOrder.slice(0, 3));
-    // After every tab drawn, with the count of the rest, Console among them.
+    // After every tab drawn, naming how many it holds, Console among them.
     expect(host.querySelector('nav')!.lastElementChild!.classList.contains('tab-more')).toBe(true);
-    expect(host.querySelector('.tab-more-button .tab-badge')!.textContent).toBe(String(drawnOrder.length - 3));
+    expect(host.querySelector('.tab-more-button')!.getAttribute('title')).toBe(`${drawnOrder.length - 3} more tabs`);
     // Each drawn tab names its id, by which the page measures it.
     expect([...host.querySelectorAll<HTMLElement>('nav > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(ORDER.slice(0, 3));
   });

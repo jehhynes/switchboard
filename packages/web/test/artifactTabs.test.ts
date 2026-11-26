@@ -86,9 +86,10 @@ describe('the artifact tabs', () => {
     expect(markup.match(/<button class="tab-close" type="button" data-action="close-artifact"/g)).toHaveLength(2);
     expect(markup).toContain('data-path="chat/a2.md" aria-label="Close Note 2" title="Close" tabindex="0"');
     expect(markup.match(/role="tab"/g)).toHaveLength(4);
-    // More counts the tabs it holds: the six other artifacts and Console.
-    expect(parse(markup).querySelector('.tab-more-button .tab-badge')!.textContent).toBe('7');
-    expect(parse(markup).querySelector('.tab-more-button')!.getAttribute('aria-label')).toBe('More tabs, 7');
+    // More shows its icon alone and counts the tabs it holds, the six other artifacts and Console, in its name and tooltip.
+    expect(parse(markup).querySelector('.tab-more-button')!.textContent).toBe('');
+    expect(parse(markup).querySelector('.tab-more-button')!.getAttribute('aria-label')).toBe('7 more tabs');
+    expect(parse(markup).querySelector('.tab-more-button')!.getAttribute('title')).toBe('7 more tabs');
     expect(markup).not.toContain('tab-menu" role="menu"');
   });
 
@@ -158,7 +159,7 @@ describe('the artifact tabs', () => {
     const all = parse(html(renderSideSwitch('history', { ...state, artifacts: eight.slice(6) }, false, { open: null, menu: true, now: 2_000, closed })));
 
     expect([...all.querySelectorAll<HTMLElement>('.tab-menu > *')].map((row) => row.dataset['path'])).toEqual(['chat/a7.md']);
-    expect(all.querySelector('.tab-more-button .tab-badge')!.textContent).toBe('1');
+    expect(all.querySelector('.tab-more-button')!.getAttribute('title')).toBe('1 more tab');
   });
 
   it('mark unread rows with the dot after the title, named in the row, and More with the dot while any row is unread', () => {
@@ -174,12 +175,13 @@ describe('the artifact tabs', () => {
     expect(menu.querySelector('[data-path="chat/a1.md"]')!.getAttribute('aria-label')).toBe('Note 1, Markdown document, 3 min ago');
     const strip = parse(markup);
 
-    // On the count's corner, as a notification badge; the button has no caret, its menu named by aria-haspopup and its tooltip.
-    expect(strip.querySelectorAll('.tab-more-button .tab-badge > .unread-dot')).toHaveLength(1);
+    // Right after its icon, so page.css draws it on the icon's corner, as a tab's; the button has no caret, its menu named by aria-haspopup and its tooltip.
+    expect(strip.querySelectorAll('.tab-more-button > .codicon-ellipsis + .unread-dot')).toHaveLength(1);
+    expect(strip.querySelector('.tab-more-button')!.textContent).toBe('');
     expect(strip.querySelector('.tab-more-button .codicon-chevron-down')).toBeNull();
     expect(strip.querySelector('.tab-more-button')!.getAttribute('aria-haspopup')).toBe('menu');
-    expect(css).toContain('.tab.tab-more-button .tab-badge > .unread-dot { position: absolute; top: -3px; right: -3px;');
-    expect(strip.querySelector('.tab-more-button')!.getAttribute('aria-label')).toBe('More tabs, 8, 1 unread');
+    expect(css).toContain('.tab :is(.codicon, .file-icon) + .unread-dot { flex: none; position: relative; top: -7px; margin: 0 -4px 0 -9px; box-shadow: 0 0 0 1.5px var(--sb-tab-strip); }');
+    expect(strip.querySelector('.tab-more-button')!.getAttribute('aria-label')).toBe('8 more tabs, 1 unread');
     // A hidden unread History marks More too; with nothing unread hidden, no dot.
     const status = parse(html(renderSideSwitch('artifacts', { ...state, state: { id: 's', sessionId: 's', at: 1, headline: 'x', body: null, stale: null, unread: true } }, false, { open: 'chat/a3.md', fit: { ...room(1), width: 140 }, menu: true, now: 0 })));
 
@@ -200,7 +202,8 @@ describe('the artifact tabs', () => {
 
     expect(paths(markup, 'data-tab')).toEqual(['conversation', 'history']);
     expect(tabPaths(markup)).toEqual(['chat/a7.md']);
-    expect(markup).toContain('<span class="tab-badge muted">8</span>');
+    expect(markup).toContain('title="8 more tabs"');
+    expect(markup).not.toContain('tab-badge');
   });
 });
 
@@ -251,13 +254,33 @@ describe('the tab strip on a narrow screen', () => {
     expect(css).not.toContain('menu-kind');
   });
 
-  it('names More and the Changes tab with their counts', () => {
+  it('names More and the Changes tab with their counts, and dots the Changes tab while a file is not viewed', () => {
     const state = { ...EMPTY, artifacts: eight };
 
-    expect(html(renderTabs(newView(), state, false, { open: null, fit: room(3), menu: false, now: 0 }))).toContain('aria-label="More tabs, 8"');
+    expect(html(renderTabs(newView(), state, false, { open: null, fit: room(3), menu: false, now: 0 }))).toContain('aria-label="8 more tabs"');
     expect(html(renderTabs(newView(), state, false, { open: null, fit: room(3), menu: false, now: 0 }))).not.toContain('unread-dot');
     expect(html(changesTab(newChanges(), false))).toContain('aria-label="Changes"');
-    expect(html(changesTab({ ...newChanges(), list: { total: 3, rows: [{ viewed: true }] } as never }, true))).toContain('aria-label="Changes, 1 of 3 files viewed"');
+    const list = (total: number, ...viewed: boolean[]) => ({ ...newChanges(), list: { total, rows: viewed.map((one) => ({ viewed: one })) } as never });
+
+    expect(html(changesTab(list(3, true, false, false), true))).toContain('aria-label="Changes, 1 of 3 files viewed"');
+    expect(html(changesTab(newChanges(), false))).not.toContain('unread-dot');
+    expect(html(changesTab(list(3, true, false, false), true))).toContain('<span class="codicon codicon-diff-multiple" aria-hidden="true"></span><span class="unread-dot" aria-hidden="true"></span><span class="tab-label">Changes</span>');
+    // With every file viewed, or none changed, no dot.
+    expect(html(changesTab(list(2, true, true), true))).not.toContain('unread-dot');
+    expect(html(changesTab(list(0), true))).not.toContain('unread-dot');
+    // A list cut short: the rows left out are not known, so only its own rows decide, and its counts say they are the first.
+    expect(html(changesTab(list(3, true, true), true))).not.toContain('unread-dot');
+    expect(html(changesTab(list(3, true, true), true))).toContain('aria-label="Changes, 2 of the first 2 of 3 files viewed"');
+    expect(html(changesTab(list(3, true, false), true))).toContain('unread-dot');
+    // Changes held in More marks More, and its row, while a file is not viewed.
+    const held = (changes: ReturnType<typeof list>): HTMLElement => Object.assign(document.createElement('div'), { innerHTML: html(renderTabs(newView(), state, false, { open: null, fit: { ...room(1), width: 140 }, menu: true, now: 0, changes })) });
+    const unviewed = held(list(2, true, false));
+
+    expect(unviewed.querySelector('.tab-menu [data-action="diff-tab"] .title > .unread-dot')).not.toBeNull();
+    expect(unviewed.querySelector('.tab-more-button > .codicon + .unread-dot')).not.toBeNull();
+    expect(unviewed.querySelector('.tab-more-button')!.getAttribute('aria-label')).toMatch(/, 1 unread$/);
+    expect(held(list(2, true, true)).querySelector('.tab-more-button .unread-dot')).toBeNull();
+    expect(css).not.toContain('.tab.changes-tab {');
   });
 });
 

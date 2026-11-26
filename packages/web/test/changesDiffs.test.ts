@@ -299,7 +299,8 @@ describe('the Changes list', () => {
 
     expect(root.querySelector('.changes-menu')).toBeNull();
     expect([...root.querySelectorAll('.changes-tab .tab-label')].map((one) => one.textContent)).toEqual(['Changes']);
-    expect(root.querySelector('.changes-tab .tab-badge')!.textContent).toBe('1/3');
+    expect(root.querySelector('.changes-tab .codicon + .unread-dot + .tab-label')).not.toBeNull();
+    expect(root.querySelector('.changes-tab')!.getAttribute('aria-label')).toBe('Changes, 1 of 3 files viewed');
     expect(root.querySelector('.changes-tab')!.classList.contains('selected')).toBe(true);
     expect(changesMounts).toHaveLength(1);
     expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'src/new.ts', 'logo.png']);
@@ -323,7 +324,8 @@ describe('the Changes list', () => {
     root.querySelectorAll<HTMLElement>('.diff-host .diff-viewed input')[0]!.click();
     await flush();
     expect(gets.at(-1)).toBe('VIEWED docs/a.md h-a true 3');
-    expect(root.querySelector('.changes-tab .tab-badge')!.textContent).toBe('2/3');
+    expect(root.querySelector('.changes-tab')!.getAttribute('aria-label')).toBe('Changes, 2 of 3 files viewed');
+    expect(root.querySelector('.changes-tab .unread-dot')).not.toBeNull();
     expect(root.querySelectorAll<HTMLInputElement>('.diff-host .diff-viewed input')[0]!.checked).toBe(true);
 
     // Picking another row scrolls the same tab.
@@ -636,7 +638,9 @@ describe('the Changes list', () => {
     expect(changesMounts[0]!.collapsed).not.toContain('docs/a.md true');
     source.emit('viewed', { workItemId: 1, path: 'logo.png', hash: 'h-logo', viewed: true });
     expect(changesMounts[0]!.collapsed.at(-1)).toBe('logo.png true');
-    expect(root.querySelector('.changes-tab .tab-badge')!.textContent).toBe('3/3');
+    // Every file viewed: the tab's dot goes.
+    expect(root.querySelector('.changes-tab .unread-dot')).toBeNull();
+    expect(root.querySelector('.changes-tab')!.getAttribute('aria-label')).toBe('Changes, 3 of 3 files viewed');
 
     // Cleared there again: the file collapsed for its tick opens.
     source.emit('viewed', { workItemId: 1, path: 'logo.png', hash: 'h-logo', viewed: false });
