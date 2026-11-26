@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Attachment, HolderClient, HolderError } from '../src/client.js';
 import { Raw, TOKEN, startHost, until } from './fakes.js';
 import type { TestHost } from './fakes.js';
+import type { Pty } from '../src/host.js';
 
 let current: TestHost | null = null;
 
@@ -225,6 +226,50 @@ describe('sessions', () => {
     state.ptys[0]!.exit(0);
     expect((await client.list()).length).toBe(1);
     await until(async () => expect(await client.list()).toEqual([]));
+    client.close();
+  });
+
+  it('releases the pseudo-terminal once when the program exits by itself or is killed, and logs a release that throws', async () => {
+    const released: Pty[] = [];
+    const logs: string[] = [];
+    const state = await started({ releasePty: (pty) => released.push(pty), log: (message) => logs.push(message) });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await client.spawn(spawnRequest('s2'));
+    expect(released).toEqual([]);
+    state.ptys[0]!.exit(0);
+    state.ptys[0]!.exit(0);
+    await client.kill('s2');
+    expect(released).toEqual([state.ptys[0], state.ptys[1]]);
+    client.close();
+
+    const throwing = await startHost({ releasePty: () => { throw new Error('busy'); }, log: (message) => logs.push(message) });
+    const other = await HolderClient.connect({ port: throwing.port, token: TOKEN });
+
+    await other.spawn(spawnRequest('s1'));
+    expect(await other.kill('s1')).toBe(1);
+    expect(logs).toEqual(['The terminal of session s1 could not be released: busy']);
+    expect((await other.list())[0]).toMatchObject({ exitCode: 1 });
+    other.close();
+    await throwing.host.close();
+  });
+
+  it("removes its listeners from the pseudo-terminal when it forgets the session, so the pseudo-terminal cannot keep it", async () => {
+    const state = await started({ exitRetentionMs: 100 });
+    const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+
+    await client.spawn(spawnRequest('s1'));
+    await client.spawn(spawnRequest('s2'));
+    expect(state.ptys.map((pty) => pty.listeners())).toEqual([2, 2]);
+    state.ptys[0]!.exit(0);
+    expect(state.ptys[0]!.listeners()).toBe(2);
+    await until(() => expect(state.ptys.map((pty) => pty.listeners())).toEqual([0, 2]));
+
+    // A spawn that replaces an exited session forgets it at once.
+    state.ptys[1]!.exit(0);
+    await client.spawn(spawnRequest('s2'));
+    expect(state.ptys.map((pty) => pty.listeners())).toEqual([0, 0, 2]);
     client.close();
   });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { closePseudoTerminal } from '../src/close.js';
+import { closePseudoTerminal, releasePseudoTerminal } from '../src/close.js';
 
 /** A node-pty Windows terminal as far as the close reads it. */
 function windowsPty(agent: Record<string, unknown>): { pty: unknown; calls: unknown[][] } {
@@ -45,5 +45,54 @@ describe('closePseudoTerminal', () => {
   it('refuses a Unix terminal without destroy, or none at all', () => {
     expect(closePseudoTerminal({ _agent: {} }, 'linux')).toBe(false);
     expect(closePseudoTerminal(undefined, 'linux')).toBe(false);
+  });
+});
+
+describe('releasePseudoTerminal', () => {
+  /** A node-pty Windows terminal as far as the release reads it, recording each call with its receiver. */
+  function windowsAgent(agent: Record<string, unknown> = {}): { pty: unknown; calls: string[] } {
+    const calls: string[] = [];
+    const thread = {
+      on(this: unknown, event: string, listener: () => void) {
+        calls.push(this === thread ? `thread.on ${event}` : 'thread.on unbound');
+        listener();
+      },
+    };
+    const worker = { _worker: thread, dispose(this: unknown) { calls.push(this === worker ? 'worker.dispose' : 'worker.dispose unbound'); } };
+    const input = { destroy(this: unknown) { calls.push(this === input ? 'input.destroy' : 'input.destroy unbound'); } };
+
+    return { pty: { _agent: { _conoutSocketWorker: worker, _inSocket: input, ...agent } }, calls };
+  }
+
+  it("disposes node-pty's output Worker, ignoring its errors from then on, and destroys its input pipe on Windows", () => {
+    const { pty, calls } = windowsAgent();
+
+    expect(releasePseudoTerminal(pty, 'win32')).toEqual(['worker', 'input']);
+    expect(calls).toEqual(['thread.on error', 'worker.dispose', 'input.destroy']);
+  });
+
+  it.each([
+    ['no Worker', { _conoutSocketWorker: undefined }, ['input'], ['input.destroy']],
+    ['a Worker without dispose', { _conoutSocketWorker: { dispose: 1 } }, ['input'], ['input.destroy']],
+    ['a Worker without its thread', { _conoutSocketWorker: { dispose: () => undefined } }, ['worker', 'input'], ['input.destroy']],
+    ['no input pipe', { _inSocket: null }, ['worker'], ['thread.on error', 'worker.dispose']],
+    ['an input pipe without destroy', { _inSocket: {} }, ['worker'], ['thread.on error', 'worker.dispose']],
+  ])('frees only what it finds when the agent has %s', (_name, agent, released, called) => {
+    const { pty, calls } = windowsAgent(agent);
+
+    expect(releasePseudoTerminal(pty, 'win32')).toEqual(released);
+    expect(calls).toEqual(called);
+  });
+
+  it('frees nothing for a terminal without an agent, or none at all', () => {
+    expect(releasePseudoTerminal({}, 'win32')).toEqual([]);
+    expect(releasePseudoTerminal(null, 'win32')).toEqual([]);
+  });
+
+  it('frees nothing on other platforms, where node-pty frees its own', () => {
+    const { pty, calls } = windowsAgent();
+
+    expect(releasePseudoTerminal(pty, 'linux')).toEqual([]);
+    expect(calls).toEqual([]);
   });
 });

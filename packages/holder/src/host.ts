@@ -20,11 +20,16 @@ import {
 } from './protocol.js';
 import type { ClientMessage, HostMessage, SessionEntry, SpawnRequest } from './protocol.js';
 
+/** A listener registration that `dispose` removes, as node-pty returns. */
+export interface Disposable {
+  dispose(): void;
+}
+
 /** The part of a node-pty process the host uses, so tests can pass a fake. */
 export interface Pty {
   readonly pid: number;
-  onData(listener: (data: string) => void): unknown;
-  onExit(listener: (exit: { exitCode: number }) => void): unknown;
+  onData(listener: (data: string) => void): Disposable;
+  onExit(listener: (exit: { exitCode: number }) => void): Disposable;
   write(data: string): void;
   resize(cols: number, rows: number): void;
 }
@@ -45,6 +50,8 @@ export interface HostOptions {
    * Without it, or when it fails, an end kills the process tree at once.
    */
   closePty?: (pty: Pty) => boolean;
+  /** Frees what the pseudo-terminal library keeps after the program exited, such as node-pty's output thread on Windows (mechanics M168). */
+  releasePty?: (pty: Pty) => void;
   /** How long a program has to exit after its pseudo-terminal closed before its process tree is killed. */
   closeGraceMs?: number;
   log?: (message: string) => void;
@@ -78,6 +85,8 @@ interface Held {
   /** When the holder closed the pseudo-terminal to end the program (`performance.now()`); input and resizes stop then. */
   closedAt: number | null;
   pty: Pty;
+  /** The `onData` and `onExit` registrations, removed when the session is forgotten so the pseudo-terminal cannot keep it. */
+  listeners: Disposable[];
   term: InstanceType<typeof headless.Terminal>;
   serializer: InstanceType<typeof serializeAddon.SerializeAddon>;
   head: string;
@@ -416,6 +425,7 @@ export class Host {
       exitCode: null,
       closedAt: null,
       pty,
+      listeners: [],
       term,
       serializer,
       head: '',
@@ -429,8 +439,10 @@ export class Host {
     };
 
     this.#sessions.set(request.session, held);
-    pty.onData((data) => this.#output(held, data));
-    pty.onExit(({ exitCode }) => this.#exited(held, exitCode));
+    held.listeners.push(
+      pty.onData((data) => this.#output(held, data)),
+      pty.onExit(({ exitCode }) => this.#exited(held, exitCode)),
+    );
     this.#send(connection, { type: 'spawned', re: id, session: held.session, pid: held.pid });
     this.#options.onLiveChange?.(this.live());
   }
@@ -471,6 +483,12 @@ export class Host {
     held.exitedAt = this.#now();
     held.exitCode = exitCode;
 
+    try {
+      this.#options.releasePty?.(held.pty);
+    } catch (error) {
+      this.#options.log?.(`The terminal of session ${held.session} could not be released: ${(error as Error).message}`);
+    }
+
     // A client still waiting for its replay is told after it; the others once the output still being parsed is on the last screen.
     const ready = [...held.clients, ...held.viewers].filter((client) => client.pending === null);
 
@@ -498,6 +516,10 @@ export class Host {
 
     if (this.#sessions.get(held.session) === held) {
       this.#sessions.delete(held.session);
+    }
+
+    for (const listener of held.listeners.splice(0)) {
+      listener.dispose();
     }
 
     held.term.dispose();

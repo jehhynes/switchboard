@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { Host } from './host.js';
-import { closePseudoTerminal } from './close.js';
+import { closePseudoTerminal, releasePseudoTerminal } from './close.js';
 import { loadNodePty } from './nodePty.js';
 import { MemorySampler, killTree } from './processes.js';
 import { PROTOCOL } from './protocol.js';
@@ -173,6 +173,7 @@ async function main(): Promise<void> {
     spawnPty: await loadNodePty(),
     killTree: (pid) => killTree(pid),
     closePty: (pty) => closePseudoTerminal(pty),
+    releasePty: (pty) => void releasePseudoTerminal(pty),
     log,
     memory: (pids) => sampler.memory(pids),
     tree: (pid) => sampler.tree(pid),

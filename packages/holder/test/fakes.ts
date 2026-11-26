@@ -2,7 +2,7 @@ import { connect } from 'node:net';
 import { vi } from 'vitest';
 import type { Socket } from 'node:net';
 import { Host } from '../src/host.js';
-import type { HostOptions, Pty } from '../src/host.js';
+import type { Disposable, HostOptions, Pty } from '../src/host.js';
 import { LineReader } from '../src/protocol.js';
 
 export class FakePty implements Pty {
@@ -15,12 +15,21 @@ export class FakePty implements Pty {
 
   constructor(readonly pid: number, readonly file: string, readonly args: string[], readonly options: { cwd: string; env: Record<string, string>; cols: number; rows: number }) {}
 
-  onData(listener: (data: string) => void): void {
+  onData(listener: (data: string) => void): Disposable {
     this.#data.push(listener);
+
+    return { dispose: () => (this.#data = this.#data.filter((one) => one !== listener)) };
   }
 
-  onExit(listener: (exit: { exitCode: number }) => void): void {
+  onExit(listener: (exit: { exitCode: number }) => void): Disposable {
     this.#exit.push(listener);
+
+    return { dispose: () => (this.#exit = this.#exit.filter((one) => one !== listener)) };
+  }
+
+  /** The listeners still registered. */
+  listeners(): number {
+    return this.#data.length + this.#exit.length;
   }
 
   write(data: string): void {

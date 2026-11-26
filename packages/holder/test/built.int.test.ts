@@ -194,6 +194,53 @@ describe('built holder', () => {
     expect(Date.now() - killedAt).toBeGreaterThanOrEqual(1400);
   }, 30_000);
 
+  // node-pty 1.1.0 ends a session's output thread only in kill(), which the holder never calls (mechanics M168). Sessions end one at a time,
+  // because sessions ending together have crashed node-pty's native code.
+  it.skipIf(process.platform !== 'win32')("frees each ended session's output thread on Windows, whether the program exits or is killed", async () => {
+    const home = newHome();
+    const holder = startHolder(home);
+    const found = await record(home);
+    const client = await HolderClient.connect({ port: found.port, token: found.token });
+    const threads = (): number => Number(execFileSync('pwsh', ['-NoProfile', '-Command', `(Get-Process -Id ${holder.pid}).Threads.Count`]).toString().trim());
+    const ended = async (session: string): Promise<void> =>
+      until(async () => (await client.list()).some((entry) => entry.session === session && entry.exitedAt !== null), `session ${session} to end`, 20_000);
+    const exiting = nodeProgram("process.stdout.write('ready\\n'); setTimeout(() => process.exit(0), 300);");
+    const waiting = nodeProgram("process.stdout.write('ready\\n'); setInterval(() => {}, 1000);");
+
+    // One session first, so the threads node-pty and the holder start once are in the baseline.
+    await client.spawn({ session: 'warm', label: 'warm', ...exiting });
+    await ended('warm');
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+    const before = threads();
+
+    for (const session of ['a1', 'a2', 'a3']) {
+      await client.spawn({ session, label: session, ...exiting });
+      await ended(session);
+    }
+
+    for (const session of ['b1', 'b2', 'b3']) {
+      await client.spawn({ session, label: session, ...waiting });
+      await until(async () => (await client.screen(session)).head.includes('ready'), `session ${session} to start`);
+    }
+
+    // Each live session has its own output thread, so the count would show them kept.
+    expect(threads()).toBeGreaterThanOrEqual(before + 3);
+
+    for (const session of ['b1', 'b2', 'b3']) {
+      await client.kill(session);
+    }
+
+    // node-pty ends the Worker a second after its dispose, which comes a second after the program's last output.
+    let after = threads();
+
+    await until(() => (after = threads()) <= before + 1, 'the output threads of the ended sessions to end', 15_000).catch(() => {
+      throw new Error(`The ended sessions kept their threads: ${before} before, ${after} after.`);
+    });
+    await client.shutdown();
+    expect(await holder.exited).toBe(0);
+  }, 90_000);
+
   it('lets a new holder take over after a forced exit left the record behind', async () => {
     const home = newHome();
     const first = startHolder(home);

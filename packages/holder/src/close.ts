@@ -30,3 +30,39 @@ export function closePseudoTerminal(pty: unknown, platform: NodeJS.Platform = pr
 
   return true;
 }
+
+/**
+ * Frees what node-pty keeps after a Windows program exits: node-pty 1.1.0 ends its output-pipe Worker thread only in `kill()`, which the holder
+ * never calls, and never closes the input pipe, so without this each ended session keeps a thread, a pipe handle and, through the Worker's
+ * listeners, its pseudo-terminal and screen (mechanics M168). Uses node-pty's private agent, checked as `closePseudoTerminal` checks it.
+ * Returns what it freed; nothing on other platforms, where node-pty frees its pseudo-terminal itself.
+ */
+export function releasePseudoTerminal(pty: unknown, platform: NodeJS.Platform = process.platform): Array<'worker' | 'input'> {
+  if (platform !== 'win32') {
+    return [];
+  }
+
+  type Agent = { _conoutSocketWorker?: { dispose?: unknown; _worker?: { on?: unknown } }; _inSocket?: { destroy?: unknown } };
+  const agent = (pty as { _agent?: Agent } | null)?._agent;
+  const released: Array<'worker' | 'input'> = [];
+  const worker = agent?._conoutSocketWorker;
+  const input = agent?._inSocket;
+
+  if (typeof worker?.dispose === 'function') {
+    // The Worker fails when output reaches it after node-pty closed its end, and node-pty does not listen for that; it is ending anyway.
+    if (typeof worker._worker?.on === 'function') {
+      (worker._worker.on as (event: string, listener: () => void) => void).call(worker._worker, 'error', () => undefined);
+    }
+
+    // Terminates the Worker once node-pty's one-second drain timer passes.
+    (worker.dispose as () => void).call(worker);
+    released.push('worker');
+  }
+
+  if (typeof input?.destroy === 'function') {
+    (input.destroy as () => void).call(input);
+    released.push('input');
+  }
+
+  return released;
+}
