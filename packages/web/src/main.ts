@@ -48,8 +48,8 @@ import { LIST_HASH, parseRoute, parseScrolls, parseTabSets, ROUTE_KEY, routeHash
 import type { Route, ScrollPlace, TabSet } from './route.js';
 import { renderContextMeter } from '@switchboard/conversation/contextMeter';
 import type { ContextMenuState } from '@switchboard/conversation/contextMeter';
-import { EMPTY_HISTORY_UI, renderHistory } from './history.js';
-import type { HistoryOpen, HistoryUi } from './history.js';
+import { EMPTY_HISTORY_UI, expandable, needsYou, renderHistory } from './history.js';
+import type { HistoryHead, HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
 import { ChangesController } from './changes.js';
@@ -2757,7 +2757,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         drawConsole(pane);
       } else if (tab === 'history') {
         // The ticket's History only for a row that offers it (`followHistory`); the state always.
-        drawPane(pane, renderHistory(offersHistory() ? shownHistory : null, state.state, now));
+        drawPane(pane, renderHistory(offersHistory() ? shownHistory : null, state.state, now, historyHead()));
         drawDiagrams(pane);
         placeHistory(pane);
       } else if (tab === 'diff') {
@@ -3628,7 +3628,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     historyTick ??= setInterval(() => void readHistory(), HISTORY_REFRESH_MS);
     void readHistory();
   };
-  /** The operator changed the open History's chips, filter, sections or runs: kept for the ticket while the page is open. */
+  /** The head History shows before its ticket's History loads: the open work item's row and scope (`HistoryHead`). */
+  const historyHead = (): HistoryHead => {
+    const row = selectedRow(state);
+
+    return {
+      key: row?.history?.key ?? row?.ticket ?? '',
+      title: state.scope?.title ?? row?.title ?? '',
+      sourceKind: row?.sourceKind ?? null,
+      playbook: row === null || row === undefined || row.playbook === '' ? null : row.playbook,
+      status: row?.mark?.title ?? null,
+      needsYou: needsYou(row ?? null),
+      workItemId: state.scope?.workItemId ?? row?.workItemId ?? null,
+      sessionId: state.scope?.sessionId ?? null,
+    };
+  };
+  /** The operator changed the open History's chips, filter, groups, runs or state bodies: kept for the ticket while the page is open. */
   const setHistoryUi = (ui: HistoryUi): void => {
     if (shownHistory !== null) {
       shownHistory.ui = ui;
@@ -3651,13 +3666,17 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const details = event.target as HTMLDetailsElement;
       const section = details.dataset?.['section'];
       const run = details.dataset?.['run'];
+      const body = details.dataset?.['body'];
 
       if (shownHistory === null || !(details instanceof HTMLDetailsElement) || details.closest('.history-view') === null) {
         return;
       }
 
-      // Drawn again, so the next drawing compares against what the page shows, and Expand all opens a section the operator closed.
-      if (section !== undefined && (shownHistory.ui.sections[section] ?? null) !== details.open) {
+      // Drawn again, so the next drawing compares against what the page shows, and Expand all opens a run the operator closed.
+      if (body !== undefined && shownHistory.ui.bodies[body] !== details.open) {
+        setHistoryUi({ ...shownHistory.ui, bodies: { ...shownHistory.ui.bodies, [body]: details.open } });
+        draw();
+      } else if (section !== undefined && (shownHistory.ui.sections[section] ?? null) !== details.open) {
         setHistoryUi({ ...shownHistory.ui, sections: { ...shownHistory.ui.sections, [section]: details.open } });
         draw();
       } else if (run !== undefined && shownHistory.ui.runs.includes(run) !== details.open) {
@@ -4638,11 +4657,30 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         }
 
         break;
+      case 'history-chips':
+        if (shownHistory !== null) {
+          setHistoryUi({ ...shownHistory.ui, chips: !shownHistory.ui.chips });
+          draw();
+        }
+
+        break;
+      case 'history-section':
+        if (shownHistory?.view != null) {
+          const section = button!.dataset['section'] ?? '';
+
+          setHistoryUi({ ...shownHistory.ui, sections: { ...shownHistory.ui.sections, [section]: button!.getAttribute('aria-expanded') !== 'true' } });
+          draw();
+        }
+
+        break;
       case 'history-all':
         if (shownHistory?.view != null) {
-          const open = button!.dataset['all'] === 'open';
-
-          setHistoryUi({ ...shownHistory.ui, sections: Object.fromEntries(shownHistory.view.sections.map((section) => [section.key, open])) });
+          // Expand all opens the groups, the runs and the older states' bodies; Collapse all closes them.
+          setHistoryUi(
+            button!.dataset['all'] === 'open'
+              ? expandable(shownHistory.view, shownHistory.ui, historyHead(), state.state?.id ?? null, deps.now())
+              : { ...shownHistory.ui, sections: Object.fromEntries(shownHistory.view.sections.map((section) => [section.key, false])), runs: [], bodies: Object.fromEntries(Object.keys(expandable(shownHistory.view, shownHistory.ui, historyHead(), state.state?.id ?? null, deps.now()).bodies).map((key) => [key, false])) },
+          );
           draw();
         }
 
@@ -6090,7 +6128,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       // Dictation (architecture.md § Dictation): live words show dimmed after the box's text; the hub's draft fills the box unless the operator typed over it.
       // An open History reads again soon after the list changed, as the History tab does after a stream state.
-      if (type === 'list' && historyLive && historyChange === null) {
+      // A new pinned state moves the one before it into the timeline, which the next read brings.
+      if ((type === 'list' || (type === 'state' && state.state?.id !== before.state?.id)) && historyLive && historyChange === null) {
         historyChange = setTimeout(() => {
           historyChange = null;
           void readHistory();

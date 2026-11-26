@@ -5,7 +5,9 @@ import { mount } from '../src/island.js';
 import { EMPTY } from '../src/model.js';
 import type { PageState } from '../src/model.js';
 import { newView, renderMicButton, renderVoice } from '../src/render.js';
-import { renderArtifactView, renderState } from '../src/side.js';
+import { renderArtifactView } from '../src/side.js';
+import { renderHistory } from '../src/history.js';
+import type { HistoryHead } from '../src/history.js';
 import { renderTimeline } from '../src/timeline.js';
 import { renderHeader } from '../src/header.js';
 import { renderShared } from '../src/composer.js';
@@ -41,20 +43,24 @@ const scope = { kind: 'page' as const, key: 'k', folder: 'D:/w', title: 'Fix it'
 const workState = (patch: Partial<StateView> = {}): StateView => ({ id: 'st-1', sessionId: 's', at: AT, headline: 'Done', body: '\`\`\`\ncode\n\`\`\`\n\nPick:\n- A) x\n- B) y', stale: null, unread: true, ...patch });
 const state = (patch: Partial<PageState> = {}): PageState => ({ ...EMPTY, connected: true, scope, session: session({ provider: 'codex' } as Partial<SessionView>), ...patch });
 
+const HISTORY_HEAD: HistoryHead = { key: 'gh 1', title: 'Fix it', sourceKind: null, playbook: null, status: null, needsYou: null, workItemId: 1, sessionId: 's' };
+
 describe('HTML from the shared renderers', () => {
   it('is found when a part draws it as text', () => {
     expect(markupText(<span>{stampTime(AT)}</span>)).toHaveLength(1);
     expect(markupText(<span>{'1 < 2 > 0'}</span>)).toEqual([]);
   });
 
-  it('is drawn as nodes on the Status tab, with its time as a time element', () => {
+  it('is drawn as nodes in History, with its time as a time element', () => {
     for (const one of [workState(), workState({ stale: 'turn', body: null, headline: 'Build' })]) {
       const host = document.createElement('div');
 
-      expect(markupText(renderState(one, AT + 23 * 3_600_000))).toEqual([]);
-      mount(host, renderState(one, AT + 23 * 3_600_000));
-      expect(host.querySelector('.state-age time.stamp')?.getAttribute('datetime')).toBe('2026-11-20T19:03:41.000Z');
-      expect(host.querySelector('.state-age')!.textContent).toMatch(/^\d{1,2}:03 [AP]M · 23 h ago$/);
+      const drawn = renderHistory(null, one, AT + 23 * 3_600_000, HISTORY_HEAD);
+
+      expect(markupText(drawn)).toEqual([]);
+      mount(host, drawn);
+      expect(host.querySelector('.hist-now time')?.getAttribute('datetime')).toBe('2026-11-20T19:03:41.000Z');
+      expect(host.querySelector('.hist-now-sub')!.textContent).toBe('State from the session · 23 h ago');
     }
   });
 

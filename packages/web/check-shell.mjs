@@ -1,5 +1,6 @@
 // Checks the page's shell at iPhone sizes and an iPad's, and its tabs on a desktop, in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
-// app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History, Settings, the drawer, a sheet,
+// app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History (its title first at 20 px, its
+// groups' headings at 14 px, and its pinned state on the first screen), Settings, the drawer, a sheet,
 // the persona dialog, a work item with more tabs than fit, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
 // a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, and the More menu lies above everything under it. Line 2 is one line, never wrapping and its items never
 // below one another, at several list widths down to 200 px; its playbook or host is cut, with an ellipsis and a tooltip naming it whole, only
@@ -45,7 +46,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
@@ -54,6 +55,8 @@ const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
+/** --history-case <ended|turn|waiting|filter> draws History's pinned state ended or as of the last turn, its row waiting on you, or a filter. */
+const historyCase = process.argv.includes('--history-case') ? process.argv[process.argv.indexOf('--history-case') + 1] : null;
 
 const browsers = [
   process.env.SWITCHBOARD_CHROME,
@@ -73,6 +76,9 @@ if (browsers.length === 0) {
 // The page with a fake stream and fetch in place of the hub's: a work item with a long conversation, one with none, and the list.
 const fake = `<script>
 const view = new URLSearchParams(location.search).get('view');
+const hcase = new URLSearchParams(location.search).get('hcase');
+// The filter case types into History's filter once it shows.
+if (hcase === 'filter') setTimeout(() => { const field = document.querySelector('.hist-filter'); if (field) { field.value = 'refresh'; field.dispatchEvent(new Event('input', { bubbles: true })); } }, 700);
 // The drawer view unpins the list, which is otherwise pinned as a column outside the phone's layout.
 if (view === 'drawer') localStorage.setItem('switchboard.listCollapsed', '1'); else localStorage.removeItem('switchboard.listCollapsed');
 // Every view starts as a first start: all views share one browser profile, and a start with no work item in its hash (the list's, Settings')
@@ -106,7 +112,7 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 // The header's sources: GitHub's and Zoho's logos are the page's own; the DPAF plugin gives its own, a made-up mark here.
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 const header = { notes: [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, actions: [approve, remove], details: [state('2/5 fixing tests · 4m', 'dim')] }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, remove], details: [state('2/5 fixing tests · 4m', 'dim')] }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
@@ -131,7 +137,7 @@ const artifacts = view === 'tabs' ? Array.from({ length: 10 }, (_, i) => ({ path
 class FakeSource {
   constructor() {
     this.listeners = {};
-    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open ? [session] : [], items, more: false, state: view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0 }), 20);
+    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open ? [session] : [], items, more: false, state: view === 'history' ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0 }), 20);
     // The tabs view's artifacts change after the page first shows them, so each is unread until its tab shows it.
     if (view === 'tabs') setTimeout(() => artifacts.forEach((artifact) => this.emit('artifact', { artifact: { ...artifact, updatedAt: artifact.updatedAt + 60000 } })), 120);
     // check-resize pauses the stream (window.__paused), so a resize is shown without a redraw.
@@ -155,14 +161,36 @@ if (listing) {
   };
   requestAnimationFrame(sample);
 }
-// History's tab reads a ticket with one entry per day over a week, so its pane scrolls.
-const historyView = { key: 'gh 1', title: 'Fix it', url: '', facts: [{ label: 'Status', value: 'Running' }], links: [], reconstructed: false, recordedSince: null, sections: [{ key: 'w1', workItemId: 1, title: 'dev:build', status: 'Running', tone: 'accent', facts: [], prompt: null, entries: Array.from({ length: 40 }, (_, i) => ({ key: 'e' + i, at: now - (40 - i) * 3600000, category: 'session', icon: 'play', text: 'Entry ' + i, lines: [], detail: null, shortId: null, links: [], tone: null, reconstructed: false, refused: null, stateChange: false })) }] };
+// History's tab reads a ticket with two work items: the open one with stage and reply states, a run of state changes, a wait and its answer;
+// a done one; and the ticket's. hcase (--history-case) shows the pinned state ended or as of the last turn, the row waiting on you, or a filter.
+const he = (key, minutes, patch) => ({ key, at: now - minutes * 60000, category: 'session', icon: 'terminal', text: key, lines: [], detail: null, shortId: null, links: [], tone: null, reconstructed: false, refused: null, stateChange: false, stateId: null, body: null, stage: false, ...patch });
+const hstate = (key, minutes, text, patch = {}) => he(key, minutes, { category: 'state', icon: 'pulse', text, stateId: key, shortId: 'a3f9', ...patch });
+const historyView = { key: 'gh 1', title: longTitle, url: 'https://github.com/o/r/issues/1', repo: 'switchboard', status: 'Running', tone: null, playbook: 'dev:build', facts: ['Yours since 2026-11-24 09:12', 'Waited on you 1h 12m', '2 work items, 3 sessions, 5h 8m'], links: [{ label: 'Open ticket', icon: 'link-external', title: 'https://github.com/o/r/issues/1', open: { type: 'openUrl', url: 'https://github.com/o/r/issues/1' } }, { label: 'fix/dialer-registration', icon: 'repo', title: 'D:/w', open: { type: 'openFolder', path: 'D:/w' } }], reconstructed: false, recordedSince: null, sections: [
+  { key: 'w1', workItemId: 1, title: 'dev:build', status: 'Running', tone: null, facts: ['Created 2026-11-25 08:02', '1 session, 2h 40m'], prompt: null, entries: [
+    he('a1', 170, { category: 'triage', icon: 'filter', text: 'Triage chose dev:build' }),
+    he('a2', 165, { icon: 'terminal', text: 'Session a3f9 started', shortId: 'a3f9', links: [{ label: 'Open in terminal', icon: 'terminal', title: 'Attach to session a3f9', open: { type: 'open', session: 's', workItemId: 1 } }] }),
+    hstate('stage-s-1', 120, 'Planning the registration refresh', { stage: true, category: 'state' }),
+    he('a4', 95, { category: 'you', icon: 'account', text: 'You sent a message', tone: 'accent' }),
+    // A link with a short label, so its touch target's width is measured.
+    he('a5', 90, { category: 'report', icon: 'link', text: 'Linked PR', links: [{ label: 'PR', icon: 'link-external', title: 'https://github.com/o/r/pull/2', open: { type: 'openUrl', url: 'https://github.com/o/r/pull/2' } }] }),
+    hstate('st-2', 60, 'Implementing the refresh in RegistrationMonitor', { body: 'Renewal timer added; wiring the lapse event to the inbound route next. **Needs you:** nothing.' }),
+    he('a6', 30, { icon: 'shield', text: 'Session a3f9 is waiting on a permission prompt', shortId: 'a3f9', tone: 'warning' }),
+    he('a7', 25, { category: 'you', icon: 'check', text: 'You approved it', tone: 'accent' }),
+    ...Array.from({ length: 25 }, (_, i) => he('b' + i, 24 - i * 0.8, { icon: 'play-circle', text: 'Session a3f9 is working', shortId: 'a3f9', stateChange: true })),
+    hstate('st', 4, 'Fix built; two tests still failing'),
+  ] },
+  { key: 'w9', workItemId: 9, title: 'dev:plan', status: 'Done', tone: 'success', facts: ['Created 2026-11-24 09:12', 'Done 2026-11-24 11:40', '2 sessions, 2h 28m'], prompt: null, entries: [
+    he('c1', 1500, { text: 'Session 7c21 started', shortId: '7c21' }),
+    hstate('st-p', 1400, 'Plan written: refresh 30 s before expiry', { shortId: '7c21', body: 'The plan is in the ticket.' }),
+  ] },
+  { key: 'ticket', workItemId: null, title: 'Ticket', status: '', tone: null, facts: ['Assignment, pool, snoozes and worktree'], prompt: null, entries: [he('d1', 1600, { category: 'ticket', icon: 'issues', text: 'Switchboard first saw the ticket, assigned to you' })] },
+] };
 // Settings reads a file with checkboxes on General and in the playbooks' table.
 const settingsRead = { settings: { path: 'C:/Users/someone/.switchboard/settings.json', version: 'v1', value: { sessions: { codeMode: true }, web: { tailscale: true }, sources: { github: { repo: 'o/r', logins: ['me'], repoRoot: 'D:/git/r' } }, schedules: { weekly: { playbook: 'dev:build', repoRoot: 'D:/git/r', every: 'week', day: 'mon', at: '09:00' } }, voice: { enabled: true, personas: [{ id: 'nova', name: 'Nova', voice: 'cedar' }], playbookPersonas: { 'dev:build': 'nova' } }, playbooks: { 'dev:build': { description: 'Build it', template: 'Build.', reports: ['done', 'approval'] }, 'dev:plan': { description: 'Plan it', template: 'Plan.', autoStart: true } } }, error: null }, permissionModes: ['default', 'auto'], codexPermissionModes: ['default'], providers: ['claude', 'codex'], templateVariables: [], sourceKinds: ['github'], sourceLabels: { github: 'GitHub' }, inUse: {}, enabled: { github: true }, configDir: 'C:/Users/someone/.switchboard' };
 // Pair a device and Devices list more devices than the sheet shows at once, so its list scrolls, and a pairing address longer than a phone's line.
 const pairDevices = [{ id: 'a1', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true }, { id: 'b2', label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now, current: false, voice: true }, ...['Android · Chrome', 'iPad · Safari', 'Mac · Safari', 'Windows · Chrome', 'Linux · Firefox', 'Android · Firefox'].map((label, i) => ({ id: 'c' + i, label, host: 'some-long-computer-name.tail1234ab.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now - i * 86400000, current: false }))];
 const pairing = { url: 'https://some-long-computer-name.tail1234ab.ts.net/page?t=' + 'a'.repeat(64), code: 'ABCD-EFGH', host: 'some-long-computer-name.tail1234ab.ts.net', expiresAt: now + 5 * 60000 };
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -211,6 +239,14 @@ const measure = `(() => {
       return { name: null, hit: hit && name(hit) };
     })(),
     bar: (() => { const probe = document.createElement('div'); probe.style.background = 'var(--sb-bar-background)'; document.body.append(probe); const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour; })(),
+    // History's head (architecture.md § Web page): the headings in order with their sizes, and where the title and the pinned state's headline
+    // sit in the body's content, so the check can say the title comes first and a first screen holds the state.
+    histHead: (() => {
+      const body = document.querySelector('.hist-body');
+      if (body === null) return null;
+      const top = (selector) => { const one = body.querySelector(selector); return one === null ? null : one.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop; };
+      return { headings: [...body.querySelectorAll('h1, h2, h3')].map((one) => one.tagName + ' ' + parseFloat(getComputedStyle(one).fontSize)), title: top('h1'), state: top('.hist-now-headline'), screen: body.clientHeight };
+    })(),
     histEnd: (() => { const body = document.querySelector('.hist-body'); return body === null ? null : parseFloat(getComputedStyle(body).paddingBottom); })(),
     band: document.getElementById('safe-top').getBoundingClientRect().height,
     // Line 2 of each shown row: a pill is whole inside its line and its box, its text shown whole; its icon alone, its text hidden from view
@@ -508,6 +544,15 @@ function failures(view, size, m) {
   }
   // History's last entry scrolls clear of the home indicator.
   if (view === 'history' && m.histEnd === null) out.push('History drew no entries');
+  // The title is History's first heading at Settings' 20 px, its groups' headings 14 px, above the pinned state, which a first screen shows.
+  if (view === 'history' && m.histHead !== null) {
+    const [first, ...rest] = m.histHead.headings;
+    if (first !== 'H1 20') out.push('History opens on ' + first + ', not its title as an h1 of 20 px');
+    for (const heading of rest.filter((one) => one.startsWith('H2') && one !== 'H2 14')) out.push('a History group heading is ' + heading + ' px, not 14');
+    if (m.histHead.state === null || m.histHead.title === null || m.histHead.state < m.histHead.title) out.push('History has no pinned state under its title');
+    // A phone held upright; on its side the screen is 300 px tall, less than the head and the bar need.
+    else if (size.phone && size.orientation === 'portrait' && m.histHead.state + 24 > m.histHead.screen) out.push('History\'s first screen, ' + m.histHead.screen + ' px, ends before the pinned state at ' + Math.round(m.histHead.state) + ' px');
+  }
   if (view === 'history' && m.histEnd !== null && m.histEnd < 48 + size.insets.bottom - 0.5) out.push('History ends ' + m.histEnd + ' px under its last entry, inside the home indicator\'s ' + size.insets.bottom + ' px');
   for (const line of m.lines) {
     if (!line.oneLine) out.push('line 2 of ' + line.row + ' has an item below another');
@@ -693,7 +738,7 @@ try {
         await send('Emulation.setFocusEmulationEnabled', { enabled: true });
         await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }, { name: 'hover', value: size.mouse ? 'hover' : 'none' }, { name: 'pointer', value: size.mouse ? 'fine' : 'coarse' }] });
         await send('Emulation.setSafeAreaInsetsOverride', { insets: size.insets });
-        await send('Page.navigate', { url: base + '?view=' + view });
+        await send('Page.navigate', { url: base + '?view=' + view + (historyCase === null ? '' : '&hcase=' + historyCase) });
         await evaluate('new Promise((done) => { const wait = () => (document.querySelector("#root .header, #root .list-header") ? setTimeout(done, 200) : setTimeout(wait, 50)); wait(); })');
         const name = scheme + ' ' + size.device + ' ' + size.orientation + ' ' + view;
         const steps = OPEN[view] ?? [];
@@ -864,6 +909,13 @@ try {
         }
 
         results.push({ name, ...m });
+        // History's screenshot shows its top too: the head and the pinned state.
+        if (shots !== null && view === 'history') {
+          await evaluate('document.querySelectorAll(".hist-body").forEach((body) => { body.scrollTop = 0; })');
+          await wait(150);
+          mkdirSync(shots, { recursive: true });
+          writeFileSync(join(shots, name.replaceAll(' ', '-') + '-top.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+        }
         if (shots !== null) {
           mkdirSync(shots, { recursive: true });
           writeFileSync(join(shots, name.replaceAll(' ', '-') + '.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));

@@ -614,14 +614,14 @@ describe('the page in use', () => {
 
     // History's body scrolls under its toolbar, and its place is the body's.
     window.innerWidth = 1440;
-    answers['/page-history'] = { status: 200, body: { view: { key: 'gh 7', title: 'Fix it', url: '', facts: [], links: [], reconstructed: false, recordedSince: null, sections: [] }, categories: [] } };
+    answers['/page-history'] = { status: 200, body: { view: { key: 'gh 7', title: 'Fix it', url: '', repo: null, status: 'Running', tone: null, playbook: null, facts: [], links: [], reconstructed: false, recordedSince: null, sections: [] }, categories: [] } };
     history.replaceState(null, '', '#w=1&t=history');
 
     const withHistory = { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 7, key: 'gh 7' } })])] };
     const second = start();
 
     hello(second.source, withHistory);
-    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-hero')).not.toBeNull());
+    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-toolbar')).not.toBeNull());
     root.querySelector<HTMLElement>('#detail .hist-body')!.scrollTop = 180;
     window.dispatchEvent(new Event('pagehide'));
     expect(JSON.parse(sessionStorage.getItem('switchboard.scroll')!)['1 history']).toMatchObject({ top: 180 });
@@ -630,7 +630,7 @@ describe('the page in use', () => {
     const third = start();
 
     hello(third.source, withHistory);
-    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-hero')).not.toBeNull());
+    await vi.waitFor(() => expect(root.querySelector('#detail .hist-body .hist-toolbar')).not.toBeNull());
     expect(root.querySelector<HTMLElement>('#detail .hist-body')!.scrollTop).toBe(180);
     third.page.close();
     window.innerWidth = 1024;

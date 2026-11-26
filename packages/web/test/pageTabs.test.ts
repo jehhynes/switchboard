@@ -308,13 +308,13 @@ describe('the page in use', () => {
     expect(root.querySelector('.history-view')).toBeNull();
     expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': { 'chat/new.md': 1 } });
 
-    // A row that stops offering History keeps the tab, which then shows the state alone.
+    // A row that stops offering History keeps the tab, which then shows the head and the state alone.
     click('#detail [data-side="history"]');
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
     expect(tabs()).toContain('History');
     expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
-    expect(root.querySelector('#detail .history-view .hist-hero')).toBeNull();
-    expect(root.querySelector('#detail .history-view .state-view')).not.toBeNull();
+    expect(root.querySelector('#detail .history-view .hist-toolbar')).toBeNull();
+    expect(root.querySelector('#detail .history-view .hist-now')).not.toBeNull();
     page.close();
   });
 
@@ -537,7 +537,7 @@ describe('the page in use', () => {
     answers['/artifact/'] = { status: 200, body: {}, text: '---\ntitle: Plan\n---\n# Plan\n\n![pic](plan/pic.png) ![up](../x.png)' };
     hello(source);
     click('[data-tab="history"]');
-    expect(root.querySelector('#panel')!.innerHTML).toContain('state-view');
+    expect(root.querySelector('#panel')!.innerHTML).toContain('hist-now');
     expect(mermaid).toHaveBeenCalled();
     // Each artifact has its own tab, newest first, and no Artifacts tab lists them.
     expect(root.querySelector('[data-tab="artifacts"]')).toBeNull();

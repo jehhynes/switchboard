@@ -67,7 +67,7 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
    0.06 em above its capitals, so text drew about 1 px low beside every icon. Padding above and below makes the box its line's height again,
    so descenders and accents stay inside a text that clips its overflow and the row lays out as before, at the same pixel positions, which
    keeps Chrome's text snapping at 125% scale from undoing the shift. A browser without text-box draws the texts as before. */
-@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, button.picker > .picker-text, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .tab-menu .title, .provider-option, .opening-note, .state-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .picker-text, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
+@supports (text-box: trim-both cap alphabetic) { :where(.menu-row, button.picker, button.picker > .picker-text, .tab, .tab-open, .group-head, .row .pill, .change-row, .changes-files, .list-header .list-title, .tab-menu .title, .provider-option, .opening-note, .hist-now-head, .hist-chip) > :where(:not(.codicon, .file-icon, .menu-gutter, .unread-dot, .tab-badge, .count, .group-count, .picker-text, .tab-open, .tab-close, .provider, .provider-option-mark, .source-logo, .change-counts, svg, img)), :where(.change-counts) > * { text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2); } }
 /* A spinner (a codicon-modifier-spin codicon or the mic's starting ring): its box stands still and clips its paint, and only its ::before turns,
    smoothly, on its own compositor layer. Chrome takes a turning layer to overlap everything painted after it up to its nearest clip, and moves
    that content onto layers of its own, where text loses its subpixel antialiasing and may shift as the layers change (mechanics.md M141);
@@ -662,15 +662,6 @@ button.picker > .codicon-chevron-down { order: 2; }
 
 /* The artifact list. */
 .artifact-list { max-width: 900px; margin: 0 auto; }
-/* The state at the top of History (architecture.md § States); an old one is dimmed. */
-.state-view { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent)); }
-.state-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.state-label { font-weight: 500; }
-.state-age { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
-.state-headline { margin: 0 0 6px; font-size: 1.08em; font-weight: 600; }
-.state-view.unread .codicon-pulse { color: var(--vscode-activityBarBadge-background); }
-.state-view.stale .state-headline, .state-view.stale .state-body { color: var(--vscode-descriptionForeground); }
-.state-empty { margin-bottom: 16px; }
 .artifact-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .timeline > li.artifact { padding-left: 30px; list-style: none; }
 .artifact-open { display: flex; align-items: center; gap: 6px; width: 100%; border: 1px solid var(--vscode-widget-border); border-radius: 6px; padding: 4px 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
@@ -1058,7 +1049,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 :where(html:not(.phone)) .detail-head { flex: none; display: flex; align-items: flex-start; padding-top: 1px; border-bottom: 1px solid var(--vscode-panel-border); }
 :where(html:not(.phone)) .detail-head { background: var(--sb-tab-strip); }
 :where(html:not(.phone)) .detail-head .tabs { flex: 1; min-width: 0; border-bottom: none; }
-:where(html:not(.phone)) .detail .state-view, :where(html:not(.phone)) .detail .artifact-list, :where(html:not(.phone)) .detail .artifact-doc { max-width: none; }
+:where(html:not(.phone)) .detail .artifact-list, :where(html:not(.phone)) .detail .artifact-doc { max-width: none; }
 
 /* Session state icons (architecture.md § Conversation view): one size and weight, a 13 px glyph in a fixed 16 px column centred on the text,
    muted unless the state needs the operator, a limit holds it, or it failed (IconTone in packages/core/src/group.ts). */
@@ -1110,93 +1101,153 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 .console-key[aria-pressed="true"] { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
 .console-key:active { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
 
-/* A ticket's History tab (architecture.md § Web page), its classes prefixed with hist- so the conversation's
-   rules do not reach it. Its body scrolls in the tab's pane, so the toolbar can stick at its top. */
-.scroll.history-pane { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-.hist-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 24px calc(48px + var(--sb-end)); }
+/* A ticket's History tab (architecture.md § Web page), its classes prefixed with hist- so the conversation's rules do not reach it. Its
+   body scrolls in the tab's pane, so the toolbar sticks at its top. One rail runs down the timeline at --hist-rail from the pinned state's dot. */
+.scroll.history-pane { display: flex; flex-direction: column; padding: 0; overflow: hidden; container-type: inline-size; }
+.hist-body { --hist-bg: var(--sb-tab-surface, var(--vscode-editor-background)); --hist-time: 48px; --hist-gap: 10px; --hist-rail: 69px; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 22px 28px calc(48px + var(--sb-end)); }
 .hist-body > * { max-width: 1100px; margin-left: auto; margin-right: auto; }
-.history-view button:not(.icon) { display: inline-flex; align-items: center; gap: 5px; font: inherit; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 2px 8px; line-height: 18px; }
-.history-view button:not(.icon):hover { background: var(--vscode-button-secondaryHoverBackground); }
-.history-view summary:focus-visible, .history-view input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-.hist-hero { padding-bottom: 16px; border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent)); }
-.hist-headline { display: flex; align-items: baseline; gap: 10px; }
-.hist-key { flex-shrink: 0; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-.hist-headline h1 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-.hist-facts { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
-.hist-facts > div { min-width: 110px; padding: 6px 12px; border-radius: 6px; background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
-.hist-facts dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vscode-descriptionForeground); }
-.hist-facts dd { margin: 2px 0 0; font-weight: 600; }
-.hist-hero-links, .hist-entry-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.hist-entry-links { margin-top: 4px; }
-.history-view button.hist-link, .hist-link.off { display: inline-flex; align-items: center; gap: 5px; padding: 0 6px; font-size: 12px; background: transparent; color: var(--vscode-textLink-foreground); border-color: transparent; }
+.history-view button { font: inherit; color: inherit; cursor: pointer; }
+.history-view summary:focus-visible, .history-view input:focus-visible, .history-view button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+/* The head: key, repository and links; the title as the page's h1, Settings' 20 px; one line of facts. */
+.hist-head { display: grid; gap: 8px; padding-bottom: 18px; }
+.hist-head-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; }
+.hist-key { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 1px 8px; border-radius: 10px; font-weight: 600; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.hist-key .source-logo { width: 13px; height: 13px; color: inherit; }
+.hist-repo { color: var(--vscode-descriptionForeground); }
+.hist-head-links { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-left: auto; }
+.hist-head h1 { margin: 0; font-size: 20px; font-weight: 600; line-height: 1.3; text-wrap: balance; overflow-wrap: anywhere; }
+.hist-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.hist-playbook { font-weight: 600; color: var(--vscode-foreground); }
+.hist-pill { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 10px; font-size: 12px; line-height: 20px; font-weight: 600; white-space: nowrap; color: var(--vscode-textLink-foreground); background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent); }
+.hist-pill .codicon { font-size: 12px; }
+.hist-pill .codicon-circle-filled { font-size: 8px; }
+.hist-pill.tone-success { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); background: color-mix(in srgb, var(--vscode-testing-iconPassed, var(--vscode-charts-green)) 14%, transparent); }
+.hist-pill.tone-warning { color: var(--vscode-editorWarning-foreground); background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 14%, transparent); }
+.hist-pill.tone-error { color: var(--vscode-errorForeground); background: color-mix(in srgb, var(--vscode-errorForeground) 12%, transparent); }
+.history-view button.hist-link, .hist-link.off { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; border: none; border-radius: 4px; font-size: 12px; background: transparent; color: var(--vscode-textLink-foreground); }
 .history-view button.hist-link:hover { background: var(--vscode-list-hoverBackground); text-decoration: underline; }
+.hist-link .codicon { font-size: 14px; }
 .hist-link.off { color: var(--vscode-descriptionForeground); cursor: default; }
-.hist-hero-links .hist-link { padding: 2px 8px; }
-.hist-toolbar { position: sticky; top: -16px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; background: var(--sb-content); border-bottom: 1px solid var(--vscode-widget-border, transparent); }
-.hist-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.history-view button.hist-chip { border-radius: 12px; padding: 2px 10px; background: transparent; color: var(--vscode-descriptionForeground); border-color: var(--vscode-widget-border, var(--vscode-descriptionForeground)); }
-.history-view button.hist-chip.on { background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent); color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
-.hist-filter { flex: 1 1 180px; min-width: 120px; padding: 3px 8px; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; }
-.hist-toolbar button.icon { display: inline-flex; align-items: center; justify-content: center; padding: 3px 5px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
+.hist-entry-links { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; margin-left: -6px; }
+/* The timeline's bar sticks over the whole timeline, above the pinned state, so nothing comes between that state and the entries before it. */
+.hist-toolbar { position: sticky; top: -22px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 0; background: var(--hist-bg); border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent)); }
+.hist-tl-title { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.hist-order { font-size: 12px; font-weight: 400; color: var(--vscode-descriptionForeground); }
+.hist-tools { flex: 1 1 420px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.history-view button.hist-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 10px; border-radius: 12px; font-size: 12px; line-height: 20px; border: 1px solid var(--vscode-widget-border, var(--vscode-descriptionForeground)); background: transparent; color: var(--vscode-descriptionForeground); }
+.history-view button.hist-chip.on { border-color: var(--vscode-focusBorder); color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent); }
+.hist-chip .codicon { font-size: 13px; }
+.history-view button.hist-chips-toggle { display: none; align-items: center; gap: 5px; padding: 1px 10px; border-radius: 12px; font-size: 12px; line-height: 20px; border: 1px solid var(--vscode-widget-border, var(--vscode-descriptionForeground)); background: transparent; color: var(--vscode-foreground); }
+.history-view button.hist-chips-toggle.filtered { border-color: var(--vscode-focusBorder); background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent); }
+.hist-find { flex: 1 1 220px; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.hist-filter-box { flex: 1 1 auto; min-width: 90px; display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 4px; background: var(--vscode-input-background); color: var(--vscode-input-placeholderForeground); }
+.hist-filter-box:focus-within { border-color: var(--vscode-focusBorder); }
+.hist-filter { flex: 1; min-width: 0; padding: 0; border: none; outline: none; font: inherit; font-size: 12px; color: var(--vscode-input-foreground); background: transparent; }
+.hist-toolbar button.icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); }
 .hist-toolbar button.icon:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
 .hist-banner, .hist-error { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0 0; padding: 8px 12px; border-radius: 6px; line-height: 18px; }
 .hist-banner { background: color-mix(in srgb, var(--vscode-editorInfo-foreground, var(--vscode-focusBorder)) 12%, transparent); }
-.hist-error { color: var(--vscode-errorForeground); background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent); }
+.hist-error { margin: 0 0 12px; color: var(--vscode-errorForeground); background: color-mix(in srgb, var(--vscode-errorForeground) 10%, transparent); }
 .hist-banner .codicon, .hist-error .codicon { line-height: 18px; }
-.hist-section { margin-top: 16px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent)); border-radius: 6px; overflow: hidden; }
-.hist-section > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; background: color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent); }
-.hist-section > summary::-webkit-details-marker { display: none; }
-.hist-section > summary::before { font-family: codicon; content: '\eab6'; font-size: 14px; transition: transform 0.1s; }
-.hist-section[open] > summary::before { transform: rotate(90deg); }
-.hist-section > summary:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent); }
-.hist-section-title { font-weight: 600; font-size: 14px; }
-.hist-status { padding: 0 8px; border-radius: 10px; font-size: 12px; line-height: 18px; background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); }
-.hist-count { font-size: 12px; color: var(--vscode-descriptionForeground); }
-.hist-section-facts { flex-basis: 100%; padding-left: 22px; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.hist-prompt { margin: 8px 12px 0; padding: 6px 10px; border-radius: 4px; background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
+/* Work items are groups of the one timeline, their headings Settings' 14 px. */
+.hist-group-head { margin: 14px 0 4px; padding: 4px 0 6px; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent)); }
+.hist-group-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.history-view button.hist-group-toggle { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; min-height: 28px; padding: 2px 6px 2px 0; border: none; border-radius: 4px; background: transparent; text-align: left; }
+.hist-group-toggle:hover .hist-group-title { text-decoration: underline; }
+.hist-group-toggle .codicon { font-size: 16px; color: var(--vscode-descriptionForeground); }
+.hist-group-title { overflow-wrap: anywhere; }
+.hist-group-facts { margin: 0; padding-left: 26px; font-size: 12px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.hist-prompt { margin: 8px 0 0 26px; padding: 6px 10px; border-radius: 4px; background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
 .hist-prompt-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vscode-descriptionForeground); }
 .hist-prompt-text { margin-top: 2px; font-family: var(--vscode-editor-font-family); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.hist-empty { margin: 0; padding: 12px 16px; color: var(--vscode-descriptionForeground); }
-ol.hist-timeline { list-style: none; margin: 0; padding: 4px 12px 10px; }
-.hist-day { margin: 10px 0 4px; padding-left: 74px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vscode-descriptionForeground); }
-.hist-entry { position: relative; display: grid; grid-template-columns: 62px 24px minmax(0, 1fr) auto; column-gap: 8px; padding: 4px 0; border-radius: 4px; }
-.hist-entry:hover { background: var(--vscode-list-hoverBackground); }
-.hist-entry::before { content: ''; position: absolute; left: 81px; top: 0; bottom: 0; border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 15%, transparent); }
-.hist-entry time { padding-top: 2px; text-align: right; font-family: var(--vscode-editor-font-family); font-size: 12px; color: var(--vscode-descriptionForeground); }
-.hist-dot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--sb-content); box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
+.hist-empty { margin: 0; padding: 12px 0 12px 26px; color: var(--vscode-descriptionForeground); }
+ol.hist-timeline { list-style: none; margin: 0; padding: 4px 0 10px; }
+ol.hist-pinned { padding-top: 14px; }
+/* The rail: every row of the timeline draws its stretch, so it runs on through day headings and runs. */
+.hist-entry, .hist-day, .hist-run { position: relative; }
+.hist-entry::before, .hist-day::before, .hist-run::before { content: ''; position: absolute; left: var(--hist-rail); top: 0; bottom: 0; border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent); }
+ol.hist-timeline > :last-child::before { bottom: auto; height: 14px; }
+.hist-run ol.hist-timeline { padding: 0; }
+.hist-run ol.hist-timeline > :last-child::before { bottom: 0; height: auto; }
+.hist-day { padding: 12px 0 2px calc(var(--hist-rail) + 15px); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--vscode-descriptionForeground); }
+.hist-entry { display: grid; grid-template-columns: var(--hist-time) 24px minmax(0, 1fr); column-gap: var(--hist-gap); padding: 4px 0; }
+.hist-entry time { padding-top: 3px; text-align: right; font-family: var(--vscode-editor-font-family); font-size: 12px; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
+.hist-dot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; font-size: 13px; background: var(--hist-bg); box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-foreground) 22%, transparent); color: var(--vscode-descriptionForeground); }
 .hist-entry-body { min-width: 0; padding-top: 2px; }
-.hist-text { line-height: 18px; overflow-wrap: anywhere; }
-.hist-gap { padding-top: 2px; font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
+.hist-text { line-height: 20px; overflow-wrap: anywhere; color: var(--vscode-descriptionForeground); }
+.hist-entry.cat-you .hist-text, .hist-entry.cat-state .hist-text, .hist-entry.tone-warning .hist-text, .hist-entry.tone-accent .hist-text { color: var(--vscode-foreground); }
+.hist-entry.cat-state .hist-words { font-weight: 600; }
+.hist-entry.pinned-stage .hist-words { font-weight: 400; color: var(--vscode-descriptionForeground); }
+.hist-tag { margin-left: 6px; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .hist-sid { margin-left: 8px; padding: 0 6px; border-radius: 8px; font-family: var(--vscode-editor-font-family); font-size: 11px; background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); color: var(--vscode-descriptionForeground); }
 .hist-mark { margin-left: 8px; font-size: 11px; font-style: italic; color: var(--vscode-descriptionForeground); }
 .hist-mark.refused-mark { font-style: normal; font-weight: 600; color: var(--vscode-errorForeground); }
 .hist-detail { margin-top: 3px; padding: 4px 8px; border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 25%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--vscode-descriptionForeground); }
 .hist-lines { margin: 3px 0 0; padding-left: 16px; color: var(--vscode-descriptionForeground); }
 .hist-lines li { line-height: 18px; overflow-wrap: anywhere; }
-.hist-entry.reconstructed .hist-text { color: var(--vscode-descriptionForeground); }
+.hist-state-body { margin-top: 6px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--vscode-widget-border, transparent); background: var(--vscode-editorWidget-background); }
+.hist-more > summary { display: inline-flex; justify-content: center; align-items: center; gap: 4px; margin-top: 2px; cursor: pointer; list-style: none; font-size: 12px; color: var(--vscode-textLink-foreground); }
+.hist-more > summary::-webkit-details-marker { display: none; }
+.hist-more > summary::after { font-family: codicon; content: '\eab4'; font-size: 12px; }
+.hist-more[open] > summary::after { content: '\eab7'; }
 .hist-entry.reconstructed .hist-dot { box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-foreground) 15%, transparent); border: 1px dashed color-mix(in srgb, var(--vscode-foreground) 35%, transparent); }
-/* Category and tone colours: the dot takes the category, a tone overrides it. */
+/* Category and tone colours: the dot takes the category, a tone overrides it; a state's dot is filled. */
 .hist-entry.cat-you .hist-dot { color: var(--vscode-charts-blue, var(--vscode-focusBorder)); }
 .hist-entry.cat-session .hist-dot { color: var(--vscode-charts-purple, var(--vscode-foreground)); }
 .hist-entry.cat-report .hist-dot { color: var(--vscode-charts-green, var(--vscode-foreground)); }
 .hist-entry.cat-triage .hist-dot { color: var(--vscode-charts-orange, var(--vscode-foreground)); }
-.hist-entry.cat-ticket .hist-dot { color: var(--vscode-descriptionForeground); }
-.hist-entry.tone-error .hist-dot, .hist-status.tone-error { color: var(--vscode-errorForeground); }
-.hist-entry.tone-warning .hist-dot, .hist-status.tone-warning { color: var(--vscode-editorWarning-foreground); }
-.hist-entry.tone-success .hist-dot, .hist-status.tone-success { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
+.hist-entry.cat-state .hist-dot { background: var(--vscode-focusBorder); box-shadow: none; color: #fff; }
+.hist-entry.tone-error .hist-dot { color: var(--vscode-errorForeground); }
+.hist-entry.tone-warning .hist-dot { color: var(--vscode-editorWarning-foreground); }
+.hist-entry.tone-success .hist-dot { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
 .hist-entry.tone-accent .hist-dot { box-shadow: 0 0 0 2px var(--vscode-focusBorder); }
-.hist-status.tone-accent { color: var(--vscode-textLink-foreground); }
 .hist-entry.tone-error .hist-text, .hist-entry.refused .hist-text { color: var(--vscode-errorForeground); }
-.hist-run > details > summary { display: flex; align-items: center; gap: 6px; margin: 2px 0; padding: 3px 0 3px 74px; cursor: pointer; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.hist-run > details > summary { display: flex; align-items: center; gap: 6px; padding: 3px 0 3px calc(var(--hist-rail) + 13px); cursor: pointer; list-style: none; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.hist-run > details > summary::-webkit-details-marker { display: none; }
+.hist-run > details[open] > summary .codicon { transform: rotate(90deg); }
 .hist-run > details > summary:hover { color: var(--vscode-foreground); }
-.hist-run ol.hist-timeline { padding: 0; }
-/* The time column keeps its width, which "09:00:00" needs; only the gap column goes. */
-@media (max-width: 560px) {
-  .hist-body { padding: 12px 12px calc(48px + var(--sb-end)); }
-  .hist-entry { grid-template-columns: 62px 24px minmax(0, 1fr); }
-  .hist-gap { display: none; }
+/* The pinned state: a box across the timeline, its time and dot on the rail and its text from the box's edge; the rail leaves its bottom. */
+.hist-now { position: relative; padding: 4px 0 10px; }
+.hist-now:not(:last-child)::after { content: ''; position: absolute; left: var(--hist-rail); bottom: 0; height: 10px; border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent); }
+.hist-now-card { position: relative; z-index: 1; padding: 10px 16px 14px 0; border: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 55%, var(--vscode-widget-border, transparent)); border-radius: 10px; background: color-mix(in srgb, var(--vscode-focusBorder) 7%, var(--vscode-editorWidget-background)); }
+.hist-now-top { display: grid; grid-template-columns: var(--hist-time) 24px minmax(0, 1fr); column-gap: var(--hist-gap); align-items: center; }
+.hist-now-top time { text-align: right; font-family: var(--vscode-editor-font-family); font-size: 12px; font-weight: 600; color: var(--vscode-textLink-foreground); font-variant-numeric: tabular-nums; }
+.hist-now .hist-dot { width: 24px; height: 24px; background: var(--vscode-focusBorder); color: #fff; box-shadow: 0 0 0 4px color-mix(in srgb, var(--vscode-focusBorder) 30%, transparent); }
+.hist-now-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.hist-now-label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--vscode-textLink-foreground); }
+.hist-now-head .unread-dot { margin-left: auto; }
+.hist-now-headline { margin: 10px 0 6px; padding-left: 16px; font-size: 16px; font-weight: 600; line-height: 1.35; text-wrap: balance; overflow-wrap: anywhere; }
+.hist-now-body { padding-left: 16px; }
+.hist-now-body.md-doc > :first-child, .hist-state-body.md-doc > :first-child { margin-top: 0; }
+.hist-now-body.md-doc > :last-child, .hist-state-body.md-doc > :last-child { margin-bottom: 0; }
+.hist-now-none { margin: 0; color: var(--vscode-descriptionForeground); }
+.hist-now.empty .hist-now-card { padding-bottom: 10px; }
+.hist-now.stale .hist-now-card, .hist-now.empty .hist-now-card { border-color: var(--vscode-widget-border, var(--vscode-panel-border, transparent)); background: var(--vscode-editorWidget-background); }
+.hist-now.stale .hist-dot, .hist-now.empty .hist-dot { background: var(--hist-bg); color: var(--vscode-descriptionForeground); box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-foreground) 22%, transparent); }
+.hist-now.stale .hist-now-top time, .hist-now.stale .hist-now-label { color: var(--vscode-descriptionForeground); }
+.hist-now.stale .hist-now-headline, .hist-now.stale .hist-now-body { color: var(--vscode-descriptionForeground); }
+/* A narrow pane, a phone's or a narrow column: a narrower time column, the bar's heading on its own line. */
+@container (max-width: 560px) {
+  .hist-body { --hist-time: 40px; --hist-gap: 8px; --hist-rail: 57px; padding: 16px 14px calc(48px + var(--sb-end)); }
+  /* A phone's screen is too short to keep the bar's two rows of 44 px chips in view. */
+  .hist-toolbar { position: static; }
+  .hist-tl-title, .hist-tools { flex-basis: 100%; }
+  .hist-head-links { margin-left: -6px; }
+  .history-view button.hist-chips-toggle { display: inline-flex; order: 0; }
+  .hist-find { order: 1; flex: 1 1 0; }
+  .history-view .hist-tools > button.hist-chip { display: none; order: 2; }
+  .history-view .hist-tools.chips-open > button.hist-chip { display: inline-flex; }
+  .hist-now-card { padding-right: 12px; }
+  .hist-now-headline, .hist-now-body { padding-left: 12px; }
+  .hist-day { padding-left: calc(var(--hist-rail) + 13px); }
 }
-@media (hover: none), (pointer: coarse) { .hist-toolbar button.icon, .history-view button.hist-chip, .history-view button.hist-link { min-height: 44px; } .hist-toolbar button.icon { min-width: 44px; } .hist-filter { flex-basis: 120px; } }
+/* Every control is a 44 px target on a touch screen: chips, the filter, the icon buttons, links, group headings, runs and Details. */
+@media (hover: none), (pointer: coarse) {
+  .hist-toolbar button.icon { min-width: 44px; min-height: 44px; }
+  .hist-tl-title { flex-basis: 100%; }
+  .history-view button.hist-chip, .history-view button.hist-chips-toggle, .history-view button.hist-link, .history-view button.hist-group-toggle, .hist-run > details > summary, .hist-more > summary { min-width: 44px; }
+  .history-view button.hist-chip, .history-view button.hist-chips-toggle, .history-view button.hist-link, .history-view button.hist-group-toggle, .hist-filter-box, .hist-run > details > summary, .hist-more > summary { min-height: 44px; }
+}
 
 /* A question card on a phone (design § 6): the full width of the timeline at 14 px. */
 :where(html.phone) .question-card.qc { max-width: none; font-size: 14px; }

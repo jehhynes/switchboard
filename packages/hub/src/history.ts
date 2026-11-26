@@ -1,6 +1,6 @@
 // The History view's model (PRD R59), which the web page's History tab draws. Imports only types and browser-safe modules, so a browser
 // bundle can import it through `@switchboard/hub/history`.
-import type { HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
+import type { ConversationState, HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
 import { adhocLabel, DONE_WORDS, PERMISSION_PROMPT, resumesHeld, START_PROMPT } from '@switchboard/core/group';
 import { shownKey, ticketKey } from './rows.js';
 
@@ -13,9 +13,10 @@ export function outcomeText(detail: string): string {
 }
 
 /** The filter chips of History (PRD R59). */
-export type Category = 'you' | 'session' | 'report' | 'triage' | 'ticket';
+export type Category = 'state' | 'you' | 'session' | 'report' | 'triage' | 'ticket';
 
 export const CATEGORIES: readonly { key: Category; label: string; icon: string }[] = [
+  { key: 'state', label: 'States', icon: 'pulse' },
   { key: 'you', label: 'You', icon: 'account' },
   { key: 'session', label: 'Sessions', icon: 'terminal' },
   { key: 'report', label: 'Reports', icon: 'comment' },
@@ -51,6 +52,12 @@ export interface Entry {
   refused: string | null;
   /** Only a session's live state changed; long runs of these collapse. */
   stateChange: boolean;
+  /** For a `state` entry, the state it shows (architecture.md § States): a reply's, or the one a stage report stored; null otherwise. */
+  stateId: string | null;
+  /** A reply state's Markdown body; null for a headline alone and for other entries. */
+  body: string | null;
+  /** A stage report's state, whose entry comes from the activity log. */
+  stage: boolean;
 }
 
 export interface Section {
@@ -69,7 +76,15 @@ export interface HistoryView {
   key: string;
   title: string;
   url: string;
-  facts: { label: string; value: string }[];
+  /** The repository root's folder name; null for a ticket without one. */
+  repo: string | null;
+  /** The newest work item's status and its tone, or the pool or no work item. */
+  status: string;
+  tone: Tone;
+  /** The newest work item's playbook; null with none. */
+  playbook: string | null;
+  /** The summary line (PRD R59): scope time, the time it waited on the operator, work items, sessions and their time, a snooze. */
+  facts: string[];
   links: EntryLink[];
   /** Whether any entry was reconstructed, so the page says what was not recorded. */
   reconstructed: boolean;
@@ -187,6 +202,8 @@ class Builder {
   readonly forks = new Map<string, { eventId: number; before: string }[]>();
   /** The event being worded. */
   eventId = 0;
+  /** Each stage entry's session, by entry key, to find the state its report stored. */
+  readonly stageSessions = new Map<string, string | null>();
 
   constructor(readonly history: TicketHistory) {
     for (const item of history.workItems) {
@@ -415,6 +432,9 @@ class Builder {
       reconstructed: false,
       refused: event.refused,
       stateChange: false,
+      stateId: null,
+      body: null,
+      stage: false,
     };
     const skip = new Set<string>();
     const sessionChange = changes.find((change) => change.entity === 'session' && change.op === 'update' && ('state' in change.fields || 'stateDetail' in change.fields || 'shortId' in change.fields));
@@ -449,6 +469,11 @@ class Builder {
     }
 
     entry.lines = lines;
+
+    if (entry.stage) {
+      this.stageSessions.set(entry.key, event.sessionId);
+    }
+
     entry.stateChange = (event.type === 'marker' || event.type === 'roster') && changes.length === 1 && sessionChange !== undefined && state !== 'ended' && !('shortId' in sessionChange.fields);
     entry.tone =
       entry.refused !== null || status === 'failed' || (state === 'failed' && entry.tone !== 'warning')
@@ -691,7 +716,7 @@ class Builder {
     switch (detail['kind']) {
       case 'stage':
         skip.add('stage');
-        return { ...base, icon: 'milestone', text: `State: ${str(detail['stage'])}` };
+        return { category: 'state', icon: 'pulse', text: str(detail['stage']).trim(), stage: true };
       case 'worktree':
         skip.add('*');
         return {
@@ -768,7 +793,7 @@ class Builder {
           tone: detail['outcome'] === 'failed' ? 'error' : null,
         };
       case 'stage':
-        return { ...base, category: 'report', icon: 'milestone', text: `State: ${str(detail['stage'])}` };
+        return { ...base, category: 'state', icon: 'pulse', text: str(detail['stage']).trim(), stage: true };
       case 'status':
         return detail['status'] === 'awaiting-approval'
           ? {
@@ -872,6 +897,10 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
     }
   }
 
+  for (const item of history.workItems) {
+    byItem.set(item.id, withStates(byItem.get(item.id) ?? [], item.states, item.id, builder));
+  }
+
   const waiting = waitingTimes(history, now);
   const sections: Section[] = history.workItems.map((item) => {
     // A moved ticket's ad-hoc work item is its first, because an ad-hoc ticket has one (PRD R83).
@@ -895,7 +924,7 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
       workItemId: item.id,
       title: playbook,
       status: item.status === 'done' && item.doneReason !== null ? DONE_WORDS[item.doneReason] : STATUS_WORDS[item.status],
-      tone: item.status === 'failed' ? 'error' : item.status === 'blocked' ? 'warning' : item.status === 'done' ? 'success' : NEEDS_YOU.has(item.status) ? 'accent' : null,
+      tone: statusTone(item.status),
       facts,
       prompt: item.prompt,
       entries: byItem.get(item.id) ?? [],
@@ -909,23 +938,24 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
 
   const latest = history.workItems[0];
   const allSessions = history.workItems.flatMap((item) => item.sessions);
-  const facts = [
-    { label: 'Status', value: latest === undefined ? (ticket.pool ? 'In the pool' : 'No work item') : STATUS_WORDS[latest.status] },
-    { label: 'Work items', value: String(history.workItems.length) },
-    { label: 'Sessions', value: allSessions.length === 0 ? '0' : `${allSessions.length}, ${durationText(sessionTime(allSessions, now))}` },
-  ];
+  const facts: string[] = [];
+
+  if (ticket.scopeAt !== null) {
+    facts.push(`${ticket.pool ? 'In the pool since' : 'Yours since'} ${timeText(ticket.scopeAt)}`);
+  }
+
   const waited = [...waiting.values()].reduce((total, time) => total + time, 0);
 
   if (waited > 0) {
-    facts.push({ label: 'Waited on you', value: durationText(waited) });
+    facts.push(`Waited on you ${durationText(waited)}`);
   }
 
-  if (ticket.scopeAt !== null) {
-    facts.push({ label: ticket.pool ? 'In the pool since' : 'Yours since', value: timeText(ticket.scopeAt) });
-  }
+  const count = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+  facts.push(`${count(history.workItems.length, 'work item')}, ${count(allSessions.length, 'session')}${allSessions.length === 0 ? '' : `, ${durationText(sessionTime(allSessions, now))}`}`);
 
   if (ticket.snoozed) {
-    facts.push({ label: 'Snoozed', value: ticket.snoozedUntil === null ? 'Indefinitely' : `Until ${timeText(ticket.snoozedUntil)}` });
+    facts.push(ticket.snoozedUntil === null ? 'Snoozed indefinitely' : `Snoozed until ${timeText(ticket.snoozedUntil)}`);
   }
 
   const links: EntryLink[] = [];
@@ -944,12 +974,70 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
     key: shownKey(ticket, undefined),
     title: oneLine(ticket.title),
     url: ticket.url,
+    repo: ticket.repoRoot === null || ticket.repoRoot === undefined || ticket.repoRoot === '' ? null : (ticket.repoRoot.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) ?? null),
+    status: latest === undefined ? (ticket.pool ? 'In the pool' : 'No work item') : latest.status === 'done' && latest.doneReason !== null ? DONE_WORDS[latest.doneReason] : STATUS_WORDS[latest.status],
+    tone: latest === undefined ? null : statusTone(latest.status),
+    playbook: latest?.playbook ?? null,
     facts,
     links,
     reconstructed: sections.some((section) => section.entries.some((entry) => entry.reconstructed)),
     recordedSince: history.recordedSince,
     sections,
   };
+}
+
+function statusTone(status: WorkItemStatus): Tone {
+  return status === 'failed' ? 'error' : status === 'blocked' ? 'warning' : status === 'done' ? 'success' : NEEDS_YOU.has(status) ? 'accent' : null;
+}
+
+/**
+ * A work item's entries with its states (architecture.md § States). A stage entry names the state its report stored: `stage-<session>-<time>`,
+ * written at the report's own time, or for a reconstructed stage the one the migration carried over (`stage-<work item>`) with its headline; a
+ * refused report stored none. Each reply state becomes an entry. Oldest first: by time, a state before a log event at the same time, else in
+ * the log's and the states' own order, so the page, which draws newest first, puts a log event first.
+ */
+function withStates(entries: Entry[], states: readonly ConversationState[], workItemId: number, builder: Builder): Entry[] {
+  const byId = new Map(states.map((state) => [state.id, state]));
+
+  for (const entry of entries) {
+    if (!entry.stage || entry.refused !== null) {
+      continue;
+    }
+
+    const sessionId = builder.stageSessions.get(entry.key) ?? null;
+    const state = entry.reconstructed ? byId.get(`stage-${workItemId}`) : sessionId === null ? undefined : byId.get(`stage-${sessionId}-${entry.at}`);
+
+    if (state !== undefined && state.replyId === null && state.headline === entry.text) {
+      entry.stateId = state.id;
+    }
+  }
+
+  const replies = states
+    .filter((state) => state.replyId !== null)
+    .map(
+      (state): Entry => ({
+        key: `state:${state.id}`,
+        at: state.at,
+        category: 'state',
+        icon: 'pulse',
+        text: state.headline,
+        lines: [],
+        detail: null,
+        shortId: builder.shortId(state.sessionId),
+        links: [],
+        tone: null,
+        reconstructed: false,
+        refused: null,
+        stateChange: false,
+        stateId: state.id,
+        body: state.body,
+        stage: false,
+      }),
+    );
+
+  const ranked = [...replies.map((entry, index) => ({ entry, rank: 0, index })), ...entries.map((entry, index) => ({ entry, rank: 1, index }))];
+
+  return ranked.sort((a, b) => a.entry.at - b.entry.at || a.rank - b.rank || a.index - b.index).map(({ entry }) => entry);
 }
 
 /** A change to the open issues blocking the ticket (PRD R90), or nothing when it has none before or after. */

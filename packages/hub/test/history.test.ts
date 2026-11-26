@@ -211,13 +211,8 @@ describe('History model', () => {
     const [item, ticket] = view.sections;
 
     expect(view).toMatchObject({ key: 'gh 77', title: 'Inbox badge', reconstructed: false });
-    expect(view.facts).toEqual([
-      { label: 'Status', value: 'Queued' },
-      { label: 'Work items', value: '1' },
-      { label: 'Sessions', value: '1, 2h 11m' },
-      { label: 'Waited on you', value: '2h 12m' },
-      { label: 'Yours since', value: timeText(T0) },
-    ]);
+    expect(view).toMatchObject({ status: 'Queued', tone: null, playbook: 'dev:question' });
+    expect(view.facts).toEqual([`Yours since ${timeText(T0)}`, 'Waited on you 2h 12m', '1 work item, 1 session, 2h 11m']);
     expect(view.links.map((link) => link.label)).toEqual(['Open ticket']);
     expect(item).toMatchObject({ title: 'dev:question', status: 'Queued', facts: [`Created ${timeText(T0)}`, '1 session, 2h 11m', 'Waited on you 2h 12m (logged)'] });
     expect(texts(item!.entries)).toEqual([
@@ -225,13 +220,13 @@ describe('History model', () => {
       'Triage chose dev:question',
       'You started it',
       'Session abc12345 started',
-      'State: researching',
+      'researching',
       'Session abc12345 is waiting for you',
       'Session abc12345 is working',
       'Asked for approval: Post the answer',
       'You approved it',
     ]);
-    expect(item!.entries.map((entry) => entry.category)).toEqual(['ticket', 'triage', 'you', 'session', 'report', 'session', 'session', 'report', 'you']);
+    expect(item!.entries.map((entry) => entry.category)).toEqual(['ticket', 'triage', 'you', 'session', 'state', 'session', 'session', 'report', 'you']);
     expect(item!.entries[0]!.lines).toEqual(['Triage started']);
     expect(item!.entries[1]).toMatchObject({ detail: 'Model: claude-sonnet-5', lines: ['Status: Triaging → Unstarted'] });
     expect(item!.entries[2]).toMatchObject({ tone: 'accent', lines: ['Status: Unstarted → Queued', 'Task prompt written', 'Task session starting in D:/git/widgets', 'Status: Queued → Running'] });
@@ -280,7 +275,7 @@ describe('History model', () => {
     const session = history.workItems[0]!.sessions[0]!;
 
     expect(view.reconstructed).toBe(true);
-    expect(view.sections[0]!.entries[0]).toMatchObject({ text: 'State: old stage', reconstructed: true, category: 'report' });
+    expect(view.sections[0]!.entries[0]).toMatchObject({ text: 'old stage', reconstructed: true, category: 'state', stage: true, stateId: null });
     expect(sessionOpen({ ...session, state: 'running' })).toBeNull();
     expect(sessionOpen({ ...session, state: 'idle', released: true })).toEqual({ type: 'open', sessionId: 'native-1', cwd: 'D:/git/widgets', provider: 'claude', session: session.id, workItemId: session.workItemId });
     // An ended session that was never held resumes in the terminal holder, by its Switchboard session ID (PRD R93).
@@ -581,6 +576,30 @@ describe('History model', () => {
     const restored = historyView({ ...base, events: [{ ...other, type: 'restore', actor: 'operator', workItemId: null, sessionId: null, detail: null }] }, T0).sections[0]!.entries[0];
 
     expect(restored).toMatchObject({ text: 'Status: Queued → Running', category: 'session' });
+  });
+
+  it('adds reply states to their work item, names the state a stage report stored, and keeps a state before a log event at the same time', () => {
+    const run = approvedRun();
+    const stageAt = T0 + 4 * MINUTE;
+    const reply = { sessionId: 's1', workItemId: 1, at: stageAt, headline: 'Reading the code', body: 'Found **two** callers.' };
+
+    run.store.setState({ id: 'r-1', replyId: 'reply-1', ...reply });
+    run.store.setState({ id: 'r-2', replyId: 'reply-2', ...reply, at: stageAt + MINUTE, headline: 'Headline only', body: null });
+    // A refused stage report stored no state.
+    run.send({ type: 'report', sessionId: 'missing', report: { kind: 'stage', stage: 'refused stage' } });
+
+    const entries = historyView(run.history(), run.now).sections[0]!.entries;
+    const states = entries.filter((entry) => entry.category === 'state');
+
+    expect(states.map((entry) => [entry.text, entry.stateId, entry.body, entry.stage])).toEqual([
+      ['Reading the code', 'r-1', 'Found **two** callers.', false],
+      ['researching', `stage-s1-${stageAt}`, null, true],
+      ['Headline only', 'r-2', null, false],
+    ]);
+    expect(states[0]).toMatchObject({ key: 'state:r-1', shortId: 'abc12345', icon: 'pulse', links: [] });
+    // Oldest first: the reply state written at the stage report's time comes before the report's log entry.
+    expect(entries.indexOf(states[0]!) + 1).toBe(entries.indexOf(states[1]!));
+    expect(entries.every((entry, index) => index === 0 || entries[index - 1]!.at <= entry.at)).toBe(true);
   });
 
   it('formats times and durations', () => {

@@ -124,6 +124,9 @@ export interface StateView {
   stale: 'turn' | 'session' | null;
   /** A state of the scoped session the operator has not seen (architecture.md § Unread); never another session's. */
   unread: boolean;
+  /** The writing session's short ID, as History shows it (a Codex thread ID's last 8 characters), and when it ended; null without one. */
+  shortId: string | null;
+  endedAt: number | null;
 }
 
 /** An artifact of the window's work item (architecture.md § Artifacts); `path` is `<owner>/<file>` in the window's `artifactsDir`. */
@@ -135,7 +138,19 @@ export function openOnPref(kept: string | null): string | null {
 }
 
 export function stateView(state: ConversationState, session: Session | null, own = true): StateView {
-  return { id: state.id, sessionId: state.sessionId, at: state.at, headline: state.headline, body: state.body, stale: stateStale(state, session), unread: own && state.seenAt === null };
+  const shortId = session?.shortId ?? null;
+
+  return {
+    id: state.id,
+    sessionId: state.sessionId,
+    at: state.at,
+    headline: state.headline,
+    body: state.body,
+    stale: stateStale(state, session),
+    unread: own && state.seenAt === null,
+    shortId: shortId !== null && session?.provider === 'codex' ? shortId.slice(-8) : shortId,
+    endedAt: session?.endedAt ?? null,
+  };
 }
 
 export function sessionView(session: Session, current: boolean, hooks: boolean, personas: PersonaView | null = null): SessionView {

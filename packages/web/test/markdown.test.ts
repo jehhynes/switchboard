@@ -45,7 +45,14 @@ describe('GitHub-flavoured Markdown', () => {
   it('typesets the Status tab, an artifact and a file as one Markdown document, with no Status rules of its own but the stage dimmed', () => {
     expect(rule('.body.md-doc')).toBe('.body.md-doc { font-size: 15px; line-height: 1.55; }');
     expect(css).not.toMatch(/\.body\.artifact-doc (?!pre\.artifact-text)/);
-    expect(css.match(/^[^\n{]*\.state-body[^\n{]*\{[^}]*\}/gm)).toEqual(['.state-view.stale .state-headline, .state-view.stale .state-body { color: var(--vscode-descriptionForeground); }']);
+    // The pinned state's body adds only its place in the box and no outer margins, and is dimmed once old.
+    expect(css.match(/^[^\n{]*\.hist-now-body[^\n{]*\{[^}]*\}/gm)).toEqual([
+      '.hist-now-body { padding-left: 16px; }',
+      '.hist-now-body.md-doc > :first-child, .hist-state-body.md-doc > :first-child { margin-top: 0; }',
+      '.hist-now-body.md-doc > :last-child, .hist-state-body.md-doc > :last-child { margin-bottom: 0; }',
+      '.hist-now.stale .hist-now-headline, .hist-now.stale .hist-now-body { color: var(--vscode-descriptionForeground); }',
+      '  .hist-now-headline, .hist-now-body { padding-left: 12px; }',
+    ]);
   });
 
   it('draws <details> with its <summary> as a disclosure, its body as Markdown, nested and open', () => {

@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, inTurn, mentionOf, mentionQuery, commandQuery, timeline, withEarlier } from '../src/model.js';
 import { parseQuestions, resolveAnswers } from '@switchboard/conversation/questions';
 import { artifactUrl, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
-import { renderArtifactView, renderState } from '../src/side.js';
+import { renderArtifactView } from '../src/side.js';
+import { renderHistory } from '../src/history.js';
 import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader, renderSideSwitch, renderTabs } from '../src/header.js';
 import { renderList } from '../src/list.js';
@@ -14,9 +15,12 @@ import { renderMicButton as viewMicButton } from '@switchboard/conversation/voic
 import { renderMarkdown } from '../src/markdown.js';
 import { startPage } from '../src/main.js';
 import { DETAIL_MIN } from '../src/layout.js';
-import type { MessageView, PageRow, ReplyView, SessionView } from '@switchboard/protocol';
+import type { MessageView, PageRow, ReplyView, SessionView, StateView } from '@switchboard/protocol';
 import { drawAtOnce } from './frame.js';
 import { message, reply, session, scope, listRow, listGroup, artifact, FakeSource } from './pageFixtures.js';
+
+/** History with no ticket History: the head and the pinned state alone. */
+const renderState = (state: StateView | null, now: number) => renderHistory(null, state, now, { key: 'gh 1', title: 'Fix it', sourceKind: null, playbook: null, status: null, needsYou: null, workItemId: 1, sessionId: 's' });
 
 
 describe('the page model', () => {
@@ -118,15 +122,15 @@ describe('question cards in replies', () => {
     const state = { id: 'st-r1', sessionId: 's', at: 1, headline: 'Blocked on a choice', body: ending, stale: null, unread: false } as const;
 
     host.innerHTML = html(renderState(state, 2));
-    expect(host.querySelector('.state-headline')?.textContent).toBe('Blocked on a choice');
-    expect(host.querySelectorAll('.state-body ol > li')).toHaveLength(1);
+    expect(host.querySelector('.hist-now-headline')?.textContent).toBe('Blocked on a choice');
+    expect(host.querySelectorAll('.hist-now-body ol > li')).toHaveLength(1);
     // The body is a Markdown document, typeset as an artifact's (`md-doc`).
-    expect(host.querySelector('.state-body')!.className).toBe('state-body md-doc body');
+    expect(host.querySelector('.hist-now-body')!.className).toBe('hist-now-body md-doc body');
     expect(host.querySelector('.question-card')).toBeNull();
     expect(host.querySelector('.questions-fold')).toBeNull();
     // A headline alone draws no body.
     host.innerHTML = html(renderState({ ...state, body: null }, 2));
-    expect(host.querySelector('.state-body')).toBeNull();
+    expect(host.querySelector('.hist-now-body')).toBeNull();
   });
 
   it('marks an unread status with the unread dot, not a New label, on the Status tab in the strip and the column and in its head', () => {
@@ -149,8 +153,8 @@ describe('question cards in replies', () => {
       expect(host.querySelector(tab)?.textContent).toBe('History');
       expect(host.querySelector('.tab-badge')).toBeNull();
     }
-    expect(dot(html(renderState(unread.state, 2)), '.state-head .unread-dot')?.getAttribute('aria-label')).toBe('Unread');
-    expect(host.querySelector('.state-head')?.textContent).not.toContain('New');
+    expect(dot(html(renderState(unread.state, 2)), '.hist-now-head .unread-dot')?.getAttribute('aria-label')).toBe('Unread');
+    expect(host.querySelector('.hist-now-head')?.textContent).not.toContain('New');
 
     // A seen state has none.
     expect(dot(html(renderTabs(newView(), seen)), '.unread-dot')).toBeNull();
@@ -163,14 +167,14 @@ describe('question cards in replies', () => {
     const state = { id: 'st-1', sessionId: 's', at: 1, headline: 'fixing tests', body: null, unread: false } as const;
     const drawn = (stale: 'turn' | 'session' | null) => {
       host.innerHTML = html(renderState({ ...state, stale }, 2));
-      return { label: host.querySelector('.state-label')?.textContent, dim: host.querySelector('.state-view')!.classList.contains('stale') };
+      return { label: host.querySelector('.hist-now-label')?.textContent, dim: host.querySelector('.hist-now')!.classList.contains('stale') };
     };
 
-    expect(drawn(null)).toEqual({ label: 'State', dim: false });
+    expect(drawn(null)).toEqual({ label: 'Now', dim: false });
     expect(drawn('turn')).toEqual({ label: 'As of the last turn', dim: true });
     expect(drawn('session')).toEqual({ label: 'Last state', dim: true });
     host.innerHTML = html(renderState(null, 2));
-    expect(host.textContent).toBe('No state yet. It appears here when the session sets one.');
+    expect(host.querySelector('.hist-now.empty')?.textContent).toBe('No state yet. It appears here when the session sets one.');
   });
 
   it("draws a tab's unread dot at its label's top-right, over the gap after it, and the dropdown's dot alike, so the dot leaves the tab's width as it was", () => {

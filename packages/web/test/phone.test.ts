@@ -29,7 +29,8 @@ describe('the page on a phone', () => {
     expect(css).toMatch(/(^|\n)\.scroll \{[^}]*padding: 20px 20px calc\(16px \+ var\(--sb-end\)\);/);
     expect(phone).toContain('.scroll { padding: 12px 12px calc(12px + var(--sb-end)); }');
     expect(css).toMatch(/\.artifact-doc \{[^}]*padding: 8px 20px calc\(60px \+ var\(--sb-end\)\);/);
-    expect(css).toMatch(/\.hist-body \{[^}]*padding: 16px 24px calc\(48px \+ var\(--sb-end\)\);/);
+    expect(css).toMatch(/\.hist-body \{[^}]*padding: 22px 28px calc\(48px \+ var\(--sb-end\)\);/);
+    expect(css).toMatch(/\.hist-body \{[^}]*padding: 16px 14px calc\(48px \+ var\(--sb-end\)\);/);
     expect(css).toMatch(/\.changes-rows \{[^}]*padding: 0 0 var\(--sb-end\);/);
     expect(css).toMatch(/\.diff-host \{[^}]*padding-bottom: var\(--sb-end\);/);
     expect(css).toMatch(/\.scroll\.console-pane \{[^}]*padding: 0 0 var\(--sb-end\);/);
