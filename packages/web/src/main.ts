@@ -71,6 +71,13 @@ export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'sessi
 export const SEEN_MS = 1_000;
 const SEEN_CHECK_MS = 250;
 const COMPOSER_MAX_PX = 200;
+
+/** The composer box's tallest: 200 px, or a third of the visible height, the keyboard's room left out where the browser reports it (V5). */
+export function composerMax(view: { innerHeight: number; visualViewport?: { height: number } | null }): number {
+  const height = view.visualViewport?.height ?? view.innerHeight;
+
+  return height > 0 ? Math.min(COMPOSER_MAX_PX, Math.round(height / 3)) : COMPOSER_MAX_PX;
+}
 /** How long the composer says a message sent from the History or Artifacts tab went. */
 export const SENT_NOTE_MS = 4_000;
 /** How long the composer stays on another tab after the mic goes off other than by its own button, so a moment's change does not move the tab. */
@@ -1186,9 +1193,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       input.style.paddingBottom = `${10 + extra}px`;
     }
 
-    input.style.height = `${Math.min(input.scrollHeight, COMPOSER_MAX_PX)}px`;
+    input.style.height = `${Math.min(input.scrollHeight, composerMax(window))}px`;
     mirror.scrollTop = input.scrollTop;
   };
+  // The keyboard opening or the phone turning changes the box's tallest.
+  (typeof visualViewport === 'object' && visualViewport !== null ? visualViewport : window).addEventListener('resize', () => grow(), { signal: listening.signal });
   /** New live words scroll into view at the end of the box. */
   const showLive = (): void => {
     grow();

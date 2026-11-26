@@ -3,6 +3,7 @@ import { PAGE_ASSETS } from '../dist/index.js';
 import { renderMarkdown } from '../src/markdown.js';
 import { menuRows } from '../src/header.js';
 import { html } from './html.js';
+import { composerMax } from '../src/main.js';
 import type { PageAction, PageRow } from '@switchboard/protocol';
 
 // The page's rules for a phone's screen (architecture.md § Web page), read from the built page.css.
@@ -11,6 +12,16 @@ const css = PAGE_ASSETS['page.css']!.body;
 const phone = /@media \(max-width: 600px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
 describe('the page on a phone', () => {
+  it('ComposerMax_ShortOrKeyboardCoveredScreen_CapsTheBoxAtAThirdOfWhatShows', () => {
+    // A phone on its side, 393 px tall: a third, 131 px.
+    expect(composerMax({ innerHeight: 393 })).toBe(131);
+    // The keyboard leaves 420 of 793 px showing: a third of what shows, not of the layout's height.
+    expect(composerMax({ innerHeight: 793, visualViewport: { height: 420 } })).toBe(140);
+    // A tall screen keeps the 200 px cap, and a page not laid out, 0 px tall, takes it too.
+    expect(composerMax({ innerHeight: 1000 })).toBe(200);
+    expect(composerMax({ innerHeight: 0 })).toBe(200);
+  });
+
   it('puts the composer across the whole width on the bottom edge, its end buttons in from the corners and just above the home indicator, and the notes on its edges', () => {
     expect(phone).toContain('#composer, #note { padding: 0; }');
     // No strip as tall as the home indicator's inset below the composer.

@@ -882,6 +882,26 @@ body.artifact-window > .artifact-view { height: 100%; }
   .composer-sent { padding: 0 12px; }
   .question-waiting { margin-right: 12px; }
 }
+/* On a phone the conversation's header is one row as tall as its 44 px targets, with no padding above or below them. */
+:where(html.phone) .header { padding-top: 0; padding-bottom: 0; }
+/* A phone on its side has under 430 px of height, so the timeline gets most of it (S1 in the 2026-11-26 UI pass): the header and the tab strip
+   share one bar, the header's title taking what the tabs leave, and the composer is one row, Attach, the slash commands and the context meter
+   left of the box and the voice controls and Send right of it, its attachments and dictation hint on a row above, with no gap round it. */
+@media (orientation: landscape) and (max-height: 500px) {
+  :where(html.phone) #head { display: flex; align-items: stretch; }
+  :where(html.phone) #head > :not(.tabs) { flex: 1 1 0; min-width: 0; }
+  /* The strip is a size container, so it has no width of its own to start from; it gets half the bar. */
+  :where(html.phone) #head > .tabs { flex: 1 1 0; min-width: 0; }
+  :where(html.phone) #composer, :where(html.phone) #note { padding: 0; }
+  :where(html.phone) #composer .composer { flex-flow: row wrap; align-items: flex-end; column-gap: 6px; padding: 5px max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-right))) max(5px, min(14px, env(safe-area-inset-bottom))) max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-left))); border-width: 1px 0 0; border-radius: 0; box-shadow: none; }
+  :where(html.phone) #composer .composer-footer { display: contents; }
+  :where(html.phone) #composer :is(.attachments, .composer-hint) { flex: 1 0 100%; }
+  :where(html.phone) #composer .composer-controls { order: 1; flex: none; }
+  :where(html.phone) #composer .composer-input { order: 2; flex: 1 1 0; min-width: 0; }
+  :where(html.phone) #composer .composer-end { order: 3; flex: none; margin-left: 0; }
+  :where(html.phone) .session-note { border-left: none; border-right: none; border-radius: 0; }
+  :where(html.phone) .composer-sent { padding: 0 12px; }
+}
 /* A conversation under 600 px wide, on a phone or in a narrow column, gives its text the width: 8 px at its sides, a 20 px gutter for the
    replies' dots, a shallower list indent, and our messages' bubbles that stop 24 px short of the left side. A wider one keeps the room messaging
    apps leave. */

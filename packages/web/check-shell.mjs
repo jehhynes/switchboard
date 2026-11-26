@@ -438,6 +438,8 @@ const measure = `(() => {
         title: title ? title.getBoundingClientRect().width : null,
       };
     })(),
+    // The conversation's heights: its header, the header and tab strip together, the timeline's pane and the composer.
+    heights: (() => { const tall = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().height) : null; }; return { header: tall('.header'), head: tall('#head'), panel: tall('#panel'), composer: tall('#composer') }; })(),
     tops: { header: top('.header'), listHeader: top('.list-header'), settingsHead: top('.settings-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
@@ -890,6 +892,18 @@ function failures(view, size, m) {
     if (h.main !== null && ((h.main.name !== undefined && h.main.name !== 'Approve') || h.main.title !== 'Approve')) out.push('the main control is named ' + JSON.stringify(h.main.name) + ' with the tooltip ' + JSON.stringify(h.main.title));
     if (h.title === null) out.push('the header shows no title');
     else if (h.title < 80) out.push('the header leaves its title ' + h.title + ' px');
+  }
+  // On a phone the header is one 44 px row; on its side the header and the tabs share that row and the composer is one row, so the timeline
+  // keeps at least 270 px of the iPhone's 393.
+  if (view === 'conversation' && size.phone && m.heights.header !== null) {
+    const hs = m.heights;
+
+    if (hs.header > 46) out.push('the header is ' + hs.header + ' px tall on a phone, not one 44 px row');
+    if (size.orientation === 'landscape') {
+      if (hs.head > 46) out.push('the header and the tabs take ' + hs.head + ' px on a phone on its side, not one row');
+      if (hs.composer > 44 + 5 + Math.max(5, Math.min(14, size.insets.bottom)) + 2) out.push('the composer is ' + hs.composer + ' px tall on a phone on its side, not one row');
+      if (hs.panel < 270) out.push('the timeline gets ' + hs.panel + ' px of a phone on its side');
+    }
   }
   for (const [bar, top] of Object.entries(m.tops)) {
     // Settings, outside the phone's layout, sits inside the dimmed page's margin.
