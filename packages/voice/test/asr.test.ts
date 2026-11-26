@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ASR_RATE, DECODE_HANGOVER_MS, pcmToSamples, sherpaEngine, sherpaRecognizer, SILENCE_RMS, Transcriber } from '../src/asr.js';
 import type { AsrEngine } from '../src/asr.js';
-import { CPU_MODEL, GPU_MODEL } from '../src/sherpa.js';
+import { collectGarbage, CPU_MODEL, GPU_MODEL } from '../src/sherpa.js';
 import type { Sherpa, SherpaRuntime } from '../src/sherpa.js';
 import { FakeEngine } from './fakes.js';
 
@@ -58,6 +58,21 @@ describe('Transcriber', () => {
     transcriber.end(false);
     expect(engine.streams).toBe(3);
     expect(transcriber.total).toBe(4800);
+  });
+
+  it('says a stream was dropped at each message end and barge-in restart, not at the first stream or while it feeds', () => {
+    const engine = new FakeEngine();
+    let dropped = 0;
+    const transcriber = new Transcriber(engine, { onWords: () => undefined, onPiece: () => undefined, onQuiet: () => undefined, onDropped: () => void dropped++ });
+
+    engine.text = 'hello';
+    transcriber.feed(CHUNK);
+    transcriber.drain();
+    expect([engine.streams, dropped]).toEqual([1, 0]);
+    transcriber.end();
+    transcriber.end(false);
+    transcriber.restartFrom(0);
+    expect([engine.streams, dropped]).toEqual([4, 3]);
   });
 
   it('gives a piece the audio since the last piece, at least the last 4 s and at most the last 8 s, for the voice check', () => {
@@ -219,6 +234,8 @@ describe('sherpaEngine', () => {
       expect(configs[1]).toMatchObject({ modelConfig: { provider: 'cpu', transducer: { encoder: join(dir, 'encoder.int8.onnx'), decoder: join(dir, 'decoder.int8.onnx') } } });
       expect(configs[1]).not.toHaveProperty('hotwordsFile');
       expect((gpu as AsrEngine).stream().text()).toBe('hello');
+      // Its streams' native memory is released only by a collection.
+      expect([(gpu as AsrEngine).collect, (cpu as AsrEngine).collect]).toEqual([collectGarbage, collectGarbage]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

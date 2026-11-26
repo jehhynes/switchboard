@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import type { VoiceSettings } from '@switchboard/core/settings';
 import { ASR_RATE, PHRASE_SILENCE_MS } from '../src/asr.js';
-import { Dictation, RECOGNISER_IDLE_MS, WARM_RELEASE_MS, WARM_RETRY_MS, WARM_SETTLE_MS, WARM_SOON_MS } from '../src/dictation.js';
+import { COLLECT_AFTER_DROP_MS, Dictation, RECOGNISER_IDLE_MS, WARM_RELEASE_MS, WARM_RETRY_MS, WARM_SETTLE_MS, WARM_SOON_MS } from '../src/dictation.js';
 import type { AudioDevices } from '../src/micUse.js';
 import { ENROLL_SECONDS } from '../src/protocol.js';
 import type { VoiceMessage } from '../src/protocol.js';
@@ -543,6 +543,53 @@ describe('Dictation', () => {
     expect(missing.loads).toHaveLength(1);
     expect(missing.dictation.error).toBeNull();
     expect(missing.logs.filter((line) => line.startsWith('No speech recognition model'))).toEqual([]);
+  });
+
+  it('collects the dropped streams a second after the last drop, never while the operator is heard, and not after close', async () => {
+    const { dictation, engine, sent, say, quiet, clock, listening } = setup();
+    const streamAt: number[] = [];
+    const collectAt: number[] = [];
+    const stream = engine.stream.bind(engine);
+
+    engine.stream = () => (streamAt.push(clock.t), stream());
+    engine.collect = () => void collectAt.push(clock.t);
+
+    const untilFinal = (): void => {
+      const before = sent.filter((one) => one.type === 'utterance').length;
+
+      for (let step = 0; step < 100 && sent.filter((one) => one.type === 'utterance').length === before; step++) {
+        quiet(100);
+      }
+    };
+
+    await listening();
+    say('fix the build', 100);
+    untilFinal();
+    expect(kinds(sent).at(-1)).toBe('utterance "fix the build" final');
+    expect(collectAt).toEqual([]);
+    quiet(COLLECT_AFTER_DROP_MS);
+    expect(collectAt).toEqual([streamAt.at(-1)! + COLLECT_AFTER_DROP_MS]);
+
+    // Words heard within the second after a drop hold the collection until that utterance has ended too.
+    say('and the tests', 100);
+    untilFinal();
+    say('then push', 100);
+
+    for (let at = 0; at < 3_000; at += 100) {
+      say(`then push ${'it '.repeat(at / 100 + 1).trim()}`, 100);
+    }
+
+    expect(collectAt).toHaveLength(1);
+    untilFinal();
+    quiet(COLLECT_AFTER_DROP_MS);
+    expect(collectAt).toEqual([collectAt[0], streamAt.at(-1)! + COLLECT_AFTER_DROP_MS]);
+
+    // A drop just before close collects nothing afterwards.
+    say('one more', 100);
+    untilFinal();
+    dictation.close();
+    clock.advance(COLLECT_AFTER_DROP_MS * 5);
+    expect(collectAt).toHaveLength(2);
   });
 
   it('frees the recogniser once capture has gone unused for 30 minutes, never while it listens, and counts again from each Mic on', async () => {

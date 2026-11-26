@@ -264,9 +264,15 @@ export class FakeEngine implements AsrEngine {
   silenceRms: number | undefined = undefined;
   /** Times the recogniser was freed. */
   freed = 0;
+  /** Times garbage was collected for dropped streams. */
+  collects = 0;
 
   free(): void {
     this.freed++;
+  }
+
+  collect(): void {
+    this.collects++;
   }
 
   stream(): AsrStream {

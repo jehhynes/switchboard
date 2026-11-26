@@ -33,6 +33,8 @@ export interface AsrEngine {
   /** Audio quieter than this RMS (samples from -1 to 1) is not decoded once {@link DECODE_HANGOVER_MS} passed; undefined decodes all of it. */
   readonly silenceRms?: number | undefined;
   stream(): AsrStream;
+  /** Collects garbage, so the native memory of the streams dropped since is released; absent where a stream holds none. */
+  collect?(): void;
   /** Releases the recogniser's native memory, gigabytes of GPU memory with the fp32 model; its streams take no more audio. */
   free(): void;
 }
@@ -44,6 +46,8 @@ export interface TranscriberEvents {
   onPiece(text: string, audio: Float32Array): void;
   /** `QUIET_MS` after the words last grew. */
   onQuiet(): void;
+  /** A new stream replaced the old one, whose native memory stays until the next collection ({@link AsrEngine.collect}). */
+  onDropped?(): void;
 }
 
 /**
@@ -185,6 +189,7 @@ export class Transcriber {
     const pre = this.samples(from);
 
     this.#stream = this.engine.stream();
+    this.events.onDropped?.();
     this.#stream.accept(pre);
     this.#fed = this.#total;
     this.#text = this.#stream.text().trim();
@@ -206,6 +211,7 @@ export class Transcriber {
    */
   end(preroll = true): void {
     this.#stream = this.engine.stream();
+    this.events.onDropped?.();
 
     const count = preroll ? Math.min(PREROLL, this.#total) : 0;
 
@@ -309,6 +315,9 @@ export function sherpaEngine(module: unknown, device: AsrDevice, modelDir: strin
   return {
     device,
     silenceRms: SILENCE_RMS,
+    // sherpa-onnx-node reports none of a stream's native memory to V8, 6.7 to 8 MB with the int8 model, so nothing else prompts the collection
+    // that releases a dropped one (mechanics.md M166).
+    collect: collectGarbage,
     stream: () => {
       if (recognizer === null) {
         return { accept: () => undefined, text: () => '', finish: () => undefined };

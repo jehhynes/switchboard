@@ -41,6 +41,8 @@ export const WARM_RELEASE_MS = 100;
  * no load ahead runs again until listening is asked for or a phone takes the voice.
  */
 export const RECOGNISER_IDLE_MS = 30 * 60_000;
+/** The recogniser's dropped streams are collected this long after the last one was dropped, once nothing is being heard (mechanics.md M166). */
+export const COLLECT_AFTER_DROP_MS = 1_000;
 /** The spoken commands (architecture.md § Dictation), recognised only as a whole utterance in the operator's voice and never sent. */
 export const SPOKEN_COMMANDS: Readonly<Record<string, SpokenCommand>> = {
   'stop listening': 'stop-listening',
@@ -228,6 +230,8 @@ export class Dictation {
   #unloadTimer: unknown = null;
   /** The recogniser was freed for disuse: no load ahead runs until Mic on, a spoken alert's answer, capture for dictation or `warmSoon`. */
   #unloaded = false;
+  /** Collects the recogniser's dropped streams, {@link COLLECT_AFTER_DROP_MS} after the last was dropped. */
+  #collectTimer: unknown = null;
   #closed = false;
 
   constructor(private readonly deps: DictationDeps) {
@@ -728,6 +732,12 @@ export class Dictation {
     this.#endRoomHold();
     this.#closed = true;
     this.#clearUnload();
+
+    if (this.#collectTimer !== null) {
+      this.#clearTimer(this.#collectTimer);
+      this.#collectTimer = null;
+    }
+
     this.deps.turn?.close();
   }
 
@@ -909,8 +919,29 @@ export class Dictation {
           void this.#checkTurn();
         }
       },
+      onDropped: () => this.#collectSoon(),
     });
     return true;
+  }
+
+  /**
+   * Collects the dropped streams' native memory {@link COLLECT_AFTER_DROP_MS} after the last drop, waiting while the operator is heard so the
+   * pause of a full collection never falls inside an utterance; a timer never runs inside a decode, which is synchronous.
+   */
+  #collectSoon(): void {
+    if (this.#collectTimer !== null) {
+      this.#clearTimer(this.#collectTimer);
+    }
+
+    this.#collectTimer = this.#timer(() => {
+      this.#collectTimer = null;
+
+      if (this.hearing) {
+        this.#collectSoon();
+      } else {
+        this.#engine?.engine.collect?.();
+      }
+    }, COLLECT_AFTER_DROP_MS);
   }
 
   /** Frees the loaded recogniser, if any; its transcriber goes with it, and `#released` resolves once its memory has gone. */
