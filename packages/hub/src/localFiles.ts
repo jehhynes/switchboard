@@ -4,7 +4,7 @@ import type { FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
-import { looksBinary } from './changes.js';
+import { looksBinary, rawMime } from './changes.js';
 
 /** The most bytes of a text, code or Markdown file the page is sent. */
 export const LOCAL_TEXT_MAX_BYTES = 4 * 1024 * 1024;
@@ -15,7 +15,6 @@ export const LOCAL_DIR_MAX = 500;
 /** Why a paired device gets no folder and no file outside its session's working folder and work item's checkouts (architecture.md § Remote access). */
 export const LOCAL_FILES_PAIRED_ONLY = 'On a paired device, only files in the session’s working folder and its work item’s worktree and repository open, not folders or files elsewhere.';
 
-const IMAGES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml' };
 const MARKDOWN = new Set(['md', 'markdown']);
 
 /**
@@ -262,12 +261,7 @@ const extOf = (path: string): string => {
   return dot <= 0 ? '' : name.slice(dot + 1).toLowerCase();
 };
 
-/** A picture's or a PDF's media type, the only files sent as bytes; null for any other. */
-export function rawMime(path: string): string | null {
-  const ext = extOf(path);
-
-  return ext === 'pdf' ? 'application/pdf' : (IMAGES[ext] ?? null);
-}
+export { rawMime };
 
 /** A local file or folder as read: its view, and for a picture or PDF the open handle its bytes are sent from, which the caller closes. */
 export interface LocalOpened {

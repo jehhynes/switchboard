@@ -40,6 +40,9 @@ import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
 import { PageChanges, VIEWED_REFUSED } from './changes.js';
+import { githubGhPath, PageStack, pullLinkOf } from './stack.js';
+import { PageTree } from './tree.js';
+import { spawnGh } from '@switchboard/github';
 import { needsMessage, needsReason, newlyNeeding, rowFor } from './needs.js';
 import { systemNotifier } from './systemAlerts.js';
 import { installedProviders } from './installed.js';
@@ -610,6 +613,15 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       }
     },
   });
+  // The Changes tab's stacked bases (PRD R128): git in the page's selected conversation's folder, and GitHub through gh, read-only.
+  const pageStack = new PageStack({
+    isPage: (key) => scopes.isPage(key),
+    scope: (key) => scopes.scope(key),
+    gh: (repo) => spawnGh(githubGhPath(config.settings.sources, repo)),
+    pullLink: (workItemId) => pullLinkOf(store, workItemId),
+    workItemAt: (path) => store.workItemAtWorktree(path),
+  });
+  const pageTree = new PageTree({ isPage: (key) => scopes.isPage(key), scope: (key) => scopes.scope(key) });
   const pageConsole = new PageConsole({
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
@@ -1284,14 +1296,21 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       },
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),
+      changesRaw: (key, query) => pageChanges.fileRaw(key, query.get('path'), query.get('side'), query.get('from'), query.get('to')),
       changes: (route, key, query) =>
         route === 'changes'
           ? pageChanges.changes(key, query.get('from'), query.get('to'))
           : route === 'diff'
-            ? pageChanges.diff(key, query.get('path'), query.get('sides'), query.get('from'), query.get('to'))
+            ? pageChanges.diff(key, query.get('path'), query.get('sides'), query.get('from'), query.get('to'), query.get('ws'))
             : route === 'file'
               ? pageChanges.file(key, query.get('path'), query.get('side'), query.get('from'), query.get('to'))
-              : Promise.resolve({ status: 404, body: { error: 'not found' } }),
+              : route === 'stack'
+                ? pageStack.stack(key, query.get('refresh'))
+                : route === 'tree'
+                  ? pageTree.tree(key)
+                  : route === 'search'
+                    ? pageTree.search(key, query)
+                    : Promise.resolve({ status: 404, body: { error: 'not found' } }),
       voice: {
         enabled: () => config.settings.voice.enabled,
         accept: (request, socket, head, device) => voiceSockets.accept(request, socket, head, device),

@@ -10,6 +10,7 @@ export * from './gh.js';
 export * from './keys.js';
 export * from './roles.js';
 export * from './source.js';
+export * from './stack.js';
 
 /** The GitHub source `name`, or why its settings are incomplete. */
 export function githubSource(name: string, settings: SourceSettings): { source: Source } | { error: string } {

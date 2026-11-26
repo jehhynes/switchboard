@@ -874,6 +874,7 @@ describe('the web page routes', () => {
       list: () => [{ kind: 'item', title: 'T', conversations: [] }],
       files: async (key) => (key === 'page-1' ? [{ path: 'a.ts', dir: false }] : null),
       changes: async (route, key, query) => (route === 'changes' && key === 'page-1' ? { status: 200, body: { rows: 'x'.repeat(2000), q: query.get('q') }, etag: 'e1' } : { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } }),
+      changesRaw: async (key, query) => (key === 'page-1' && query.get('path') === 'shot.png' ? { status: 200 as const, raw: { mime: 'image/svg+xml', bytes: Buffer.from('<svg/>') } } : { status: 404, body: { error: 'Only a picture or a PDF of this worktree is sent as a file.' } }),
       artifact: (key, name) => {
         const external = join(folder, 'report.md');
 
@@ -1720,6 +1721,18 @@ describe('the web page routes', () => {
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-2', { Cookie: cookie })).status).toBe(403);
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', {})).status).toBe(401);
 
+    // A worktree picture under the Changes routes' checks, always with the artifacts' sandbox.
+    const raw = await send(server.port, 'GET', '/v1/conversation/file-raw?window=page-1&path=shot.png&side=disk', { Cookie: cookie });
+
+    expect(raw.status).toBe(200);
+    expect(raw.headers['content-type']).toBe('image/svg+xml');
+    expect(raw.headers['content-security-policy']).toMatch(/^sandbox allow-scripts; default-src 'none'/);
+    expect(raw.headers['x-content-type-options']).toBe('nosniff');
+    expect(raw.body).toBe('<svg/>');
+    expect((await send(server.port, 'GET', '/v1/conversation/file-raw?window=page-1&path=notes.md&side=disk', { Cookie: cookie })).status).toBe(404);
+    expect((await send(server.port, 'GET', '/v1/conversation/file-raw?window=page-2&path=shot.png&side=disk', { Cookie: cookie })).status).toBe(403);
+    expect((await send(server.port, 'GET', '/v1/conversation/file-raw?window=page-1&path=shot.png&side=disk', {})).status).toBe(401);
+
     // The diff viewer's files: kept by the browser, gzipped when taken, and only with the cookie.
     const viewer = await send(server.port, 'GET', '/page/diff/b1/diff.js', { Cookie: cookie, 'Accept-Encoding': 'gzip' });
 
@@ -1915,6 +1928,15 @@ describe('the web page routes', () => {
     // This computer's page cannot read through the phone's key, nor the phone through this computer's.
     expect((await get('/v1/conversation/local-file?window=page-2&path=notes.md')).status).toBe(403);
     expect((await get('/v1/conversation/local-file-raw?window=page-1&path=shot.png', asPhone)).status).toBe(403);
+    // Nor the change routes: the phone cannot read the worktree this computer's page has open, and the reverse.
+    for (const route of ['changes', 'stack', 'tree', 'file-raw']) {
+      const crossed = await get(`/v1/conversation/${route}?window=page-1&path=shot.png&side=disk`, asPhone);
+
+      expect(crossed.status).toBe(403);
+      expect(JSON.parse(crossed.body)).toEqual({ error: "This page's connection belongs to another sign-in or address. Reload the page." });
+      expect((await get(`/v1/conversation/${route}?window=page-2&path=shot.png&side=disk`)).status).toBe(403);
+    }
+
     phoneStream.destroy();
     stream.destroy();
     await until(() => (server.clients() === 0 ? true : null));

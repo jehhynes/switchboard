@@ -1388,6 +1388,11 @@ export class Store {
     return this.#one('SELECT * FROM worktrees WHERE ticketId = ?', ticketId);
   }
 
+  /** The newest work item whose ticket's linked worktree is at `path`, with its ticket's title. */
+  workItemAtWorktree(path: string): { id: number; title: string } | null {
+    return this.#one('SELECT w.id AS id, t.title AS title FROM worktrees wt JOIN workItems w ON w.ticketId = wt.ticketId JOIN tickets t ON t.id = wt.ticketId WHERE wt.path = ? ORDER BY w.id DESC LIMIT 1', path);
+  }
+
   /** Links the ticket's worktree, replacing an earlier link. */
   linkWorktree(worktree: NewWorktree): void {
     this.#upsert(

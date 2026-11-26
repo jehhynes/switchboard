@@ -1,0 +1,11 @@
+query($owner: String!, $name: String!, $head: String!) {
+  repository(owner: $owner, name: $name) {
+    open: pullRequests(headRefName: $head, first: 20, states: [OPEN]) {
+      totalCount
+      nodes { number state url isInMergeQueue headRefName headRefOid baseRefName headRef { name } headRepository { nameWithOwner } stack { number baseRefName entries(first: 50) { pageInfo { hasNextPage } nodes { position pullRequest { number state url isInMergeQueue headRefName headRefOid baseRefName headRef { name } headRepository { nameWithOwner } } } } } }
+    }
+    done: pullRequests(headRefName: $head, first: 20, states: [MERGED, CLOSED], orderBy: { field: CREATED_AT, direction: DESC }) {
+      nodes { number state url isInMergeQueue headRefName headRefOid baseRefName headRef { name } headRepository { nameWithOwner } }
+    }
+  }
+}

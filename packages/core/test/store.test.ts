@@ -742,6 +742,20 @@ describe('Store', () => {
     expect(store.worktreeFor(ticket.id)).toEqual({ id: 1, ticketId: 1, path: 'D:/wt/b', branch: null, linkedBy: 'report' });
   });
 
+  it("finds the newest work item at a linked worktree's path", () => {
+    const store = Store.open(':memory:');
+    const ticket = store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    const item = (id: number) => ({ ticketId: ticket.id, playbook: 'dev', status: 'running', taskPrompt: null, guidance: null, reportedPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: id, statusAt: id, runStartedAt: null, readyAt: null, orderAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
+
+    store.insertWorkItem(item(1));
+
+    const newer = store.insertWorkItem(item(2));
+
+    store.linkWorktree({ ticketId: ticket.id, path: '/wt/a', branch: '1-a', linkedBy: 'report' });
+    expect(store.workItemAtWorktree('/wt/a')).toEqual({ id: newer.id, title: 'One' });
+    expect(store.workItemAtWorktree('/wt/b')).toBeNull();
+  });
+
   it('keeps one paste per label per work item, replacing its file in place (R60)', () => {
     const store = Store.open(':memory:');
     const ticket = store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
