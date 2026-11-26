@@ -92,6 +92,8 @@ interface Held {
   serializer: InstanceType<typeof serializeAddon.SerializeAddon> | null;
   /** Set once the terminal is being disposed, which waits for the writes queued before it. */
   disposing: boolean;
+  /** Writes given to the terminal that it has not parsed yet, so a read can answer at once when there are none. */
+  unparsed: number;
   ended: Ended | null;
   head: string;
   /** The size last given to the pseudo-terminal; the headless screen follows once the output before it is parsed. */
@@ -466,6 +468,7 @@ export class Host {
       term,
       serializer,
       disposing: false,
+      unparsed: 0,
       ended: null,
       head: '',
       cols: request.cols,
@@ -488,7 +491,7 @@ export class Host {
 
   #output(held: Held, data: string): void {
     if (held.ended === null) {
-      held.term?.write(data);
+      this.#feed(held, data);
     }
 
     held.lastOutputAt = this.#now();
@@ -569,14 +572,31 @@ export class Host {
     this.#dispose(held);
   }
 
-  /** Runs `read` once the output already received is parsed; at once for an exited session, whose screen no longer changes. */
+  /** Writes to the session's terminal, counting the write until xterm has parsed it. */
+  #feed(held: Held, data: string, parsed?: () => void): void {
+    if (held.term === null) {
+      return;
+    }
+
+    held.unparsed++;
+    held.term.write(data, () => {
+      held.unparsed--;
+      parsed?.();
+    });
+  }
+
+  /**
+   * Runs `read` once the output and resizes already received are parsed: at once when none is waiting, and for an exited session, whose screen
+   * no longer changes. xterm calls a write's callback from a timer, about 15 ms on Windows, so waiting on an empty write costs every read that
+   * much (mechanics M168).
+   */
   #parsed(held: Held, read: () => void): void {
-    if (held.ended !== null || held.term === null) {
+    if (held.ended !== null || held.term === null || held.unparsed === 0) {
       read();
       return;
     }
 
-    held.term.write('', read);
+    this.#feed(held, '', read);
   }
 
   /** Keeps what an exited session serves as text and disposes its terminal. */
@@ -982,6 +1002,6 @@ export class Host {
     }
 
     // Output already queued was drawn at the old size, so the screen resizes after it is parsed.
-    held.term?.write('', () => held.term?.resize(cols, rows));
+    this.#feed(held, '', () => held.term?.resize(cols, rows));
   }
 }
