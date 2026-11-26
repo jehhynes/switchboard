@@ -5,7 +5,7 @@ import { rm } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, join, resolve } from 'node:path';
-import { hubRecordPath, parseHubRecord } from '@switchboard/core';
+import { hubLogPath, hubRecordPath, parseHubRecord } from '@switchboard/core';
 import type { HubRecord } from '@switchboard/core';
 import { afterEach, beforeEach } from 'vitest';
 
@@ -104,6 +104,15 @@ export function record(): HubRecord | null {
     return parseHubRecord(readFileSync(hubRecordPath(home), 'utf8'));
   } catch {
     return null;
+  }
+}
+
+/** The test home's hub log, or a note that there is none, for a failure message. */
+export function hubLog(): string {
+  try {
+    return `hub.log:\n${readFileSync(hubLogPath(home), 'utf8')}`;
+  } catch {
+    return 'no hub.log';
   }
 }
 
