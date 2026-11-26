@@ -163,10 +163,17 @@ try {
   }
 
   let target;
+  // Headless Chrome on a slow runner can start without its about:blank page; after 5 seconds the check opens one.
+  const askAt = Date.now() + 5_000;
+  let asked = false;
 
   while (target === undefined) {
     if (Date.now() > deadline) throw new Error('The browser opened no page');
     target = (await fetch('http://127.0.0.1:' + port + '/json').then((answer) => answer.json()).catch(() => [])).find((one) => one.type === 'page');
+    if (target === undefined && !asked && Date.now() > askAt) {
+      asked = true;
+      await fetch('http://127.0.0.1:' + port + '/json/new?about:blank', { method: 'PUT' }).catch(() => undefined);
+    }
     if (target === undefined) await wait(100);
   }
 
