@@ -202,18 +202,20 @@ html[data-switchboard-full-width] :is(
   max-width: none !important;
 }
 
-/* At the right end of a pull request's tab row or an issue header's bottom row, above the sidebar, centred on the 40 px tabs or labels. */
-:has(> .switchboard-layout-buttons) {
-  position: relative;
+/* In the flow of an issue header's row of actions, after New issue, or floated to the right end of a pull request's tab row. */
+.switchboard-layout-buttons {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
 }
 
-.switchboard-layout-buttons {
-  position: absolute;
-  z-index: 12; /* Above the tab row, whose list spans the full width at z-index 11. */
-  right: 0;
-  bottom: 4px;
-  display: inline-flex;
-  gap: 4px;
+/* Centred on the 40 px tabs. Above the tab list, which can span the row at z-index 11, so the buttons take clicks. */
+[class*="prc-PageHeader-Navigation-"] > .switchboard-layout-buttons {
+  position: relative;
+  z-index: 12;
+  float: right;
+  margin: 4px 0 0 8px;
 }
 
 .switchboard-layout-button {

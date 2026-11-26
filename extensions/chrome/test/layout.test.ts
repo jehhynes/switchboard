@@ -119,6 +119,15 @@ describe('content.css', () => {
     expect(hidden(COMMITS)).toEqual([]);
   });
 
+  it('lays the buttons out in the flow of their row, never pinned over it', () => {
+    const rules = [...CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => selector!.includes(LAYOUT_BUTTONS));
+
+    expect(rules.length).toBeGreaterThan(0);
+    expect(rules.filter(([, , body]) => /position:\s*(absolute|fixed)/.test(body!))).toEqual([]);
+    expect(CSS).not.toMatch(/:has\(>\s*\.switchboard-layout-buttons\)/);
+    expect(rules.find(([selector]) => selector!.includes('prc-PageHeader-Navigation-'))?.[2]).toMatch(/float:\s*right/);
+  });
+
   it('lifts each width cap the fixtures record and leaves the sidebar and header alone', () => {
     const selectors = ruleSelectors(LAYOUT_ATTRIBUTES.wide);
     const widened = (page: string) => {
@@ -141,6 +150,9 @@ describe('placeButtons', () => {
 
     expect(buttons.parentElement?.className).toContain('prc-PageHeader-Navigation-');
     expect(buttons.parentElement?.querySelector('nav')?.getAttribute('aria-label')).toBe('Pull request');
+    // First, so it floats right of the row's own right-hand content.
+    expect(buttons.parentElement?.firstElementChild).toBe(buttons);
+    expect(buttons.nextElementSibling?.className).toContain('rightContentWrapper__');
     expect([...buttons.querySelectorAll('button')].map((button) => [button.getAttribute('aria-label'), button.getAttribute('aria-pressed'), button.title, button.hidden])).toEqual([
       ['Hide sidebar', 'false', 'Hide the sidebar (Switchboard)', false],
       ['Full width', 'false', 'Use the full width (Switchboard)', false],
@@ -166,11 +178,24 @@ describe('placeButtons', () => {
     expect(buttonFor('wide').hidden).toBe(false);
   });
 
-  it("puts them in an issue's header, which has no tab row", () => {
+  it("puts them at the end of the row of actions beside an issue's title, after New issue, and not in the narrow window's row", () => {
     document.body.innerHTML = ISSUE;
     placeButtons(document, ISSUE_PATH, { sidebar: false, wide: false });
 
-    expect(group()!.parentElement?.getAttribute('data-testid')).toBe('issue-header');
+    const groups = [...document.querySelectorAll(`.${LAYOUT_BUTTONS}`)];
+
+    expect(groups.map((element) => element.parentElement?.getAttribute('data-component'))).toEqual(['PH_Actions']);
+    expect(groups[0]!.parentElement?.lastElementChild).toBe(groups[0]);
+    expect(groups[0]!.previousElementSibling?.querySelector('a')?.textContent).toBe('New issue');
+  });
+
+  it('moves the buttons from an issue to the tab row of a pull request rendered in its place', () => {
+    document.body.innerHTML = ISSUE;
+    placeButtons(document, ISSUE_PATH, { sidebar: false, wide: false });
+    document.body.insertAdjacentHTML('beforeend', PULL);
+    placeButtons(document, PULL_PATH, { sidebar: false, wide: false });
+
+    expect([...document.querySelectorAll(`.${LAYOUT_BUTTONS}`)].map((element) => element.parentElement?.className)).toEqual([expect.stringContaining('prc-PageHeader-Navigation-')]);
   });
 
   it('puts them in the tab row on a pull request tab with no sidebar', () => {
@@ -208,15 +233,18 @@ describe('placeButtons', () => {
     expect(document.querySelectorAll(`.${LAYOUT_BUTTONS}`)).toHaveLength(1);
   });
 
-  it('makes no mutation when nothing changed', async () => {
-    document.body.innerHTML = PULL;
-    placeButtons(document, PULL_PATH, { sidebar: true, wide: false });
+  it.each([
+    ['a pull request', PULL, PULL_PATH],
+    ['an issue', ISSUE, ISSUE_PATH],
+  ])('makes no mutation on %s when nothing changed', async (_, page, path) => {
+    document.body.innerHTML = page;
+    placeButtons(document, path, { sidebar: true, wide: false });
 
     const records: MutationRecord[] = [];
     const observer = new MutationObserver((found) => records.push(...found));
 
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
-    placeButtons(document, PULL_PATH, { sidebar: true, wide: false });
+    placeButtons(document, path, { sidebar: true, wide: false });
     await Promise.resolve();
     observer.disconnect();
 

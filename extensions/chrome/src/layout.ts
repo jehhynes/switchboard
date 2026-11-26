@@ -117,18 +117,21 @@ function syncButtons(group: Element, layout: Layout, hasSidebar: boolean): void 
   }
 }
 
+const TAB_ROW = '[class*="prc-PageHeader-Navigation-"]';
+
 /**
- * Where the buttons go: the right end of a pull request's tab row, or the right end of an issue header's bottom row. Both sit above the
- * sidebar; content.css pins the buttons there.
+ * Where the buttons go: a pull request's tab row, or the issue header's row of actions beside the title, which holds New issue. GitHub hides
+ * that row, and so the buttons, in a window under 768 px wide, where it moves the sidebar above the body. The buttons are laid out in the
+ * row's flow, so they move GitHub's controls along rather than cover them.
  */
 function buttonsHost(doc: Document): Element | null {
-  const tabs = [...doc.querySelectorAll('[class*="prc-PageHeader-Navigation-"]')].find((element) => element.querySelector('nav') !== null);
+  const tabs = [...doc.querySelectorAll(TAB_ROW)].find((element) => element.querySelector('nav') !== null);
 
-  return tabs ?? doc.querySelector('[data-testid="issue-header"]');
+  return tabs ?? doc.querySelector('[data-testid="issue-header"] [data-component="PH_Actions"]');
 }
 
 /**
- * Puts the buttons in line with a pull request's tabs, or an issue's header, on an issue or pull request page, and removes them from any
+ * Puts the buttons in a pull request's tab row, or an issue's row of actions, on an issue or pull request page, and removes them from any
  * other page. A group already in place is only brought up to date, so a pass that changes nothing makes no mutation.
  */
 export function placeButtons(doc: Document, path: string, layout: Layout): void {
@@ -147,7 +150,13 @@ export function placeButtons(doc: Document, path: string, layout: Layout): void 
     group = doc.createElement('span');
     group.className = LAYOUT_BUTTONS;
     group.append(button(doc, 'sidebar'), button(doc, 'wide'));
-    host.append(group);
+
+    // The tab row's own right-hand content floats right, so the group goes first to float at the row's right end; the issue's is a flex row.
+    if (host.matches(TAB_ROW)) {
+      host.prepend(group);
+    } else {
+      host.append(group);
+    }
   }
 
   syncButtons(group, layout, doc.querySelector(SIDEBAR) !== null);
