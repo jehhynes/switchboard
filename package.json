@@ -31,9 +31,12 @@
     "test": "npm test --workspaces --if-present",
     "verify": "node tools/verify.mjs",
     "verify:staged": "node tools/precommit.mjs",
-    "prepare": "node -e \"try { require('node:child_process').execSync('git config core.hooksPath .githooks', { stdio: 'ignore' }) } catch {}\""
+    "prepare": "node -e \"try { require('node:child_process').execSync('git config core.hooksPath .githooks', { stdio: 'ignore' }) } catch {}\"",
+    "test:unit": "vitest run --coverage.enabled=false --exclude **/*.int.test.ts --exclude **/node_modules/**",
+    "verify:full": "node tools/verify.mjs --full"
   },
   "devDependencies": {
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.7"
   }
 }

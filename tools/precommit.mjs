@@ -1,35 +1,22 @@
 #!/usr/bin/env node
 // Pre-commit checks for the staged files. See docs/testing.md.
 //
-// Runs build, typecheck and tests, without coverage, only for the workspaces the
-// staged files touch and the workspaces that depend on them, or only the test files
+// Builds, then typechecks and runs the unit tests of, the workspaces the staged
+// files touch and the workspaces that depend on them, or only the test files
 // `narrow` lists for a dependent; dependencies of those are built first, because
 // tests run built bundles. It waits for a machine-wide check slot first
-// (tools/check-lock.mjs). A staged file outside every
-// workspace runs the full `npm run verify`. Markdown and text files need no
-// checks. The full suite runs before a merge into main, not here.
+// (tools/check-lock.mjs). A staged file outside every workspace runs `npm run
+// verify`. Markdown and text files need no checks. Integration tests and
+// coverage run in GitHub Actions, not here.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { takeSlot } from './check-lock.mjs';
-import { checkPlan } from './check-plan.mjs';
+import { checkPlan, loadWorkspaces } from './check-plan.mjs';
+import { runAll, unitTests, workspaceJobs } from './run-tests.mjs';
 import { cleanGitEnv, guardRepo } from './git-guard.mjs';
 
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 const guard = guardRepo(root, { checkout: true });
-const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-
-// Workspaces in package.json order, which is dependency order.
-const workspaces = rootPackage.workspaces.map((dir) => {
-  const pkg = JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8'));
-  const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies, ...pkg.optionalDependencies });
-  return { dir, name: pkg.name, deps, scripts: pkg.scripts ?? {} };
-});
-const byName = new Map(workspaces.map((w) => [w.name, w]));
-// Dependencies the manifests do not declare: apps/hub's standalone build carries
-// the browser extension's build (apps/hub/carried.cjs).
-const undeclared = { '@switchboard/hub-app': ['@switchboard/chrome'] };
-for (const w of workspaces) w.deps = [...w.deps, ...(undeclared[w.name] ?? [])].filter((d) => byName.has(d));
+const workspaces = loadWorkspaces(root);
 
 // Files no workspace's checks cover: documentation, and the hook itself, which
 // a commit that changes it exercises.
@@ -80,7 +67,6 @@ if (full || outside.length > 0) {
 // run no tests for it unless listed here too. The full verify runs the rest.
 const narrow = {
   '@switchboard/hub': { '@switchboard/web': ['test/page.test.ts', 'test/pageAssets.test.ts'] },
-  '@switchboard/hub-app': { '@switchboard/web': ['test/install.test.ts'], '@switchboard/chrome': ['test/install.test.ts'] },
 };
 
 const { affected, partial, checked, toBuild } = checkPlan(workspaces, touched, narrow);
@@ -88,12 +74,30 @@ const { affected, partial, checked, toBuild } = checkPlan(workspaces, touched, n
 // One session's checks at a time across the machine (tools/check-lock.mjs).
 takeSlot();
 
-const flags = (set, script) => workspaces.filter((w) => set.has(w.name) && w.scripts[script]).flatMap((w) => ['--workspace', w.name]);
+const byName = new Map(workspaces.map((w) => [w.name, w]));
 console.log(`pre-commit: checking ${[...affected].join(', ')}${partial.size > 0 ? `; for them, ${[...partial].map(([name, files]) => `${name} ${files.join(' ')}`).join('; ')}` : ''}`);
-// Tests run without coverage: its thresholds are checked by the full verify before a merge.
-const noCoverage = '--coverage.enabled=false';
-for (const [script, set, extra] of [['build', toBuild, []], ['typecheck', checked, []], ['test', affected, ['--', noCoverage]]]) {
-  const f = flags(set, script);
-  if (f.length > 0) run(['run', script, ...f, ...extra]);
+const build = workspaces.filter((w) => toBuild.has(w.name) && w.scripts.build).flatMap((w) => ['--workspace', w.name]);
+if (build.length > 0) run(['run', 'build', ...build]);
+
+// Typechecks and unit tests at once, the tests in one vitest run without coverage
+// or integration tests (tools/run-tests.mjs); the full suite runs in GitHub Actions.
+const jobs = workspaceJobs('typecheck', workspaces.filter((w) => checked.has(w.name)), root);
+const testing = workspaces.filter((w) => affected.has(w.name) && w.scripts.test).map((w) => w.name);
+if (testing.length > 0) jobs.push(unitTests({ projects: testing }));
+for (const [name, files] of partial) {
+  if (byName.get(name).scripts.test) jobs.push(unitTests({ projects: [name], files: files.map((f) => `${byName.get(name).dir}/${f}`), label: `${name} unit tests ${files.join(' ')}` }));
 }
-for (const [name, files] of partial) run(['run', 'test', '--workspace', name, '--', noCoverage, ...files]);
+if (jobs.length > 0) {
+  const failed = await runAll(jobs, { cwd: root, env: cleanGitEnv() });
+  const changed = guard.check();
+  if (changed) {
+    console.error('');
+    console.error(`pre-commit: checks ${changed}`);
+    process.exit(1);
+  }
+  if (failed.length > 0) {
+    console.error('');
+    console.error(`pre-commit: ${failed.join(', ')} failed. Fix it, or use --no-verify only for a WIP commit.`);
+    process.exit(1);
+  }
+}

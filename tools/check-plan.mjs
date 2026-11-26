@@ -1,4 +1,25 @@
 // Which workspaces the pre-commit hook builds, typechecks and tests (tools/precommit.mjs).
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+// Dependencies the manifests do not declare: apps/hub's standalone build carries
+// the browser extension's build (apps/hub/carried.cjs).
+const UNDECLARED = { '@switchboard/hub-app': ['@switchboard/chrome'] };
+
+/** The workspaces under `root` as `{ dir, name, deps, scripts }`, in package.json order, which is dependency order. */
+export function loadWorkspaces(root) {
+  const read = (dir) => JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8'));
+  const workspaces = read('.').workspaces.map((dir) => {
+    const pkg = read(dir);
+    const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies, ...pkg.optionalDependencies });
+
+    return { dir, name: pkg.name, deps: [...deps, ...(UNDECLARED[pkg.name] ?? [])], scripts: pkg.scripts ?? {} };
+  });
+  const names = new Set(workspaces.map((w) => w.name));
+
+  for (const w of workspaces) w.deps = w.deps.filter((d) => names.has(d));
+  return workspaces;
+}
 
 /**
  * `workspaces` are `{ name, deps }` in dependency order; `touched` names the workspaces the staged files are in.

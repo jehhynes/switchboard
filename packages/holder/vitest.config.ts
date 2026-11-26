@@ -8,7 +8,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      // main.ts and nodePty.ts run only in the built holder, which test/built.test.ts spawns.
+      // main.ts and nodePty.ts run only in the built holder, which test/built.int.test.ts spawns.
       exclude: ['src/index.ts', 'src/main.ts', 'src/nodePty.ts'],
       thresholds: { lines: 85, branches: 85, functions: 85, statements: 85 },
     },
