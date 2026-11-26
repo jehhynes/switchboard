@@ -74,7 +74,7 @@ function harness(pings: Ping[] = [], build: string | null = 'b1', random = 0.5) 
     const end = now + ms;
 
     for (;;) {
-      await new Promise((done) => setTimeout(done, 0));
+      await new Promise((done) => setImmediate(done));
       timers.sort((a, b) => a.at - b.at);
 
       const next = timers[0];
@@ -89,7 +89,7 @@ function harness(pings: Ping[] = [], build: string | null = 'b1', random = 0.5) 
     }
 
     now = end;
-    await new Promise((done) => setTimeout(done, 0));
+    await new Promise((done) => setImmediate(done));
   };
   const last = (): FakeStream => streams.at(-1)!;
 

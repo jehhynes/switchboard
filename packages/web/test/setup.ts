@@ -31,6 +31,12 @@ vi.mock('../src/main.js', async (importOriginal) => {
   };
 });
 
-afterEach(() => {
+/** A real timer, taken before any test fakes timers. */
+const realTimeout = setTimeout;
+
+// jsdom delivers history events, such as the popstate of history.back(), in a later timer task. A test that ends before it runs would have
+// it land in the next test and move that test's address, so each test ends with one real timer turn, after its pages are closed.
+afterEach(async () => {
   for (const page of [...open]) page.close();
+  await new Promise((done) => realTimeout(done, 0));
 });

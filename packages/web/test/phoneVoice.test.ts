@@ -42,7 +42,7 @@ class FakeSocket {
   }
 }
 
-const flush = () => new Promise((done) => setTimeout(done, 0));
+const flush = () => new Promise((done) => setImmediate(done));
 
 /** A page's post with the hub's voice ticket given at once, in the same call, and every other command sent on to `post`. */
 function ticketing(post: (name: string, body: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>) {

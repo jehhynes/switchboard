@@ -159,7 +159,7 @@ describe('web links with the browser pane', () => {
     vi.restoreAllMocks();
   });
 
-  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
   const start = (options: { installed: boolean; paneOpen?: number; width?: number; local?: boolean; error?: string; toExtension?: (id: string, message: Record<string, unknown>) => Promise<unknown> }) => {
     const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
     const opened: string[] = [];
@@ -327,7 +327,7 @@ describe('local file tabs', () => {
     vi.restoreAllMocks();
   });
 
-  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
   const text = 'See [Review](.wip/review.md) · [9 screenshots](D:/w/.wip/shots/), [code](src/a.ts#L42), [pdf](doc.pdf), [log](big.log), [out](../secret.txt), [uri](file:///D:/w/src/a%20b.ts#L7-L9), [far](file:///E:/other/x.ts#L5) and [site](https://example.com/a).';
   const start = (local = true, filePollMs = 1_000_000) => {
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {

@@ -101,7 +101,7 @@ describe('attachment uploads', () => {
 
     expect(files.remove(1, id)).toBe(true);
     fail(new TypeError('Load failed'));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setImmediate(resolve));
     expect(files.of(1)).toEqual([]);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(refused).not.toHaveBeenCalled();

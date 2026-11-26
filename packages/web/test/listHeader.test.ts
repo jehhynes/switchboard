@@ -69,7 +69,7 @@ describe('the list header (architecture.md § Web page)', () => {
 
     return { page, source: FakeSource.last! };
   };
-  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
   const hello = (source: FakeSource, patch: Record<string, unknown> = {}) => source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], header: header(), scope: null, ...patch });
 

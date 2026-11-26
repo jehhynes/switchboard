@@ -5859,7 +5859,15 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (listening.signal.aborted) return;
     if (frame !== null) draw();
     const holes = iframe.holes;
-    const covered = !holes && framesCovered();
+
+    // With no Browser tab no frame shows, so the layers over one are not looked for: reportFrames runs at every draw.
+    if (!browserTab()) {
+      floatingShown = false;
+      clearTimeout(framesHold ?? undefined);
+      framesHold = null;
+    }
+
+    const covered = !holes && browserTab() && framesCovered();
     iframe.place(browserTab() && state.connected && openingShown() === null && showBrowser() && (wide() ? sideTab() : mainTab()) === 'browser' && !covered && (holes || !settingsPane.isOpen()) && !(isPhone() && root.classList.contains('listing')), holes ? frameLayers() : undefined);
   };
   const browserResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => reportFrames()) : null;

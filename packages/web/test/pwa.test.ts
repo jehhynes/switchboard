@@ -65,7 +65,7 @@ describe('the service worker', () => {
       const answer = shellResponse(get('/page/#w=3', 'navigate'), ORIGIN, deps)!;
 
       if (late) {
-        await new Promise((done) => setTimeout(done, 0));
+        await new Promise((done) => setImmediate(done));
         timers.forEach((run) => run());
       }
 

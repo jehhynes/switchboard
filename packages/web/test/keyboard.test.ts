@@ -29,7 +29,7 @@ const key = (target: HTMLElement, name: string, patch: KeyboardEventInit = {}): 
   target.dispatchEvent(event);
   return event;
 };
-const flush = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 0)); };
+const flush = async (): Promise<void> => { await new Promise((resolve) => setImmediate(resolve)); };
 const start = (groups: PageGroup[]): Source => {
   const page = startPage(root, {
     frame: drawAtOnce, now: () => 10_000,

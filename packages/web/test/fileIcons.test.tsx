@@ -9,7 +9,7 @@ import { html } from './html.js';
 import { drawAtOnce } from './frame.js';
 
 const MAP = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/seti/file-icons.json'), 'utf8')) as FileIconMap;
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+const flush = () => new Promise((resolve) => setImmediate(resolve));
 const answer = (status: number, body: unknown) => ({ status, ok: status === 200, json: async () => body }) as unknown as Response;
 
 describe("VS Code's Seti file icons", () => {
