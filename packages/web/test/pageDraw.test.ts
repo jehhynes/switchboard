@@ -113,4 +113,44 @@ describe('drawing the page', () => {
     expect(root.querySelector('#panel li.day')!.textContent).toBe('Yesterday');
     page.close();
   });
+
+  it('Draw_ProgressOfAPlayingReplyAndLiveWords_AskForNoDraw', () => {
+    const frames: Array<() => void> = [];
+    const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: (run) => void frames.push(run), now: () => 10_000 });
+    const source = FakeSource.last!;
+    const heard = reply('r1', 1, { opening: 'Fixed it. More after.', speak: 'Fixed it.', spoken: { state: 'interrupted', atMs: 900, saidChars: 3 } });
+    const drawn = (): number => {
+      const ran = frames.length;
+
+      frames.splice(0).forEach((run) => run());
+      return ran;
+    };
+
+    source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope, sessions: [session()], items: [heard, reply('r2', 2)], more: false, state: null, artifacts: [] });
+    drawn();
+    expect(root.querySelector('#panel li.reply[data-id="r1"] .unheard')).not.toBeNull();
+
+    // The reply heard in part plays again: its first progress draws it whole.
+    source.emit('progress', { replyId: 'r1', atMs: 0, chars: 0 });
+    expect(drawn()).toBe(1);
+    expect(root.querySelector('#panel li.reply[data-id="r1"] .unheard')).toBeNull();
+
+    // While it plays, its progress, and progress for a reply the page does not hold, draw nothing; the state still follows.
+    source.emit('progress', { replyId: 'r1', atMs: 150, chars: 4 });
+    source.emit('progress', { replyId: 'gone', atMs: 300, chars: 8 });
+    expect(drawn()).toBe(0);
+    expect(page.state().items.find((one) => one.id === 'r1')).toMatchObject({ spoken: { state: 'playing', atMs: 150, saidChars: 4 } });
+
+    // Live words show at once, with no draw.
+    source.emit('words', { messageId: 'u1', text: 'fix the' });
+    expect(drawn()).toBe(0);
+    expect(root.querySelector<HTMLElement>('.live-words')!.textContent).toBe('fix the');
+
+    // Interrupted again, by a `reply`, it draws.
+    source.emit('reply', { reply: { ...heard, spoken: { state: 'interrupted', atMs: 400, saidChars: 5 } } });
+    expect(drawn()).toBe(1);
+    expect(root.querySelector('#panel li.reply[data-id="r1"] .unheard')).not.toBeNull();
+    page.close();
+  });
 });

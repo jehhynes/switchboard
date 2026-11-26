@@ -8,7 +8,7 @@ import { ARTIFACTS_SEEN, artifactShow, artifactUrl, openArtifactsSeen, parseArti
 import type { CardDraft, NewDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
-import type { ArtifactView, ItemView, PageRow, ScreenPrompt } from '@switchboard/protocol';
+import type { ArtifactView, ItemView, PageRow, ReplyView, ScreenPrompt } from '@switchboard/protocol';
 import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane, sourceIcons } from './list.js';
@@ -6080,6 +6080,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // period changes nothing the operator sees.
       const keep = type === 'hello' && typeof data['key'] === 'string' && data['key'] !== keyBefore && data['scope'] == null && wanted !== null && state.scope?.workItemId === wanted;
       const before = state;
+      // What a spoken reply's progress can change: its spoken state, which only its first progress event changes to playing.
+      const spokenBefore = type === 'progress' ? state.items.find((item): item is ReplyView => item.id === data['replyId'] && item.type === 'reply')?.spoken.state : undefined;
 
       state = applyEvent(state, data);
       // A state whose body changed is unread again under the same ID, so it is reported seen again once it shows.
@@ -6206,6 +6208,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         liveWords.textContent = String(data['text'] ?? '');
         liveWords.hidden = liveWords.textContent === '';
         showLive();
+        // The box grew or shrank under the conversation, which stays at its end.
+        followEnd();
       } else if (type === 'draft' && typeof data['sessionId'] === 'string') {
         takeHubDraft(data['sessionId'], String(data['text'] ?? ''), typeof data['added'] === 'string' ? data['added'] : null, typeof data['piece'] === 'number' ? data['piece'] : null);
       }
@@ -6316,8 +6320,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
 
       applyHostSelection();
-      // A burst of events, such as a long history read, draws once per frame, not once per event.
-      drawSoon();
+      // A burst of events, such as a long history read, draws once per frame, not once per event. Live words are drawn above, outside the
+      // page's tree. A reply's progress, every 150 ms while it is read aloud, draws only when it starts the reply playing: the page
+      // shows no place in a reply, only its spoken state (a failure's mark, the part of an interrupted reply not heard).
+      if (type !== 'words' && !(type === 'progress' && (spokenBefore === undefined || spokenBefore === 'playing'))) {
+        drawSoon();
+      }
 
       if (type === 'session' || type === 'hello') {
         void readPrompt();
