@@ -3,7 +3,8 @@
 // groups' headings at 14 px, and its pinned state on the first screen), History's filter and the Changes tree's search box (each at least 160 px
 // wide and covered by nothing else of its bar, with History's chips shown and the search's options menu open), Settings, the drawer, a sheet,
 // a work item with more tabs than fit, the composer under each other tab and a maximized column with the mic on, a conversation with questions waiting, the long Actions, More actions, row and More tabs menus, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
-// a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, and the More menu lies above everything under it. Line 2 is one line, never wrapping and its items never
+// a tab's unread dot sits at its label's top-right, clear of its close mark and taking no width, two unselected tabs side by side show a line or fills
+// at 1.25:1 between them, and the More menu lies above everything under it. Line 2 is one line, never wrapping and its items never
 // below one another, at several list widths down to 200 px; its playbook or host is cut, with an ellipsis and a tooltip naming it whole, only
 // where it does not fit beside the comment icon and the key; a key shows its source's logo, GitHub's, Zoho's or a plugin's, in place of its source's label; every pill, the key included, shows its text where line 2 is 300 px wide or more and its icon alone under that,
 // its text kept for screen readers; the key never drops out; a link pill is whole, its icon alone or left out whole, never cut, the last
@@ -229,6 +230,11 @@ const measure = `(() => {
   const root = document.documentElement;
   const shown = (node) => { for (let one = node; one; one = one.parentElement) { const style = getComputedStyle(one); if (style.display === 'none' || style.visibility === 'hidden') return false; } return true; };
   const scrolls = (node) => /auto|scroll/.test(getComputedStyle(node).overflowY + getComputedStyle(node).overflowX);
+  // A computed colour's red, green, blue and alpha, from rgb(), rgba() or color(srgb), its alpha laid over a colour under it, and contrast ratios.
+  const rgba = (colour) => { const n = (colour.match(/[0-9.]+/g) ?? []).map(Number); const scale = colour.startsWith('color(srgb') ? 255 : 1; return [n[0] * scale, n[1] * scale, n[2] * scale, n[3] ?? 1]; };
+  const over = (top, under) => { const [r, g, b, a] = rgba(top); const [ur, ug, ub] = typeof under === 'string' ? rgba(under) : under; return [r * a + ur * (1 - a), g * a + ug * (1 - a), b * a + ub * (1 - a)]; };
+  const luminance = (rgb) => { const [r, g, b] = rgb.map((one) => { const c = one / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (one, two) => { const [high, low] = [luminance(one), luminance(two)].sort((a, b) => b - a); return Math.round(((high + 0.05) / (low + 0.05)) * 100) / 100; };
   const clipped = (node) => { for (let one = node.parentElement; one && one !== document.body; one = one.parentElement) { if (/auto|scroll|hidden|clip/.test(getComputedStyle(one).overflowY)) return true; } return false; };
   const name = (node) => node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/ +/).join('.') : '');
   const nodes = [...document.querySelectorAll('body *')].filter(shown);
@@ -369,6 +375,23 @@ const measure = `(() => {
         artifacts: tabs.filter((tab) => (tab.dataset.id ?? '').startsWith('artifact:') && !tab.classList.contains('selected') && tab.querySelector('[aria-selected="true"]') === null).length,
         cut: [...strip.querySelectorAll('.tab-label')].filter((label) => !shown(label) || label.getBoundingClientRect().width < Math.min(43.5, label.scrollWidth - 0.5)).map((label) => label.textContent),
         past: tabs.filter((tab) => { const box = tab.getBoundingClientRect(); return box.left < edge.left - 0.5 || box.right > edge.right + 0.5; }).map(name),
+        // Each pair of unselected tabs side by side: the contrast of the line between them against each tab's fill, and of their fills
+        // against each other; and, for the report, the chosen tab's fill and top edge against the strip, and each tab's label against its fill.
+        ...(() => {
+          const strip0 = over(getComputedStyle(strip).backgroundColor, [255, 255, 255]);
+          const fill = (tab) => over(getComputedStyle(tab).backgroundColor, strip0);
+          const chosen = (tab) => tab.classList.contains('selected') || tab.querySelector('[aria-selected="true"]') !== null;
+          const row = tabs.flatMap((one) => (one.classList.contains('tab-more') ? [...one.children].filter((child) => child.matches('.tab')) : one.matches('.tab') ? [one] : []));
+          const seams = row.slice(1).map((right, at) => [row[at], right]).filter(([left, right]) => !chosen(left) && !chosen(right) && !right.matches('.tab-more-button, .panel-max') && left.parentElement === right.parentElement).map(([left, right]) => {
+            const style = getComputedStyle(left);
+            const width = parseFloat(style.borderRightWidth);
+            const line = width >= 1 && style.borderRightStyle !== 'none' ? over(style.borderRightColor, fill(left)) : null;
+            return { left: left.dataset.id, right: right.dataset.id, line: line === null ? null : Math.min(ratio(line, fill(left)), ratio(line, fill(right))), fills: ratio(fill(left), fill(right)) };
+          });
+          const selected = row.find(chosen);
+          const label = (tab) => ratio(over(getComputedStyle(tab).color, fill(tab)), fill(tab));
+          return { seams, contrast: { selectedFill: selected ? ratio(fill(selected), strip0) : null, selectedTop: selected ? ratio(over(getComputedStyle(selected).borderTopColor, fill(selected)), strip0) : null, selectedLabel: selected ? label(selected) : null, labels: Math.min(...row.filter((tab) => !chosen(tab)).map(label)), more: row.filter((tab) => tab.matches('.tab-more-button')).map(label)[0] ?? null } };
+        })(),
         // Each unread dot of a tab: where it lies against its label, its tab and its close mark, and whether hiding it changes the tab's width.
         dots: [...strip.querySelectorAll('.tab .unread-dot:not(.tab-badge > *)')].filter(shown).map((dot) => {
           const tab = dot.closest('.tab');
@@ -558,6 +581,8 @@ const SEARCHES = {
 };
 /** The least width a search field's text keeps, in CSS px. */
 const SEARCH_MIN = 160;
+/** The least contrast, against each other, of the line between two unselected tabs or of their fills. */
+const SEAM_MIN = 1.25;
 
 /** The shown search field's visible width, and the controls of its bar, outside the field's own box, whose boxes cross it. */
 const searchFit = ({ field, bar }) => `(() => {
@@ -820,6 +845,10 @@ function failures(view, size, m) {
   for (const strip of m.strips) {
     if (strip.cut.length > 0) out.push('a tab strip hides or cuts below five characters the labels ' + strip.cut.slice(0, 4).join(', '));
     if (strip.past.length > 0) out.push('a tab passes its strip: ' + strip.past.slice(0, 4).join(', '));
+  }
+  // Two unselected tabs side by side show where one ends: the line between them, or their fills, at SEAM_MIN against each other at least.
+  for (const seam of m.strips.flatMap((strip) => strip.seams)) {
+    if (Math.max(seam.line ?? 1, seam.fills) < SEAM_MIN) out.push('the tabs ' + seam.left + ' and ' + seam.right + ' run together: their line is ' + seam.line + ':1 and their fills ' + seam.fills + ':1, under ' + SEAM_MIN + ':1');
   }
   // A tab's unread dot sits at its label's top-right, inside its tab, clear of its close mark, and takes no width.
   const dots = m.strips.flatMap((strip) => strip.dots);

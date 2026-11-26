@@ -210,6 +210,9 @@ describe('the theme copy', () => {
     expect(css).toMatch(/--sb-tab-strip: color-mix\(in srgb, var\(--sb-tab-surface\), #000 var\(--sb-tab-shade\)\)/);
     expect(css).toMatch(/\.tab\.selected \{[^}]*background: var\(--sb-tab-surface\)/);
     expect(light).toContain('--sb-tab-shade:');
+    // The line between tabs has its own colour in light, where the panel border is lost on the strip.
+    expect(light).toContain('--sb-tab-divider: #CBCCD1;');
+    expect(css).toMatch(/\.tab \{[^}]*border-right: 1px solid var\(--sb-tab-divider\);/);
     // The column's strip starts at its top with no band above, its tabs at their own height, the chosen tab's top edge one pixel down, in the accent.
     expect(css).toMatch(/\.detail-head \{[^}]*align-items: flex-start;[^}]*padding-top: 1px;/);
     expect(css).not.toMatch(/\.detail-head \{[^}]*min-height/);
