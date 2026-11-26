@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { testTemp } from '../../tools/vitest-temp.js';
+import { ciTimeouts } from '../../tools/vitest-timeouts.js';
 
 // The page's model and DOM run in jsdom; the hub's routes are tested in packages/hub.
 export default defineConfig({
@@ -7,6 +8,7 @@ export default defineConfig({
   esbuild: { jsx: 'automatic', jsxImportSource: 'preact' },
   test: {
     env: testTemp(),
+    ...ciTimeouts,
     environment: 'jsdom',
     // A fresh context per file in a kept worker: jsdom costs far less to set up there than in a new process.
     pool: 'vmForks',

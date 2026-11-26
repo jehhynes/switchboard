@@ -1,10 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import { testTemp } from '../../tools/vitest-temp.js';
+import { ciTimeouts } from '../../tools/vitest-timeouts.js';
 
 // The extension's behavior is tested in extensions/chrome; this package tests only what the Firefox build changes.
 export default defineConfig({
   test: {
     env: testTemp(),
+    ...ciTimeouts,
     include: ['test/**/*.test.ts'],
     coverage: {
       provider: 'v8',

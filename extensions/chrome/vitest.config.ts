@@ -1,10 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import { testTemp } from '../../tools/vitest-temp.js';
+import { ciTimeouts } from '../../tools/vitest-timeouts.js';
 
 // Board DOM and hub reads run in jsdom; main.ts and background.ts only wire them to Chrome.
 export default defineConfig({
   test: {
     env: testTemp(),
+    ...ciTimeouts,
     environment: 'jsdom',
     // A fresh context per file in a kept worker: jsdom costs far less to set up there than in a new process.
     pool: 'vmForks',
