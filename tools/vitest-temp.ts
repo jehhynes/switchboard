@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -17,8 +17,13 @@ const STALE_MS = 24 * 60 * 60 * 1000;
  * It also drops every GIT_* variable from the environment the test workers inherit, and stops git's repository search at the shared
  * folder: a commit hook sets GIT_DIR to the checkout being committed to, and `git init` or `git config` run with it writes to the
  * repository's shared config, as tools/git-guard.mjs explains.
+ *
+ * The folder is given by its real path, so a test comparing a path it made with one the code resolved agrees even where the OS temp
+ * folder is a short 8.3 name, as on GitHub's Windows runners (C:\Users\RUNNER~1), or reached through a link.
  */
-export function testTemp(base = tmpdir()): Record<string, string> {
+export function testTemp(given = tmpdir()): Record<string, string> {
+  const base = realPath(given);
+
   for (const name of Object.keys(process.env)) {
     if (name.toUpperCase().startsWith('GIT_')) delete process.env[name];
   }
@@ -54,6 +59,14 @@ export function removeStale(root: string, now = Date.now(), alive = processAlive
     } catch {
       // Gone already, or another run is removing it.
     }
+  }
+}
+
+function realPath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
   }
 }
 

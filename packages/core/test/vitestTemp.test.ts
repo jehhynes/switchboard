@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -27,6 +27,19 @@ describe('testTemp', () => {
     expect(existsSync(env['TEMP']!)).toBe(true);
     expect([env['TMP'], env['TMPDIR']]).toEqual([env['TEMP'], env['TEMP']]);
     expect(env).toMatchObject({ CLAUDE_CONFIG_DIR: join(root, 'claude-home'), CODEX_HOME: join(root, 'codex-home'), GIT_CEILING_DIRECTORIES: root });
+  });
+
+  it('TestTemp_BaseThroughALink_GivesTheRealPath', () => {
+    const real = mkdtempSync(join(tmpdir(), 'temp-real-'));
+    const link = join(mkdtempSync(join(tmpdir(), 'temp-link-')), 'base');
+
+    symlinkSync(real, link, 'junction');
+
+    const env = testTemp(link);
+    const root = join(realpathSync.native(real), 'switchboard-tests');
+
+    expect(dirname(env['TEMP']!)).toBe(root);
+    expect(env['GIT_CEILING_DIRECTORIES']).toBe(root);
   });
 
   it('TestTemp_InsideARunsFolder_KeepsThatFolder', () => {
