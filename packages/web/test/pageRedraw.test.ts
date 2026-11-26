@@ -135,7 +135,7 @@ describe('the page', () => {
     page.close();
   });
 
-  it('keeps the composer\'s box across tabs, says Sent in the toast after a send that ends off the Conversation tab, shows it for files dropped there, and shows an ended session\'s reason above the composer', async () => {
+  it('keeps the composer\'s box across tabs, says Sent in the toast after a send that ends off the Chat tab, shows it for files dropped there, and shows an ended session\'s reason above the composer', async () => {
     const { page, source } = start();
     const composer = root.querySelector<HTMLElement>('#composer')!;
 
@@ -152,13 +152,13 @@ describe('the page', () => {
     await flush();
     expect(posts.some((post) => post.url.endsWith('/send') && post.body['text'] === 'From the status')).toBe(true);
     expect(root.querySelector('.tab.selected')?.getAttribute('data-tab')).toBe('history');
-    // The folded tabs hide the composer off the Conversation tab, so the toast says it went, not the composer's own line.
+    // The folded tabs hide the composer off the Chat tab, so the toast says it went, not the composer's own line.
     expect(root.classList.contains('off-conversation')).toBe(true);
     expect(composer.querySelector<HTMLElement>('.composer-sent')!.hidden).toBe(true);
-    expect(root.querySelector('.toast.info .toast-text')?.textContent).toBe('Sent. Its reply shows on the Conversation tab.');
+    expect(root.querySelector('.toast.info .toast-text')?.textContent).toBe('Sent. Its reply shows on the Chat tab.');
     expect(SENT_NOTE_MS).toBe(4_000);
 
-    // Files dropped on another tab show the Conversation tab, where the composer shows their chips.
+    // Files dropped on another tab show the Chat tab, where the composer shows their chips.
     const dropped = new Event('drop', { bubbles: true, cancelable: true });
     Object.defineProperty(dropped, 'dataTransfer', { value: { types: ['Files'], files: [new File(['d'], 'report.pdf', { type: 'application/pdf' })] } });
     root.querySelector('#panel')!.dispatchEvent(dropped);
@@ -278,7 +278,7 @@ describe('the page', () => {
     vi.advanceTimersByTime(DICTATION_GRACE_MS);
     expect(offTab()).toBe(true);
 
-    // On the Conversation tab nothing changes, and the wide layout keeps the composer with the conversation, marking the mic for the maximized column.
+    // On the Chat tab nothing changes, and the wide layout keeps the composer with the conversation, marking the mic for the maximized column.
     source.emit('session', { session: session() });
     root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     expect(offTab()).toBe(false);

@@ -5,7 +5,7 @@ import type { FrameLink } from './iframeBrowser.js';
 import type { LocalFilesView, LocalTab } from './localFiles.js';
 import type { Tab } from './render.js';
 
-/** Which strip: the side column's on a wide page, or the conversation's on a narrower one, which adds Conversation. */
+/** Which strip: the side column's on a wide page, or the conversation's on a narrower one, which adds Chat. */
 export type StripLayout = 'wide' | 'narrow';
 
 /** What a strip can show: which tab shows, and each tab's source. */
@@ -48,7 +48,7 @@ export type DocTab =
 export const filePath = (tab: LocalTab): string => (tab.entry.state === 'ok' ? tab.entry.data.path : tab.target);
 
 /**
- * The strip's tabs in order, each only while it applies: Conversation (narrow strip only), Changes, History, the links (or Browser),
+ * The strip's tabs in order, each only while it applies: Chat (narrow strip only), Changes, History, the links (or Browser),
  * the artifacts newest first but those closed, unless shown, the file tabs in the order they were opened, then Console.
  */
 export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
@@ -94,8 +94,8 @@ const FIRST_KEPT = ['conversation', 'changes', 'history'];
 /**
  * Which of a strip's tabs show and which go in More, each list in strip order. Every tab shows while all fit at their least widths, with More
  * beside them when `menu` (closed artifacts for it to list). Else More takes its room and the tabs are kept in this order while they fit: the
- * selected tab, Conversation, Changes, History, then the rest in strip order, stopping at the first that does not fit; so a very narrow strip drops
- * History first, then Changes, then Conversation, and keeps the selected tab whatever its width, every tab reachable through More. An unmeasured strip shows them all.
+ * selected tab, Chat, Changes, History, then the rest in strip order, stopping at the first that does not fit; so a very narrow strip drops
+ * History first, then Changes, then Chat, and keeps the selected tab whatever its width, every tab reachable through More. An unmeasured strip shows them all.
  */
 export function fitTabs(tabs: readonly DocTab[], fit: TabFit, menu = false): { shown: DocTab[]; hidden: DocTab[] } {
   const least = (tab: DocTab): number => fit.measured[tab.id] ?? (closable(tab) ? fit.closable : fit.plain);

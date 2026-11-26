@@ -143,7 +143,7 @@ describe('fitTabs', () => {
   // Every tab 100 px, a closable one 120 px, More 60 px.
   const fit = (width: number, measured: Record<string, number> = {}): TabFit => ({ width, more: 60, plain: 100, closable: 120, measured });
   const all = ['conversation', ...ORDER];
-  // 4 plain tabs (Conversation, Changes, History, Console) and 7 closable ones (two links, three artifacts, two files).
+  // 4 plain tabs (Chat, Changes, History, Console) and 7 closable ones (two links, three artifacts, two files).
   const total = 4 * 100 + 7 * 120;
 
   it('FitTabs_UnmeasuredOrRoomForAll_ShowsEveryTab', () => {
@@ -155,7 +155,7 @@ describe('fitTabs', () => {
   });
 
   it('FitTabs_TooNarrow_KeepsTheSelectedTabConversationChangesAndHistoryThenTheRestInStripOrder', () => {
-    // 60 for More, 120 for the selected artifact, 100 each for Conversation, Changes and History, then the first link at 120: 600.
+    // 60 for More, 120 for the selected artifact, 100 each for Chat, Changes and History, then the first link at 120: 600.
     const [shown, hidden] = ids2(fitTabs(tabs, fit(600)));
 
     expect(shown).toEqual(['conversation', 'changes', 'history', `link:${links[0]!.url}`, 'artifact:chat/a2.md']);

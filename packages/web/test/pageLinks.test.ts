@@ -402,7 +402,7 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it("opens every work item on the Conversation tab in the phone's layout, whatever tab it kept or the column would show, and keeps a tab chosen until another work item opens", async () => {
+  it("opens every work item on the Chat tab in the phone's layout, whatever tab it kept or the column would show, and keeps a tab chosen until another work item opens", async () => {
     window.innerWidth = 375;
     history.replaceState(null, '', '#');
     onTestFinished(() => {

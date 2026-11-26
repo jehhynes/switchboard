@@ -441,7 +441,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    * The tabs a work item opens on: Console or an artifact kept for it while it still applies; otherwise Browser when embedded tabs has links of
    * the work item to show and the operator last chose Browser, or the work item has no state yet, or before any choice when it also has no
    * session yet; otherwise History. That is the column's tab; where the column folds into the conversation's tabs, the work item opens on the
-   * Conversation tab.
+   * Chat tab.
    */
   const openTabs = (): void => {
     const saved = savedTabs?.workItemId === state.scope?.workItemId ? savedTabs?.tab : null;
@@ -552,7 +552,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.tab = view.tab === 'browser' ? 'conversation' : view.tab;
     } else {
       view.tab = tab;
-      // A tab of the column chosen here is the column's choice too; Conversation leaves the column's choice, but Browser.
+      // A tab of the column chosen here is the column's choice too; Chat leaves the column's choice, but Browser.
       view.side = tab !== 'conversation' ? tab : view.side === 'browser' ? 'history' : view.side;
     }
   };
@@ -1150,10 +1150,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const confirmSent = (): void => {
     clearTimeout(sentTimer);
 
-    // Where the tabs fold into the conversation's, the composer hides off the Conversation tab, so the toast says it there.
+    // Where the tabs fold into the conversation's, the composer hides off the Chat tab, so the toast says it there.
     if (root.classList.contains('off-conversation')) {
       sentNote.hidden = true;
-      toastBox.show('Sent. Its reply shows on the Conversation tab.', 'info');
+      toastBox.show('Sent. Its reply shows on the Chat tab.', 'info');
       return;
     }
 
@@ -1621,7 +1621,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       event.preventDefault();
 
-      // Files dropped on another tab, where the tabs fold and the composer hides, show the Conversation tab, so their chips show.
+      // Files dropped on another tab, where the tabs fold and the composer hides, show the Chat tab, so their chips show.
       if (root.classList.contains('off-conversation') && canAttach()) {
         leaving('conversation');
         chooseTab('conversation');
@@ -2734,9 +2734,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     root.classList.toggle('wide', side);
     root.classList.toggle('item-opening', pending !== null);
-    // Where the tabs fold into the conversation's, the composer and the note show only on the Conversation tab while the mic is off (page.css);
+    // Where the tabs fold into the conversation's, the composer and the note show only on the Chat tab while the mic is off (page.css);
     // while it is on, the composer shows under every tab, and the maximized column ends above it.
-    // A work item being opened opens on the Conversation tab there, so its composer keeps its place meanwhile.
+    // A work item being opened opens on the Chat tab there, so its composer keeps its place meanwhile.
     const micShown = dictating();
 
     root.classList.toggle('dictating', micShown);
@@ -3190,7 +3190,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawConnection();
     keepRoute();
   };
-  /** The tab the route names for the shown work item: the column's on a wide page, else the conversation pane's; null for the Conversation. */
+  /** The tab the route names for the shown work item: the column's on a wide page, else the conversation pane's; null for Chat. */
   /** The route for what the page shows: its work item, the column's tab on a wide page, else the conversation pane's, History among them, and what that tab shows (route.ts). */
   const routeOf = (): Route => {
     const tab = wide() ? sideTab() : mainTab();
@@ -3449,7 +3449,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       view.side = set.side as SideTab;
     }
 
-    // Where the column folds into the conversation's strip, every opening shows the Conversation tab (PRD R109); the column's tab waits in `side`.
+    // Where the column folds into the conversation's strip, every opening shows the Chat tab (PRD R109); the column's tab waits in `side`.
     view.tab = wide() && TABS.some((one) => one.tab === set.tab) ? (set.tab as Tab) : 'conversation';
 
     // An artifact gone or closed since leaves its tab to History (`sideTab`, `mainTab`).
@@ -3877,7 +3877,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       history.replaceState(history.state, '', `#w=${workItemId}`);
     }
 
-    // Where the column folds into the conversation's tabs, the work item already open shows its Conversation tab again; another opens on it
+    // Where the column folds into the conversation's tabs, the work item already open shows its Chat tab again; another opens on it
     // with its hello (`openTabs`), so a refused select leaves the open work item's tab as it was.
     if (state.scope?.workItemId === workItemId && !wide()) {
       view.tab = 'conversation';
@@ -4101,7 +4101,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /**
    * Shows the tab the route names for the work item shown, as no choice of the operator's (`openDoc` without `chosen`): an artifact gone or
    * closed on every device gives way to History. Where the column folds into the conversation's strip, the route's tab waits in the column's
-   * choice and the page shows the Conversation tab, as every opening does there (PRD R109).
+   * choice and the page shows the Chat tab, as every opening does there (PRD R109).
    */
   const routeTab = (): void => {
     const route = routing;

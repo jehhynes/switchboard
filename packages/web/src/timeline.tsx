@@ -1,4 +1,4 @@
-// The Conversation tab (architecture.md § Web page): the cards of questions carried past retention, our messages, the replies with their primary
+// The Chat tab (architecture.md § Web page): the cards of questions carried past retention, our messages, the replies with their primary
 // responses and question cards, artifact rows, the turn row, and the prompt or Codex request the session waits on.
 import type { VNode } from 'preact';
 import { fullTime, metaLine, spokenMark, stamped, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
@@ -380,7 +380,7 @@ function startOfDay(at: number): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
-/** The Conversation tab: why the page cannot talk to the session, earlier messages, and the timeline with its spinner. */
+/** The Chat tab: why the page cannot talk to the session, earlier messages, and the timeline with its spinner. */
 export function renderTimeline(state: PageState, view: View, now: number = Date.now()): VNode {
   // New conversation…'s draft is empty until its first message starts its session (architecture.md § Web page).
   if (view.newDraft !== null && view.newDraft.workItemId === state.scope?.workItemId) {

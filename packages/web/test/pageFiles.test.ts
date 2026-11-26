@@ -668,7 +668,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(kept()).toBe(before);
     page.close();
 
-    // A file tab restored on a narrow page waits for the column while the Conversation shows; read as an artifact, the artifact waits there instead.
+    // A file tab restored on a narrow page waits for the column while Chat shows; read as an artifact, the artifact waits there instead.
     window.innerWidth = 1000;
     localStorage.setItem('switchboard.tabs', JSON.stringify({ w1: { side: 'file', tab: 'conversation', artifact: null, changes: false, changesFile: null, files: [{ target: plan, line: null }], file: 0, history: false } }));
     answers['local-file'] = artifactRead;

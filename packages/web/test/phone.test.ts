@@ -36,7 +36,7 @@ describe('the page on a phone', () => {
     expect(css).toMatch(/\.scroll\.console-pane \{[^}]*padding: 0 0 var\(--sb-end\);/);
     // A framed HTML or PDF artifact scrolls inside its frame, so the frame ends above the inset.
     expect(css).toContain('.scroll.framed { display: flex; flex-direction: column; padding: 0 0 var(--sb-end); }');
-    // Where the composer hides off the Conversation tab, by the same condition, the other tabs keep the inset.
+    // Where the composer hides off the Chat tab, by the same condition, the other tabs keep the inset.
     expect(css).toContain('#root.off-conversation #note, #root.off-conversation #composer { display: none; }');
     expect(css).toContain('\n#root.off-conversation > .main { --sb-end: env(safe-area-inset-bottom); }\n');
     // Full-screen Settings runs to the edge too, its bar holding the inset, or without the bar its page and navigation.

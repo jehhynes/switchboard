@@ -59,7 +59,7 @@ Do not test type declarations, pass-through property bags, or simple settings re
 | Hub server | Vitest with test-owned loopback listeners | Routes, streams and their refusals |
 | Built hub | Spawn the built hub under a temporary home | Startup, single instance, shutdown, and `hub.js install` from the standalone build into a temporary home |
 | Conversation | Vitest (`packages/conversation`) | Reading transcripts and screens, states, question cards, the composer's input and the shared markup |
-| Web page | Vitest/jsdom (`packages/web`) | The page's model, rendering, escaping, keys and requests, including the Conversation, History, Changes and Console tabs |
+| Web page | Vitest/jsdom (`packages/web`) | The page's model, rendering, escaping, keys and requests, including the Chat, History, Changes and Console tabs |
 | Chrome extension | Vitest/jsdom with recorded board markup and an injected hub | Card marks, menus, popups, requests and refusals; the Switchboard tab group and the page's link requests, with fake Chrome calls |
 | Firefox extension | Vitest on the Chrome manifest and `content.css`, with fake git, `gh` and `web-ext` steps | The Firefox build, versioning, signing and release, and refusal of Chrome inputs the build no longer recognises |
 | Terminal holder | Vitest with an injected pseudo-terminal factory and test-owned loopback listeners | Spawn, list, kill, replay, resize, clients, the handshake, limits and idle exit |

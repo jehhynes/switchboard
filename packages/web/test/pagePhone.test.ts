@@ -593,14 +593,14 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     root.querySelector<HTMLElement>('#head [data-tab="history"]')!.click();
     expect(root.classList.contains('off-conversation')).toBe(true);
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
-    // It opens on the Conversation tab, so the composer keeps its place meanwhile.
+    // It opens on the Chat tab, so the composer keeps its place meanwhile.
     expect(root.classList.contains('off-conversation')).toBe(false);
-    expect(labels('#head .opening-tabs .tab')).toEqual(['Conversation', 'History', 'Console']);
+    expect(labels('#head .opening-tabs .tab')).toEqual(['Chat', 'History', 'Console']);
     await flush();
     await flush();
     expect(root.querySelector('#panel .opening-failed')).not.toBeNull();
     expect(root.classList.contains('wide')).toBe(false);
-    expect(labels('#head .opening-tabs .tab')).toEqual(['Conversation', 'History', 'Console']);
+    expect(labels('#head .opening-tabs .tab')).toEqual(['Chat', 'History', 'Console']);
     resizeTo(1440);
     expect(root.classList.contains('wide')).toBe(true);
     expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['History', 'Console']);

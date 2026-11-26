@@ -213,7 +213,7 @@ function totals(list: ChangesList): { viewed: number; additions: number; deletio
 }
 
 /**
- * The Changes tab, the strip's one Changes item, first after Conversation (tabs.ts): how many files are viewed of all once the list
+ * The Changes tab, the strip's one Changes item, first after Chat (tabs.ts): how many files are viewed of all once the list
  * was read. Choosing it opens the diffs; it has no close mark, as the other fixed tabs have none.
  */
 export function changesTab(changes: ChangesView, shown: boolean): VNode {

@@ -492,10 +492,10 @@ try {
       const hash = await evaluate('location.hash');
 
       if (hash !== '#w=2&t=history') found.push('the address names ' + hash);
-      // Where the column folds into the conversation's strip, every opening shows the Conversation tab (PRD R109), a reload's too, and the
+      // Where the column folds into the conversation's strip, every opening shows the Chat tab (PRD R109), a reload's too, and the
       // address follows it.
       await send('Page.reload');
-      if (!(await until('document.querySelector("#head .tab.selected")?.dataset.tab === "conversation" && location.hash === "#w=2"', 8_000))) found.push('a reload did not come back to work item 2 on the Conversation tab: ' + (await evaluate('location.hash')));
+      if (!(await until('document.querySelector("#head .tab.selected")?.dataset.tab === "conversation" && location.hash === "#w=2"', 8_000))) found.push('a reload did not come back to work item 2 on the Chat tab: ' + (await evaluate('location.hash')));
       await send('Page.navigate', { url: base });
       if (!(await until('document.querySelector("#head .tab.selected")?.dataset.tab === "conversation" && location.hash === "#w=2"', 8_000))) found.push('a start with no hash did not come back to work item 2: ' + (await evaluate('location.hash')));
       await evaluate('document.querySelector("#head [data-tab=\\"conversation\\"]")?.click()');

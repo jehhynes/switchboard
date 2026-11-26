@@ -14,7 +14,7 @@ import type { TabFit } from './tabs.js';
 /** `diff` shows the open file's diff tab (`changes.tsx`), which has no fixed tab of its own. */
 export type Tab = 'conversation' | 'history' | 'artifacts' | 'console' | 'browser' | 'diff' | 'file';
 export const TABS: Array<{ tab: Tab; label: string; icon: string }> = [
-  { tab: 'conversation', label: 'Conversation', icon: 'comment-discussion' },
+  { tab: 'conversation', label: 'Chat', icon: 'comment-discussion' },
   { tab: 'history', label: 'History', icon: 'history' },
   { tab: 'artifacts', label: 'Artifacts', icon: 'files' },
   { tab: 'console', label: 'Console', icon: 'terminal' },

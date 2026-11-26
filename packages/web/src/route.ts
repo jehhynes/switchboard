@@ -4,7 +4,7 @@
 
 /**
  * The open work item and its tab: `history`, `console`, `artifact:<path>`, `link` with the link tab's URL `u`, `changes` with the file
- * `f` its diff was at, or `file` with the local file `p` at line `l`; null for its Conversation. An address from before link tabs had URLs names
+ * `f` its diff was at, or `file` with the local file `p` at line `l`; null for its Chat tab. An address from before link tabs had URLs names
  * `browser`, read as `link` with no URL, and one from before History took the Status tab's place names `status`, read as `history`. `h` is the ticket whose History an address from before History was a tab showed, with its key, which
  * the page opens as the History tab. `list` is the phone's list (`#list`), which names no work item.
  */

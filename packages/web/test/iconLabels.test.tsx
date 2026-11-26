@@ -60,13 +60,13 @@ describe('the tab strips', () => {
     // In the strip's order (tabs.ts): History before the links, Console last, after Changes.
     // Each shows an icon before its label, whichever codicon it is, and is titled by its label.
     expect(tabs.map((tab) => [tab.dataset['tab'], tab.querySelector('.codicon') !== null, tab.querySelector('.tab-label')!.textContent, tab.title])).toEqual([
-      ['conversation', true, 'Conversation', 'Conversation'],
+      ['conversation', true, 'Chat', 'Chat'],
       ['history', true, 'History', 'History'],
       ['browser', true, 'Browser', 'Browser'],
       ['console', true, 'Console', 'Console'],
     ]);
     // History's unread dot stays in its name once the label is hidden.
-    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Conversation', 'History, unread', 'Browser', 'Console']);
+    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Chat', 'History, unread', 'Browser', 'Console']);
     expect(strips[0]!.querySelector('.changes-tab ~ [data-tab="console"]')).not.toBeNull();
     // History has no close mark.
     expect(strips.map((strip) => strip.querySelector('[data-action="close-history"]'))).toEqual([null, null]);

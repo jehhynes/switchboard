@@ -853,7 +853,7 @@ body.artifact-window > .artifact-view { height: 100%; }
   .composer-input { font-size: 16px; }
   input:not([type="checkbox"], [type="radio"], [type="file"]), textarea, select { font-size: 16px !important; }
 }
-/* Where the composer hides off the Conversation tab (below), the other tabs' scrollers keep the home indicator's inset. */
+/* Where the composer hides off the Chat tab (below), the other tabs' scrollers keep the home indicator's inset. */
 #root.off-conversation > .main { --sb-end: env(safe-area-inset-bottom); }
 /* On a touch screen every icon button in the bars, inside a menu's anchor or not, is at least 44 px square, with its glyph at 20 px, centred. */
 @media (hover: none), (pointer: coarse) {
@@ -1004,7 +1004,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
    the column, at least 360 px (DETAIL_MIN), takes the rest of the width, so a wide screen gives the status and artifacts the room. */
 .detail { display: none; }
 /* Where the tabs fold into the conversation's, as on a phone, the other tabs get the whole height while the mic is off: the composer and the
-   ended session's note above it show only on the Conversation tab (#root.off-conversation, set by main.ts), hidden rather than removed so the
+   ended session's note above it show only on the Chat tab (#root.off-conversation, set by main.ts), hidden rather than removed so the
    draft, attachments and live words stay and a voice reply plays on. While the mic is on main.ts leaves the class off, so the composer shows
    under every tab, which ends above it, as dictation's sign. A wide layout always shows the conversation here. */
 #root.off-conversation #note, #root.off-conversation #composer { display: none; }

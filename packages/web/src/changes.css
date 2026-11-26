@@ -1,4 +1,4 @@
-/* The Changes tab (architecture.md § Web page): its tab first in the strip after Conversation, its bar above the diffs, and its Files menu under the bar, as
+/* The Changes tab (architecture.md § Web page): its tab first in the strip after Chat, its bar above the diffs, and its Files menu under the bar, as
    wide as a path needs up to the pane's width. Status letters and counts take 2026 Dark's and 2026 Light's git decoration colours; renamed, which
    they leave unset, takes untracked's. */
 :root { --sb-git-added: #73c991; --sb-git-modified: #e5ba7d; --sb-git-deleted: #f48771; --sb-git-untracked: #73c991; --sb-git-renamed: #73c991; --sb-git-conflict: #f48771; }

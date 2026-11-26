@@ -491,7 +491,7 @@ export function renderMaximize(maximized: boolean): VNode {
   );
 }
 
-/** The conversation's tab strip on a narrower screen: Conversation, then the column's tabs in the same order (`stripContent`). */
+/** The conversation's tab strip on a narrower screen: Chat, then the column's tabs in the same order (`stripContent`). */
 export function renderTabs(view: View, state: PageState, browser = false, strip: ArtifactStrip = { open: null, menu: false, now: 0 }, console = true): VNode {
   return (
     <nav class="tabs" role="tablist">

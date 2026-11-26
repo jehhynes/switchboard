@@ -253,7 +253,7 @@ describe('the page in use', () => {
     expect(location.hash).toBe('#w=1&t=history');
     hello(source);
     expect(root.classList.contains('listing')).toBe(false);
-    // Where the column folds into the conversation's strip, the opening shows the Conversation tab (PRD R109), and the address follows it.
+    // Where the column folds into the conversation's strip, the opening shows the Chat tab (PRD R109), and the address follows it.
     expect(root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab']).toBe('conversation');
     expect(location.hash).toBe('#w=1');
     if (root.querySelector('#head [data-action="artifact"][data-path="chat/plan.md"]') === null) {
@@ -443,7 +443,7 @@ describe('the page in use', () => {
     window.innerWidth = 1024;
   });
 
-  it("applies a phone's conversation entry's route on the browser's forward, showing the Conversation tab with the route's tab kept for the column", async () => {
+  it("applies a phone's conversation entry's route on the browser's forward, showing the Chat tab with the route's tab kept for the column", async () => {
     window.innerWidth = 375;
     history.replaceState(null, '', '#list');
     history.pushState({ switchboardConversation: true }, '', '#w=2&t=status');

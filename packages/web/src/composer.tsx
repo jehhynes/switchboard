@@ -48,7 +48,7 @@ export function renderComposer(): VNode {
       <button class="question-waiting" type="button" data-action="goto-card" title="Go to the questions" hidden></button>
       <div class="composer-sent" role="status" hidden>
         <span class="codicon codicon-check" aria-hidden="true"></span>
-        <span>Sent. Its reply shows on the Conversation tab.</span>
+        <span>Sent. Its reply shows on the Chat tab.</span>
       </div>
       <div class="composer">
         <div class="glass composer-menu" id="composer-list" role="listbox" hidden></div>

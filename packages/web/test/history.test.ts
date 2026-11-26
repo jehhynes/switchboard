@@ -681,9 +681,9 @@ describe("the page's History tab in use", () => {
     expect(document.documentElement.classList.contains('phone')).toBe(true);
     const tabs = () => [...root.querySelectorAll('#head .tabs > .tab')].map((one) => one.textContent);
 
-    expect(tabs()).toEqual(['Conversation', 'Changes', 'History']);
+    expect(tabs()).toEqual(['Chat', 'Changes', 'History']);
     openTab();
-    expect(tabs()).toEqual(['Conversation', 'Changes', 'History']);
+    expect(tabs()).toEqual(['Chat', 'Changes', 'History']);
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     await flush();
     expect(root.querySelector('#panel.history-pane .history-view h1')?.textContent).toBe('Inbox <badge>');
