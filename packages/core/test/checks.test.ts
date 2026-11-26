@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { HELD, takeSlot } from '../../../tools/check-lock.mjs';
 import { checkPlan } from '../../../tools/check-plan.mjs';
+import { unitTests } from '../../../tools/run-tests.mjs';
 
 // The workspace graph in package.json order, cut down: hub takes web, the app takes hub and chrome.
 const WORKSPACES = [
@@ -109,5 +110,14 @@ describe('takeSlot', () => {
     takeSlot({ dir, env: {}, pid: 888, slots: 2, alive: () => true, sleep: () => { throw new Error('waited'); }, log: () => {} });
     expect(readFileSync(join(dir, 'switchboard-check-1.lock'), 'utf8')).toBe('777');
     expect(readFileSync(join(dir, 'switchboard-check-2.lock'), 'utf8')).toBe('888');
+  });
+});
+
+describe('unitTests', () => {
+  it('UnitTests_NamedProjects_PassWithNoTestsOnlyThen', () => {
+    // apps/hub has only integration tests, so a named project may have none; every workspace's run, or named files, must find some.
+    expect(unitTests({ projects: ['@switchboard/hub-app'] }).args).toEqual(['vitest', 'run', '--coverage.enabled=false', '--passWithNoTests', '--exclude', '**/*.int.test.ts', '--exclude', '**/node_modules/**', '--project', '@switchboard/hub-app']);
+    expect(unitTests().args).not.toContain('--passWithNoTests');
+    expect(unitTests({ projects: ['@switchboard/web'], files: ['packages/web/test/page.test.ts'] }).args).not.toContain('--passWithNoTests');
   });
 });
