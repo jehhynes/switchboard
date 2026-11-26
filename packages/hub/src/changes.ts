@@ -328,24 +328,34 @@ async function indexStamp(path: string | null): Promise<string | null> {
 /**
  * HEAD's commit, the commits of {@link BASE_REFS} and the index file (`indexStamp`), which decide the merge base, the commits since it, what a
  * range names and the staged changes with their renames (`WorktreeChanges.stamp`): `head` HEAD's commit, null when it has none, `stamp` null
- * when a read failed, `index` the index file's path.
+ * when a read failed, `index` the index file's path, `bases` the base refs some ref of which exists, all of them when the refs could not be read.
  */
-async function readStamp(folder: string, git: Git): Promise<{ head: string | null; stamp: string | null; index: string | null }> {
+async function readStamp(folder: string, git: Git): Promise<{ head: string | null; stamp: string | null; index: string | null; bases: readonly string[] }> {
   const [read, refs] = await Promise.all([
     git(['rev-parse', '--path-format=absolute', '--git-path', 'index', '--verify', 'HEAD'], folder),
-    git(['for-each-ref', '--format=%(refname) %(objectname)', ...BASE_REFS.map((ref) => `refs/remotes/${ref}`)], folder),
+    git(['for-each-ref', '--format=%(refname) %(objectname)', ...BASE_REFS.flatMap(refsNamed)], folder),
   ]);
   const [index = '', head = ''] = read.stdout.toString('utf8').trim().split('\n').map((line) => line.trim());
   const ok = read.code === 0 && SHA.test(head) && index !== '';
+  const lines = refs.stdout.toString('utf8').split('\n').filter((line) => line !== '');
+  const listed = new Set(lines.map((line) => line.split(' ')[0]));
+  const bases = refs.code === 0 ? BASE_REFS.filter((ref) => refsNamed(ref).some((name) => listed.has(name))) : BASE_REFS;
+  // The stamp holds the remote refs alone, as `stillHolds` reads them.
+  const remote = lines.filter((line) => BASE_REFS.some((ref) => line.startsWith(`refs/remotes/${ref} `) || line.startsWith(`refs/remotes/${ref}/`))).map((line) => `${line}\n`).join('');
 
   const indexed = ok ? await indexStamp(index) : null;
 
-  return { head: ok ? head : null, index: index || null, stamp: ok && refs.code === 0 && indexed !== null ? `${head}\n${refs.stdout.toString('utf8')}\n${indexed}` : null };
+  return { head: ok ? head : null, index: index || null, bases, stamp: ok && refs.code === 0 && indexed !== null ? `${head}\n${remote}\n${indexed}` : null };
 }
 
-/** The first of {@link BASE_REFS} that shares history with HEAD, or null. */
-async function mergeBase(root: string, git: Git): Promise<string | null> {
-  for (const ref of BASE_REFS) {
+/** The full refs git tries for a short name such as `origin/main`, in its order (gitrevisions § SPECIFYING REVISIONS). */
+function refsNamed(ref: string): string[] {
+  return [`refs/${ref}`, `refs/tags/${ref}`, `refs/heads/${ref}`, `refs/remotes/${ref}`, `refs/remotes/${ref}/HEAD`];
+}
+
+/** The first of `bases`, the {@link BASE_REFS} that exist, that shares history with HEAD, or null. */
+async function mergeBase(root: string, bases: readonly string[], git: Git): Promise<string | null> {
+  for (const ref of bases) {
     const found = await git(['merge-base', 'HEAD', ref], root);
     const sha = found.stdout.toString('utf8').trim();
 
@@ -420,7 +430,7 @@ export async function readChanges(
 ): Promise<WorktreeChanges | { error: string; stale?: true }> {
   // Read side by side in the folder, which must be its repository's top, and checked in this order once both are back. HEAD and the base refs
   // are read before anything that depends on them, so a ref that moves later leaves a stamp that no longer matches, never one newer than the read.
-  const [top, { head: headRead, stamp, index }] = await Promise.all([git(['rev-parse', '--show-toplevel'], folder), readStamp(folder, git)]);
+  const [top, { head: headRead, stamp, index, bases }] = await Promise.all([git(['rev-parse', '--show-toplevel'], folder), readStamp(folder, git)]);
   const root = top.stdout.toString('utf8').trim();
 
   if (top.code !== 0 || root === '') {
@@ -441,7 +451,7 @@ export async function readChanges(
 
   const head = headRead;
 
-  const base = await mergeBase(root, git);
+  const base = await mergeBase(root, bases, git);
 
   // A commit the range names must be one since the base, or a range's start the first parent of one, so only this branch's commits are read.
   // Every commit since the base counts, not only those the menu lists, so a commit chosen before more were made is still found.
