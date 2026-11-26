@@ -170,14 +170,15 @@ describe('hub entry point', () => {
       const restarted = await start('restart').exited;
       const after = record()!;
 
-      expect(restarted.code).toBe(0);
+      // hub.js restart waits 60 seconds; a failure shows what it and the hub's log said.
+      expect(restarted.code, `${restarted.stderr}\nhub.log:\n${readFileSync(hubLogPath(home), 'utf8').slice(-6000)}`).toBe(0);
       expect(after.pid).not.toBe(before.pid);
       expect(after.build).toBe(before.build);
       expect(restarted.stdout).toBe(`Restarting the hub (pid ${before.pid}, build ${before.build}) onto build ${before.build}.\nRestarted: pid ${after.pid}, build ${after.build}.\n`);
     } finally {
       await stopAndWait();
     }
-  }, 60_000);
+  }, 90_000);
 
   it("installs the builds a build folder carries on hub.js install, and refuses to run from another folder", async () => {
     const refused = await start('install').exited;
