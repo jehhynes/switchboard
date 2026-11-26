@@ -103,7 +103,7 @@
 /* A file's collapse chevron, before its name; a collapsed file's header expands it too. */
 .diff-chevron { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-right: 2px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-foreground); cursor: pointer; pointer-events: auto; }
 .diff-chevron:hover { background: var(--vscode-toolbar-hoverBackground); }
-@media (hover: none), (pointer: coarse) { .diff-chevron { width: 36px; height: 36px; } }
+@media (hover: none), (pointer: coarse) { .diff-chevron { width: 44px; height: 44px; } }
 @media (hover: none), (pointer: coarse) { .change-viewed { width: 44px; height: 44px; } .change-viewed input, .diff-viewed input { width: 20px; height: 20px; } .diff-viewed { justify-content: center; min-width: 44px; min-height: 44px; } }
 /* The tree beside the diffs (changesTree.tsx): pinned in a column of its own the splitter sizes, or a flyout over the diffs from the bar's
    tree button. Rows are VS Code's Source Control rows: 22 px, a twisty, a label, a dim description, then links that are targets of their own. */
@@ -223,6 +223,9 @@
   .tree-link, .tree-options-button, .tree-pin, .changes-tree-button, .tree-toggle button, .file-toggle button { min-width: 44px; min-height: 44px; }
   .tree-viewed { min-width: 44px; min-height: 44px; justify-content: center; }
   .tree-viewed input { width: 20px; height: 20px; }
+  /* The search field itself is 44 px tall, as the list's is. */
+  .tree-search { padding-top: 0; padding-bottom: 0; }
+  .tree-search input { height: 44px; }
   .tree-item:not(:hover):not(:focus-within) .tree-link.icon { visibility: visible; }
   .diff-view.tree-open > .changes-tree { width: min(360px, 100%); }
   /* A phone's bar keeps Files, the scope and the note; Hide viewed, Collapse all, Expand all, Wrap and Refresh move into ⋯. */

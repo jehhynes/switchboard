@@ -12,10 +12,12 @@
 .qc-head { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 0.9em; line-height: 1.5; }
 .qc-progress { overflow: hidden; color: var(--qc-muted); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .qc-dots { display: inline-flex; gap: 4px; }
-.qc-dot { width: 22px; height: 4px; padding: 0; border: none; border-radius: 2px; background: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); cursor: pointer; }
-.qc-dot.qc-filled { background: color-mix(in srgb, var(--qc-accent) 55%, transparent); }
-.qc-dot.qc-current { background: var(--qc-accent); }
-.qc-dot:focus-visible { outline: 1px solid var(--qc-accent); outline-offset: 3px; }
+/* A step dot is a 22 by 4 px bar centred in its button, which is 24 px tall so a pointer can hit it (and 44 px square on a touch screen, page.css). */
+.qc-dot { position: relative; flex: none; width: 22px; height: 24px; padding: 0; border: none; background: transparent; cursor: pointer; }
+.qc-dot::before { content: ''; position: absolute; top: 50%; left: 50%; width: 22px; height: 4px; border-radius: 2px; transform: translate(-50%, -50%); background: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
+.qc-dot.qc-filled::before { background: color-mix(in srgb, var(--qc-accent) 55%, transparent); }
+.qc-dot.qc-current::before { background: var(--qc-accent); }
+.qc-dot:focus-visible { outline: 1px solid var(--qc-accent); outline-offset: -1px; }
 .qc-menu-anchor { position: relative; flex: none; margin-left: auto; }
 .qc-menu-button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-descriptionForeground); cursor: pointer; }
 .qc-menu-button:hover, .qc-menu-button:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15)); color: var(--vscode-foreground); }

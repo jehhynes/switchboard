@@ -292,6 +292,8 @@ describe('GitHub-flavoured Markdown', () => {
     expect(host.querySelectorAll('details')).toHaveLength(3);
     expect(host.querySelectorAll('.markdown-alert')).toHaveLength(5);
     expect(host.querySelectorAll('input.task-list-item-checkbox')).toHaveLength(3);
+    // Read-only, so they take no press and check-shell does not hold them to a touch target's size.
+    expect([...host.querySelectorAll<HTMLInputElement>('input.task-list-item-checkbox')].map((box) => box.disabled)).toEqual([true, true, true]);
     expect(host.querySelectorAll('kbd')).toHaveLength(3);
     expect(host.querySelectorAll('sub, sup:not(.footnote-ref)')).toHaveLength(2);
     expect(host.querySelectorAll('section.footnotes li')).toHaveLength(1);

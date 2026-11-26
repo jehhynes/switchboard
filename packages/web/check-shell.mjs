@@ -9,7 +9,9 @@
 // where it does not fit beside the comment icon and the key; a key shows its source's logo, GitHub's, Zoho's or a plugin's, in place of its source's label; every pill, the key included, shows its text where line 2 is 300 px wide or more and its icon alone under that,
 // its text kept for screen readers; the key never drops out; a link pill is whole, its icon alone or left out whole, never cut, the last
 // first; a pill left out is no keyboard stop, and a pill shown is one only in the list's Tab stop row; the pills change with the list's width alone, without a redraw; and line 2 paints the same while
-// the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them. Every control shown is a touch target of at least 44 px each way.
+// the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them. Every control shown is a touch target of at least 44 px each way,
+// and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
+// task list, whose read-only boxes are not controls; on the desktop a question card's step dots are at least 24 px tall.
 // The questions waiting chip takes its own room above the composer, under the session's note: it covers no part of the conversation, the note or
 // the composer, at the conversation's end and halfway up, and the conversation's last row shows whole at its end. The card's topic is 4.5:1 on
 // the card, and its first question's disabled Back has no border.
@@ -22,7 +24,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PAGE_ASSETS } from './dist/index.js';
+
+const DIFF_DIR = fileURLToPath(new URL('./dist/diff/', import.meta.url));
 
 /**
  * Settings' views: each page, by the navigation entries pressed to reach it. On a phone a list's entry drills into its list and on a desktop
@@ -50,7 +55,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'portrait', width: 393, height: 793, screen: [393, 852], insets: { top: 0, bottom: 34, left: 0, right: 0 }, phone: true },
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
-  // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
+  // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
   { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
@@ -60,7 +65,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -111,6 +116,7 @@ const approve = { label: 'Approve', action: 'approve', icon: 'check', group: 'ma
 const control = (label, action, icon, group) => ({ label, action, icon, group, confirm: null, input: null });
 const asking = (label, action, icon) => ({ ...control(label, action, icon, 'asking'), confirm: { question: label + ' Fix it?', detail: 'It cannot be undone.', action } });
 const crowdedMenu = view?.endsWith('-menu') ? { actions: [approve, control('Snooze…', 'snooze', 'clock', 'state'), control('Mark done', 'done', 'pass', 'state'), control('Add comment…', 'comment', 'comment', 'notes'), asking('Stop session', 'stop', 'debug-stop'), { ...remove, group: 'asking' }], pastes: ['report', 'comment'], opens: [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'file', file: 'D:/w/report.md' }], url: 'https://github.com/o/r/issues/1' } : {};
+const snooze = { label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state', confirm: null, input: null };
 // The second row's line 2 holds more pills than fit beside its long playbook, so some drop out.
 const pr = (n) => ({ label: 'PR #' + n, url: 'https://github.com/o/r/pull/' + n, kind: 'pr', badge: String(n), glyph: '\u{ea64}', mentioned: false });
 const crowded = { ticket: 'gh 21509', ticketNumber: '21509', url: 'https://github.com/o/r/issues/21509', playbook: 'dev:address-pr-review', comment: { glyph: '\u{ea6b}', title: 'A comment' }, links: [pr(21512), pr(21513), pr(21514), pr(21515), { label: 'Design notes', url: 'https://example.com/notes', kind: 'url', badge: 'Design notes', glyph: '\u{eb15}', mentioned: false }], returned: 2 };
@@ -128,7 +134,7 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 // The list's notes, which a phone folds into one line.
 const header = { notes: view === 'list' || view?.startsWith('narrow') ? ['settings.json: sources.zoho.orgId is missing, so Zoho Desk is not polled.', 'Voice: the voice process stopped.'] : [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, snooze, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
@@ -138,11 +144,11 @@ if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list
 // A title longer than any header here fits, so the header shows how much of it is left beside the main control.
 const longTitle = 'Call Center dialer stops receiving incoming calls when its registration lapses';
 const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: longTitle, scopeGen: 3, conversations: [{ workItemId: 1, title: longTitle, primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0, sessionTitle: 'switchboard · dev:build · github 1' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
-const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null };
+const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, ...(view === 'context' ? { provider: 'claude', context: { used: 120000, window: 200000, compactAt: 167000, model: 'claude-opus-4-5' } } : {}) };
 const items = [];
 for (let i = 0; view !== 'empty' && open && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
-  items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : i === 28 ? '\\n\\n~~~\\nnpm run build --workspace @switchboard/web && npm run check:shell --workspace @switchboard/web\\n~~~' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
+  items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : i === 28 ? '\\n\\n~~~\\nnpm run build --workspace @switchboard/web && npm run check:shell --workspace @switchboard/web\\n~~~' : i === 27 ? '\\n\\n- [x] Find the cause\\n- [ ] Fix the renewal' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
 }
 // The questions views: the first reply asks two questions, so their card is far above the end, where the session waits on a permission in its
 // terminal (questions) or has ended and takes a message, which resumes it (questions-ended, a Codex app-server session).
@@ -215,12 +221,14 @@ const settingsRead = { settings: { path: 'C:/Users/someone/.switchboard/settings
 // Pair a device and Devices list more devices than the sheet shows at once, so its list scrolls, and a pairing address longer than a phone's line.
 const pairDevices = [{ id: 'a1', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true }, { id: 'b2', label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now, current: false, voice: true }, ...['Android · Chrome', 'iPad · Safari', 'Mac · Safari', 'Windows · Chrome', 'Linux · Firefox', 'Android · Firefox'].map((label, i) => ({ id: 'c' + i, label, host: 'some-long-computer-name.tail1234ab.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now - i * 86400000, current: false }))];
 const pairing = { url: 'https://some-long-computer-name.tail1234ab.ts.net/page?t=' + 'a'.repeat(64), code: 'ABCD-EFGH', host: 'some-long-computer-name.tail1234ab.ts.net', expiresAt: now + 5 * 60000 };
-// The Changes views' routes: two changed files, a branch of one commit, the worktree's files and a file's diff.
-const changesList = { scopeGen: 3, base: 'b0', head: 'c1', from: 'base', to: 'worktree', commits: [{ sha: 'c1', parent: 'b0', subject: 'Renew the registration before it lapses', time: Math.floor(now / 1000) - 600 }], commitsMore: false, rows: [{ path: 'src/dialer/registration.ts', status: 'M', stages: ['committed'], additions: 30, deletions: 4, binary: false, hash: 'h1', viewed: false }, { path: 'src/dialer/monitor.ts', status: 'M', stages: ['working'], additions: 3, deletions: 1, binary: false, hash: 'h2', viewed: false }], stages: { committed: 1, staged: 0, working: 1, untracked: 0 }, shown: 2, total: 2 };
-const changesDiff = (path) => ({ path, status: 'M', patch: 'diff --git a/' + path + ' b/' + path + '\\n--- a/' + path + '\\n+++ b/' + path + '\\n@@ -1,3 +1,3 @@\\n line\\n-old\\n+new\\n line\\n', old: 'line\\nold\\nline\\n', new: 'line\\nnew\\nline\\n', binary: false, tooLarge: null });
+// The Changes views' routes: three changed files of a branch of one commit, the worktree's files, and each file's patch and sides.
+const changesList = { scopeGen: 3, base: 'b0', head: 'c1', from: 'base', to: 'worktree', commits: [{ sha: 'c1', parent: 'b0', subject: 'Renew the registration before it lapses', time: Math.floor(now / 1000) - 600 }], commitsMore: false, rows: [{ path: 'src/dialer/registration.ts', status: 'M', stages: ['committed'], additions: 30, deletions: 4, binary: false, hash: 'h1', viewed: false }, { path: 'src/dialer/monitor.ts', status: 'M', stages: ['working'], additions: 3, deletions: 1, binary: false, hash: 'h2', viewed: false }, { path: 'src/dialer/timer.ts', status: 'M', stages: ['working'], additions: 1, deletions: 0, binary: false, hash: 'h3', viewed: false }], stages: { committed: 1, staged: 0, working: 2, untracked: 0 }, shown: 3, total: 3 };
+const oldSide = 'export function renew() {\\n  register();\\n}\\n';
+const newSide = 'export function renew() {\\n  register();\\n  schedule();\\n}\\n';
+const diffOf = (path) => ({ path, status: 'M', patch: 'diff --git a/' + path + ' b/' + path + '\\n--- a/' + path + '\\n+++ b/' + path + '\\n@@ -1,3 +1,4 @@\\n export function renew() {\\n   register();\\n+  schedule();\\n }\\n', old: oldSide, new: newSide, binary: false, tooLarge: null });
 const planText = '# Plan\\n\\n' + Array.from({ length: 40 }, (_, i) => 'Step ' + (i + 1) + ': renew the registration 30 s before it lapses, and check the inbound route again.').join('\\n\\n');
 const stackData = { scopeGen: 3, repo: 'switchboard', root: 'D:/w', branch: 'fix/dialer-registration', head: 'c1', commitIds: ['c1'], more: false, incomplete: false, github: { state: 'none', observedAt: null }, links: [], main: { ref: 'origin/main', behind: 0, fetchedAt: now } };
-const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? { scopeGen: 3, paths: ['src/dialer/monitor.ts', 'src/dialer/registration.ts'], more: false } : url.includes('/v1/conversation/diff?') ? changesDiff(new URL(url, location.href).searchParams.get('path')) : null);
+const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? { scopeGen: 3, paths: changesList.rows.map((row) => row.path), more: false } : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
 window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? planText : '') });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
@@ -490,21 +498,41 @@ function settingsFailures(view, size, s) {
 /** What each view opens with, clicked in order. */
 /**
  * The touch targets under 44 px in the open view (architecture.md § Web page, Phones first), each as its name and size; `checks` counts the checkboxes
- * measured, so a view meant to show some proves it did.
+ * measured, so a view meant to show some proves it did; `tasks` holds whether each task list box shown is read-only; `overlaps` names the
+ * targets of one layer whose boxes cross.
  */
 const TOUCH = `(() => {
   const shown = (node) => { for (let one = node; one; one = one.parentElement) { const style = getComputedStyle(one); if (style.display === 'none' || style.visibility === 'hidden') return false; } return true; };
   const name = (node) => node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/ +/).join('.') : '');
   let checks = 0;
+  // A task list's boxes in rendered Markdown, each as whether it is read-only.
+  const tasks = [];
+  // The layer a target is drawn in: its nearest box around it that is fixed, sticky or positioned with a z-index, as a menu, a dialog,
+  // a toast, a top bar, the Changes tree over the diffs or the list as a drawer are. Only targets of one layer are
+  // checked for overlaps, since a layer is drawn over what scrolls under it.
+  const layer = (node) => {
+    for (let one = node.parentElement; one && one !== document.body; one = one.parentElement) {
+      const style = getComputedStyle(one);
+      if (style.position === 'fixed' || style.position === 'sticky' || (style.position !== 'static' && style.zIndex !== 'auto')) return one;
+    }
+    return null;
+  };
+  const boxes = [];
   const small = (() => {
     // Every control shown is a touch target of at least 44 px each way (architecture.md § Web page, Phones first), measured as its box cut by
     // every ancestor that clips without scrolling. Not held to it: line 2's pills, whose press is an open question; links inside prose; and a
     // tab's own buttons, which fill their tab between its 1 px top and bottom borders, its whole height less those.
-  return [...document.querySelectorAll('button, a[href], [role="tab"], [role="menuitem"], [role="link"], [role="button"], input[type="checkbox"], input[type="radio"], select, summary')].filter(shown).flatMap((node) => {
+  return [...document.querySelectorAll('button, a[href], [role="tab"], [role="menuitem"], [role="link"], [role="button"], input[type="checkbox"], input[type="radio"], input[type="search"], select, summary')].filter(shown).flatMap((node) => {
       // A row's waiting questions are held to it no more than its pills: a press that misses them opens the work item, whose conversation offers the card.
       if (node.matches('.row .pill, .row-head .questions, :is(.body, .artifact-doc, .sheet-detail, .hist-body p, .group-empty) a')) return [];
+      // A task list's boxes are read-only (markdown.ts), so they take no press; one that takes a press is held to it.
+      if (node.matches('.task-list-item-checkbox')) {
+        tasks.push(node.disabled);
+        if (node.disabled) return [];
+      }
       // A checkbox or radio takes presses on its label too, which holds it (settings.tsx).
-      const target = node.matches('input[type="checkbox"], input[type="radio"]') ? (node.closest('label') ?? node) : node;
+      // A checkbox, radio or search field takes presses on a label that holds it too (settings.tsx, history.tsx).
+      const target = node.matches('input[type="checkbox"], input[type="radio"], input[type="search"]') ? (node.closest('label') ?? node) : node;
       const whole = target.getBoundingClientRect();
       if (whole.width === 0 || whole.height === 0 || whole.bottom <= 0 || whole.top >= innerHeight || whole.right <= 0 || whole.left >= innerWidth) return [];
       if (node.matches('input[type="checkbox"]')) checks++;
@@ -521,11 +549,22 @@ const TOUCH = `(() => {
       const width = right - left;
       const height = bottom - top;
       const tab = node.parentElement?.matches('.tab') ? node.parentElement : null;
+      boxes.push({ node: target, layer: layer(target), left, top, right, bottom });
       const tall = tab === null ? height >= 43.5 : tab.getBoundingClientRect().height >= 43.5 && height >= tab.clientHeight - 0.5;
       return width >= 43.5 && tall ? [] : [name(node) + ' ' + Math.round(width) + 'x' + Math.round(height)];
     });
   })();
-  return { small, checks };
+  // No two targets of one layer overlap, but for one inside the other.
+  const overlaps = [];
+  for (const [index, one] of boxes.entries()) {
+    for (const other of boxes.slice(index + 1)) {
+      if (one.layer !== other.layer || one.node.contains(other.node) || other.node.contains(one.node)) continue;
+      const width = Math.min(one.right, other.right) - Math.max(one.left, other.left);
+      const height = Math.min(one.bottom, other.bottom) - Math.max(one.top, other.top);
+      if (width > 1 && height > 1) overlaps.push(name(one.node) + ' and ' + name(other.node) + ' by ' + Math.round(width) + 'x' + Math.round(height));
+    }
+  }
+  return { small, checks, tasks, overlaps };
 })()`;
 
 /** A toast with its work item's link and Dismiss (toast.tsx), and the console's foot with Reconnect (console.ts). */
@@ -575,6 +614,11 @@ const OPEN = {
   'row-menu': [{ contextmenu: '#list .row[data-work-item="1"]' }],
   // The tab strip's More menu, a grid rather than a list, with 20 artifacts.
   'tab-menu': ['.tab-more-button'],
+  // The Changes tab's diffs, each file's header with its collapse chevron and Viewed tick.
+  diffs: ['[data-action=diff-tab]'],
+  // The context meter's popover with Compact….
+  context: ['[data-context=toggle]'],
+  snooze: ['[data-action=actions]', '[data-action=row-action][data-label="Snooze…"]'],
 };
 
 /** The search views: the field, and the bar whose controls must not cover it. */
@@ -922,7 +966,7 @@ function failures(view, size, m) {
   // status bar, so no colour is painted there, and its bars, inside the notch's insets, are under 90% of the width. The iPad is not checked for it.
   if (size.device === 'iphone' && size.orientation === 'portrait') {
     const edge = m.edge;
-    const own = view === 'sheet' || view === 'pair' ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head)(\.|$)/.test(edge.name ?? '');
+    const own = ['sheet', 'pair', 'snooze'].includes(view) ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head)(\.|$)/.test(edge.name ?? '');
 
     if (!own) out.push('WebKit finds ' + (edge.name ?? 'no fixed or sticky box (hit ' + edge.hit + ')') + (edge.kind ? ' (' + edge.kind + ')' : '') + ' at the top edge, not the view\'s top bar');
     else if (edge.kind === 'bar' && (edge.top !== 0 || edge.height <= 10 || edge.background !== m.bar)) out.push('the top bar ' + edge.name + ' is at ' + edge.top + ', ' + edge.height + ' px tall, ' + edge.background + ' for the bars\' ' + m.bar);
@@ -932,6 +976,13 @@ function failures(view, size, m) {
 
 const server = createServer((request, response) => {
   const path = new URL(request.url, 'http://x').pathname;
+  // The diff viewer's modules, which the build writes beside the page's (build.mjs) and the hub serves under the page's build.
+  const diffFile = /^\/page\/diff\/[^/]+\/([\w./-]+\.(js|json))$/.exec(path);
+
+  if (diffFile !== null && !diffFile[1].includes('..') && existsSync(join(DIFF_DIR, diffFile[1]))) {
+    response.writeHead(200, { 'content-type': diffFile[2] === 'js' ? 'text/javascript' : 'application/json' }).end(readFileSync(join(DIFF_DIR, diffFile[1])));
+    return;
+  }
   const asked = path === '/page/' ? 'index.html' : path.replace(/^\/page\//, '');
   // A shell file by its hashed name (build.mjs) is the plain one's.
   const name = Object.keys(PAGE_ASSETS).find((one) => PAGE_ASSETS[one].hashed === asked) ?? asked;
@@ -1039,6 +1090,8 @@ try {
         }
 
         await wait(200);
+        // The diff viewer loads its modules and draws each file's header after the tab opens.
+        if (view === 'diffs') await evaluate('new Promise((done) => { const end = Date.now() + 10000; const wait = () => (document.querySelector(".diff-chevron") || Date.now() > end ? setTimeout(done, 300) : setTimeout(wait, 100)); wait(); })');
         const m = await evaluate(measure);
 
         // The main control's accessible name as the browser computes it, which a hidden label or an aria-label would change; not while a modal
@@ -1189,8 +1242,10 @@ try {
         // view at first is measured too.
         if (missing.length === 0 && size.mouse !== true) {
           const small = new Set();
+          const overlaps = new Set();
+          const tasks = [];
           let checks = 0;
-          const take = async () => { const touch = await evaluate(TOUCH); touch.small.forEach((one) => small.add(one)); checks += touch.checks; };
+          const take = async () => { const touch = await evaluate(TOUCH); touch.small.forEach((one) => small.add(one)); touch.overlaps.forEach((one) => overlaps.add(one)); tasks.push(...touch.tasks); checks += touch.checks; };
           const scrollers = await evaluate('[...document.querySelectorAll("body *")].filter((node) => /auto|scroll/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight + 1).length');
 
           await take();
@@ -1203,8 +1258,33 @@ try {
               await take();
             }
           }
+          // The diffs view opens the Changes tree over the diffs, where it is not pinned beside them, and measures its rows and search too.
+          if (view === 'diffs' && (await evaluate('(() => { const button = document.querySelector("[data-action=tree-flyout]"); button?.click(); return button !== null; })()'))) {
+            await wait(400);
+            await take();
+          }
+          // The questions views' card is at the conversation's top, out of view at the end, where the questions-waiting chip shows; measure the card too.
+          if (view.startsWith('questions')) {
+            await evaluate('document.getElementById("panel").scrollTop = 0');
+            await wait(300);
+            await take();
+          }
           for (const one of small) found.push('a touch target under 44 px: ' + one);
+          for (const one of overlaps) found.push('touch targets overlap: ' + one);
           if (SWITCHED.includes(view) && checks === 0) found.push('Settings showed no switch or checkbox to measure');
+          if (view === 'conversation' && tasks.length === 0) found.push("a reply's task list showed no box to check");
+          const seen = { diffs: ['.diff-chevron', '.diff-viewed'], context: ['.context-action'], questions: ['.qc-dot', '.question-waiting'], snooze: ['.sheet-choice'] }[view] ?? [];
+          for (const selector of seen) {
+            if (!(await evaluate('document.querySelector(' + JSON.stringify(selector) + ') !== null'))) found.push('the view showed no ' + selector + ' to measure');
+          }
+        }
+
+        // With a mouse a question card's step dots are at least 24 px tall, as WCAG's least target size asks.
+        if (view === 'questions' && size.mouse === true && missing.length === 0) {
+          const dots = await evaluate('[...document.querySelectorAll(".qc-dot")].map((dot) => Math.round(dot.getBoundingClientRect().height))');
+
+          if (dots.length === 0) found.push('the question card showed no step dots');
+          else if (dots.some((height) => height < 24)) found.push("a question card's step dots are " + dots.join(', ') + ' px tall, under 24 px');
         }
 
         // Each link pill's and key's accessible name is its text, whether it shows its text or its icon alone.

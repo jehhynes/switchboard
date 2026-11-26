@@ -100,7 +100,11 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .side { flex: none; width: 100%; display: flex; flex-direction: column; background: var(--sb-content); border-right: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); }
 /* The list's header, one title row: the icons keep their width at the right. */
 .side-head { flex: none; }
-.list-header { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; background: var(--sb-bar-background); }
+.list-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; background: var(--sb-bar-background); }
+/* Outside the phone's layout the header has no title at its left, so its icons take its width; a list too narrow for them all wraps the last
+   ones onto a second row rather than lay one over another. */
+:where(html:not(.phone)) .list-header { padding-left: 4px; }
+.list-header > .menu-anchor { flex: none; }
 /* On a phone the list is its own view and no window title names the app, so the header starts with the icon and "Switchboard", which take
    what is left and end in an ellipsis; outside the phone's layout the window or tab title shows it. */
 .list-title { display: none; }
@@ -854,8 +858,10 @@ body.artifact-window > .artifact-view { height: 100%; }
   .code-block > pre { flex: 1 1 auto; min-width: 0; }
   .code-block > .copy { position: static; flex: none; order: 1; margin-top: 8px; background: transparent; }
   .md-doc .code-block > .copy { margin-top: 1em; }
-  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .question-waiting, .artifact-open, .toast .dismiss, .conn-update button.conn-reload { min-height: 44px; }
-  .qc-menu-button { min-width: 44px; }
+  button.picker, .tab, .composer-tool, .send, .voice-controls .ghost, .row, .group-head, .question-option, .earlier-items, .question-submit, .question-link, .qc-primary, .qc-secondary, .qc-menu-button, .qc-menu button, .question-waiting, .artifact-open, .toast .dismiss, .conn-update button.conn-reload, .context-action { min-height: 44px; }
+  .qc-menu-button, .context-action { min-width: 44px; }
+  /* A step dot keeps its 22 px bar inside a 44 px target. */
+  .qc-dot { width: 44px; height: 44px; }
   .question-waiting { border-radius: 22px; font-size: 13px; }
   /* A card's options are 56 px rows on touch (design § 6, Phone). */
   .qc-option { min-height: 56px; }
@@ -900,6 +906,9 @@ body.artifact-window > .artifact-view { height: 100%; }
 }
 /* On a phone the conversation's header is one row as tall as its 44 px targets, with no padding above or below them. */
 :where(html.phone) .header { padding-top: 0; padding-bottom: 0; }
+/* On a phone the context meter's popover opens from the composer's left edge and is never wider than the composer, so it stays on the screen. */
+:where(html.phone) .context-meter { position: static; }
+:where(html.phone) .context-menu { max-width: min(320px, 100%); }
 /* A phone on its side has under 430 px of height, so the timeline gets most of it (S1 in the 2026-11-26 UI pass): the header and the tab strip
    share one bar, the header's title taking what the tabs leave, and the composer is one row, Attach, the slash commands and the context meter
    left of the box and the voice controls and Send right of it, its attachments and dictation hint on a row above, with no gap round it. */
