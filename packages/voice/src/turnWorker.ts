@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { turnPrompt } from './turn.js';
+import { TURN_SESSION_OPTIONS, turnPrompt } from './turn.js';
 import type { ChatTurn } from './turn.js';
 
 /**
@@ -25,7 +25,7 @@ const load = (async () => {
   const ort = require('onnxruntime-node') as Ort;
   const { Tokenizer } = require('@huggingface/tokenizers') as TokenizerModule;
   const tokenizer = new Tokenizer(JSON.parse(readFileSync(join(modelDir, 'tokenizer.json'), 'utf8')), JSON.parse(readFileSync(join(modelDir, 'tokenizer_config.json'), 'utf8')));
-  const session = await ort.InferenceSession.create(join(modelDir, 'onnx', 'model_q8.onnx'), { intraOpNumThreads: 4, interOpNumThreads: 1 });
+  const session = await ort.InferenceSession.create(join(modelDir, 'onnx', 'model_q8.onnx'), TURN_SESSION_OPTIONS);
 
   return { ort, tokenizer, session };
 })();

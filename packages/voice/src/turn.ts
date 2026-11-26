@@ -12,6 +12,15 @@ import { createInterface } from 'node:readline';
 
 /** The turn model, LiveKit's multilingual turn detector (a Qwen2.5-0.5B fine-tune, int8 ONNX), in `<voice home>/models`. */
 export const TURN_MODEL = 'livekit-turn-detector';
+/**
+ * The turn model's onnxruntime session options. Its threads do not spin waiting for work after a run: spinning cost about 1 CPU-second after each
+ * request, against 0.13 to 0.18 s without, with latency within its run-to-run spread of 40 to 80 ms (mechanics.md M166).
+ */
+export const TURN_SESSION_OPTIONS = {
+  intraOpNumThreads: 4,
+  interOpNumThreads: 1,
+  extra: { session: { intra_op: { allow_spinning: '0' }, inter_op: { allow_spinning: '0' } } },
+} as const;
 /** A message judged finished, or ending in a sentence's mark, closes after this quiet. */
 export const TEXT_QUIET_MS = 500;
 /** The model's English threshold when its `languages.json` does not say. */
