@@ -8,8 +8,9 @@ export function closePseudoTerminal(pty: unknown, platform: NodeJS.Platform = pr
   if (platform === 'win32') {
     const agent = (pty as { _agent?: { _useConpty?: unknown; _useConptyDll?: unknown; _pty?: unknown; _ptyNative?: { kill?: unknown } } } | null)?._agent;
 
-    // winpty's kill takes other arguments and kills the program, so only ConPTY qualifies. With conpty.dll the native kill also terminates it.
-    if (agent?._useConpty !== true || agent._useConptyDll !== false || typeof agent._pty !== 'number' || typeof agent._ptyNative?.kill !== 'function') {
+    // With conpty.dll the native kill also terminates the program. node-pty 1.2 has only ConPTY and no `_useConpty`; an agent that names
+    // winpty (`_useConpty` false) has a kill that takes other arguments and kills the program.
+    if (agent?._useConpty === false || agent?._useConptyDll !== false || typeof agent._pty !== 'number' || typeof agent._ptyNative?.kill !== 'function') {
       return false;
     }
 

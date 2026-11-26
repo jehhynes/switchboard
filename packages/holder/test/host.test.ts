@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Attachment, HolderClient, HolderError } from '../src/client.js';
-import { Raw, TOKEN, startHost, until } from './fakes.js';
+import { FakePty, Raw, TOKEN, startHost, until } from './fakes.js';
 import type { TestHost } from './fakes.js';
 import type { Pty } from '../src/host.js';
 
@@ -312,12 +312,139 @@ describe('sessions', () => {
     const client = await HolderClient.connect({ port: state.port, token: TOKEN });
 
     await client.spawn(spawnRequest('s1'));
-    await expect(client.shutdown()).rejects.toThrow('The terminal holder holds 1 live session.');
+    await expect(client.shutdown()).rejects.toMatchObject({ message: 'The terminal holder holds 1 live session.', starting: undefined });
     expect(state.shutdowns).toBe(0);
     state.ptys[0]!.exit(0);
     await client.shutdown();
     expect(state.shutdowns).toBe(1);
     client.close();
+  });
+
+  describe('a program that starts later, as node-pty 1.2 starts one on Windows', () => {
+    /** A host whose spawns answer with a promise the test settles. */
+    async function later(options: Parameters<typeof startHost>[0] = {}) {
+      const starts: Array<{ resolve: (pty: FakePty) => void; reject: (error: Error) => void; pty: FakePty }> = [];
+      const state = await started({
+        spawnPty: (file, args, ptyOptions) =>
+          new Promise<FakePty>((resolve, reject) => {
+            const pty = new FakePty(2000 + starts.length, file, args, ptyOptions);
+
+            starts.push({ resolve: (value) => (state.ptys.push(value), resolve(value)), reject, pty });
+          }),
+        ...options,
+      });
+
+      return { state, starts };
+    }
+
+    it('answers the spawn with the process ID once the program started, and refuses the same session meanwhile', async () => {
+      const { state, starts } = await later();
+      const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+      const spawned = client.spawn(spawnRequest('s1'));
+
+      await until(() => expect(starts).toHaveLength(1));
+      expect(await client.list()).toEqual([]);
+      await expect(client.spawn(spawnRequest('s1'))).rejects.toThrow('Session s1 is already held.');
+      expect(starts).toHaveLength(1);
+      starts[0]!.resolve(starts[0]!.pty);
+      expect(await spawned).toEqual({ session: 's1', pid: 2000 });
+      starts[0]!.pty.emit('first output');
+      expect((await client.screen('s1')).text).toContain('first output');
+      // The start counted as live, then the held program.
+      expect(state.live).toEqual([1, 1]);
+      client.close();
+    });
+
+    it('answers a program that cannot start with the reason, holds nothing, and lets the session spawn again', async () => {
+      const { state, starts } = await later();
+      const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+      const spawned = client.spawn(spawnRequest('s1'));
+
+      await until(() => expect(starts).toHaveLength(1));
+      starts[0]!.reject(new Error('The program ended before it started (code 267).'));
+      await expect(spawned).rejects.toThrow('claude could not be started: The program ended before it started (code 267).');
+      expect(await client.list()).toEqual([]);
+
+      const again = client.spawn(spawnRequest('s1'));
+
+      await until(() => expect(starts).toHaveLength(2));
+      starts[1]!.resolve(starts[1]!.pty);
+      expect(await again).toEqual({ session: 's1', pid: 2001 });
+      client.close();
+    });
+
+    it('refuses a shutdown while a program starts, counts the start as live for the idle exit, and accepts one once the start failed', async () => {
+      const { state, starts } = await later();
+      const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+      const spawned = client.spawn(spawnRequest('s1'));
+
+      await until(() => expect(starts).toHaveLength(1));
+      expect(state.host.live()).toBe(1);
+      expect(state.live).toEqual([1]);
+      // Refused with the starting session named, as list does not show it.
+      await expect(client.shutdown()).rejects.toMatchObject({ message: 'The terminal holder is starting a session.', refused: true, starting: ['s1'] });
+      expect(state.shutdowns).toBe(0);
+      starts[0]!.reject(new Error('The program did not start within 15 seconds.'));
+      await expect(spawned).rejects.toThrow('could not be started: The program did not start within 15 seconds.');
+      expect(state.live).toEqual([1, 0]);
+      await client.shutdown();
+      expect(state.shutdowns).toBe(1);
+      client.close();
+    });
+
+    it('names a program still starting in a refusal for live sessions too', async () => {
+      const { state, starts } = await later();
+      const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+      const first = client.spawn(spawnRequest('a'));
+
+      await until(() => expect(starts).toHaveLength(1));
+      starts[0]!.resolve(starts[0]!.pty);
+      await first;
+
+      const second = client.spawn(spawnRequest('b'));
+
+      await until(() => expect(starts).toHaveLength(2));
+      await expect(client.shutdown()).rejects.toMatchObject({ message: 'The terminal holder holds 1 live session.', starting: ['b'] });
+      starts[1]!.resolve(starts[1]!.pty);
+      await second;
+      client.close();
+    });
+
+    it('answers a kill while the program starts as for a session it does not hold, closing and killing nothing, since no pid is known yet', async () => {
+      const closed: unknown[] = [];
+      const { state, starts } = await later({ closePty: (pty) => (closed.push(pty), true) });
+      const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+      const spawned = client.spawn(spawnRequest('s1'));
+
+      await until(() => expect(starts).toHaveLength(1));
+      await expect(client.kill('s1')).rejects.toThrow('No session s1 is held.');
+      expect(closed).toEqual([]);
+      expect(state.killed).toEqual([]);
+      starts[0]!.resolve(starts[0]!.pty);
+      expect(await spawned).toEqual({ session: 's1', pid: 2000 });
+      client.close();
+    });
+
+    it('ends a program still starting on endAll once it started', async () => {
+      const { state, starts } = await later();
+      const client = await HolderClient.connect({ port: state.port, token: TOKEN });
+      const spawned = client.spawn(spawnRequest('s1'));
+
+      await until(() => expect(starts).toHaveLength(1));
+
+      let ended = false;
+      const ending = state.host.endAll().then(() => (ended = true));
+
+      // endAll waits for the start: still pending after other requests are answered.
+      expect(await client.list()).toEqual([]);
+      expect(ended).toBe(false);
+      starts[0]!.resolve(starts[0]!.pty);
+      expect(await spawned).toEqual({ session: 's1', pid: 2000 });
+      await ending;
+      expect(state.killed).toEqual([2000]);
+      expect(state.host.live()).toBe(0);
+      client.close();
+    });
   });
 
   it('rejects pending and later requests once the connection closes', async () => {

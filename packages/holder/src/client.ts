@@ -8,6 +8,8 @@ export class HolderError extends Error {
   constructor(
     message: string,
     readonly refused = false,
+    /** The sessions whose start made the holder refuse a `shutdown`, absent when something else did. */
+    readonly starting?: string[],
   ) {
     super(message);
   }
@@ -235,7 +237,7 @@ export class HolderClient {
       this.#pending.delete(message.re);
 
       if (message.type === 'error') {
-        pending?.reject(new HolderError(message.message, true));
+        pending?.reject(new HolderError(message.message, true, Array.isArray(message.starting) ? message.starting.filter((session) => typeof session === 'string') : undefined));
       } else {
         pending?.resolve(message);
       }

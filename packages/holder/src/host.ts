@@ -34,7 +34,8 @@ export interface Pty {
   resize(cols: number, rows: number): void;
 }
 
-export type PtyFactory = (file: string, args: string[], options: { cwd: string; env: Record<string, string>; cols: number; rows: number }) => Pty;
+/** Starts a program in a pseudo-terminal; a promise when the program starts later (node-pty 1.2 on Windows), so `pid` is known on return. */
+export type PtyFactory = (file: string, args: string[], options: { cwd: string; env: Record<string, string>; cols: number; rows: number }) => Pty | Promise<Pty>;
 
 export interface HostOptions {
   token: string;
@@ -188,6 +189,8 @@ export class Host {
   readonly #options: HostOptions;
   readonly #now: () => number;
   readonly #sessions = new Map<string, Held>();
+  /** Spawns whose program has not started yet, by session; each settles once the session is held or the spawn refused. */
+  readonly #starting = new Map<string, Promise<void>>();
   readonly #connections = new Set<Connection>();
   #server: Server | null = null;
   /** Set once the holder ends its sessions to exit; spawns are refused from then on. */
@@ -231,9 +234,12 @@ export class Host {
     return this.#connections.size;
   }
 
-  /** The number of sessions whose program is running. */
+  /**
+   * The number of sessions whose program is running or starting. A start counts, so a shutdown or the idle exit never comes while a program
+   * starts and then ends it.
+   */
   live(): number {
-    return [...this.#sessions.values()].filter((held) => held.exitedAt === null).length;
+    return [...this.#sessions.values()].filter((held) => held.exitedAt === null).length + this.#starting.size;
   }
 
   list(): SessionEntry[] {
@@ -428,19 +434,44 @@ export class Host {
 
     const existing = this.#sessions.get(request.session);
 
-    if (existing !== undefined && existing.exitedAt === null) {
+    if ((existing !== undefined && existing.exitedAt === null) || this.#starting.has(request.session)) {
       this.#send(connection, { type: 'error', re: id, message: `Session ${request.session} is already held.` });
       return;
     }
 
-    let pty: Pty;
+    let started: Pty | Promise<Pty>;
 
     try {
-      pty = this.#options.spawnPty(request.file, request.args, { cwd: request.cwd, env: request.env, cols: request.cols, rows: request.rows });
+      started = this.#options.spawnPty(request.file, request.args, { cwd: request.cwd, env: request.env, cols: request.cols, rows: request.rows });
     } catch (error) {
       this.#send(connection, { type: 'error', re: id, message: `${request.file} could not be started: ${(error as Error).message}` });
       return;
     }
+
+    if (started instanceof Promise) {
+      this.#starting.set(
+        request.session,
+        started.then(
+          (pty) => {
+            this.#starting.delete(request.session);
+            this.#hold(connection, id, request, pty);
+          },
+          (error: unknown) => {
+            this.#starting.delete(request.session);
+            this.#send(connection, { type: 'error', re: id, message: `${request.file} could not be started: ${(error as Error).message}` });
+            this.#options.onLiveChange?.(this.live());
+          },
+        ),
+      );
+      this.#options.onLiveChange?.(this.live());
+      return;
+    }
+
+    this.#hold(connection, id, request, started);
+  }
+
+  #hold(connection: Connection, id: number, request: SpawnRequest, pty: Pty): void {
+    const existing = this.#sessions.get(request.session);
 
     if (existing !== undefined) {
       this.#forget(existing);
@@ -703,6 +734,9 @@ export class Host {
   async endAll(): Promise<void> {
     this.#exiting = true;
 
+    // A program still starting is held once it starts, and ended with the others.
+    await Promise.all(this.#starting.values());
+
     const deadlineMs = this.#options.killDeadlineMs ?? KILL_DEADLINE_MS;
 
     await Promise.all(
@@ -876,10 +910,17 @@ export class Host {
   }
 
   #shutdown(connection: Connection, id: number): void {
-    const live = this.live();
+    const live = this.live() - this.#starting.size;
+    // `list` does not show a program that is starting, so every refusal names the starts, and the client can ask again once they end.
+    const starting = this.#starting.size > 0 ? { starting: [...this.#starting.keys()] } : {};
 
     if (live > 0) {
-      this.#send(connection, { type: 'error', re: id, message: `The terminal holder holds ${live} live session${live === 1 ? '' : 's'}.` });
+      this.#send(connection, { type: 'error', re: id, message: `The terminal holder holds ${live} live session${live === 1 ? '' : 's'}.`, ...starting });
+      return;
+    }
+
+    if (this.#starting.size > 0) {
+      this.#send(connection, { type: 'error', re: id, message: `The terminal holder is starting ${this.#starting.size === 1 ? 'a session' : `${this.#starting.size} sessions`}.`, ...starting });
       return;
     }
 

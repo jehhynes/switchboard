@@ -172,6 +172,8 @@ export class MemorySampler {
   #trees = new Map<number, ProcessRow[]>();
   #timer: NodeJS.Timeout | null = null;
   #reading = false;
+  /** A sample was asked for while a read ran, so another follows it, with the pids of then. */
+  #again = false;
 
   constructor(
     private readonly pids: () => number[],
@@ -193,9 +195,14 @@ export class MemorySampler {
   }
 
   async sample(): Promise<void> {
+    if (this.#reading) {
+      this.#again = true;
+      return;
+    }
+
     const pids = this.pids();
 
-    if (this.#reading || pids.length === 0) {
+    if (pids.length === 0) {
       return;
     }
 
@@ -222,6 +229,12 @@ export class MemorySampler {
       }
     } finally {
       this.#reading = false;
+
+      // A session held during the read, such as one whose program started then, gets its tree from the next.
+      if (this.#again) {
+        this.#again = false;
+        void this.sample();
+      }
     }
   }
 

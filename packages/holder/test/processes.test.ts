@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MemorySampler, killTree, procTable, treeOf, windowsTable } from '../src/processes.js';
 import type { ProcessRow, RunFile } from '../src/processes.js';
+import { until } from './fakes.js';
 
 const temps: string[] = [];
 
@@ -169,5 +170,25 @@ describe('MemorySampler', () => {
     await sampler.sample();
     expect(errors).toEqual(['no table']);
     expect(sampler.memory([10])).toEqual(new Map([[10, 5]]));
+  });
+
+  it('reads again once a read ends when a sample was asked for during it, with the pids of then, and only once', async () => {
+    const reads: Array<{ pids: number[]; done: (rows: ProcessRow[]) => void }> = [];
+    let pids = [10];
+    const sampler = new MemorySampler(() => pids, () => new Promise<ProcessRow[]>((done) => reads.push({ pids: [...pids], done })));
+    const first = sampler.sample();
+
+    // A session held while the first read runs, and two asks for it.
+    pids = [10, 20];
+    void sampler.sample();
+    void sampler.sample();
+    expect(reads).toHaveLength(1);
+    reads[0]!.done([row(10, 1, '100', 5)]);
+    await first;
+    await until(() => expect(reads).toHaveLength(2));
+    expect(reads[1]!.pids).toEqual([10, 20]);
+    reads[1]!.done([row(10, 1, '100', 5), row(20, 1, '120', 4)]);
+    await until(() => expect(sampler.tree(20)).toEqual([{ pid: 20, created: '120' }]));
+    expect(reads).toHaveLength(2);
   });
 });

@@ -194,8 +194,7 @@ describe('built holder', () => {
     expect(Date.now() - killedAt).toBeGreaterThanOrEqual(1400);
   }, 30_000);
 
-  // node-pty 1.1.0 ends a session's output thread only in kill(), which the holder never calls (mechanics M168). Sessions end one at a time,
-  // because sessions ending together have crashed node-pty's native code.
+  // node-pty ends a session's output thread only in kill(), which the holder never calls (mechanics M168).
   it.skipIf(process.platform !== 'win32')("frees each ended session's output thread on Windows, whether the program exits or is killed", async () => {
     const home = newHome();
     const holder = startHolder(home);
@@ -214,22 +213,16 @@ describe('built holder', () => {
 
     const before = threads();
 
-    for (const session of ['a1', 'a2', 'a3']) {
-      await client.spawn({ session, label: session, ...exiting });
-      await ended(session);
-    }
-
-    for (const session of ['b1', 'b2', 'b3']) {
-      await client.spawn({ session, label: session, ...waiting });
-      await until(async () => (await client.screen(session)).head.includes('ready'), `session ${session} to start`);
-    }
+    // Programs that exit together by themselves, and others the holder ends together (mechanics M169).
+    await Promise.all(['a1', 'a2', 'a3'].map((session) => client.spawn({ session, label: session, ...exiting })));
+    await Promise.all(['a1', 'a2', 'a3'].map((session) => ended(session)));
+    await Promise.all(['b1', 'b2', 'b3'].map((session) => client.spawn({ session, label: session, ...waiting })));
+    await Promise.all(['b1', 'b2', 'b3'].map((session) => until(async () => (await client.screen(session)).head.includes('ready'), `session ${session} to start`)));
 
     // Each live session has its own output thread, so the count would show them kept.
     expect(threads()).toBeGreaterThanOrEqual(before + 3);
 
-    for (const session of ['b1', 'b2', 'b3']) {
-      await client.kill(session);
-    }
+    await Promise.all(['b1', 'b2', 'b3'].map((session) => client.kill(session)));
 
     // node-pty ends the Worker a second after its dispose, which comes a second after the program's last output.
     let after = threads();

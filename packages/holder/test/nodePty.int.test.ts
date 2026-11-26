@@ -41,7 +41,6 @@ const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry
 const program = (code: string) => ({ label: 'test', file: process.execPath, args: ['-e', code], cwd: tmpdir(), env, cols: 80, rows: 24 });
 
 describe('node-pty on Windows', () => {
-  // Sessions end one at a time, because sessions ending together have crashed node-pty's native code (mechanics M168).
   it.skipIf(process.platform !== 'win32')("closes each ended session's input pipe and output Worker, whether the program exits or is killed", async () => {
     host = new Host({ token: TOKEN, build: 'test', spawnPty: await loadNodePty(), killTree, closePty: (pty) => closePseudoTerminal(pty), releasePty: (pty) => void releasePseudoTerminal(pty) });
 
@@ -49,16 +48,19 @@ describe('node-pty on Windows', () => {
     const ended = (session: string): Promise<void> => until(async () => (await client.list()).some((entry) => entry.session === session && entry.exitedAt !== null), `session ${session} to end`);
     const before = ptyHandles();
 
-    await client.spawn({ session: 'exits', ...program("process.stdout.write('ready\\n'); setTimeout(() => process.exit(0), 300);") });
-    await client.spawn({ session: 'killed', ...program("process.stdout.write('ready\\n'); setInterval(() => {}, 1000);") });
-    await until(async () => (await client.screen('killed')).head.includes('ready'), 'the program to start');
-    await ended('exits');
+    const exiting = ['e1', 'e2', 'e3'];
+    const killed = ['k1', 'k2', 'k3'];
 
-    // The killed session's input pipe and Worker are open while it runs.
-    expect(ptyHandles().pipes).toBeGreaterThan(before.pipes);
-    expect(ptyHandles().ports).toBeGreaterThan(before.ports);
-    await client.kill('killed');
-    await ended('killed');
+    await Promise.all(exiting.map((session) => client.spawn({ session, ...program("process.stdout.write('ready\\n'); setTimeout(() => process.exit(0), 300);") })));
+    await Promise.all(killed.map((session) => client.spawn({ session, ...program("process.stdout.write('ready\\n'); setInterval(() => {}, 1000);") })));
+    await Promise.all(killed.map((session) => until(async () => (await client.screen(session)).head.includes('ready'), `session ${session} to start`)));
+    await Promise.all(exiting.map(ended));
+
+    // The killed sessions' input pipes and Workers are open while they run.
+    expect(ptyHandles().pipes).toBeGreaterThanOrEqual(before.pipes + killed.length);
+    expect(ptyHandles().ports).toBeGreaterThanOrEqual(before.ports + killed.length);
+    await Promise.all(killed.map((session) => client.kill(session)));
+    await Promise.all(killed.map(ended));
 
     // node-pty ends the Worker a second after its dispose, which comes a second after the program's last output.
     let after = ptyHandles();

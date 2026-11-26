@@ -16,6 +16,13 @@ describe('closePseudoTerminal', () => {
     expect(calls).toEqual([[3, false]]);
   });
 
+  it('closes a node-pty 1.2 pseudo-console, whose agent has no _useConpty', () => {
+    const { pty, calls } = windowsPty({ _useConpty: undefined });
+
+    expect(closePseudoTerminal(pty, 'win32')).toBe(true);
+    expect(calls).toEqual([[3, false]]);
+  });
+
   it.each([
     ['conpty.dll, whose native kill also terminates the program', { _useConptyDll: true }],
     ['winpty', { _useConpty: false }],

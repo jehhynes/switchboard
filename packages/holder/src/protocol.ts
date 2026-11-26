@@ -74,7 +74,8 @@ export type ClientMessage =
 
 export type HostMessage =
   | { type: 'welcome'; protocol: number; build: string; pid: number; features?: string[] }
-  | { type: 'error'; message: string; re?: number }
+  /** `starting`: a `shutdown` was refused only because these sessions' programs are starting; it is accepted once their starts end. */
+  | { type: 'error'; message: string; re?: number; starting?: string[] }
   | { type: 'spawned'; re: number; session: string; pid: number }
   | { type: 'sessions'; re: number; sessions: SessionEntry[] }
   | { type: 'killed'; re: number; session: string; exitCode: number | null }

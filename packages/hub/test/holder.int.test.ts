@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseHolderRecord, recordPath } from '@switchboard/holder';
+import { HolderError, parseHolderRecord, recordPath } from '@switchboard/holder';
 import type { SessionEntry } from '@switchboard/holder';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HolderLink } from '../src/holder.js';
@@ -294,6 +294,174 @@ describe('HolderLink (architecture.md § Terminal holder)', () => {
       expect(state.launched).toEqual([]);
       expect(await holder.find(false)).toMatchObject({ holder: old });
     });
+
+    const starting = (): HolderError => new HolderError('The terminal holder is starting a session.', true, ['s1']);
+
+    it('asks again while the holder is starting a session, never ending it, and names the session once it is held', async () => {
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      let held = false;
+      let asks = 0;
+      const { state, link: holder } = restarting(old, { killTree: async (pid) => (killed.push(pid), null), sleep: async () => {} });
+
+      old.list = async () => (held ? [{ session: 's1', label: '', pid: 9, cwd: '', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null }] : []);
+      old.shutdown = async () => {
+        old.shutdowns += 1;
+
+        // The program starts during the third refusal.
+        if (++asks === 3) {
+          held = true;
+        }
+
+        throw starting();
+      };
+
+      expect(await holder.restart()).toEqual({ live: ['s1'] });
+      expect(old.shutdowns).toBe(3);
+      expect(killed).toEqual([]);
+      expect(state.launched).toEqual([]);
+    });
+
+    it('ends the holder once a start it waited for failed and it accepts the shutdown, without a tree kill', async () => {
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      const { current, state, link: holder } = restarting(old, { killTree: async (pid) => (killed.push(pid), null), sleep: async () => {} });
+
+      old.shutdown = async () => {
+        old.shutdowns += 1;
+
+        if (old.shutdowns === 1) {
+          throw starting();
+        }
+
+        state.held = false;
+      };
+
+      expect(await holder.restart()).toMatchObject({ holder: current });
+      expect(old.shutdowns).toBe(2);
+      expect(killed).toEqual([]);
+    });
+
+    it('names a session still starting after the wait as live, and ends nothing', async () => {
+      let clock = 0;
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      const { state, link: holder } = restarting(old, { now: () => (clock += 1_000), sleep: async () => {}, killTree: async (pid) => (killed.push(pid), null) });
+
+      old.shutdown = async () => {
+        old.shutdowns += 1;
+        throw starting();
+      };
+
+      expect(await holder.restart()).toEqual({ live: ['s1'] });
+      // Asked again over the 20 second wait, a second apart, then given up.
+      expect(old.shutdowns).toBeGreaterThan(5);
+      expect(old.shutdowns).toBeLessThanOrEqual(21);
+      expect(killed).toEqual([]);
+      expect(state.launched).toEqual([]);
+    });
+
+    it('asks again a holder that refused for a live session gone by the list while another starts, and names the started one', async () => {
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      const { state, link: holder } = restarting(old, { killTree: async (pid) => (killed.push(pid), null), sleep: async () => {} });
+
+      // Session a was live at the refusal and exited before the list; b is starting, and is held at the second ask.
+      old.list = async () => (old.shutdowns >= 2 ? [{ session: 'b', label: '', pid: 9, cwd: '', startedAt: 0, lastInputAt: null, lastOutputAt: null, exitedAt: null, exitCode: null, clients: 0, memoryBytes: null }] : []);
+      old.shutdown = async () => {
+        old.shutdowns += 1;
+        // The first refusal names no start, as a holder's from before starts were named on every refusal.
+        throw old.shutdowns === 1 ? new HolderError('The terminal holder holds 1 live session.', true) : new HolderError('The terminal holder is starting a session.', true, ['b']);
+      };
+
+      expect(await holder.restart()).toEqual({ live: ['b'] });
+      expect(killed).toEqual([]);
+      expect(state.launched).toEqual([]);
+    });
+
+    it('asks again a holder that refused with nothing live or starting by the list, and ends it once it accepts, without a tree kill', async () => {
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      const { current, state, link: holder } = restarting(old, { killTree: async (pid) => (killed.push(pid), null), sleep: async () => {} });
+
+      old.shutdown = async () => {
+        old.shutdowns += 1;
+
+        if (old.shutdowns === 1) {
+          throw new HolderError('The terminal holder holds 1 live session.', true);
+        }
+
+        state.held = false;
+      };
+
+      expect(await holder.restart()).toMatchObject({ holder: current });
+      expect(old.shutdowns).toBe(2);
+      expect(killed).toEqual([]);
+    });
+
+    it('fails, ending nothing, when the holder keeps refusing with nothing listed or starting', async () => {
+      let clock = 0;
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      const { state, link: holder } = restarting(old, { now: () => (clock += 1_000), sleep: async () => {}, killTree: async (pid) => (killed.push(pid), null) });
+
+      old.shutdown = async () => {
+        old.shutdowns += 1;
+        throw new HolderError('The terminal holder holds 1 live session.', true);
+      };
+
+      expect(await holder.restart()).toEqual({ error: 'The terminal holder did not exit: The terminal holder holds 1 live session.' });
+      expect(old.shutdowns).toBeGreaterThan(5);
+      expect(killed).toEqual([]);
+      expect(state.launched).toEqual([]);
+    });
+
+    it('fails the restart, ending nothing, when a holder that refused does not answer the next ask', async () => {
+      let clock = 0;
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      const { state, link: holder } = restarting(old, { now: () => (clock += 15_000), sleep: async () => {}, killTree: async (pid) => (killed.push(pid), null) });
+
+      // Refused while b starts, then no answer within the 5 seconds a shutdown has, while the holder still holds b.
+      old.shutdown = async () => {
+        old.shutdowns += 1;
+
+        if (old.shutdowns === 1) {
+          throw new HolderError('The terminal holder is starting a session.', true, ['b']);
+        }
+
+        await new Promise(() => undefined);
+      };
+
+      expect(await holder.restart()).toEqual({ live: ['b'] });
+      expect(old.shutdowns).toBe(2);
+      expect(killed).toEqual([]);
+      expect(state.launched).toEqual([]);
+    }, 15_000);
+
+    it('ends the process tree of a holder that does not answer the first shutdown, so a hung holder can be replaced', async () => {
+      let clock = 0;
+      const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 0);
+      const killed: number[] = [];
+      const { current, state, link: holder } = restarting(old, {
+        now: () => (clock += 1_000),
+        sleep: async () => {},
+        killTree: async (pid) => {
+          killed.push(pid);
+          state.held = false;
+          return null;
+        },
+      });
+
+      old.shutdown = async () => {
+        old.shutdowns += 1;
+        await new Promise(() => undefined);
+      };
+
+      expect(await holder.restart()).toMatchObject({ holder: current });
+      expect(old.shutdowns).toBe(1);
+      expect(killed).toEqual([4242]);
+    }, 15_000);
 
     it('keeps a holder that still holds live sessions, naming them', async () => {
       const old = fakeHolder('aaaaaaaaaaaaaaaa', 4242, 2);

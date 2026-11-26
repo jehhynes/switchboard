@@ -39,6 +39,8 @@ export type HolderRestart = { holder: HolderConnection } | { live: string[] } | 
 
 /** How long a holder asked to exit may take to answer `shutdown`. */
 const SHUTDOWN_ANSWER_MS = 5_000;
+/** How long a restart asks again a holder that refused to exit: the holder gives a start 15 seconds (mechanics M169), and a margin. */
+const STARTING_WAIT_MS = 20_000;
 
 export interface HolderLinkDeps {
   /** The Switchboard home, which holds `holder.json` and the installed builds. */
@@ -175,16 +177,14 @@ export class HolderLink {
       return { live };
     }
 
-    let timer: NodeJS.Timeout | undefined;
-    let refused = false;
+    const first = await this.#shutdown(old);
+    let refusal = typeof first === 'string' ? null : first;
 
-    // A holder that does not answer is ended below.
-    await Promise.race([old.shutdown(), new Promise<void>((done) => (timer = setTimeout(done, SHUTDOWN_ANSWER_MS)))])
-      .catch(() => (refused = true))
-      .finally(() => clearTimeout(timer));
-
-    // It refuses while it holds a live session, as one whose spawn began before the list; that session goes back to the caller, never ended here.
-    if (refused) {
+    // It refuses while it holds a live session, as one whose spawn began before the list; that session goes back to the caller, never ended
+    // here. A session still starting is not listed yet, so the holder names it. A holder that refused is never ended: it is asked again until
+    // it accepts, and a retry it does not answer is no acceptance. Only a holder that does not answer the first request, or does not exit
+    // after accepting, has its process tree ended below, so a hung holder can still be replaced.
+    for (const until = this.deps.now() + STARTING_WAIT_MS; refusal !== null; ) {
       const started = await old.list().then(
         (entries) => entries.filter((entry) => entry.exitedAt === null).map((entry) => entry.session),
         () => [],
@@ -192,6 +192,22 @@ export class HolderLink {
 
       if (started.length > 0) {
         return { live: started };
+      }
+
+      if (this.deps.now() >= until) {
+        return refusal.starting.length > 0 ? { live: refusal.starting } : { error: `The terminal holder did not exit: ${refusal.message}` };
+      }
+
+      await this.deps.sleep(POLL_MS);
+
+      const again = await this.#shutdown(old);
+
+      if (again === 'accepted') {
+        break;
+      }
+
+      if (again !== 'silent') {
+        refusal = again;
       }
     }
 
@@ -214,6 +230,19 @@ export class HolderLink {
 
     this.deps.log(`terminal holder ${old.welcome.build} did not exit, so its process tree was ended to start the installed build`, 'warn');
     return null;
+  }
+
+  /** Asks the holder to exit: `accepted`, `silent` when it did not answer in time, or its refusal. */
+  async #shutdown(old: HolderConnection): Promise<'accepted' | 'silent' | { message: string; starting: string[] }> {
+    let timer: NodeJS.Timeout | undefined;
+
+    try {
+      return await Promise.race([old.shutdown().then(() => 'accepted' as const), new Promise<'silent'>((done) => (timer = setTimeout(() => done('silent'), SHUTDOWN_ANSWER_MS)))]);
+    } catch (error) {
+      return { message: (error as Error).message, starting: (error as { starting?: string[] }).starting ?? [] };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Whether the holder's lock is free within 10 seconds. */
