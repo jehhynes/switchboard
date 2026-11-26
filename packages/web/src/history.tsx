@@ -71,7 +71,7 @@ export function entryShown(entry: HistoryEntry, ui: HistoryUi): boolean {
 
   const query = ui.query.trim().toLowerCase();
 
-  return query === '' || [entry.text, entry.detail ?? '', entry.refused ?? '', entry.shortId ?? '', ...entry.lines, ...entry.links.map((link) => link.label)].some((text) => text.toLowerCase().includes(query));
+  return query === '' || [entry.text, entry.body ?? '', entry.detail ?? '', entry.refused ?? '', entry.shortId ?? '', ...entry.lines, ...entry.links.map((link) => link.label)].some((text) => text.toLowerCase().includes(query));
 }
 
 /** The URL a link opens on the page: an http or https `openUrl`; null for anything else. */
@@ -297,8 +297,7 @@ export function renderHistory(open: HistoryOpen | null, state: StateView | null,
             <dl class="hist-facts">
               {view.facts.map((fact) => (
                 <div>
-                  <dt>{fact.label}</dt>
-                  <dd>{fact.value}</dd>
+                  <dd>{fact}</dd>
                 </div>
               ))}
             </dl>

@@ -784,12 +784,12 @@ export interface HistoryEvent extends EventRecord {
 /** Everything recorded about a ticket, for History (PRD R59). */
 export interface TicketHistory {
   ticket: Ticket;
-  /** Newest first, each with its sessions, triages and pastes oldest first; no task or approval prompt. */
+  /** Newest first, each with its sessions, triages, pastes and kept states oldest first; no task or approval prompt. */
   /**
    * `prompted`: the work item has a task prompt, which a registered session's lacks (PRD R81); `prompt`: the prompt of an ad-hoc or task work
    * item, which has no ticket elsewhere to show it (PRD R59).
    */
-  workItems: (Omit<WorkItem, 'taskPrompt' | 'approvalPrompt' | 'reportedPrompt'> & { prompted: boolean; prompt: string | null; sessions: Session[]; triages: HistoryTriage[]; pastes: Paste[] })[];
+  workItems: (Omit<WorkItem, 'taskPrompt' | 'approvalPrompt' | 'reportedPrompt'> & { prompted: boolean; prompt: string | null; sessions: Session[]; triages: HistoryTriage[]; pastes: Paste[]; states: ConversationState[] })[];
   /** Pool triages no pick attached to a work item, oldest first. */
   poolTriages: HistoryTriage[];
   worktree: Worktree | null;
@@ -2121,6 +2121,8 @@ export class Store {
       sessions: this.sessionsFor(item.id),
       triages: triages.filter((triage) => triage.workItemId === item.id),
       pastes: this.pastesFor(item.id),
+      // The states the store keeps, oldest first (architecture.md § States).
+      states: this.#stateRows('SELECT * FROM states WHERE workItemId = ? ORDER BY seq', item.id),
     }));
     const changes = new Map<number, HistoryChange[]>();
 

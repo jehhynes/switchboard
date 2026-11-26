@@ -164,6 +164,9 @@ export interface StateView {
   body: string | null;
   stale: 'turn' | 'session' | null;
   unread: boolean;
+  /** The short ID of the session that wrote it, and when that session ended; null without a session or before it has one. */
+  shortId?: string | null;
+  endedAt?: number | null;
 }
 
 export interface ArtifactView {
@@ -277,6 +280,11 @@ export interface HistoryEntry {
   reconstructed: boolean;
   refused: string | null;
   stateChange: boolean;
+  /** For a `state` entry, the state it shows; null otherwise. */
+  stateId: string | null;
+  body: string | null;
+  /** A stage report's state, drawn from the activity log. */
+  stage: boolean;
 }
 
 /** One History section: a work item's, or the ticket's (`Section` in the hub's `history.ts`). */
@@ -296,7 +304,11 @@ export interface HistoryView {
   key: string;
   title: string;
   url: string;
-  facts: Array<{ label: string; value: string }>;
+  repo: string | null;
+  status: string;
+  tone: HistoryEntry['tone'];
+  playbook: string | null;
+  facts: string[];
   links: HistoryLink[];
   reconstructed: boolean;
   recordedSince: number | null;

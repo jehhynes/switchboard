@@ -34,12 +34,16 @@ const CATEGORIES: HistoryCategory[] = [
   { key: 'session', label: 'Sessions', icon: 'terminal' },
   { key: 'ticket', label: 'Ticket', icon: 'issues' },
 ];
-const entry = (key: string, at: number, patch: Partial<HistoryEntry> = {}): HistoryEntry => ({ key, at, category: 'you', icon: 'play', text: `Entry ${key}`, lines: [], detail: null, shortId: null, links: [], tone: null, reconstructed: false, refused: null, stateChange: false, ...patch });
+const entry = (key: string, at: number, patch: Partial<HistoryEntry> = {}): HistoryEntry => ({ key, at, category: 'you', icon: 'play', text: `Entry ${key}`, lines: [], detail: null, shortId: null, links: [], tone: null, reconstructed: false, refused: null, stateChange: false, stateId: null, body: null, stage: false, ...patch });
 const view = (patch: Partial<HistoryView> = {}): HistoryView => ({
   key: 'gh 77',
   title: 'Inbox <badge>',
   url: 'https://github.com/o/r/issues/77',
-  facts: [{ label: 'Status', value: 'Running' }],
+  repo: 'r',
+  status: 'Running',
+  tone: 'accent',
+  playbook: 'dev:build',
+  facts: ['In scope since 2026-10-07 09:00'],
   links: [{ label: 'Open ticket', icon: 'link-external', title: 'https://github.com/o/r/issues/77', open: { type: 'openUrl', url: 'https://github.com/o/r/issues/77' } }],
   reconstructed: false,
   recordedSince: null,
@@ -88,7 +92,7 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(root.querySelector('.history-view')?.getAttribute('aria-label')).toBe('gh 77 History');
     expect(root.querySelector('.hist-headline h1')?.textContent).toBe('Inbox <badge>');
     expect(root.querySelector('.hist-key')?.textContent).toBe('gh 77');
-    expect([...root.querySelectorAll('.hist-facts dt')].map((fact) => fact.textContent)).toEqual(['Status']);
+    expect([...root.querySelectorAll('.hist-facts dd')].map((fact) => fact.textContent)).toEqual(['In scope since 2026-10-07 09:00']);
     expect([...root.querySelectorAll('.hist-chip')].map((chip) => [chip.textContent, chip.getAttribute('aria-pressed')])).toEqual([['You', 'true'], ['Sessions', 'true'], ['Ticket', 'true']]);
     expect([...root.querySelectorAll<HTMLDetailsElement>('details.hist-section')].map((section) => [section.dataset['section'], section.open])).toEqual([['w1', true], ['ticket', false]]);
     expect(root.querySelectorAll('[data-section="w1"] .hist-day')).toHaveLength(2);
