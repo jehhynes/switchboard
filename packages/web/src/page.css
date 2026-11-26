@@ -928,8 +928,19 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .hub-log-output { flex: 1; min-height: 60px; margin: 0; padding: 10px; overflow: auto; overscroll-behavior: contain; white-space: pre; font: 12px/1.6 var(--vscode-editor-font-family, monospace); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); border: 1px solid var(--vscode-panel-border); border-radius: 4px; }
 .hub-log-output.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 .hub-log-line { min-height: 1.6em; }
+.hub-log-line.continued { padding-left: 2ch; color: var(--vscode-descriptionForeground); }
+.hub-log-line.level-warn { color: var(--vscode-editorWarning-foreground); }
+.hub-log-line.level-error { color: var(--vscode-errorForeground); }
+.hub-log-line.level-debug { color: var(--vscode-descriptionForeground); }
+.hub-log-time, .hub-log-level { color: var(--vscode-descriptionForeground); }
+.hub-log-day { margin: 6px 0 2px; color: var(--vscode-descriptionForeground); font-family: var(--vscode-font-family, sans-serif); border-bottom: 1px solid var(--vscode-panel-border); }
+.hub-log-chip { min-height: 28px; padding: 0 10px; border: 1px solid var(--vscode-panel-border); border-radius: 14px; background: transparent; color: var(--vscode-foreground); cursor: pointer; }
+.hub-log-chip[aria-pressed="true"] { background: var(--vscode-button-background); border-color: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.hub-log-tools .hub-log-area { flex: 0 1 160px; }
+.hub-log-errors { border: none; background: none; padding: 0; color: var(--vscode-errorForeground); text-decoration: underline; cursor: pointer; }
 .hub-log-earlier { padding-bottom: 8px; font-family: var(--vscode-font-family, sans-serif); white-space: normal; }
-@media (hover: none), (pointer: coarse) { .hub-log-tools .sheet-input, .hub-log-tools label, .hub-log .sheet-button { min-height: 44px; } }
+@media (hover: none), (pointer: coarse) { .hub-log-tools .sheet-input, .hub-log-tools label, .hub-log .sheet-button, .hub-log-chip { min-height: 44px; } }
+@media (max-width: 600px) { .hub-log-tools.hub-log-levels { flex-wrap: nowrap; overflow-x: auto; } .hub-log-chip { flex: none; } .hub-log-tools .hub-log-area { flex: 0 0 140px; } .hub-log-errors { flex: none; } }
 .held-sheet { width: min(1000px, 100%); }
 .held-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; margin-bottom: 16px; }
 .held-row, .held-confirm { border: 1px solid var(--vscode-widget-border); padding: 12px; border-radius: 4px; min-width: 0; }

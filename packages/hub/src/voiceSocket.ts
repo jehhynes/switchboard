@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { acceptWebSocket } from './webSocket.js';
@@ -47,7 +48,7 @@ export interface VoiceSocketDeps {
   idleMs?: number;
   /** How long a socket may wait for its `hello`; {@link VOICE_HELLO_MS} when left out. */
   helloMs?: number;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   /** The device's page said `hello`: it has the voice socket; `resumed` when it asked to take the voice back. */
   opened?(device: VoiceDevice, resumed: boolean): void;
   /** Why the device's page may not take the voice back after a hub restart, as its `hello {resume: true}` asks; null when it may. */
@@ -226,7 +227,7 @@ export class VoiceSockets {
     const refused = !resume ? null : this.deps.resumable === undefined ? 'Voice did not resume after Switchboard restarted.' : this.deps.resumable(one.device);
 
     if (refused !== null) {
-      this.deps.log(`voice socket: ${one.device.label || 'a device'} (${one.device.hash.slice(0, 8)}) did not take the voice back: ${refused}`);
+      this.deps.log(`voice socket: ${one.device.label || 'a device'} (${one.device.hash.slice(0, 8)}) did not take the voice back: ${refused}`, 'warn');
       one.socket.close(VOICE_CLOSE.refused, refused);
       return;
     }

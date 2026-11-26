@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { DEBRIEF_ENV, debriefRange, failureOf, findTranscript, frictionOf, rosterState, runDebrief, scopeOf, subagentTranscripts } from '@switchboard/claude';
 import type { DebriefCache, DebriefRange, DebriefResult, Exec, ExecResult, FrictionEntry, RosterResult } from '@switchboard/claude';
@@ -180,7 +181,7 @@ export interface DebriefDeps {
   roster(): Promise<RosterResult>;
   now(): number;
   newId(): string;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
 }
 
 /** One debrief's entries, merged into the state on disk. */
@@ -238,7 +239,7 @@ export class Debriefs {
     try {
       await this.run();
     } catch (error) {
-      this.deps.log(`debrief: the scan failed: ${String(error)}`);
+      this.deps.log(`debrief: the scan failed: ${String(error)}`, 'warn');
     } finally {
       this.scanning = false;
     }
@@ -304,7 +305,7 @@ export class Debriefs {
         const roster = await this.deps.roster();
 
         if ('error' in roster) {
-          this.deps.log(`debrief: the roster could not be read: ${roster.error}`);
+          this.deps.log(`debrief: the roster could not be read: ${roster.error}`, 'warn');
           return;
         }
 
@@ -345,7 +346,7 @@ export class Debriefs {
       if (session.codeMode === true) {
         if (!this.skippedCodeMode.has(session.id)) {
           this.skippedCodeMode.add(session.id);
-          this.deps.log(`debrief: session ${session.id} skipped, because Code Mode sessions cannot be debriefed`);
+          this.deps.log(`debrief: session ${session.id} skipped, because Code Mode sessions cannot be debriefed`, 'debug');
         }
 
         continue;
@@ -360,7 +361,7 @@ export class Debriefs {
             const found = appServerDebriefRange(await this.deps.appServer.history(session.nativeSessionId), held?.throughMessageUuid ?? null);
             const age = found === null ? -1 : now - found.writtenAt;
             if (found !== null && age >= (this.deps.workItemDone(session.workItemId) ? 0 : DEBRIEF_IDLE_MS) && age < DEBRIEF_EXPIRY_MS && rangeDue({ throughMessageUuid: found.range.throughTurnId, toolCalls: found.range.toolCalls }, held)) candidates.push({ provider: 'codex', session: session as Candidate['session'], transcript: '', ...found });
-          } catch (error) { this.deps.log(`debrief: Codex history unavailable: ${String(error)}`); }
+          } catch (error) { this.deps.log(`debrief: Codex history unavailable: ${String(error)}`, 'warn'); }
           continue;
         }
         const candidate = this.codexCandidate(session as Candidate['session'], held, now);
@@ -458,7 +459,7 @@ export class Debriefs {
     const error = 'error' in result ? result.error : friction === null ? `the answer was not the friction JSON: ${result.text.slice(0, 200)}` : null;
 
     if (error !== null || friction === null) {
-      this.deps.log(`debrief: Codex session ${thread} failed: ${error}`);
+      this.deps.log(`debrief: Codex session ${thread} failed: ${error}`, 'warn');
       this.save(
         {
           sessions: {
@@ -519,7 +520,7 @@ export class Debriefs {
     const at = new Date(this.deps.now()).toISOString();
 
     if ('error' in result) {
-      this.deps.log(`debrief: ${sessionId} failed: ${result.error}`);
+      this.deps.log(`debrief: ${sessionId} failed: ${result.error}`, 'warn');
       this.save(
         {
           codex: this.pending(state, candidate),
@@ -628,7 +629,7 @@ export class Debriefs {
     const error = result.code === NOTHING_TO_DEBRIEF || friction !== null ? null : result.code === 0 ? `the answer was not the friction JSON: ${result.stdout.slice(0, 200)}` : failureOf(this.deps.nodePath, result, DEBRIEF_TIMEOUT_MS, { notFound: `${this.deps.nodePath} was not found.` });
 
     if (error !== null) {
-      this.deps.log(`debrief: Codex thread ${thread} failed: ${error}`);
+      this.deps.log(`debrief: Codex thread ${thread} failed: ${error}`, 'warn');
     } else if (friction !== null) {
       this.deps.log(`debrief: Codex thread ${thread}, ${friction.length} friction reports`);
     }

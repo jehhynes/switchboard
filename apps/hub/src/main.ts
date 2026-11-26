@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { answers, hubBundlePath, hubLogPath, lockAddress, switchboardHome } from '@switchboard/core';
+import { answers, hubBundlePath, hubLogPath, lockAddress, logLine, switchboardHome } from '@switchboard/core';
+import type { LogLevel } from '@switchboard/core';
 import { execFile } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { ATTACH_TIMEOUT_MS, buildOf, carriesBuilds, installCarried, loadConfigFolder, reportReady, runConfig, startSuccessor, bundleHome, killProcessTree, connectHolder, currentHolderBuild, createHubApp, dropColourOverrides, findHub, gitBashRoot, handledBody, holdSupervisorLock, HubSupervisor, isSnapshotWorker, pendingHandover, postToHub, readStopped, recordedHubPid, registerTitle, reportBody, runAttach, runHolder, runAutostart, runSnapshotWorker, serveHub, START_FLAGS, START_WAIT_MS, startDetached, stopHub, stopSupervisor, supervisorAddress, supervisorOffPath, ticketBody } from '@switchboard/hub';
@@ -608,9 +609,9 @@ async function supervise(home: string, rest: readonly string[]): Promise<number>
   const bundle = hubBundlePath(home);
   // Without --config the hub reads config.json each time it starts, so hub.js config set holds for the hubs this starts too.
   const configArgs = named === null ? [] : [`--config=${resolve(named)}`];
-  const log = (line: string): void => {
+  const log = (line: string, level: LogLevel = 'info'): void => {
     try {
-      appendFileSync(hubLogPath(home), `${new Date().toISOString()} supervisor: ${line}\n`);
+      appendFileSync(hubLogPath(home), logLine(new Date(), level, `supervisor: ${line}`));
     } catch {
       // A log that cannot be written must not stop the supervisor.
     }
@@ -628,7 +629,7 @@ async function supervise(home: string, rest: readonly string[]): Promise<number>
       }
 
       try {
-        startDetached(process.execPath, bundle, home, [`--home=${home}`, ...configArgs, ...passed]).on('error', (error) => log(`the hub did not start: ${error.message}`));
+        startDetached(process.execPath, bundle, home, [`--home=${home}`, ...configArgs, ...passed]).on('error', (error) => log(`the hub did not start: ${error.message}`, 'warn'));
         return null;
       } catch (error) {
         return String(error);
@@ -736,11 +737,11 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 
   const build = bundle === undefined ? 'unknown' : buildOf(bundle);
-  const log = (line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
+  const log = (line: string, level: LogLevel = 'info') => process.stdout.write(logLine(new Date(), level, line));
   const loaded = loadConfigFolder(configDeps(home), flag(argv, 'config'));
 
   if ('error' in loaded) {
-    process.stderr.write(`Not starting: ${loaded.error}; pid ${process.pid} exiting.\n`);
+    process.stderr.write(logLine(new Date(), 'error', `Not starting: ${loaded.error}; pid ${process.pid} exiting.`));
 
     return 1;
   }
@@ -753,13 +754,13 @@ async function main(argv: readonly string[]): Promise<number> {
   const result = await serveHub({ home, version: VERSION, build, configDir, log, app: (carried) => createHubApp({ home, configDir, log, handover: carried, ...(codeModeIdle === null ? {} : { codeModeIdleMs: Number(codeModeIdle) }), ...(bundle === undefined ? {} : { snapshotWorker: resolve(bundle) }) }), ...(idle > 0 ? { idleMs: idle } : {}), ...(wait > 0 ? { waitMs: wait } : {}), ...(takeover === null ? {} : { takeover: Number(takeover) }), restart: { bundle: hubBundlePath(home), successor: () => startSuccessor({ execPath: process.execPath, bundle: hubBundlePath(home), args: argv, env: process.env, logPath: hubLogPath(home) }) }, ...(browserPort === null ? {} : { browserPort: Number(browserPort) || null }), ...(pagePort === null ? {} : { pagePort: Number(pagePort) }) });
 
   if ('existing' in result) {
-    process.stdout.write(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.\n`);
+    log(`A hub is already running for this home on port ${result.existing.port}; pid ${process.pid} exiting.`, 'debug');
 
     return 0;
   }
 
   if ('refused' in result) {
-    process.stderr.write(`Not starting: ${result.refused}; pid ${process.pid} exiting.\n`);
+    process.stderr.write(logLine(new Date(), 'warn', `Not starting: ${result.refused}; pid ${process.pid} exiting.`));
 
     return 1;
   }
@@ -783,12 +784,12 @@ process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
 }) as typeof process.emitWarning;
 
 process.on('uncaughtException', (error) => {
-  process.stderr.write(`uncaughtException: ${error instanceof Error && error.stack !== undefined ? error.stack : String(error)}\n`);
+  process.stderr.write(logLine(new Date(), 'error', `uncaughtException: ${error instanceof Error && error.stack !== undefined ? error.stack : String(error)}`));
   process.exit(1);
 });
 
 process.on('unhandledRejection', (error) => {
-  process.stderr.write(`unhandledRejection: ${String(error)}\n`);
+  process.stderr.write(logLine(new Date(), 'error', `unhandledRejection: ${String(error)}`));
 });
 
 // Every hub.js command, the supervisor and `start` included, so nothing it starts inherits them (mechanics M149).
@@ -805,7 +806,7 @@ if (isSnapshotWorker()) {
       }
     })
     .catch((error: unknown) => {
-      process.stderr.write(`Hub failed: ${String(error)}\n`);
+      process.stderr.write(logLine(new Date(), 'error', `Hub failed: ${String(error)}`));
       process.exit(1);
     });
 }

@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,7 +36,7 @@ export interface RestartDeps {
    * stopping anything, ends the successor and answers why, and this hub runs on.
    */
   handOver(successor: Successor): Promise<void | { error: string }>;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
 }
 
 /**
@@ -114,7 +115,7 @@ export class HubRestart {
       const successor = await this.deps.successor();
 
       if ('error' in successor) {
-        this.deps.log(`hub restart failed: ${successor.error}; this hub keeps running`);
+        this.deps.log(`hub restart failed: ${successor.error}; this hub keeps running`, 'warn');
         this.#failed = installed;
         this.#asked = false;
         this.#waiting = null;
@@ -141,7 +142,7 @@ export class HubRestart {
 
     // Nothing was handed over: this hub keeps running its own build.
     if (refused !== undefined) {
-      this.deps.log(`hub restart failed: ${refused.error}; this hub keeps running`);
+      this.deps.log(`hub restart failed: ${refused.error}; this hub keeps running`, 'warn');
       this.#handedOver = false;
       this.#failed = installed;
       this.#asked = false;

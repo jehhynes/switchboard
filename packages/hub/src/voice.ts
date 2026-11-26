@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ConversationMessage, ConversationReply, Interruption, Persona, Piece, Session, SpokenState, ViewSettings, VoiceSettings } from '@switchboard/core';
@@ -270,7 +271,7 @@ export interface VoiceControlDeps {
   /** The voice target or the voice's problem changed, so the page's list and header are sent again. */
   dockChanged(): void;
   now(): number;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   setTimer?(run: () => void, ms: number): unknown;
   clearTimer?(timer: unknown): void;
   every?(run: () => void, ms: number): { stop(): void };
@@ -570,7 +571,7 @@ export class VoiceControl {
     this.#stopFlush();
     this.#clear('linger');
     this.#clear('restart');
-    this.deps.log(`voice: handed over: device ${state.device}, target ${state.target.sessionId ?? 'none'}, generation ${state.target.gen}, mic ${state.micOn ? 'on' : 'off'}`);
+    this.deps.log(`voice: handed over: device ${state.device}, target ${state.target.sessionId ?? 'none'}, generation ${state.target.gen}, mic ${state.micOn ? 'on' : 'off'}`, 'debug');
     return state;
   }
 
@@ -1186,7 +1187,7 @@ export class VoiceControl {
   micTiming(key: string, steps: Array<{ step: string; ms: number }>, outcome: string): void {
     const from = this.deps.remotePage?.(key) === true ? "a paired device's page" : "this computer's page";
 
-    this.deps.log(`voice: mic on tap on ${from} → ${outcome}: ${steps.map((one) => `${one.step} at ${Math.round(one.ms)} ms`).join(', ')}`);
+    this.deps.log(`voice: mic on tap on ${from} → ${outcome}: ${steps.map((one) => `${one.step} at ${Math.round(one.ms)} ms`).join(', ')}`, 'debug');
   }
 
   /**
@@ -1407,7 +1408,7 @@ export class VoiceControl {
     const heard = this.#heardFor(message.gen, message.utteranceId, message.sessionId);
 
     if (heard === null) {
-      this.deps.log(`voice: piece of utterance ${message.utteranceId} dropped: generation ${message.gen} is not ${this.#target.gen}`);
+      this.deps.log(`voice: piece of utterance ${message.utteranceId} dropped: generation ${message.gen} is not ${this.#target.gen}`, 'debug');
       return;
     }
 
@@ -1519,7 +1520,7 @@ export class VoiceControl {
     const sent = this.deps.dictate(heard.key, heard.sessionId, text, pieces, partial, partial ? null : composer.interrupted);
 
     if ('refused' in sent) {
-      this.deps.log(`voice: dictated message refused: ${sent.refused}`);
+      this.deps.log(`voice: dictated message refused: ${sent.refused}`, 'warn');
 
       for (const piece of pieces) {
         this.#fragment({ event: 'refused', sessionId: heard.sessionId, utteranceId: null, pieceId: null, messageId: null, text: piece.text, error: sent.refused });
@@ -1609,7 +1610,7 @@ export class VoiceControl {
       mkdirSync(this.deps.fragmentsDir, { recursive: true });
       appendFileSync(join(this.deps.fragmentsDir, `fragments-${date}.jsonl`), `${JSON.stringify({ at: at.toISOString(), ...fragment })}\n`);
     } catch (error) {
-      this.deps.log(`voice: the fragments log could not be written: ${(error as Error).message}`);
+      this.deps.log(`voice: the fragments log could not be written: ${(error as Error).message}`, 'warn');
     }
   }
 
@@ -1981,7 +1982,7 @@ export class VoiceControl {
           }
         }
 
-        this.deps.log(`voice target ${message.sessionId ?? 'none'} (${message.reason}), generation ${message.gen}`);
+        this.deps.log(`voice target ${message.sessionId ?? 'none'} (${message.reason}), generation ${message.gen}`, 'debug');
         this.viewsChanged();
         this.deps.dockChanged();
         this.#syncTyping();
@@ -2015,7 +2016,7 @@ export class VoiceControl {
           const had = message.device === 'phone' ? 'the phone' : message.device === 'none' ? 'no device' : 'this computer';
 
           if (this.#deviceChosen) {
-            this.deps.log(`voice: device ${this.#device}: the voice process had ${had} when the hub connected, and is told this hub's device`);
+            this.deps.log(`voice: device ${this.#device}: the voice process had ${had} when the hub connected, and is told this hub's device`, 'debug');
             this.#client?.send({ type: 'device', device: this.#device });
           } else if (message.device !== 'computer') {
             // The phone's socket closed with the hub that stopped, a loss; none was already off, as the operator may have chosen.
@@ -2152,7 +2153,7 @@ export class VoiceControl {
           this.#audioError = message.error;
 
           if (message.error !== null) {
-            this.deps.log(`voice: ${message.error}`);
+            this.deps.log(`voice: ${message.error}`, 'warn');
           }
 
           this.viewsChanged();
@@ -2224,7 +2225,7 @@ export class VoiceControl {
 
       if (this.#processError !== found.error) {
         this.#processError = found.error;
-        this.deps.log(`voice: ${found.error}`);
+        this.deps.log(`voice: ${found.error}`, 'warn');
         this.deps.dockChanged();
       }
 
@@ -2316,7 +2317,7 @@ export class VoiceControl {
 
   /** What became of an offered reply's speech, in the hub log beside the voice process's own line in voice.log. */
   #logSpeech(replyId: string, offered: Offered, outcome: string, atMs: number | null, said: number | null): void {
-    this.deps.log(`voice: reply ${replyId} of session ${offered.sessionId} ${outcome}, voice ${offered.voice}, ${atMs ?? 0} ms played, ${said ?? 0} characters said`);
+    this.deps.log(`voice: reply ${replyId} of session ${offered.sessionId} ${outcome}, voice ${offered.voice}, ${atMs ?? 0} ms played, ${said ?? 0} characters said`, 'debug');
   }
 
   #timer(run: () => void, ms: number): unknown {

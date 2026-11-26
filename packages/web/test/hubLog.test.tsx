@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'preact/test-utils';
 import { render } from 'preact';
-import { earlierLines, HubLog, HUB_LOG_POLL_MS, mergeTail, splitLines } from '../src/hubLog.js';
+import { earlierLines, HubLog, HUB_LOG_POLL_MS, mergeTail, parseRows, splitLines } from '../src/hubLog.js';
 
 let host: HTMLElement;
 const flush = async () => { await act(async () => { await Promise.resolve(); }); };
@@ -65,7 +65,58 @@ describe('the hub log lines', () => {
   });
 });
 
+describe('the hub log levels', () => {
+  it('reads the time, level and area, counts a line before levels as info, and gives a stack frame the line above\'s', () => {
+    const rows = parseRows(['2026-11-26T01:04:18.000Z warn  sessions: could not list', '    at read (x.js:1)', '2026-11-26T01:04:19.000Z voice target abc', '2026-11-26T01:04:20.000Z debug session bfd12580 (work item 3): sent', '2026-11-26T01:04:21.000Z info  work item 4: artifact updated: a.md', 'no stamp at the start']);
+    expect(rows.map((row) => [row.level, row.area, row.continued])).toEqual([['warn', 'sessions', false], ['warn', 'sessions', true], ['info', 'voice', false], ['debug', 'session', false], ['info', 'work item', false], ['info', 'work item', true]]);
+    expect(rows[0]!.text).toBe('sessions: could not list');
+    expect(rows[1]!.at).toEqual(rows[0]!.at);
+  });
+});
+
 describe('the hub log sheet', () => {
+  it('shows local times with a date line, colours warnings and errors, hides details until asked, and filters by level and area', async () => {
+    const text = [
+      '2026-11-25T10:00:00.000Z info  hub: restarted on build b1',
+      '2026-11-25T10:00:01.000Z debug voice: now for session s1',
+      '2026-11-26T10:00:02.000Z warn  sessions: could not list running Codex sessions',
+      '2026-11-26T10:00:03.000Z error hub: unexpected error: boom',
+      '    at main (hub.js:1)',
+      '2026-11-26T10:00:04.000Z voice: an old line with no level',
+    ].join('\n') + '\n';
+    const read = vi.fn().mockResolvedValue(reply(text));
+    await act(() => render(<HubLog fetch={read} />, host));
+    await flush();
+    // Details are off by default: the debug line is hidden.
+    expect(lines()).toHaveLength(5);
+    expect(host.textContent).not.toContain('now for session');
+    const first = host.querySelector('.hub-log-line')!;
+    expect(first.querySelector('.hub-log-time')!.textContent).toBe(new Date('2026-11-25T10:00:00.000Z').toLocaleTimeString());
+    expect(first.getAttribute('title')).toBe('2026-11-25T10:00:00.000Z');
+    expect([...host.querySelectorAll('.hub-log-day')].map((node) => node.textContent)).toEqual(['2026-11-25T10:00:00.000Z', '2026-11-26T10:00:02.000Z'].map((at) => new Date(at).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })));
+    expect(host.querySelector('.hub-log-line.level-warn')!.textContent).toContain('could not list');
+    expect(host.querySelector('.hub-log-line.level-error:not(.continued)')!.textContent).toContain('boom');
+    expect(host.querySelector('.continued')!.classList.contains('level-error')).toBe(true);
+    await click('Details');
+    expect(lines()).toHaveLength(6);
+    expect(status()).toContain('6 lines');
+    await click('1 error in loaded lines');
+    expect(lines()).toEqual([expect.stringContaining('boom'), '    at main (hub.js:1)']);
+    expect(status()).toContain('2 of 6 lines match');
+    // Clicks between renders all count.
+    await act(() => { for (const label of ['Errors', 'Info', 'Warnings', 'Details']) button(label)!.click(); });
+    expect(['Errors', 'Warnings', 'Info', 'Details'].map((label) => button(label)!.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'true', 'true']);
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label=Area]')!;
+    expect([...select.options].map((one) => one.value)).toEqual(['', 'hub', 'sessions', 'voice']);
+    await act(() => { select.value = 'voice'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(lines()).toEqual([expect.stringContaining('now for session'), expect.stringContaining('an old line with no level')]);
+    // Copy keeps the file's own text.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    await click('Copy shown lines');
+    expect(writeText).toHaveBeenCalledWith('2026-11-25T10:00:01.000Z debug voice: now for session s1\n2026-11-26T10:00:04.000Z voice: an old line with no level\n');
+  });
+
   it('reads 500 lines, shows text as text, filters with a match count, wraps, and copies the shown lines', async () => {
     const read = vi.fn().mockResolvedValue(reply('2026-11-22T12:01:00Z ready\r\n2026-11-22T12:02:00Z ERROR <img src=x>\r\n', true));
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -73,11 +124,13 @@ describe('the hub log sheet', () => {
     await act(() => render(<HubLog fetch={read} />, host));
     await flush();
     expect(read).toHaveBeenCalledWith('/v1/page/hub-log?lines=500', expect.objectContaining({ credentials: 'same-origin', cache: 'no-store' }));
-    expect(lines()).toEqual(['2026-11-22T12:01:00Z ready', '2026-11-22T12:02:00Z ERROR <img src=x>']);
+    expect(lines()).toHaveLength(2);
+    expect(lines()[1]).toContain('ERROR <img src=x>');
     expect(host.querySelector('img')).toBeNull();
     const filter = host.querySelector<HTMLInputElement>('input[type=search]')!;
     await act(() => { filter.value = 'error'; filter.dispatchEvent(new Event('input', { bubbles: true })); });
-    expect(lines()).toEqual(['2026-11-22T12:02:00Z ERROR <img src=x>']);
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]).toContain('ERROR <img src=x>');
     expect(status()).toContain('1 of 2 lines match · Load earlier lines to search further');
     await act(() => host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
     expect(output().classList.contains('wrap')).toBe(true);
@@ -190,7 +243,8 @@ describe('the hub log sheet', () => {
     await scrollTo(60);
     const earlier = host.querySelector('.hub-log-earlier')!;
     // The button is above the first line, inside the scroller.
-    expect(earlier.nextElementSibling!.textContent).toContain('line 11');
+    expect(earlier.compareDocumentPosition(host.querySelector('.hub-log-line')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(host.querySelector('.hub-log-line')!.textContent).toContain('line 11');
     read.mockResolvedValueOnce(reply(numbered(1, 21), false));
     await click('Load earlier lines');
     await flush();
@@ -271,7 +325,7 @@ describe('the hub log sheet', () => {
     await flush();
     read.mockResolvedValue(reply('2026-11-22T13:00:00.000Z fresh\n', false, { file: 'f2' }));
     await tick();
-    expect(lines()).toEqual(['2026-11-22T13:00:00.000Z fresh']);
+    expect(lines()).toEqual([expect.stringContaining('fresh')]);
     expect(host.textContent).toContain('The log was replaced or cut; showing the new file.');
     read.mockResolvedValue(reply(numbered(30, 40), true, { file: 'f2' }));
     await tick();

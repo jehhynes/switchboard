@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { Worker } from 'node:worker_threads';
 import type { DockView } from './dock.js';
 import type { Snapshot, SnapshotInputs } from './snapshot.js';
@@ -20,7 +21,7 @@ export interface SnapshotBuilderOptions {
   /** The worker's script and data; null builds on the main thread. */
   worker: { script: string; data: SnapshotWorkerData } | null;
   now(): number;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
 }
 
 /**
@@ -110,7 +111,7 @@ export class SnapshotBuilder {
       try {
         built = await this.#build(this.options.inputs());
       } catch (error) {
-        this.options.log(`snapshot build failed: ${String(error)}`);
+        this.options.log(`snapshot build failed: ${String(error)}`, 'warn');
         continue;
       }
 
@@ -175,7 +176,7 @@ export class SnapshotBuilder {
   #fail(error: Error): void {
     if (!this.#failed) {
       this.#failed = true;
-      this.options.log(`snapshot worker failed, building on the main thread: ${error.message}`);
+      this.options.log(`snapshot worker failed, building on the main thread: ${error.message}`, 'warn');
     }
 
     void this.#worker?.terminate();

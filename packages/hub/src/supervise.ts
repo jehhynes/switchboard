@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
@@ -178,7 +179,7 @@ export interface SuperviseDeps {
   start(): string | null;
   now(): number;
   sleep(ms: number): Promise<void>;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   checkMs?: number;
   graceMs?: number;
   /** The wait before the second start; `SUPERVISE_BASE_MS` when left out. */
@@ -260,7 +261,7 @@ export class HubSupervisor {
           lastStart = deps.now();
           attempts += 1;
           said = null;
-          deps.log(why !== null ? `could not start the hub: ${why}` : seen ? `the hub stopped without hub.js --stop; starting it again (start ${attempts} since it last ran steadily)` : 'no hub is running; starting one');
+          deps.log(why !== null ? `could not start the hub: ${why}` : seen ? `the hub stopped without hub.js --stop; starting it again (start ${attempts} since it last ran steadily)` : 'no hub is running; starting one', why !== null ? 'warn' : 'info');
         }
       }
 

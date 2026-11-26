@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { readdirSync, readFileSync, realpathSync, statSync, watch } from 'node:fs';
 import type { Dirent, FSWatcher } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
@@ -116,7 +117,7 @@ export interface ArtifactFolderDeps {
   /** An artifact written, rewritten or changed through a file it uses, or removed. */
   onChange(change: { artifact: Artifact } | { path: string; removed: true }): void;
   now(): number;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   /** How long a file's changes settle before it is read; 150 ms by default. */
   settleMs?: number;
   /** How often a missing folder is looked for; a second by default. */
@@ -494,7 +495,7 @@ function usesStamp(entry: ExternalEntry): string {
 export interface ExternalArtifactsDeps {
   onChange(change: { artifact: Artifact } | { path: string; removed: true }): void;
   now(): number;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   /** How often every file is read again, for a change its folder's watch missed; two seconds by default. */
   pollMs?: number;
   /** How long a file's changes settle before it is read; 150 ms by default. */

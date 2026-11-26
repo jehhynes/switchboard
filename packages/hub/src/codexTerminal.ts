@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { join } from 'node:path';
 import { claudeFile } from '@switchboard/claude';
 import type { HolderLookup } from '@switchboard/claude';
@@ -25,7 +26,7 @@ export interface CodexTerminalsDeps {
   hasTurns(session: Session): Promise<boolean>;
   /** Whether an end of the session is running now, which a start waits for. */
   ending(sessionId: string): Promise<void> | undefined;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   environment?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
 }
@@ -147,7 +148,7 @@ export class CodexTerminals {
     if (!('holder' in found)) {
       if ('error' in found) {
         this.#unended.add(sessionId);
-        this.deps.log(`session ${sessionId}: its Codex terminal may still run: ${found.error}`);
+        this.deps.log(`session ${sessionId}: its Codex terminal may still run: ${found.error}`, 'warn');
       } else {
         this.#unended.delete(sessionId);
       }
@@ -171,7 +172,7 @@ export class CodexTerminals {
         this.#unended.delete(sessionId);
       } else {
         this.#unended.add(sessionId);
-        this.deps.log(`session ${sessionId}: ending its Codex terminal failed, so it may still run: ${message}`);
+        this.deps.log(`session ${sessionId}: ending its Codex terminal failed, so it may still run: ${message}`, 'warn');
       }
     }
   }

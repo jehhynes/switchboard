@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 /**
  * Typing a message into a held session (architecture.md § Typing a message), from claude-collab's `session.js`: one input transaction per
  * message, serialized per session, which a message queued while it waits to be pasted joins. It waits until no menu is open, the input box holds
@@ -540,7 +541,7 @@ export interface SessionInputDeps {
   reserve(): Promise<{ release(): void } | { refused: string }>;
   now(): number;
   sleep(ms: number): Promise<void>;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   submit?: SubmitOptions;
 }
 
@@ -651,7 +652,7 @@ export class SessionInput {
           one.steps?.({ ...steps, queuedAt: one.queuedAt });
           one.done(outcome);
         } catch (error) {
-          this.deps.log(`session ${this.sessionId}: a typed message's outcome could not be reported: ${String(error)}`);
+          this.deps.log(`session ${this.sessionId}: a typed message's outcome could not be reported: ${String(error)}`, 'warn');
         }
       }
     };
@@ -763,12 +764,12 @@ export class SessionInput {
     const typedSince = (keyAt: number | null): boolean => keyAt !== null && keyAt >= since;
 
     if (draft === '' || !boxHolds(draft, pasted)) {
-      this.deps.log(`session ${this.sessionId}: a typed message is not in the transcript yet and not in the input box; counted as sent`);
+      this.deps.log(`session ${this.sessionId}: a typed message is not in the transcript yet and not in the input box; counted as sent`, 'warn');
       return { delivery: 'sent' };
     }
 
     if (!isMessage(draft, pasted) || typedSince(shown.keyAt)) {
-      this.deps.log(`session ${this.sessionId}: a typed message Claude Code did not take shares the input box with other text; left as it is`);
+      this.deps.log(`session ${this.sessionId}: a typed message Claude Code did not take shares the input box with other text; left as it is`, 'warn');
       return outcome(NOT_CLEARED);
     }
 
@@ -988,7 +989,7 @@ export class SessionInput {
         return { delivery: 'sent' };
       }
 
-      this.deps.log(`session ${this.sessionId}: a typed message is not in the transcript after ${result.enterAttempts} Enter${result.enterAttempts === 1 ? '' : 's'}${result.submitted ? '' : '; it is still in the input box'}`);
+      this.deps.log(`session ${this.sessionId}: a typed message is not in the transcript after ${result.enterAttempts} Enter${result.enterAttempts === 1 ? '' : 's'}${result.submitted ? '' : '; it is still in the input box'}`, 'warn');
 
       return await this.#settle(pasted, since, check, UNREADABLE, steps, watch);
     } catch (error) {

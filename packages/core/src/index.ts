@@ -25,3 +25,4 @@ export * from './conversation.js';
 export * from './persona.js';
 export * from './limit.js';
 export * from './changes.js';
+export * from './log.js';

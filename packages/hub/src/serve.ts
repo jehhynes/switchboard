@@ -1,3 +1,5 @@
+import { logLine } from '@switchboard/core';
+import type { LogLevel } from '@switchboard/core';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
@@ -68,7 +70,7 @@ export interface ServeOptions {
   /** How long a hub that lost the lock waits for the holder's record. */
   waitMs?: number;
   exit?: (code: number) => void;
-  log?: (line: string) => void;
+  log?: (line: string, level?: LogLevel) => void;
   /** Built once this process holds the hub lock, so a losing start never opens the store; a successor's gets what the hub before it carried. */
   app?: (carried: Record<string, unknown> | null) => Promise<HubApp>;
   /** The pid of the hub this one takes over from, whose lock it waits for (`--takeover`). */
@@ -126,7 +128,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   const { home, version, build, configDir } = options;
   const path = hubRecordPath(home);
   const exit = options.exit ?? ((code: number) => process.exit(code));
-  const log = options.log ?? ((line: string) => process.stdout.write(`${new Date().toISOString()} ${line}\n`));
+  const log = options.log ?? ((line: string, level: LogLevel = 'info') => process.stdout.write(logLine(new Date(), level, line)));
   const idleMs = options.idleMs;
 
   mkdirSync(switchboardHome(home), { recursive: true });
@@ -232,7 +234,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
   if (app?.page !== undefined && pagePort > 0) {
     // A taken port leaves the page on the hub's own port, whose links then say so.
     void server.listenPage(pagePort).then((error) =>
-      log(error === null ? `web page on http://127.0.0.1:${pagePort}/page/` : `web page not served on 127.0.0.1:${pagePort}: ${error}; it is on the hub's port ${server.port}, which changes at each start`),
+      log(error === null ? `web page on http://127.0.0.1:${pagePort}/page/` : `web page not served on 127.0.0.1:${pagePort}: ${error}; it is on the hub's port ${server.port}, which changes at each start`, error === null ? 'info' : 'warn'),
     );
   }
 
@@ -245,7 +247,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       const origin = new URL(await server.pageUrl()).origin;
       return { enabled: app.page?.browser?.iframeEnabled?.() === true, origins: [origin, origin.replace('127.0.0.1', 'localhost')] };
     }).catch((error: unknown) => {
-      log(`browser endpoint not served on 127.0.0.1:${browserPort}: ${String(error)}`);
+      log(`browser endpoint not served on 127.0.0.1:${browserPort}: ${String(error)}`, 'warn');
 
       return null;
     });
@@ -316,7 +318,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
 
             const successor = await waitForHub(home, restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS, (found) => found.token !== record.token);
 
-            log(successor === null ? `hub restart: no hub took over within ${(restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} seconds; hub.js start or its supervisor starts one` : `hub restart: pid ${successor.pid} took over with build ${successor.build}`);
+            log(successor === null ? `hub restart: no hub took over within ${(restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS) / 1000} seconds; hub.js start or its supervisor starts one` : `hub restart: pid ${successor.pid} took over with build ${successor.build}`, successor === null ? 'warn' : 'info');
             exit(0);
           },
           log,
@@ -335,7 +337,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
         try {
           writeStopped(home, reason);
         } catch (error) {
-          log(`hub-stopped.json could not be written: ${(error as Error).message}`);
+          log(`hub-stopped.json could not be written: ${(error as Error).message}`, 'warn');
         }
       }
 

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 export const HUB_LOG_POLL_MS = 2_000;
 /** Lines each poll reads; new lines beyond it in one poll leave a gap the view says. */
@@ -57,6 +57,29 @@ export function earlierLines(held: readonly string[], read: readonly string[]): 
 
 const STAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s/;
 
+export type Level = 'error' | 'warn' | 'info' | 'debug';
+const LEVELS: ReadonlyArray<{ level: Level; label: string }> = [{ level: 'error', label: 'Errors' }, { level: 'warn', label: 'Warnings' }, { level: 'info', label: 'Info' }, { level: 'debug', label: 'Details' }];
+const LINE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) (?:(error|warn|info|debug) +)?(.*)$/;
+
+/** A log line: its time, level and area from `<ISO> <level> <area>: <text>`; a line before levels counts as info, and one with no timestamp, such as a stack frame, belongs to the line above. */
+export type LogRow = { raw: string; at: Date | null; level: Level; area: string; text: string; continued: boolean };
+
+export function parseRows(lines: readonly string[]): LogRow[] {
+  const rows: LogRow[] = [];
+  let last: LogRow | null = null;
+  for (const raw of lines) {
+    const found = LINE.exec(raw);
+    if (found === null) {
+      rows.push({ raw, at: last?.at ?? null, level: last?.level ?? 'info', area: last?.area ?? '', text: raw, continued: true });
+      continue;
+    }
+    const text = found[3]!;
+    last = { raw, at: new Date(found[1]!), level: (found[2] as Level | undefined) ?? 'info', area: (/^(work item|[a-z]+)\b/i.exec(text)?.[1] ?? '').toLowerCase(), text, continued: false };
+    rows.push(last);
+  }
+  return rows;
+}
+
 /** The local time of the newest line with a timestamp, or null. */
 function lastTime(rows: readonly string[]): string | null {
   for (let i = rows.length - 1; i >= 0; i--) {
@@ -108,9 +131,16 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
   const followingRef = useRef(following);
   followingRef.current = following;
 
+  const [levels, setLevels] = useState<ReadonlySet<Level>>(() => new Set<Level>(['error', 'warn', 'info']));
+  const [area, setArea] = useState('');
   const m = model.current;
+  const parsed = useMemo(() => parseRows(m.drawn), [m.drawn]);
+  const areas = useMemo(() => [...new Set(parsed.map((row) => row.area).filter((one) => one !== ''))].sort(), [parsed]);
+  const errors = parsed.filter((row) => row.level === 'error' && !row.continued).length;
   const query = filter.toLocaleLowerCase();
-  const shown = query === '' ? m.drawn : m.drawn.filter((line) => line.toLocaleLowerCase().includes(query));
+  const selecting = query !== '' || levels.size < LEVELS.length || area !== '';
+  const shownRows = selecting ? parsed.filter((row) => levels.has(row.level) && (area === '' || row.area === area) && (query === '' || row.raw.toLocaleLowerCase().includes(query))) : parsed;
+  const shown = shownRows.map((row) => row.raw);
 
   const update = (next: Model): void => {
     model.current = next;
@@ -224,7 +254,7 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
       node.scrollTop += node.scrollHeight - anchor.current;
       anchor.current = null;
     } else if (following) node.scrollTop = node.scrollHeight;
-  }, [m.drawn, following, wrap, filter]);
+  }, [m.drawn, following, wrap, filter, levels, area]);
 
   useEffect(() => {
     const timer = setInterval(() => setClock(Date.now()), 1_000);
@@ -256,8 +286,16 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
         ? <span>Paused — {m.gap ? 'new lines, some skipped' : `${m.waiting.toLocaleString()} new line${m.waiting === 1 ? '' : 's'}`}</span>
         : <span>Paused — no new lines</span>;
   const empty = !m.loaded ? 'Loading…' : m.missing ? 'No Switchboard log yet. It appears when Switchboard writes its first line.' : m.drawn.length === 0 ? m.limited ? 'No complete lines fit in the last 4 MiB.' : 'The Switchboard log is empty. Lines appear here as Switchboard writes them.' : null;
-  const matches = empty !== null ? empty : query === '' ? `${m.drawn.length.toLocaleString()} lines` : shown.length === 0 ? 'No lines match in the loaded lines.' : `${shown.length.toLocaleString()} of ${m.drawn.length.toLocaleString()} lines match`;
-  const further = query !== '' && canLoadEarlier ? ' · Load earlier lines to search further' : '';
+  const matches = empty !== null ? empty : !selecting ? `${m.drawn.length.toLocaleString()} lines` : shown.length === 0 ? 'No lines match in the loaded lines.' : `${shown.length.toLocaleString()} of ${m.drawn.length.toLocaleString()} lines match`;
+  const further = selecting && canLoadEarlier ? ' · Load earlier lines to search further' : '';
+  // From the latest set, so clicks between renders all count.
+  const toggle = (level: Level): void => setLevels((now) => {
+    const next = new Set(now);
+    if (next.has(level)) next.delete(level);
+    else next.add(level);
+    return next;
+  });
+  let day = '';
 
   return (
     <div class="hub-log">
@@ -265,6 +303,14 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
         <input class="sheet-input" type="search" aria-label="Filter Switchboard log" placeholder="Filter log…" value={filter} onInput={(event) => setFilter(event.currentTarget.value)} />
         <label><input type="checkbox" checked={wrap} onChange={(event) => setWrap(event.currentTarget.checked)} /> Wrap</label>
         <button type="button" class="sheet-button secondary" onClick={() => void copy()} disabled={shown.length === 0}>Copy shown lines</button>
+      </div>
+      <div class="hub-log-tools hub-log-levels" role="group" aria-label="Show lines">
+        {LEVELS.map(({ level, label }) => <button type="button" class={`hub-log-chip level-${level}`} aria-pressed={levels.has(level)} onClick={() => toggle(level)}>{label}</button>)}
+        <select class="sheet-input hub-log-area" aria-label="Area" value={area} onChange={(event) => setArea(event.currentTarget.value)}>
+          <option value="">All areas</option>
+          {areas.map((one) => <option value={one}>{one}</option>)}
+        </select>
+        {errors === 0 ? null : <button type="button" class="hub-log-errors" onClick={() => setLevels(new Set<Level>(['error']))}>{errors === 1 ? '1 error' : `${errors.toLocaleString()} errors`} in loaded lines</button>}
       </div>
       <div class="hub-log-live">
         <p class="hub-log-note" role="status">{live}{' · '}{matches}{further}{copied === '' ? '' : ` · ${copied}`}</p>
@@ -293,7 +339,19 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
               }}>Load earlier lines</button>}
           </div>
           : null}
-        {shown.map((line) => <div class="hub-log-line">{line}</div>)}
+        {shownRows.map((row) => {
+          const date = row.at === null ? '' : row.at.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+          const divider = date !== '' && date !== day && !row.continued ? <div class="hub-log-day">{date}</div> : null;
+          if (date !== '' && !row.continued) day = date;
+          return (
+            <>
+              {divider}
+              {row.continued || row.at === null
+                ? <div class={`hub-log-line continued level-${row.level}`}>{row.raw}</div>
+                : <div class={`hub-log-line level-${row.level}`} title={row.at.toISOString()}><span class="hub-log-time">{row.at.toLocaleTimeString()}</span> <span class="hub-log-level">{row.level.padEnd(5)}</span> {row.text}</div>}
+            </>
+          );
+        })}
       </div>
     </div>
   );

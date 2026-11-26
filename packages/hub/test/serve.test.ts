@@ -358,7 +358,7 @@ describe('serveHub', () => {
       const hub = served(await serve({ browserPort, log, app: async () => app([]) }));
 
       expect(await findHub(home)).toEqual(hub.record);
-      expect(log).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^browser endpoint not served on 127\\.0\\.0\\.1:${browserPort}: .*EADDRINUSE`)));
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^browser endpoint not served on 127\\.0\\.0\\.1:${browserPort}: .*EADDRINUSE`)), 'warn');
       await new Promise((done) => holder.close(done));
     });
   });

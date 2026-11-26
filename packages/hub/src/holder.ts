@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -43,7 +44,7 @@ export interface HolderLinkDeps {
   home: string;
   /** Read at each start, so a change to `sessions.nodePath` applies to the next one. */
   nodePath(): string;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   /** Called each time a lookup finds no holder holding the lock, before a start replaces it, so the sessions it held end (PRD R94). */
   gone?(): void;
   now(): number;
@@ -208,7 +209,7 @@ export class HolderLink {
       return { error: `The terminal holder (pid ${old.welcome.pid}) did not exit within ${HOLDER_START_MS / 1000} seconds of its process tree being ended.` };
     }
 
-    this.deps.log(`terminal holder ${old.welcome.build} did not exit, so its process tree was ended to start the installed build`);
+    this.deps.log(`terminal holder ${old.welcome.build} did not exit, so its process tree was ended to start the installed build`, 'warn');
     return null;
   }
 

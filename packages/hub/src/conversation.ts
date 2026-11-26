@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { countsUnread, inTranscript, stateStale, summarizeMessage } from '@switchboard/core';
 import type { ConversationMessage, ConversationReply, ConversationState, Interruption, Piece, Provider, Session, SpokenState, Store } from '@switchboard/core';
 import { artifactsDir, backgroundCounts, PERMISSION_PROMPT, personaById, resumesHeld, sessionTone, START_PROMPT, toneVersion, waitsOnLimit } from '@switchboard/core';
@@ -374,7 +375,7 @@ export interface ConversationServiceDeps {
   questionsSettled?(sessionId: string): void;
   /** The Switchboard home, whose files an artifact tag never makes artifacts, since it holds the hub's keys and sign-ins. */
   switchboardHome?: string;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
 }
 
 /** How long the hub gathers a session's changes before it sends its windows the questions again. */
@@ -542,7 +543,7 @@ export class ConversationService {
       if (this.#polling.has(adapter)) return;
       this.#polling.add(adapter);
       try { await adapter.poll(this.deps.store.activeSessions()); }
-      catch (error) { this.deps.log(`conversation read failed: ${String(error)}`); }
+      catch (error) { this.deps.log(`conversation read failed: ${String(error)}`, 'warn'); }
       finally { this.#polling.delete(adapter); }
     }));
     this.#contextChanged();
@@ -1866,7 +1867,7 @@ export class ConversationService {
       const found = taggedFile(tag.path, session.cwd || null, refused);
 
       if ('why' in found) {
-        this.deps.log(`session ${sessionId}: artifact tag ${JSON.stringify(tag.path)} ignored: ${found.why}`);
+        this.deps.log(`session ${sessionId}: artifact tag ${JSON.stringify(tag.path)} ignored: ${found.why}`, 'debug');
         continue;
       }
 
@@ -2398,7 +2399,7 @@ export class ConversationService {
             }
           },
           now: this.deps.now,
-          log: (line) => this.deps.log(`work item ${workItemId}: ${line}`),
+          log: (line, level) => this.deps.log(`work item ${workItemId}: ${line}`, level),
         });
 
         this.#external.set(workItemId, external);
@@ -2419,7 +2420,7 @@ export class ConversationService {
           new ArtifactFolder(dir, {
             onChange: (change) => this.#artifactChanged(workItemId, dir, change),
             now: this.deps.now,
-            log: (line) => this.deps.log(`work item ${workItemId}: ${line}`),
+            log: (line, level) => this.deps.log(`work item ${workItemId}: ${line}`, level),
           }),
         );
       }
@@ -2852,7 +2853,7 @@ export class ConversationService {
     }
 
     if (outcome.delivery !== 'sent') {
-      this.deps.log(`session ${message.sessionId}: message ${id} ${outcome.delivery}: ${outcome.error}`);
+      this.deps.log(`session ${message.sessionId}: message ${id} ${outcome.delivery}: ${outcome.error}`, 'warn');
     }
 
     // Nothing was typed, or Claude Code did not take it, so the message leaves the conversation; its last event tells the windows to drop it,
@@ -2908,7 +2909,7 @@ export class ConversationService {
       return;
     }
 
-    this.deps.log(`session ${message.sessionId}: message ${id} ${message.delivery === 'sent' ? 'sent' : outcome.delivery}: ${voice === null ? '' : `${voice}, `}${stepsText(steps, this.deps.now())}`);
+    this.deps.log(`session ${message.sessionId}: message ${id} ${message.delivery === 'sent' ? 'sent' : outcome.delivery}: ${voice === null ? '' : `${voice}, `}${stepsText(steps, this.deps.now())}`, 'debug');
   }
 
   /**

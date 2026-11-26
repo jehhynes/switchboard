@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { spawn } from 'node:child_process';
 import { win32 } from 'node:path';
 import { browserCommand, launchEnvironment } from './launch.js';
@@ -104,7 +105,7 @@ export function toastInput(alerts: readonly SystemAlert[], sound: boolean): stri
  * logged; the alert is not retried.
  */
 export function systemNotifier(
-  log: (line: string) => void,
+  log: (line: string, level?: LogLevel) => void,
   run: RunHelper = runHelper,
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
@@ -116,7 +117,7 @@ export function systemNotifier(
     const exit = result as { code?: unknown; stderr?: unknown } | null;
     const detail = typeof exit === 'object' && exit !== null && 'code' in exit ? `exit ${String(exit.code)}: ${String(exit.stderr).trim().slice(0, 300)}` : String(result);
 
-    log(`system notification not shown (${what}): ${detail}`);
+    log(`system notification not shown (${what}): ${detail}`, 'warn');
   };
 
   return {
@@ -156,7 +157,7 @@ export function systemNotifier(
         return;
       }
 
-      log(`system notification not shown: none on ${platform}`);
+      log(`system notification not shown: none on ${platform}`, 'warn');
     },
   };
 }

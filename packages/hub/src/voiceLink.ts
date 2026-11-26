@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,7 +26,7 @@ export interface VoiceLinkDeps {
   home: string;
   /** Read at each start, so a change to `sessions.nodePath` applies to the next one. */
   nodePath(): string;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   now(): number;
   sleep(ms: number): Promise<void>;
   connect?(options: VoiceConnectOptions): Promise<VoiceConnection>;

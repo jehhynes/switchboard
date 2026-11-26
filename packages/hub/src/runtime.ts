@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import type { SourceIcon } from '@switchboard/core';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
@@ -112,7 +113,7 @@ export interface RuntimeDeps {
   runners?: Partial<Record<RunnerKey, SessionRunner>>;
   /** Whether a process runs; a stand-in for tests. */
   alive?(pid: number): boolean;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   /** The Code Mode idle limit, shorter than the default for tests and live acceptance (`--code-mode-idle-ms`). */
   codeModeIdleMs?: number;
   /** Stand-ins for the holder link's connection, lock check and start, for tests. */
@@ -234,7 +235,7 @@ export class Runtime {
     this.config = config;
     // Made now, so retention carries unresolved questions from the first item it deletes (`QuestionIndex`).
     questionIndex(deps.store, deps.now);
-    this.holder = new HolderLink({ home: this.home, nodePath: () => this.config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep, gone: () => this.holderGone(), ...deps.holder });
+    this.holder = new HolderLink({ home: this.home, nodePath: () => this.config.settings.sessions.nodePath, log: (line, level) => deps.log(line, level), now: deps.now, sleep: deps.sleep, gone: () => this.holderGone(), ...deps.holder });
 
     const hooks = () => this.config.settings.sessions.installHooks;
     const codex = deps.codex ?? { home: join(deps.home, '.codex'), env: {} };
@@ -406,7 +407,7 @@ export class Runtime {
           const stopped = await this.stopHeld(one.session);
 
           if ('refused' in stopped) {
-            this.deps.log(`holder restart: held session ${one.session} did not stop: ${stopped.refused}`);
+            this.deps.log(`holder restart: held session ${one.session} did not stop: ${stopped.refused}`, 'warn');
           }
         }
 
@@ -431,7 +432,7 @@ export class Runtime {
     }
 
     if (error !== null) {
-      this.deps.log(`holder restart failed: ${error}`);
+      this.deps.log(`holder restart failed: ${error}`, 'warn');
     }
 
     // Each stopped session is resumed even when the restart failed, into whichever holder runs.
@@ -442,7 +443,7 @@ export class Runtime {
       this.reservations.delete(session);
 
       if ('refused' in result) {
-        this.deps.log(`holder restart: session ${session} did not resume: ${result.refused}`);
+        this.deps.log(`holder restart: session ${session} did not resume: ${result.refused}`, 'warn');
         failed.push({ session, key, error: result.refused });
       }
     }
@@ -500,7 +501,7 @@ export class Runtime {
     this.track(
       read
         .catch((error: unknown) => {
-          if (!this.stopped) this.deps.log(`conversation read before a turn end failed: ${String(error)}`);
+          if (!this.stopped) this.deps.log(`conversation read before a turn end failed: ${String(error)}`, 'warn');
         })
         .then(() => {
           if (this.stopped) return;
@@ -524,7 +525,7 @@ export class Runtime {
       try {
         this.conversation.read(ending);
       } catch (error) {
-        this.deps.log(`conversation read before a turn end failed: ${String(error)}`);
+        this.deps.log(`conversation read before a turn end failed: ${String(error)}`, 'warn');
       }
     }
 
@@ -747,7 +748,7 @@ export class Runtime {
           this.unreconciled.add(result.sessionId);
           if (result.attention === true) this.send({ type: 'session-start-pending', sessionId: result.sessionId, message: result.pending });
           if (this.reconcileMessages.get(result.sessionId) !== result.pending) {
-            this.deps.log(`session ${result.sessionId} left starting by the hub that stopped is not settled yet: ${result.pending}`);
+            this.deps.log(`session ${result.sessionId} left starting by the hub that stopped is not settled yet: ${result.pending}`, 'warn');
             this.reconcileMessages.set(result.sessionId, result.pending);
           }
           continue;
@@ -796,7 +797,7 @@ export class Runtime {
       this.markerWatcher = null;
 
       if (!this.markerWatchFailed) {
-        this.deps.log(`marker watch stopped: ${reason}`);
+        this.deps.log(`marker watch stopped: ${reason}`, 'warn');
         this.markerWatchFailed = true;
       }
 
@@ -998,7 +999,7 @@ export class Runtime {
     const tickets = await Promise.race([this.readAfter(ticket.source, source).catch(() => null), this.deps.sleep(REPORT_CHECK_MS).then(() => 'late' as const)]);
 
     if (tickets === 'late') {
-      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the ${ticket.source} read took over ${REPORT_CHECK_MS / 1000} seconds`);
+      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the ${ticket.source} read took over ${REPORT_CHECK_MS / 1000} seconds`, 'warn');
       return false;
     }
 
@@ -1038,7 +1039,7 @@ export class Runtime {
     const tickets = await Promise.race([read, this.deps.sleep(REPORT_CHECK_MS).then(() => 'late' as const)]);
 
     if (tickets === 'late') {
-      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the second ${ticket.source} read took over ${REPORT_CHECK_MS / 1000} seconds`);
+      this.deps.log(`done report for ${ticket.ref} accepted unchecked: the second ${ticket.source} read took over ${REPORT_CHECK_MS / 1000} seconds`, 'warn');
     }
 
     if (!this.stopped) {
@@ -1064,7 +1065,7 @@ export class Runtime {
     const check = await Promise.race([source.checkLink(ticket, target).catch(() => ({ error: 'the check failed' })), this.deps.sleep(REPORT_CHECK_MS).then(() => 'late' as const)]);
 
     if (check === 'late' || 'error' in check) {
-      this.deps.log(`link report for ${ticket.ref} accepted unchecked: ${check === 'late' ? `the ${ticket.source} check took over ${REPORT_CHECK_MS / 1000} seconds` : check.error}`);
+      this.deps.log(`link report for ${ticket.ref} accepted unchecked: ${check === 'late' ? `the ${ticket.source} check took over ${REPORT_CHECK_MS / 1000} seconds` : check.error}`, 'warn');
       return null;
     }
 
@@ -1146,7 +1147,7 @@ export class Runtime {
 
       // A failed read changes none of the provider's sessions.
       if ('error' in roster) {
-        this.deps.log(`${key} roster read failed: ${roster.error}`);
+        this.deps.log(`${key} roster read failed: ${roster.error}`, 'warn');
         continue;
       }
 
@@ -1503,12 +1504,12 @@ export class Runtime {
     }
 
     if (source === 'resume') {
-      this.deps.log(`gave session ${session.id} the conversation rules on resume`);
+      this.deps.log(`gave session ${session.id} the conversation rules on resume`, 'debug');
 
       return session.execution === 'app-server' ? `${sessionContract(session.id, this.reportCommand, session.reports, session.provider)}\n\n${rules()}` : rules();
     }
 
-    this.deps.log(`restored the report contract of session ${session.id} after compaction`);
+    this.deps.log(`restored the report contract of session ${session.id} after compaction`, 'debug');
 
     const contract = sessionContract(session.id, this.reportCommand, session.reports, session.provider);
 
@@ -1957,7 +1958,7 @@ export class Runtime {
   }
 
   private track(work: Promise<void>): void {
-    const tracked = work.catch((error: unknown) => this.deps.log(`action failed: ${String(error)}`)).finally(() => this.pending.delete(tracked));
+    const tracked = work.catch((error: unknown) => this.deps.log(`action failed: ${String(error)}`, 'error')).finally(() => this.pending.delete(tracked));
 
     this.pending.add(tracked);
   }
@@ -2046,7 +2047,7 @@ export class Runtime {
     const result = await source.pullRequests(urls);
 
     if ('error' in result) {
-      this.deps.log(`${name}: pull requests not read: ${result.error}`);
+      this.deps.log(`${name}: pull requests not read: ${result.error}`, 'warn');
       return;
     }
 
@@ -2119,7 +2120,7 @@ export class Runtime {
 
     if (error !== null) {
       if (error !== this.heldError) {
-        this.deps.log(`held session list failed: ${error}`);
+        this.deps.log(`held session list failed: ${error}`, 'warn');
       }
 
       this.heldError = error;
@@ -2143,7 +2144,7 @@ export class Runtime {
 
     for (const held of this.heldSessions().filter((one) => one.orphan && !this.orphansLogged.has(one.session))) {
       this.orphansLogged.add(held.session);
-      this.deps.log(`held session ${held.session} has no work item: ${held.label}`);
+      this.deps.log(`held session ${held.session} has no work item: ${held.label}`, 'warn');
     }
 
     const holder = this.holderState();
@@ -2470,7 +2471,7 @@ export class Runtime {
     if (session?.execution === 'app-server' && session.state === 'ended' && !this.resuming.has(session.id)) {
       this.track(this.resumeThread(session.id).then((refused) => {
         if (refused !== null) {
-          this.deps.log(`session ${session.id} was resumed in Codex, but Switchboard could not follow it: ${refused}`);
+          this.deps.log(`session ${session.id} was resumed in Codex, but Switchboard could not follow it: ${refused}`, 'warn');
         }
       }));
     }
@@ -2507,7 +2508,7 @@ export class Runtime {
       try {
         await this.codexAppServer.resumeThread(session);
       } catch (error) {
-        this.deps.log(`session ${sessionId} could not resume in the Codex daemon: ${String(error)}`);
+        this.deps.log(`session ${sessionId} could not resume in the Codex daemon: ${String(error)}`, 'warn');
         return `Codex could not resume the session: ${String(error)}`;
       }
 
@@ -2642,7 +2643,7 @@ export class Runtime {
       if (after === null || after.state !== 'ended') {
         const failure = await this.runners.codeMode.stop({ sessionId, shortId: session.shortId }, 'operator');
 
-        this.deps.log(`session ${sessionId} changed while it resumed; ${failure === null ? 'ended the resumed process' : `ending the resumed process failed, so it may still be running: ${failure.error}`}`);
+        this.deps.log(`session ${sessionId} changed while it resumed; ${failure === null ? 'ended the resumed process' : `ending the resumed process failed, so it may still be running: ${failure.error}`}`, 'warn');
 
         return after === null ? refuse(`No session ${sessionId}.`, 404) : refuse(`Session ${name} changed while it resumed; try again.`);
       }
@@ -2670,7 +2671,7 @@ export class Runtime {
 
     if (waiting() === null) {
       this.deferred.delete(action.sessionId);
-      this.deps.log(`end of held session ${action.sessionId} skipped: it no longer waits to end`);
+      this.deps.log(`end of held session ${action.sessionId} skipped: it no longer waits to end`, 'debug');
       return false;
     }
 
@@ -2680,7 +2681,7 @@ export class Runtime {
 
     if (session === null) {
       this.deferred.delete(action.sessionId);
-      this.deps.log(`end of held session ${action.sessionId} skipped: it no longer waits to end`);
+      this.deps.log(`end of held session ${action.sessionId} skipped: it no longer waits to end`, 'debug');
       return false;
     }
 
@@ -2692,7 +2693,7 @@ export class Runtime {
     const compacted = reading?.compacted === true;
 
     if (reading !== undefined && !compacted && reading.observed?.state !== 'idle' && reading.observed?.state !== 'failed') {
-      this.deps.log(`end of held session ${action.sessionId} skipped: its last marker is not a turn end`);
+      this.deps.log(`end of held session ${action.sessionId} skipped: its last marker is not a turn end`, 'debug');
       return false;
     }
 
@@ -2720,7 +2721,7 @@ export class Runtime {
       this.deferred.add(action.sessionId);
       const why = 'error' in activity ? activity.error : activity.clients > 0 ? `${activity.clients} terminal${activity.clients === 1 ? ' is' : 's are'} attached` : reserved ? 'a terminal is attaching' : typing ? 'a message is being typed' : limited ? 'it waits on its usage limit' : typed ? 'input arrived after its turn' : 'it was active within the idle limit';
 
-      this.deps.log(`end of held session ${action.sessionId} deferred: ${why}`);
+      this.deps.log(`end of held session ${action.sessionId} deferred: ${why}`, 'debug');
     }
 
     return false;
@@ -2745,14 +2746,14 @@ export class Runtime {
         }
 
         if (context.warning !== undefined) {
-          this.deps.log(`triage context for ${action.ticket.ref}: ${context.warning}`);
+          this.deps.log(`triage context for ${action.ticket.ref}: ${context.warning}`, 'warn');
         }
 
         const stale = nothingNew(action.handled, context.activityAt);
         const text = triageText(context.context, this.deps.now(), action.handled, stale);
         const model = triageModel(provider, action.model);
         if (model !== action.model) {
-          this.deps.log(`Triage model ${action.model} does not match ${provider}; using its default model.`);
+          this.deps.log(`Triage model ${action.model} does not match ${provider}; using its default model.`, 'warn');
         }
         const input = {
           systemPrompt: action.systemPrompt,
@@ -2813,7 +2814,7 @@ export class Runtime {
         if (!('error' in result) && (action.codeMode === true || action.execution === 'app-server') && this.deps.store.session(action.sessionId) === null) {
           const failure = await runner.stop({ sessionId: action.sessionId, shortId: result.shortId }, 'operator');
 
-          this.deps.log(`session ${action.sessionId} started after its work item was deleted; ${failure === null ? 'ended it' : `ending it failed, so it may still be running: ${failure.error}`}`);
+          this.deps.log(`session ${action.sessionId} started after its work item was deleted; ${failure === null ? 'ended it' : `ending it failed, so it may still be running: ${failure.error}`}`, 'warn');
           return;
         }
 
@@ -2895,7 +2896,7 @@ export class Runtime {
       await this.findSetupWorktrees();
     } else if (this.deps.store.session(action.sessionId) === null) {
       // Delete removed the session row, so the flow has nowhere to show the failure (PRD R120).
-      this.deps.log(`stop of deleted session ${action.sessionId} (${action.shortId}) failed; it may still be running: ${failure.error}`);
+      this.deps.log(`stop of deleted session ${action.sessionId} (${action.shortId}) failed; it may still be running: ${failure.error}`, 'warn');
     }
 
     this.send(

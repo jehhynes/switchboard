@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import type { ConversationMessage, Session, Store } from '@switchboard/core';
 import { AppServer, AppServerError, AppServerRunner, items, notMaterialized, object, settingsDifferences, threadSettings } from '@switchboard/codex';
 import type { Json, ThreadSettings } from '@switchboard/codex';
@@ -14,7 +15,7 @@ export interface CodexConversationDeps {
   store: Store;
   now(): number;
   newId(): string;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   requestsChanged(): void;
   providerTitle?(workItemId: number, title: string, origin: 'provider-manual' | 'provider-auto'): void;
 }
@@ -96,7 +97,7 @@ export class CodexConversationAdapter implements ConversationAdapter {
         this.#followed.set(session.id, this.#revision(session));
         for (const item of this.#buffered.get(session.id) ?? []) this.#item(session, item, this.deps.now());
         this.#buffered.delete(session.id);
-        await this.#skills(session).catch(error => this.deps.log(`Codex skill list unavailable: ${String(error)}`));
+        await this.#skills(session).catch(error => this.deps.log(`Codex skill list unavailable: ${String(error)}`, 'warn'));
         this.#errors.delete(session.id);
       } catch (error) {
         // A thread with no turn yet, as one started elsewhere before its first message, cannot be joined or read: its conversation is empty, not
@@ -108,7 +109,7 @@ export class CodexConversationAdapter implements ConversationAdapter {
           continue;
         }
         const message = `Codex conversation unavailable: ${String(error)}`;
-        if (this.#errors.get(session.id) !== message) this.deps.log(message);
+        if (this.#errors.get(session.id) !== message) this.deps.log(message, 'warn');
         this.#errors.set(session.id, message);
       }
       this.#retryAt.set(session.id, this.deps.now() + 5_000);
@@ -141,7 +142,7 @@ export class CodexConversationAdapter implements ConversationAdapter {
     void this.#history(session).then(() => {
       for (const item of this.#buffered.get(session.id) ?? []) this.#item(session, item, this.deps.now());
       this.#buffered.delete(session.id);
-    }).catch(error => { this.#followed.delete(session.id); this.deps.log(`Codex history unavailable: ${String(error)}`); });
+    }).catch(error => { this.#followed.delete(session.id); this.deps.log(`Codex history unavailable: ${String(error)}`, 'warn'); });
   }
 
   async #history(session: Session): Promise<Json[]> {
@@ -269,7 +270,7 @@ export class CodexConversationAdapter implements ConversationAdapter {
         await this.#history(session);
         if (this.deps.store.message(message.id)?.delivery === 'sent') { done({ delivery: 'sent' }); return; }
       }
-    } catch (error) { this.deps.log(`Codex delivery check failed: ${String(error)}`); }
+    } catch (error) { this.deps.log(`Codex delivery check failed: ${String(error)}`, 'warn'); }
     done({ delivery: 'uncertain', error: UNKNOWN });
   }
 

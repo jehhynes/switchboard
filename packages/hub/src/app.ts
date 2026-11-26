@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, watch, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -34,6 +35,7 @@ import type { Built } from './snapshotBuilder.js';
 import { liveScope, PAGE_GONE, WindowScopes } from './windows.js';
 import { tailscaleIdentity } from './tailscale.js';
 import { readHubLog } from './hubLog.js';
+import { labelSessions } from './logLabels.js';
 import type { RemoteAccess } from './page.js';
 import { dockRowOf, PageAccess, pageActionEvent, pageCommandOf, pageHeader, pageReportOf, pageList, pageRow, pasteText, poolRowOf, rowOpenUrl } from './page.js';
 import { launcher } from './launch.js';
@@ -194,7 +196,7 @@ export interface AppOptions {
   home: string;
   /** The folder holding settings.json; the Switchboard home when left out. */
   configDir?: string;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   /** The Code Mode idle limit (`--code-mode-idle-ms`); 1 hour when left out. */
   codeModeIdleMs?: number;
   /** Overrides for tests. */
@@ -237,7 +239,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     claudeSettings: claudeSettingsPath(homedir(), process.env),
     // Codex reads CODEX_HOME when the operator set it, else ~/.codex.
     codex: { home: process.env['CODEX_HOME'] || join(homedir(), '.codex'), env: {} },
-    log: options.log,
+    log: (line, level) => options.log(labelSessions(line, (id) => store.session(id)?.workItemId ?? null), level),
     ...(options.codeModeIdleMs === undefined ? {} : { codeModeIdleMs: options.codeModeIdleMs }),
     ...options.deps,
   };
@@ -248,7 +250,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   const logWarnings = (loaded: Config): void => {
     for (const warning of loaded.settingsWarnings) {
-      deps.log(`settings.json: ${warning}`);
+      deps.log(`settings.json: ${warning}`, 'warn');
     }
   };
 
@@ -289,7 +291,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         }
 
         if ('error' in found) {
-          deps.log(`web page: Tailscale not used: ${found.error}`);
+          deps.log(`web page: Tailscale not used: ${found.error}`, 'warn');
           tailscaleFound = null;
         } else {
           deps.log(`web page: served as https://${found.host} to the Tailscale login ${found.login} through tailscale serve`);
@@ -464,7 +466,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   // The voice socket of a paired device (architecture.md § Remote access).
   const voiceSockets = new VoiceSockets({
     now: deps.now,
-    log: (line) => deps.log(line),
+    log: (line, level) => deps.log(line, level),
     opened: (device, resumed) => voice.phoneOpened(device.key, device.hash, resumed),
     resumable: (device) => voice.resumable(device.hash),
     closed: (_device, reason, refused) => voice.phoneClosed(reason, refused),
@@ -472,7 +474,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     audio: (device, data) => voice.phoneAudio(device.key, data),
   });
   const voice: VoiceControl = new VoiceControl({
-    link: new VoiceLink({ home, nodePath: () => config.settings.sessions.nodePath, log: (line) => deps.log(line), now: deps.now, sleep: deps.sleep }),
+    link: new VoiceLink({ home, nodePath: () => config.settings.sessions.nodePath, log: (line, level) => deps.log(line, level), now: deps.now, sleep: deps.sleep }),
     settings: () => config.settings.voice,
     viewSettings: () => viewSettings(),
     store,
@@ -570,7 +572,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       try {
         writeWorkspaceFile(window, written);
       } catch (error) {
-        deps.log(`workspace file ${window.file} not written: ${String(error)}`);
+        deps.log(`workspace file ${window.file} not written: ${String(error)}`, 'warn');
         return `The workspace file was not written: ${(error as Error).message}`;
       }
     } else if (window.file !== null) {
@@ -582,7 +584,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
           writeWorkspaceFile(host, written);
         }
       } catch (error) {
-        deps.log(`workspace file ${window.file} not written: ${String(error)}`);
+        deps.log(`workspace file ${window.file} not written: ${String(error)}`, 'warn');
         return `The workspace file was not written: ${(error as Error).message}`;
       }
 
@@ -886,7 +888,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         void pageUrl().then(
           (base) => notifier.notify(needing.map(({ workItemId, title, reason }) => ({ workItemId, title, reason, url: `${base}#w=${workItemId}` })), here),
-          (error: unknown) => deps.log(`system notification not shown: ${String(error)}`),
+          (error: unknown) => deps.log(`system notification not shown: ${String(error)}`, 'warn'),
         );
       }
     }

@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import { createHash } from 'node:crypto';
 import type { ConversationMessage, ConversationReply, ConversationState, TranscriptCheckpoint } from '@switchboard/core';
 import { ScreenHold } from './screenHold.js';
@@ -56,7 +57,7 @@ export interface ConversationDeps {
   now(): number;
   newId(): string;
   onChange(change: ConversationChange): void;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
   hold?: HoldOptions;
 }
 
@@ -375,7 +376,7 @@ export class SessionConversation extends ConversationLog {
   }
 
   #logUnconfirmed(message: ConversationMessage, why: string): void {
-    this.deps.log(`session ${this.sessionId}: typed message ${message.id} is unconfirmed: ${why}`);
+    this.deps.log(`session ${this.sessionId}: typed message ${message.id} is unconfirmed: ${why}`, 'warn');
   }
 
   /**

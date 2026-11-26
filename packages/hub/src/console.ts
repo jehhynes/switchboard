@@ -1,3 +1,4 @@
+import type { LogLevel } from '@switchboard/core';
 import type { Session } from '@switchboard/core';
 import { resumesHeld } from '@switchboard/core';
 import { refusal } from './conversation.js';
@@ -22,7 +23,7 @@ export interface PageConsoleDeps {
   /** Types the operator's keys into the held session as keys typed in a terminal. */
   write(session: string, data: string): Promise<unknown>;
   size(session: string, cols: number, rows: number): Promise<unknown>;
-  log(line: string): void;
+  log(line: string, level?: LogLevel): void;
 }
 
 /** Writes one SSE event to a console stream; false once the stream has more queued than `CONSOLE_QUEUE_BYTES` (`page.ts`). */
