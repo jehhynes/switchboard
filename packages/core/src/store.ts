@@ -1392,7 +1392,16 @@ export class Store {
 
   /** The newest work item whose ticket's linked worktree is at `path`, with its ticket's title. */
   workItemAtWorktree(path: string): { id: number; title: string } | null {
-    return this.#one('SELECT w.id AS id, t.title AS title FROM worktrees wt JOIN workItems w ON w.ticketId = wt.ticketId JOIN tickets t ON t.id = wt.ticketId WHERE wt.path = ? ORDER BY w.id DESC LIMIT 1', path);
+    // git prints `C:/a` where a session may have reported `C:\a`. Case is ignored only on Windows: elsewhere `/a/B` and `/a/b` can be two worktrees.
+    const key = (one: string) => {
+      const plain = one.replaceAll('\\', '/').replace(/\/+$/, '');
+
+      return process.platform === 'win32' ? plain.toLowerCase() : plain;
+    };
+    const rows = this.#all<{ id: number; title: string; path: string }>('SELECT w.id AS id, t.title AS title, wt.path AS path FROM worktrees wt JOIN workItems w ON w.ticketId = wt.ticketId JOIN tickets t ON t.id = wt.ticketId ORDER BY w.id DESC');
+    const row = rows.find((one) => key(one.path) === key(path));
+
+    return row === undefined ? null : { id: row.id, title: row.title };
   }
 
   /** Links the ticket's worktree, replacing an earlier link. */

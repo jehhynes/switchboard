@@ -767,9 +767,28 @@ describe('Store', () => {
 
     const newer = store.insertWorkItem(item(2));
 
-    store.linkWorktree({ ticketId: ticket.id, path: '/wt/a', branch: '1-a', linkedBy: 'report' });
-    expect(store.workItemAtWorktree('/wt/a')).toEqual({ id: newer.id, title: 'One' });
-    expect(store.workItemAtWorktree('/wt/b')).toBeNull();
+    store.linkWorktree({ ticketId: ticket.id, path: 'D:\\wt\\a', branch: '1-a', linkedBy: 'report' });
+    expect(store.workItemAtWorktree('D:\\wt\\a')).toEqual({ id: newer.id, title: 'One' });
+    // git prints the same worktree with forward slashes.
+    expect(store.workItemAtWorktree('D:/wt/a')).toEqual({ id: newer.id, title: 'One' });
+    expect(store.workItemAtWorktree('D:/wt/ab')).toBeNull();
+    expect(store.workItemAtWorktree('D:/wt/b')).toBeNull();
+    expect(store.workItemAtWorktree(process.platform === 'win32' ? 'd:/WT/A/' : 'D:/wt/a/')).toEqual({ id: newer.id, title: 'One' });
+  });
+
+  it.skipIf(process.platform === 'win32')('tells apart worktree paths that differ only in case off Windows', () => {
+    const store = Store.open(':memory:');
+    const ticket = (key: string, title: string) => store.insertTicket({ source: 'github', sourceKey: key, ref: `#${key}`, repo: '', sourceId: null, title, url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    const item = (ticketId: number, id: number) => ({ ticketId, playbook: 'dev', status: 'running', taskPrompt: null, guidance: null, reportedPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: id, statusAt: id, runStartedAt: null, readyAt: null, orderAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
+    const upper = ticket('1', 'Upper');
+    const lower = ticket('2', 'Lower');
+    const upperItem = store.insertWorkItem(item(upper.id, 1));
+    // The newer work item is at the other path, so a case-insensitive match would find it first.
+    store.insertWorkItem(item(lower.id, 2));
+    store.linkWorktree({ ticketId: upper.id, path: '/work/Feature', branch: null, linkedBy: 'report' });
+    store.linkWorktree({ ticketId: lower.id, path: '/work/feature', branch: null, linkedBy: 'report' });
+
+    expect(store.workItemAtWorktree('/work/Feature')).toEqual({ id: upperItem.id, title: 'Upper' });
   });
 
   it('keeps one paste per label per work item, replacing its file in place (R60)', () => {
