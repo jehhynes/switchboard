@@ -217,6 +217,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const toastBox = toast(toastHost, { open: (workItemId) => void select(workItemId) });
   // The scope generation the persona dialog opened for, and each opening's number, so a late roster answer fills only the dialog that asked.
   let personaScope: number | null = null;
+  /** The work item and layout More's menu opened in. */
+  let tabMenuFor = '';
   let personaAsks = 0;
   const detailHead = root.querySelector<HTMLElement>('#detail .detail-head')!;
   const detailBody = root.querySelector<HTMLElement>('#detail .detail-body')!;
@@ -543,6 +545,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Where the tab left was is kept, for when it shows again.
     keepScroll();
     tabChosen = true;
+    // More closes for a tab chosen any way, a press, a key or its menu's row.
+    view.tabMenu = false;
     // The pane follows the tab: its state is sent again, whatever was sent before.
 
     if (tab === 'browser') {
@@ -2623,6 +2627,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Draws the state; Preact changes only what differs, so the focus, a selection, the scroll position and open menus stay. */
   const drawRegions = (): void => {
     view.connection = dotView(connectionView(), deps.now());
+    // More's menu lists the tabs of the work item and the strip it opened in: the column's on a wide page, else the conversation's.
+    if (view.tabMenu && `${state.scope?.workItemId ?? ''} ${wide()}` !== tabMenuFor) {
+      view.tabMenu = false;
+    }
+
     // On a narrow screen the list and the conversation are each a full-width view (page.css); the list shows until a work item is opened.
     const listing = view.list || wanted === null;
 
@@ -3154,6 +3163,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // Measured again after a draw that changed the tabs, since More and the tabs drawn may have changed; twice at most.
     for (let again = 0; again < 3 && fitStripTabs(); again++) {
       drawRegions();
+    }
+
+    // A strip drawn without More, as once every tab fits, closes its menu, so a More shown later starts closed.
+    if (view.tabMenu && root.querySelector('.tab-more') === null) {
+      view.tabMenu = false;
     }
 
     fitMenus();
@@ -4864,6 +4878,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'tab-menu':
         view.tabMenu = !view.tabMenu;
+        tabMenuFor = `${state.scope?.workItemId ?? ''} ${wide()}`;
         draw();
         break;
       case 'close-artifact': {
@@ -5172,7 +5187,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (open) {
       view.picker = false;
       view.viewMenu = false;
-      view.tabMenu = false;
       closeMenus();
     }
 
@@ -5622,6 +5636,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Closes the header's actions menu and the list's row menu. */
   const closeMenus = (): void => {
     view.actions = false;
+    view.tabMenu = false;
     view.rowMenu = null;
     view.linkMenu = false;
     view.copyMenu = false;

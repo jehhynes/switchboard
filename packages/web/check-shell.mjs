@@ -546,6 +546,28 @@ const moreOnTop = `(async () => {
   return { open: true, rows: rows.length, covered, inside: box.left >= -0.5 && box.top >= -0.5 && box.right <= innerWidth + 0.5 && box.bottom <= innerHeight + 0.5 };
 })()`;
 
+/** The centre and id of a tab, not the chosen one, in the strip whose More menu is open. */
+const otherTab = `(() => {
+  const strip = document.querySelector('.tab-menu')?.closest('.tabs');
+  const tab = strip ? [...strip.children].find((one) => one.dataset.id !== undefined && !one.classList.contains('selected') && one.querySelector('[aria-selected="true"]') === null && !one.matches('[aria-selected="true"]')) : undefined;
+  if (!tab) return null;
+  const target = tab.querySelector('.tab-open') ?? tab;
+  const box = target.getBoundingClientRect();
+  return { id: tab.dataset.id, x: box.left + box.width / 2, y: box.top + box.height / 2 };
+})()`;
+
+/** Presses at `at` as the size's pointer does: a mouse click, or a finger's tap. */
+async function press(send, size, at) {
+  if (size.mouse) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'left', buttons: 1, clickCount: 1 });
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', buttons: 0, clickCount: 1 });
+  } else {
+    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x, y: at.y }] });
+    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  }
+}
+
 /** Checks one view's measurements; answers its failures. */
 function failures(view, size, m) {
   const out = [];
@@ -825,6 +847,22 @@ try {
 
           if (!more.open) found.push('More opened no menu');
           else if (more.covered.length > 0 || !more.inside || more.rows === 0) found.push('the More menu is covered at ' + more.covered.join(', ') + (more.inside ? '' : ', or passes the viewport') + (more.rows === 0 ? ', or has no rows' : ''));
+
+          // A press on another tab of the strip, by the mouse or a finger, chooses it and closes the menu.
+          if (more.open) {
+            const tab = await evaluate(otherTab);
+
+            if (tab === null) found.push('the strip with More shows no other tab to press');
+            else {
+              await press(send, size, tab);
+              await wait(200);
+              const after = await evaluate('JSON.stringify({ menu: document.querySelector(".tab-menu") !== null, chosen: document.querySelector(' + JSON.stringify('[data-id="' + tab.id + '"]') + ')?.matches(".selected, :has([aria-selected=true])") ?? false })');
+              const { menu, chosen } = JSON.parse(after);
+
+              if (menu) found.push('the More menu stays open after a press on the ' + tab.id + ' tab');
+              if (!chosen) found.push('a press on the ' + tab.id + ' tab with More open did not choose it');
+            }
+          }
         }
 
         // The phone's layout by the device, never the drawer on a phone; the tablet's on the iPad.

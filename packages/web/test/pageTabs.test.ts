@@ -471,6 +471,120 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('closes More for a tab chosen by a press or a key, a press elsewhere, the window losing the focus, Escape, its button, another work item, a switch to the other layout, and a strip without More', () => {
+    window.innerWidth = 1920;
+    answers['/v1/conversation/changes'] = { status: 404, body: { error: 'No changes here.' } };
+
+    const { page, source } = start();
+    const artifacts = Array.from({ length: 8 }, (_, index) => ({ path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown' as const, updatedAt: 10_000 + index }));
+    let strip = 400;
+
+    // A 400 px strip shows Changes, History and five artifacts, and More holds the rest.
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return { width: this.matches('#detail .tabs, #head .tabs') ? strip : 0 } as DOMRect;
+    });
+    hello(source, { artifacts });
+
+    const menu = () => root.querySelector('#detail .tab-menu');
+    const more = () => root.querySelector<HTMLElement>('#detail [data-action="tab-menu"]')!;
+    const openMore = () => {
+      more().click();
+      expect(menu()).not.toBeNull();
+    };
+    /** A mouse's or a finger's press: pointerdown, then the click. */
+    const press = (target: Element) => {
+      target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      (target as HTMLElement).click();
+    };
+    const selected = () => root.querySelector<HTMLElement>('#detail .tabs > .tab.selected, #detail .tabs > .selected')!.dataset['id'];
+
+    click('#detail [data-side="history"]');
+    expect(root.querySelector('#detail .tab-more')).not.toBeNull();
+
+    // A press on another tab in the strip chooses it and closes the menu.
+    openMore();
+    press(root.querySelector('#detail .artifact-tab[data-path="chat/a7.md"] .tab-open')!);
+    expect(menu()).toBeNull();
+    expect(selected()).toBe('artifact:chat/a7.md');
+    openMore();
+    press(root.querySelector('#detail [data-side="history"]')!);
+    expect(menu()).toBeNull();
+    expect(selected()).toBe('history');
+
+    // Enter or Space on a focused tab clicks it with no press: History, Changes and an artifact's tab each close it too.
+    openMore();
+    click('#detail .changes-tab');
+    expect(menu()).toBeNull();
+    expect(selected()).toBe('changes');
+    openMore();
+    click('#detail [data-side="history"]');
+    expect(menu()).toBeNull();
+    expect(selected()).toBe('history');
+    openMore();
+    click('#detail .artifact-tab[data-path="chat/a6.md"] .tab-open');
+    expect(menu()).toBeNull();
+
+    // A row of the menu does what its tab does, and closes it.
+    openMore();
+    click('#detail .tab-menu [data-path="chat/a0.md"]');
+    expect(menu()).toBeNull();
+    expect(selected()).toBe('artifact:chat/a0.md');
+
+    // A press in the list or the conversation closes it, and so does the window losing the focus, as to a website's frame.
+    openMore();
+    press(root.querySelector('#list')!);
+    expect(menu()).toBeNull();
+    openMore();
+    press(root.querySelector('#panel')!);
+    expect(menu()).toBeNull();
+    openMore();
+    window.dispatchEvent(new Event('blur'));
+    expect(menu()).toBeNull();
+
+    // Escape closes it, giving the focus back to More; More's button closes it again.
+    openMore();
+    more().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(more());
+    openMore();
+    more().click();
+    expect(menu()).toBeNull();
+
+    // Another work item, opened from its row by a key or by the hub, closes it.
+    openMore();
+    click('#list .row[data-work-item="2"]');
+    expect(menu()).toBeNull();
+    hello(source, { artifacts });
+    openMore();
+    hello(source, { artifacts, scope: { ...scope, workItemId: 2, scopeGen: 4 } });
+    expect(root.querySelector('#detail .tab-more')).not.toBeNull();
+    expect(menu()).toBeNull();
+
+    // A page narrowed out of the column's layout draws the tabs in the conversation's strip, its More closed.
+    hello(source, { artifacts });
+    openMore();
+    window.innerWidth = 900;
+    window.dispatchEvent(new Event('resize'));
+    expect(root.querySelector('#head .tab-more')).not.toBeNull();
+    expect(root.querySelector('.tab-menu')).toBeNull();
+    window.innerWidth = 1920;
+    window.dispatchEvent(new Event('resize'));
+    expect(root.querySelector('#detail .tab-more')).not.toBeNull();
+
+    // A strip with room for every tab draws no More and closes its menu, so More starts closed when it shows again.
+    openMore();
+    // A redraw for the stream, as an artifact's new version, measures the strip again.
+    strip = 4_000;
+    source.emit('artifact', { artifact: { ...artifacts[0]!, updatedAt: 20_000 } });
+    expect(root.querySelector('#detail .tab-more')).toBeNull();
+    strip = 400;
+    source.emit('artifact', { artifact: { ...artifacts[0]!, updatedAt: 20_001 } });
+    expect(root.querySelector('#detail .tab-more')).not.toBeNull();
+    expect(menu()).toBeNull();
+    page.close();
+  });
+
   it('measures hidden tabs again when the strip crosses the 480 px breakpoint, so a tab measured under the other padding neither overflows nor hides', () => {
     window.innerWidth = 1920;
     onTestFinished(() => {
