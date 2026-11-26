@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     env: testTemp(),
     environment: 'jsdom',
+    pool: 'vmForks',
     include: ['test/**/*.test.ts'],
     coverage: {
       provider: 'v8',

@@ -1,4 +1,7 @@
+import { TransformStream } from 'node:stream/web';
 import { afterEach, beforeEach, vi } from 'vitest';
+
+globalThis.TransformStream ??= TransformStream as typeof globalThis.TransformStream;
 
 // The page picks its columns from window.innerWidth (layout.ts); jsdom's 1024 px would give every test the tablet layout, so each test starts at
 // a phone's width, as tests did when jsdom had no matchMedia, and one that wants wider sets it. Tests in the node environment have no window.
@@ -33,10 +36,27 @@ vi.mock('../src/main.js', async (importOriginal) => {
 
 /** A real timer, taken before any test fakes timers. */
 const realTimeout = setTimeout;
+/** Whether the test, or a page it started, moved through the history, whose popstate jsdom delivers in a later timer task. */
+let traversed = false;
 
-// jsdom delivers history events, such as the popstate of history.back(), in a later timer task. A test that ends before it runs would have
-// it land in the next test and move that test's address, so each test ends with one real timer turn, after its pages are closed.
+if (typeof History !== 'undefined') {
+  for (const name of ['back', 'forward', 'go'] as const) {
+    const move = History.prototype[name] as (this: History, ...args: unknown[]) => void;
+
+    History.prototype[name] = function (this: History, ...args: unknown[]) {
+      traversed = true;
+      move.apply(this, args);
+    };
+  }
+}
+
+// A popstate still to come when a test ends would land in the next test and move that test's address, so a test that moved through the
+// history ends with one real timer turn, after its pages are closed. A timer turn takes about 15 ms on Windows, so other tests skip it.
 afterEach(async () => {
   for (const page of [...open]) page.close();
-  await new Promise((done) => realTimeout(done, 0));
+
+  if (traversed) {
+    traversed = false;
+    await new Promise((done) => realTimeout(done, 0));
+  }
 });

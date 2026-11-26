@@ -86,12 +86,16 @@ describe('GitHub-flavoured Markdown', () => {
   });
 
   it('reads many unclosed comments and summaries in linear time', () => {
-    const started = performance.now();
+    // The process's own CPU time, which other processes loading the machine do not add to; a quadratic reading takes many seconds.
+    const started = process.cpuUsage();
 
     renderMarkdown('<!-- x\n'.repeat(20_000));
     renderMarkdown(`p ${'<!-- '.repeat(20_000)}`);
     renderMarkdown('<details>\n<summary>a\n'.repeat(5_000));
-    expect(performance.now() - started).toBeLessThan(1_500);
+
+    const used = process.cpuUsage(started);
+
+    expect((used.user + used.system) / 1000).toBeLessThan(1_500);
   });
 
   it('closes an unclosed <details> where its container ends and drops a </details> with no opening, so none reaches outside its place', () => {
@@ -225,10 +229,14 @@ describe('GitHub-flavoured Markdown', () => {
     ]);
     expect(slug('  A -- b_c  ', new Map())).toBe('a----b_c');
     const many = new Map<string, number>();
-    const started = performance.now();
+    const started = process.cpuUsage();
 
     expect(Array.from({ length: 5_000 }, () => slug('Same', many)).at(-1)).toBe('same-4999');
-    expect(performance.now() - started).toBeLessThan(200);
+
+    const used = process.cpuUsage(started);
+
+    // CPU time, as above: a slug that counted up from 1 each time would make some 12 million lookups here.
+    expect((used.user + used.system) / 1000).toBeLessThan(200);
     // A repeated name never takes one another heading has, and a heading never takes a footnote's place.
     expect([...dom('# A\n# A\n# A-1\n# fn1\n\nx[^1]\n\n[^1]: n').querySelectorAll('h1')].map((h) => h.getAttribute('data-anchor'))).toEqual(['a', 'a-1', 'a-1-1', 'fn1']);
     expect(dom('# fn1\n\nx[^1]\n\n[^1]: n').querySelector<HTMLElement>('sup a')!.dataset['target']).toBe('^fn1');
