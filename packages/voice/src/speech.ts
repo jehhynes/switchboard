@@ -373,6 +373,8 @@ export class Speech {
           current.writtenMs += pcm.length / BYTES_PER_MS;
           start();
         });
+        // Each link gets the handler: a write that fails, as one pending when the reply is stopped, rejects this link and not the first.
+        chain.catch((error: unknown) => this.#fail(current, error as Error));
       }, item.as);
     } catch (error) {
       this.#fail(current, error as Error);

@@ -269,6 +269,64 @@ describe('Speech', () => {
     expect(states()).toEqual(['r1 failed', 'r2 failed', 'r3 failed']);
     expect(failures).toEqual(['No OpenAI key', 'no device', 'speech connection closed', 'no device']);
   });
+  it('leaves no unhandled rejection when a reply is stopped while a later chunk\'s write is pending, and fails a reply whose later write fails at once', async () => {
+    const unhandled: string[] = [];
+    const onUnhandled = (reason: unknown): void => void unhandled.push((reason as Error).message);
+
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      const tts = new FakeTts();
+      const failures: Array<string | null> = [];
+      // A playback like decibri's Speaker: a pending write rejects once it is stopped; `breaks` fails the second write by itself.
+      let breaks = false;
+      const output = {
+        engine: 'fake',
+        open: async () => {
+          let fail!: (error: Error) => void;
+          const stopped = new Promise<void>((_, no) => (fail = no));
+          let writes = 0;
+
+          stopped.catch(() => undefined);
+          return {
+            write: () => (!breaks ? stopped : ++writes === 2 ? Promise.reject(new Error('device lost')) : Promise.resolve()),
+            drain: async () => undefined,
+            stop: () => fail(new Error('Speaker stream is closed')),
+          };
+        },
+      };
+      const speech = new Speech({ tts, output, device: () => null, report: () => undefined, failed: (error) => failures.push(error), now: () => 0, log: () => undefined });
+
+      for (let index = 0; index < 3; index++) {
+        speech.speak(item(`r${index}`, `t${index}`));
+        await settle();
+        tts.requests.at(-1)!.audio(4800);
+        tts.requests.at(-1)!.audio(4800);
+        await settle();
+        speech.cancel(`r${index}`, true);
+        await settle();
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+      expect(failures).toEqual([]);
+
+      // A write that fails while speech still streams fails the reply then, not when the speech ends.
+      breaks = true;
+      speech.speak(item('r9', 't9'));
+      await settle();
+      tts.requests.at(-1)!.audio(4800);
+      tts.requests.at(-1)!.audio(4800);
+      await settle();
+      expect(failures).toEqual(['device lost']);
+      expect(tts.requests.at(-1)!.cancelled).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('stops the playing reply on a barge-in with how much of it played, skips the rest of its turn, and plays the next turn\'s replies', async () => {
     const { clock, tts, speech, states, reports, logs } = setup();
 
