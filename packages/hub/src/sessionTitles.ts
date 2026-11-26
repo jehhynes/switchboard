@@ -19,7 +19,7 @@ interface Tail {
   size: number;
   mtimeMs: number;
   /** The file's inode and its first bytes (up to `HEAD`) as last read, which tell a replaced file from a grown one. */
-  ino?: number;
+  ino?: string;
   head?: Buffer;
 }
 
@@ -146,7 +146,10 @@ function readTail(tail: Tail, reset: () => void, line: (text: string) => void): 
   let stat;
 
   try {
-    stat = statSync(tail.path);
+    // NTFS file IDs pass 2^53, so a number can round two files' IDs to one; the inode is compared as read in full.
+    const read = statSync(tail.path, { bigint: true });
+
+    stat = { size: Number(read.size), mtimeMs: Number(read.mtimeNs) / 1e6, ino: String(read.ino) };
   } catch {
     return;
   }
