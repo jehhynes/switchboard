@@ -1964,3 +1964,31 @@ The offline startup limitation below is superseded by M145's verified-origin she
   - Choice, the fewest threads whose decode stays within 0.8 of the audio's time: 1 on the GPU, 2 on the CPU, where 1 thread reached 0.8 to 0.92 under the machine's other load.
 - **Not verified:** the GPU path's stream size; the live voice process with hotwords, the voice check's speaker model and capture loaded; Linux.
 - **Current use:** `COLLECT_AFTER_DROP_MS` in `packages/voice/src/dictation.ts` and `AsrEngine.collect`, `RECOGNISER_THREADS` in `packages/voice/src/asr.ts`, `TURN_SESSION_OPTIONS` in `packages/voice/src/turn.ts`, the turn model's close in `Dictation`'s disuse free ([architecture.md](architecture.md) § Dictation, Recognition).
+
+## M167. What a stream event costs the web page to draw, by conversation length, 2026-11-26
+
+- **Setup:** Windows 11 Pro 10.0.26300, Node.js v24.14.0; the page's own code (`startPage`) on a fake event stream with no hub, 120 list rows in four groups and a conversation of alternating messages and ~1 KB Markdown replies (a heading, a list, a code block and a table each), before and after the changes on base 08f24c49. Chromium 155.0.8059.12 headless (Playwright core 1.64, the page's CSS laid out, 1600×1000): each event timed from its emit to after the next frame, so an event that draws nothing costs one frame, about 16.6 ms; `Performance.getMetrics` gave script, style and layout times. jsdom 29.1.1 under Vitest: each event drawn at once, and `<template>` elements counted as `trusted()`'s HTML parses. Preact 11.2.0, markdown-it 14.3.3. Scratch harness, not committed.
+- **Before, Chromium, ms per event (frame included):**
+
+  | Items | Reply appended | Session | List | Progress | Words | Unread |
+  |---|---|---|---|---|---|---|
+  | 100 | 28 | 26 | 28 | 25 | 17 | 26 |
+  | 500 | 61 | 52 | 62 | 52 | 45 | 74 |
+  | 1000 | 137 | 113 | 115 | 115 | 106 | 106 |
+  | 4000 | 390 | 305 | 310 | 288 | 322 | 312 |
+
+  Script time per list event: 9 ms at 100 items, 75 at 1000, 351 at 4000; every event redrew the list and the whole conversation, rendering each reply's Markdown again. `trusted()`'s 500-entry first-in first-out cache, never refreshed on a hit, parsed 543 strings per event at 500 items, 1043 at 1000 and 4043 at 4000.
+- **After, Chromium, ms per event (frame included):**
+
+  | Items | Reply appended | Session | List | Progress | Words | Unread |
+  |---|---|---|---|---|---|---|
+  | 100 | 22 | 20 | 22 | 17 | 17 | 20 |
+  | 500 | 31 | 24 | 28 | 17 | 18 | 22 |
+  | 1000 | 34 | 23 | 30 | 17 | 18 | 23 |
+  | 4000 | 113 | 35 | 70 | 17 | 22 | 34 |
+
+  Script time per list event: 3 ms at 100 items, 4 at 1000, 8 at 4000. Two parses per appended reply at every length. What remains grows with the page's size outside script: at 4000 items an appended reply spends 38 ms in style recalculation, and a list event's task runs 38 ms against 8 ms of script.
+- **jsdom, mean ms per event, before → after:** reply appended 34 → 15 at 100 items, 331 → 51 at 500, 440 → 79 at 1000, 1946 → 300 at 4000; session 41 → 13, 484 → 44, 593 → 76, 2223 → 336; list 39 → 21, 276 → 36, 451 → 44, 2017 → 180; progress 33 → 0.3, 251 → 0.9, 658 → 0.9, 1847 → 4. jsdom's remaining cost is mostly its own document-wide selector queries, which Chromium runs in a few milliseconds.
+- **Extension's cleanup alarm, kept:** the Chrome extension's 30-second `iframe-cleanup` alarm stays on at every start of its service worker, waking it about 2,880 times a day with no iframe leases. Setting it only while a lease exists was tried and dropped: a failed write of the leases, or a stop between installing a frame's header rules and saving its lease, could leave rules with no alarm to sweep them, and with them the X-Frame-Options exception (decision 2026-11-26). The always-on alarm sweeps such rules within 30 seconds, which is worth more than the idle wake-ups saved.
+- **Not verified:** a phone; Firefox; conversations with many question cards or Mermaid diagrams; heap held by the 5000-entry Markdown and HTML caches in a long-open page.
+- **Current use:** the page's drawing ([architecture.md](architecture.md) § Web page, Drawing).
