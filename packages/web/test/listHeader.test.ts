@@ -99,6 +99,37 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(host.querySelector('.header-sources')).toBeNull();
   });
 
+  it('ListNotes_SeveralNotes_FoldIntoOneLineThatOpensThem', () => {
+    const { page, source } = start();
+    const toggle = () => root.querySelector<HTMLElement>('.list-notes-toggle');
+
+    hello(source);
+    // No notes, no line.
+    expect(toggle()).toBeNull();
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Settings: settings.json is not valid JSON.'], heldNote: '1 background session without a work item', voiceNote: 'Voice is off.' }) });
+    // The first note, how many more, closed; the notes stay in the page, which hides them on a phone while the line is closed.
+    expect(toggle()!.querySelector('.list-notes-first')!.textContent).toBe('Settings: settings.json is not valid JSON.');
+    expect(toggle()!.querySelector('.list-notes-more')!.textContent).toBe('+2');
+    expect(toggle()!.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle()!.getAttribute('aria-controls')).toBe('list-notes');
+    expect(toggle()!.classList.contains('voice-note')).toBe(false);
+    expect(root.querySelector('#list-notes')!.classList.contains('open')).toBe(false);
+    expect([...root.querySelectorAll('#list-notes .list-note')].map((note) => note.textContent)).toEqual(['Settings: settings.json is not valid JSON.', '1 background session without a work item', 'Voice is off.']);
+    click('.list-notes-toggle');
+    expect(toggle()!.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('#list-notes')!.classList.contains('open')).toBe(true);
+    // Open over the next list, and closed again by the line.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Settings: settings.json is not valid JSON.'] }) });
+    expect(toggle()!.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle()!.querySelector('.list-notes-more')).toBeNull();
+    click('.list-notes-toggle');
+    expect(root.querySelector('#list-notes')!.classList.contains('open')).toBe(false);
+    // The voice note alone is untoned, and so is its line.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ voiceNote: 'Voice is off.' }) });
+    expect(toggle()!.classList.contains('voice-note')).toBe(true);
+    page.close();
+  });
+
   it('draws a plugin path with its color and width in the header and phone menu, and grays disabled icons', () => {
     const icon = { viewBox: '0 0 24 24', path: 'M0 0H24V24H0Z', color: '#357abc', width: 24, fillRule: 'evenodd' as const };
     const sources = [{ kind: 'forum', label: 'Community', icon, enabled: true, title: 'forum', sources: [{ name: 'forum', enabled: true }] }];

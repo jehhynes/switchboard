@@ -182,6 +182,17 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
 /* The notes above the groups, in the warning colour; the held-session note is a button that looks like one. */
 .list-note { display: block; box-sizing: border-box; width: 100%; margin: 0; padding: 4px 4px 4px 20px; border: none; background: transparent; color: var(--vscode-editorWarning-foreground); text-align: left; overflow-wrap: anywhere; }
 button.held-note { cursor: pointer; }
+/* In the phone's layout the notes fold into one 44 px line: the first note cut with an ellipsis, how many more, and a chevron, which opens them
+   all; outside it they show as they are, so the line is left out. */
+.list-notes-toggle { display: none; }
+:where(html.phone) .list-notes-toggle { display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 100%; min-height: 44px; margin: 0; padding: 0 12px 0 20px; border: none; background: transparent; color: var(--vscode-editorWarning-foreground); font: inherit; text-align: left; cursor: pointer; }
+:where(html.phone) .list-notes-toggle.voice-note { color: var(--vscode-descriptionForeground); }
+.list-notes-first { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-notes-more { flex: none; color: var(--vscode-descriptionForeground); }
+/* Closed, the notes are clipped from view rather than removed, so a screen reader still reads them and hears a new one; the held-session note's
+   button, the only control among them, is left out until they open. */
+:where(html.phone) .list-notes:not(.open) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+:where(html.phone) .list-notes:not(.open) .held-note { display: none; }
 /* Why no device has the voice after the phone was lost: information, not a warning. */
 .voice-note { color: var(--vscode-descriptionForeground); }
 button.held-note:hover { background: var(--vscode-list-hoverBackground); }

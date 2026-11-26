@@ -298,14 +298,42 @@ export interface HeaderView {
   connection?: DotView | null;
   /** Whether the list is pinned, for the pin button at the header's end; left out, the header has no pin. */
   pinned?: boolean;
+  /** Whether the notes folded into one line in the phone's layout are open. */
+  notesOpen?: boolean;
 }
 
 /**
  * The notes above the list's groups, in the warning colour: settings, playbook, hook, source and voice errors and setup notes, then the held
  * sessions without a work item, whose click opens what Held sessions in More Actions opens; then, untoned, why no device has the voice when
- * the phone was lost.
+ * the phone was lost. In the phone's layout they fold into one line, which opens them (page.css).
  */
-function HeaderNotes({ header }: { header: PageHeader | null }) {
+function HeaderNotes({ header, open }: { header: PageHeader | null; open: boolean }) {
+  const texts = [...(header?.notes ?? []), ...(header?.heldNote === undefined ? [] : [header.heldNote]), ...(header?.voiceNote === undefined ? [] : [header.voiceNote])];
+
+  if (texts.length === 0) {
+    return null;
+  }
+
+  // Only the voice note is untoned, so the line takes the warning colour while any other note is folded into it.
+  const toned = texts.length > (header?.voiceNote === undefined ? 0 : 1);
+
+  return (
+    <>
+      {/* Shown only in the phone's layout (page.css): the notes folded into one line, the first cut short, which opens them all. */}
+      <button type="button" class={`list-notes-toggle${toned ? '' : ' voice-note'}`} data-action="list-notes" aria-expanded={open} aria-controls="list-notes" title={open ? 'Hide the notes' : 'Show the notes'}>
+        <span class="list-notes-first">{texts[0]}</span>
+        {texts.length > 1 ? <span class="list-notes-more">{`+${texts.length - 1}`}</span> : null}
+        <span class={`codicon codicon-chevron-${open ? 'up' : 'down'}`} aria-hidden="true"></span>
+      </button>
+      <div class={`list-notes${open ? ' open' : ''}`} id="list-notes">
+        <NoteList header={header} />
+      </div>
+    </>
+  );
+}
+
+/** The notes themselves, each on its own lines. */
+function NoteList({ header }: { header: PageHeader | null }) {
   return (
     <>
       {(header?.notes ?? []).map((note) => (
@@ -465,7 +493,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           </div>
         </div>
       ) : null}
-      <HeaderNotes header={header} />
+      <HeaderNotes header={header} open={view.notesOpen === true} />
       <HolderNotices header={header} view={view} />
     </>
   );
@@ -1788,6 +1816,10 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.sheet = { kind: 'holder', busy: false, error: null };
         redraw();
         sheetHost.querySelector<HTMLElement>('.sheet-button')?.focus();
+        break;
+      case 'list-notes':
+        view.notesOpen = view.notesOpen !== true;
+        redraw();
         break;
       case 'list-holder-dismiss':
         view.holderDismissed = shown?.holderResult?.at ?? null;

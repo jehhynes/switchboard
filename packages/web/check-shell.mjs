@@ -126,7 +126,8 @@ const many = { ticket: 'gh 9', ticketNumber: '9', playbook: 'dev:x', links: ['1'
 const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, sourceKind: 'adhoc', links: [link('A very long design document title')] };
 // The header's sources: GitHub's and Zoho's logos are the page's own; the DPAF plugin gives its own, a made-up mark here.
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
-const header = { notes: [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
+// The list's notes, which a phone folds into one line.
+const header = { notes: view === 'list' || view?.startsWith('narrow') ? ['settings.json: sources.zoho.orgId is missing, so Zoho Desk is not polled.', 'Voice: the voice process stopped.'] : [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
 const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
@@ -439,7 +440,7 @@ const measure = `(() => {
       };
     })(),
     // The conversation's heights: its header, the header and tab strip together, the timeline's pane and the composer.
-    heights: (() => { const tall = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().height) : null; }; return { header: tall('.header'), head: tall('#head'), panel: tall('#panel'), composer: tall('#composer') }; })(),
+    heights: (() => { const tall = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().height) : null; }; return { header: tall('.header'), head: tall('#head'), panel: tall('#panel'), composer: tall('#composer'), notesLine: tall('.list-notes-toggle'), notes: tall('#list-notes') }; })(),
     tops: { header: top('.header'), listHeader: top('.list-header'), settingsHead: top('.settings-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
@@ -904,6 +905,11 @@ function failures(view, size, m) {
       if (hs.composer > 44 + 5 + Math.max(5, Math.min(14, size.insets.bottom)) + 2) out.push('the composer is ' + hs.composer + ' px tall on a phone on its side, not one row');
       if (hs.panel < 270) out.push('the timeline gets ' + hs.panel + ' px of a phone on its side');
     }
+  }
+  // A phone folds the list's notes into one line, closed until tapped; elsewhere they show whole, with no line.
+  if (view === 'list') {
+    if (size.phone && (m.heights.notesLine === null || m.heights.notesLine > 46 || (m.heights.notes ?? 0) > 1)) out.push('the list\'s notes are not one closed line on a phone (line ' + m.heights.notesLine + ' px, notes ' + m.heights.notes + ' px)');
+    if (!size.phone && (m.heights.notesLine !== null || !(m.heights.notes > 0))) out.push('the list\'s notes are folded outside the phone\'s layout');
   }
   for (const [bar, top] of Object.entries(m.tops)) {
     // Settings, outside the phone's layout, sits inside the dimmed page's margin.
