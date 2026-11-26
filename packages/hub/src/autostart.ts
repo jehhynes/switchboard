@@ -292,7 +292,7 @@ export function regValue(stdout: string): string | null {
 
 function regExe(env: NodeJS.ProcessEnv): string {
   // An absolute path, so a reg.exe earlier on PATH cannot stand in for it.
-  return join(env['SystemRoot'] || 'C:\\Windows', 'System32', 'reg.exe');
+  return win32.join(env['SystemRoot'] || 'C:\\Windows', 'System32', 'reg.exe');
 }
 
 /** Reads what is registered, changing nothing. */

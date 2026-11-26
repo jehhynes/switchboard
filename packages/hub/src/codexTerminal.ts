@@ -126,7 +126,7 @@ export class CodexTerminals {
       file: claudeFile(codexPath, this.deps.platform),
       args: ['resume', '--no-alt-screen', '--remote', controlSocket(this.deps.codexHome), session!.nativeSessionId!],
       cwd: session!.cwd,
-      env: { ...(env as Record<string, string>), ...this.deps.env, ...executableDirOnPath(codexPath, env), CODEX_HOME: this.deps.codexHome, TERM: 'xterm-256color' },
+      env: { ...(env as Record<string, string>), ...this.deps.env, ...executableDirOnPath(codexPath, env, this.deps.platform), CODEX_HOME: this.deps.codexHome, TERM: 'xterm-256color' },
       cols: COLS,
       rows: ROWS,
     });

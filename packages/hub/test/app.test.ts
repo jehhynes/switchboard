@@ -268,7 +268,8 @@ describe('parseReport and reportBody', () => {
 describe('session provider metadata', () => {
   it('returns the configured provider without starting a session or changing settings', async () => {
     const claude = join(temp.home, 'claude.exe');
-    writeFileSync(claude, '');
+    // Executable, as Linux requires of a CLI.
+    writeFileSync(claude, '', { mode: 0o755 });
     writeSettings({ sessions: { provider: 'codex', installHooks: false, claudePath: claude, codexPath: join(temp.home, 'missing', 'codex.exe') } });
     const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
     closers.push(() => app.close());

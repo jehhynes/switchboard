@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -119,7 +119,7 @@ describe('ArtifactFolder', () => {
     expect(changes).toHaveLength(1);
   });
 
-  it('ignores a rewrite of the same bytes with a new time, as a git checkout makes, and still reads a different rewrite', () => {
+  it('ignores a rewrite of the same bytes with a new time, as a git checkout makes, and still reads a different rewrite', async () => {
     put('chat/report.md', '# First', 2_000_000);
     const { folder, changes } = watchFolder(dir, () => 9_000_000);
 
@@ -127,7 +127,15 @@ describe('ArtifactFolder', () => {
     folder.rescan();
     expect(changes).toEqual([]);
     expect(folder.list()[0]!.updatedAt).toBe(2_000_000);
-    put('chat/report.md', '# Other', 3_000_000);
+
+    // Linux moves a change time in clock ticks of a few milliseconds, and a rewrite in the same tick, with the same time and size, changes
+    // nothing the rescan reads.
+    const changed = statSync(join(dir, 'chat', 'report.md')).ctimeMs;
+
+    await vi.waitFor(() => {
+      put('chat/report.md', '# Other', 3_000_000);
+      expect(statSync(join(dir, 'chat', 'report.md')).ctimeMs).not.toBe(changed);
+    });
     folder.rescan();
     expect(changes).toEqual([{ artifact: expect.objectContaining({ title: 'Other', updatedAt: 3_000_000 }) }]);
   });

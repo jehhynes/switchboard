@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { delimiter, dirname, isAbsolute } from 'node:path';
+import { posix, win32 } from 'node:path';
 
 export interface ExecResult {
   code: number | null;
@@ -23,17 +23,19 @@ export type Exec = (file: string, args: string[], options: ExecOptions) => Promi
 
 /**
  * Puts an absolute executable path's directory first on PATH, because an npm launcher runs `node` from PATH and nvm installs `node` beside it.
- * Keeps the environment's own spelling of PATH, such as Windows' `Path`. A bare name adds nothing.
+ * Keeps the environment's own spelling of PATH, such as Windows' `Path`. A bare name adds nothing. `platform` gives the path rules.
  */
-export function executableDirOnPath(executable: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  if (!isAbsolute(executable)) {
+export function executableDirOnPath(executable: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Record<string, string> {
+  const path = platform === 'win32' ? win32 : posix;
+
+  if (!path.isAbsolute(executable)) {
     return {};
   }
 
   const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
   const current = env[key];
 
-  return { [key]: current ? `${dirname(executable)}${delimiter}${current}` : dirname(executable) };
+  return { [key]: current ? `${path.dirname(executable)}${path.delimiter}${current}` : path.dirname(executable) };
 }
 
 /** Leaves out VS Code window and build variables, so the CLI and the sessions it starts do not target a VS Code window (GC M26, M49). */

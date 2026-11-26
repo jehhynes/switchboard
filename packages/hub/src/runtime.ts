@@ -2,7 +2,7 @@ import type { SourceIcon } from '@switchboard/core';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { classify, ClaudeRunner, CODE_MODE_IDLE_MS, findTranscript, CodeModeRunner, conversationRules, HOOKS_REQUIRED, readRoster, readTranscriptLaunch, readTranscriptLimit } from '@switchboard/claude';
 import { classifyCodex, CodexRunner, AppServer, AppServerRunner } from '@switchboard/codex';
 import type { Exec } from '@switchboard/claude';
@@ -808,18 +808,19 @@ export class Runtime {
     };
 
     // Windows keeps firing on a removed folder without an error, and a watch does not follow a folder made again at the same path.
+    // Linux names the folder itself in the event for its removal, and may give a folder made again at once the same inode.
     const folderId = () => statSync(dir, { bigint: true, throwIfNoEntry: false })?.ino ?? null;
 
     try {
       mkdirSync(dir, { recursive: true });
       const id = folderId();
-      const watcher = watch(dir, () => {
+      const watcher = watch(dir, (_event, name) => {
         if (watcher !== this.markerWatcher) {
           return;
         }
 
         try {
-          if (folderId() !== id) {
+          if (name === basename(dir) || folderId() !== id) {
             rearm('the activity folder was removed or replaced');
             return;
           }

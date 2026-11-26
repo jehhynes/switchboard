@@ -925,7 +925,8 @@ it('confirms messages typed as one by their shared line, each in order with its 
     expect(changes).toHaveLength(2);
   });
 
-  it('takes a checkpoint whose path names the transcript with other separators as its own', () => {
+  // Only Windows takes either separator, so only there can the two spellings name one file.
+  it.runIf(process.platform === 'win32')('takes a checkpoint whose path names the transcript with other separators as its own', () => {
     const { store, conversation, path, append, items } = setup();
 
     append(user('u0', T0 - 60_000, 'Old question'));

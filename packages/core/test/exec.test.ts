@@ -18,4 +18,10 @@ describe('executableDirOnPath', () => {
     expect(executableDirOnPath(join(bin, 'codex'), { Path: 'C:\\Windows' })).toEqual({ Path: `${bin}${delimiter}C:\\Windows` });
     expect(executableDirOnPath(join(bin, 'codex'), {})).toEqual({ PATH: bin });
   });
+
+  it("reads the path by the platform's rules", () => {
+    expect(executableDirOnPath('C:/Codex/bin/codex.exe', { Path: 'C:\\Windows' }, 'win32')).toEqual({ Path: 'C:/Codex/bin;C:\\Windows' });
+    expect(executableDirOnPath('C:/Codex/bin/codex.exe', { PATH: '/usr/bin' }, 'linux')).toEqual({});
+    expect(executableDirOnPath('/opt/codex/bin/codex', { PATH: '/usr/bin' }, 'linux')).toEqual({ PATH: '/opt/codex/bin:/usr/bin' });
+  });
 });

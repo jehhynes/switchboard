@@ -75,14 +75,17 @@ describe('PluginRegistry', () => {
       return { default: { kind: 'forum', label: 'Forum', optionsError: () => null, create: () => ({ error: 'x' }) } };
     });
 
+    // An absolute path on this platform, and its file URL.
+    const [plugin, url] = process.platform === 'win32' ? ['D:/plugins/forum.mjs', 'file:///D:/plugins/forum.mjs'] : ['/plugins/forum.mjs', 'file:///plugins/forum.mjs'];
+
     await registry.use([]);
-    const draft = await registry.resolve(['D:/plugins/forum.mjs']);
+    const draft = await registry.resolve([plugin]);
 
     expect(draft.get('forum')?.label).toBe('Forum');
     expect(registry.current.get('forum')).toBeUndefined();
-    await registry.use(['D:/plugins/forum.mjs']);
+    await registry.use([plugin]);
     expect(registry.current.get('forum')?.label).toBe('Forum');
-    expect(imported).toEqual(['file:///D:/plugins/forum.mjs']);
+    expect(imported).toEqual([url]);
   });
 });
 
