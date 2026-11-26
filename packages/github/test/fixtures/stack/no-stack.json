@@ -1,0 +1,30 @@
+{
+  "data": {
+    "repository": {
+      "open": {
+        "totalCount": 1,
+        "nodes": [
+          {
+            "number": 5,
+            "state": "OPEN",
+            "url": "https://github.com/owner/repo/pull/5",
+            "isInMergeQueue": false,
+            "headRefName": "solo",
+            "headRefOid": "5859121e885eeb70540cc4cd57dd29a1b5bfe89f",
+            "baseRefName": "s2",
+            "headRef": {
+              "name": "solo"
+            },
+            "headRepository": {
+              "nameWithOwner": "owner/repo"
+            },
+            "stack": null
+          }
+        ]
+      },
+      "done": {
+        "nodes": []
+      }
+    }
+  }
+}

@@ -381,7 +381,7 @@ describe('Runtime', () => {
 
     expect(cli.calls.filter((call) => call[1] === 'stop')).toEqual([]);
     expect(store.session('s1')).toMatchObject({ state: 'idle', released: false });
-    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.' });
+    expect(store.workItem(1)).toMatchObject({ status: 'blocked', error: 'The session finished its turn without reporting done.' });
 
     cli.roster = [];
     await runtime.readRoster();

@@ -146,7 +146,7 @@ describe('the page in use', () => {
     click('button.send');
     await vi.waitFor(() => expect(sends().at(-1)!.body['text']).toBe('Next'));
     // The hub keeps its old text for this refusal, which the page says in its own words.
-    await vi.waitFor(() => expect(root.querySelector('#toast .toast-text')?.textContent).toBe('This page switched to another conversation or session, so that was not done. Try again.'));
+    await vi.waitFor(() => expect(root.querySelector('#toast .toast-text')?.textContent).toBe('You switched to another session, so that was not done. Try again.'));
     const stale = sends().at(-1)!.body['opId'];
 
     expect(JSON.parse(localStorage.getItem('switchboard.sendOps')!)).toEqual({ '1': { key: expect.stringContaining('Next'), opId: stale } });
@@ -212,7 +212,7 @@ describe('the page in use', () => {
     expect([...root.querySelectorAll('.conn-banner')].map((one) => one.textContent)).toEqual(Array(2).fill('Offline. Showing what was here at ' + new Date(10_000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '.Retry'));
     expect(root.classList.contains('stale')).toBe(true);
     expect(input.disabled).toBe(true);
-    expect(input.placeholder).toBe("Can't send while offline.");
+    expect(input.placeholder).toBe('Messages cannot be sent while offline.');
     expect(root.querySelector('.header .conn-dot')?.className).toBe('conn-dot waiting');
     hello(FakeSource.last!);
     expect(root.querySelector('.conn-banner')).toBeNull();
@@ -255,7 +255,7 @@ describe('the page in use', () => {
 
     const screen = root.querySelector('.conn-screen')!;
 
-    expect(screen.querySelector('h2')?.textContent).toBe("Can't reach Switchboard");
+    expect(screen.querySelector('h2')?.textContent).toBe("Switchboard is not reachable");
     expect(screen.querySelector('.conn-screen-status')?.textContent).toMatch(/^Trying again in \d+ s\.$/);
     // Only this computer can start the hub.
     expect(screen.querySelector('a[href="switchboard:start"]')?.textContent).toBe('Start Switchboard');
@@ -311,7 +311,7 @@ describe('the page in use', () => {
     await vi.advanceTimersByTimeAsync(SEND_RETRY_MS);
     expect(sends().length).toBeGreaterThan(2);
     expect(new Set(sends().map((post) => post.body['opId'])).size).toBe(1);
-    expect(root.querySelector('#toast .toast-text')?.textContent).toBe('Not sent. Switchboard is restarting. Try again in a moment.');
+    expect(root.querySelector('#toast .toast-text')?.textContent).toBe('Your message was not sent. Switchboard is restarting. Try again in a moment.');
     expect(input.value).toBe('Ship it');
 
     const first = sends()[0]!.body['opId'];

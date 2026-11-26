@@ -115,7 +115,7 @@ describe('createHubApp', () => {
 
     const page = app.page!.opened();
 
-    expect(await app.post['/v1/conversation/page-new-session']!({ window: page, folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Claude sessions need sessions.installHooks.' } });
+    expect(await app.post['/v1/conversation/page-new-session']!({ window: page, folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Claude sessions need Install hooks turned on in Settings › Advanced.' } });
     expect(app.runtime.snapshot().workItems).toHaveLength(1);
   });
   it("shows the page no mic mark while no session is the voice target, and a voice problem as a note in the list's header (architecture.md § Voice)", async () => {
@@ -249,7 +249,7 @@ describe('createHubApp', () => {
     expect(await postToHub(record, '/holder/stop', { id: 'nope' }, 5000)).toMatchObject({ status: 404, error: 'No held session nope.' });
     expect(await postToHub(record, '/holder/open', {}, 5000)).toMatchObject({ status: 400, error: 'Expected {id}.' });
     expect(await postToHub(record, '/holder/open', { id: 'missing' }, 5000)).toMatchObject({ status: 404, error: 'No held session missing.' });
-    expect(await postToHub(record, '/holder/open', { id: 'orphan-1' }, 5000)).toMatchObject({ status: 409, error: 'This held session has no terminal to open.' });
+    expect(await postToHub(record, '/holder/open', { id: 'orphan-1' }, 5000)).toMatchObject({ status: 409, error: 'This background session has no terminal to open.' });
     expect(kills).toEqual([]);
     expect(await postToHub(record, '/holder/stop', { id: '9273f594' }, 5000)).toEqual({ status: 200, error: null, body: { stopped: 'orphan-1' } });
     expect(kills).toEqual(['orphan-1']);
@@ -257,7 +257,7 @@ describe('createHubApp', () => {
     // The holder's build b is not the installed one, so a restart starts; it ends the holder, whose installed build is incomplete here.
     expect(await postToHub({ ...record, token: 'wrong' }, '/holder/restart', {}, 5000)).toMatchObject({ status: 401 });
     // A confirmation the view no longer asks is refused, so no session is interrupted unnamed.
-    expect(await postToHub(record, '/holder/restart', { detail: 'Restarting stops the held session.' }, 5000)).toMatchObject({ status: 409, error: 'The held sessions changed since you were asked. Press Restart and resume again to see them.' });
+    expect(await postToHub(record, '/holder/restart', { detail: 'Restarting stops the held session.' }, 5000)).toMatchObject({ status: 409, error: 'The background sessions changed since you were asked. Press Restart and resume again to see them.' });
     expect(lock).toBe(true);
     expect(await postToHub(record, '/holder/restart', {}, 5000)).toEqual({ status: 200, error: null, body: { started: true } });
     expect(await postToHub(record, '/holder/restart', {}, 5000)).toMatchObject({ status: 409 });

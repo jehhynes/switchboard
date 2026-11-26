@@ -387,13 +387,13 @@ export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'work
     };
     const parts = [
       live.length === 0 ? 'The terminal holder holds no live session.' : '',
-      resumed.length === 0 ? '' : `Restarting stops ${resumed.length === 1 ? 'the held session' : `the ${resumed.length} held sessions`} and resumes ${resumed.length === 1 ? 'it' : 'them'} in a holder of the installed build.`,
+      resumed.length === 0 ? '' : `Restarting stops ${resumed.length === 1 ? 'the background session' : `the ${resumed.length} background sessions`} and resumes ${resumed.length === 1 ? 'it' : 'them'} in a holder of the installed build.`,
       busy.length === 0 ? '' : `${busy.length === 1 ? 'This session is' : 'These sessions are'} not idle, so the restart interrupts ${busy.length === 1 ? 'its turn' : 'their turns'}: ${busy.map(name).join(', ')}.`,
-      others === 0 ? '' : `${plural(others, resumed.length === 0 ? 'held session' : 'other held session', resumed.length === 0 ? 'held sessions' : 'other held sessions')} ${others === 1 ? 'ends and is' : 'end and are'} not resumed.`,
+      others === 0 ? '' : `${plural(others, resumed.length === 0 ? 'background session' : 'other background session', resumed.length === 0 ? 'background sessions' : 'other background sessions')} ${others === 1 ? 'ends and is' : 'end and are'} not resumed.`,
     ];
 
     shown.holderNotice = {
-      text: `The terminal holder is from an older build. Restart it to update${resumed.length === 0 ? '' : ` (${plural(resumed.length, 'session', 'sessions')} will be resumed)`}.`,
+      text: `The terminal holder that runs background sessions is out of date. Restart it to update${resumed.length === 0 ? '' : `; its ${plural(resumed.length, 'session stops and resumes', 'sessions stop and resume')}`}.`,
       confirm: { question: 'Restart the terminal holder?', detail: parts.filter((part) => part !== '').join(' '), action: 'Restart and resume' },
     };
   }
@@ -415,7 +415,7 @@ export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'work
 function orphanNote(held: HeldSession[]): { heldNote?: string } {
   const count = held.filter((one) => one.orphan).length;
 
-  return count === 0 ? {} : { heldNote: `${count} held ${count === 1 ? 'session' : 'sessions'} without a work item` };
+  return count === 0 ? {} : { heldNote: `${count} background ${count === 1 ? 'session' : 'sessions'} without a work item` };
 }
 
 /**
@@ -438,9 +438,9 @@ export function sourceGroups(states: Snapshot['sourceStates']): DockSourceGroup[
 
   return kinds.map((kind) => {
     const sources = states.filter((state) => state.kind === kind).map(({ name, enabled }) => ({ name, enabled }));
-    const lines = sources.map((source) => `${source.name}: ${source.enabled ? 'polled' : 'not polled'}`);
+    const lines = sources.map((source) => `${source.name}: ${source.enabled ? 'on' : 'off'}`);
     const only = sources.length === 1 ? sources[0]! : null;
-    const action = only === null ? 'Click to choose which to poll.' : only.enabled ? 'Click to stop polling it.' : 'Click to poll it.';
+    const action = only === null ? 'Click to choose which are on.' : only.enabled ? 'Click to turn it off.' : 'Click to turn it on.';
 
     const first = states.find((state) => state.kind === kind)!;
 
@@ -505,7 +505,7 @@ function poolRow(entry: PoolView, now: number, namespaces: Record<string, string
     key: rowKeyOf(entry),
     title: ticket.title,
     priority: priorityTitle(triage),
-    time: queuedTime(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In scope since' }, null, now),
+    time: queuedTime(ticket.scopeAt === null ? null : { since: ticket.scopeAt, label: 'In the pool since' }, null, now),
     playbook: playbookText(entry, namespaces),
     ticket: shownKey(ticket, undefined),
     source: ticket.source,

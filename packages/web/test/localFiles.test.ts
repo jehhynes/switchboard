@@ -285,6 +285,7 @@ describe('local file tabs', () => {
   let pages: Array<{ close(): void }>;
   const files: Array<{ path: string; contents: string | null; line: number | null }> = [];
   const updates: string[] = [];
+  const wraps: boolean[] = [];
   const module: DiffModule = {
     mountDiff: () => null,
     mountChanges: () => {
@@ -294,10 +295,11 @@ describe('local file tabs', () => {
       const shown = document.createElement('span');
 
       files.push({ path: data.path, contents: data.contents, line: options.line });
+      wraps.push(options.wrap);
       shown.className = 'fake';
       shown.textContent = `file ${data.path} at ${String(options.line)}`;
-      host.replaceChildren(shown, ...(options.suffix === undefined ? [] : [options.suffix]));
-      return { set: () => {}, update: (contents) => updates.push(contents), dispose: () => {} };
+      host.replaceChildren(shown, ...(options.suffix === undefined ? [] : [options.suffix]), ...(options.meta === undefined ? [] : [options.meta]));
+      return { set: (_layout, wrap) => wraps.push(wrap), update: (contents) => updates.push(contents), dispose: () => {} };
     },
   };
 
@@ -311,6 +313,7 @@ describe('local file tabs', () => {
     pages = [];
     files.length = 0;
     updates.length = 0;
+    wraps.length = 0;
     answers = {
       '.wip/review.md': { status: 200, body: file({ path: 'D:/w/.wip/review.md', name: 'review.md', kind: 'markdown', contents: '# Review\n\n[shot](shots/a.png)' }) },
       'D:/w/.wip/shots/': { status: 200, body: file({ path: 'D:/w/.wip/shots', name: 'shots', kind: 'dir', entries: [{ name: 'old', dir: true }, { name: 'a.png', dir: false }] }) },
@@ -426,6 +429,30 @@ describe('local file tabs', () => {
     link('out').click();
     await flush();
     expect(root.querySelector('.local-view .empty')!.textContent).toBe('No such file in this conversation’s folders.');
+  });
+
+  it("wraps a code tab's long lines as the Changes tab's diffs do, by this device's choice, which its Wrap toggles for both", async () => {
+    start();
+    link('code').click();
+    await flush();
+    await flush();
+
+    const wrap = () => root.querySelector<HTMLElement>('.diff-host.file-view [data-action="file-wrap"]')!;
+
+    // Wide, with web.diffWrap's default (auto): side by side, so long lines do not wrap.
+    expect(wraps[0]).toBe(false);
+    expect(wrap().getAttribute('aria-pressed')).toBe('false');
+
+    wrap().click();
+    expect(localStorage.getItem('switchboard.diffWrap')).toBe('on');
+    expect(wraps.at(-1)).toBe(true);
+    expect(wrap().getAttribute('aria-pressed')).toBe('true');
+    // The view is the one drawn at first, not a new one.
+    expect(files).toHaveLength(1);
+
+    wrap().click();
+    expect(localStorage.getItem('switchboard.diffWrap')).toBe('off');
+    expect(wraps.at(-1)).toBe(false);
   });
 
   it('opens a file: URI link in a file tab at its line, asking the hub for the decoded path', async () => {

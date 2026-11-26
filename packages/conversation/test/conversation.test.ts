@@ -1022,7 +1022,7 @@ it('confirms messages typed as one by their shared line, each in order with its 
     appendFileSync(branched, `${assistant('c2', T0 + 30_000, 'New in branch.')}\n`);
     conversation.readTranscript(branched);
 
-    expect(items().map((item) => (item.type === 'reply' ? `${item.kind}:${item.opening}` : ''))).toEqual(['reply:Before.', 'reply:After clear.', 'note:Conversation continued from another session.', 'reply:New in branch.']);
+    expect(items().map((item) => (item.type === 'reply' ? `${item.kind}:${item.opening}` : ''))).toEqual(['reply:Before.', 'reply:After clear.', 'note:Continued from an earlier session.', 'reply:New in branch.']);
   });
 
   it('reads a new transcript whose first line is longer than the part checked for copied history from its end', () => {
@@ -1036,7 +1036,7 @@ it('confirms messages typed as one by their shared line, each in order with its 
     writeFileSync(resumed, `${assistant('c0', T0, `Copied ${'x'.repeat(COPIED_HEAD_BYTES)}`)}\n${assistant('c1', T0 + 1, 'Copied too.')}\n`);
     conversation.readTranscript(resumed);
 
-    expect(items().map((item) => (item.type === 'reply' ? `${item.kind}:${item.opening}` : ''))).toEqual(['reply:Before.', 'note:Conversation continued from another session.']);
+    expect(items().map((item) => (item.type === 'reply' ? `${item.kind}:${item.opening}` : ''))).toEqual(['reply:Before.', 'note:Continued from an earlier session.']);
   });
 
   it('confirms a typed /clear by its line in the new transcript it starts, and still lets go of other messages typed into the earlier one', () => {

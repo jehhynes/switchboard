@@ -743,6 +743,20 @@ describe('Store', () => {
     expect(store.worktreeFor(ticket.id)).toEqual({ id: 1, ticketId: 1, path: 'D:/wt/b', branch: null, linkedBy: 'report' });
   });
 
+  it("finds the newest work item at a linked worktree's path", () => {
+    const store = Store.open(':memory:');
+    const ticket = store.insertTicket({ source: 'github', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
+    const item = (id: number) => ({ ticketId: ticket.id, playbook: 'dev', status: 'running', taskPrompt: null, guidance: null, reportedPrompt: null, warning: null, error: null, unassignedAt: null, queuedAt: null, approvalPrompt: null, approvalSummary: null, approvalReport: null, approvalHeld: false, createdAt: id, statusAt: id, runStartedAt: null, readyAt: null, orderAt: null, scopeAt: null, doneAt: null, doneReason: null, parentId: null }) as const;
+
+    store.insertWorkItem(item(1));
+
+    const newer = store.insertWorkItem(item(2));
+
+    store.linkWorktree({ ticketId: ticket.id, path: '/wt/a', branch: '1-a', linkedBy: 'report' });
+    expect(store.workItemAtWorktree('/wt/a')).toEqual({ id: newer.id, title: 'One' });
+    expect(store.workItemAtWorktree('/wt/b')).toBeNull();
+  });
+
   it('keeps one paste per label per work item, replacing its file in place (R60)', () => {
     const store = Store.open(':memory:');
     const ticket = store.insertTicket({ source: 'zoho', sourceKey: '1', ref: '#1', repo: '', sourceId: null, title: 'One', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: null, lastPolledAt: null, repoRoot: '' });
@@ -902,6 +916,19 @@ describe('Store', () => {
     store.savePageSession('p', 900, { label: 'other', host: 'other.ts.net', login: 'mallory@example.com' });
     expect(store.pageSession('p')).toEqual({ hash: 'p', createdAt: 100, usedAt: 900, label: 'Android · Chrome', host: 'pc.tailnet.ts.net', login: 'alex@example.com', voice: false });
     expect(store.pageSessions()).toEqual([store.pageSession('p')]);
+    store.close();
+  });
+
+  it('RenamePageSession_FromItsCurrentName_RenamesOnlyThen', () => {
+    const store = Store.open(join(dir, 'rename.db'));
+
+    store.savePageSession('p', 100);
+    expect(store.renamePageSession('p', 'Windows · Edge', 'Mac · Safari')).toBe(false);
+    expect(store.renamePageSession('p', '', 'Windows · Edge')).toBe(true);
+    // A second rename from the name it had loses to the first.
+    expect(store.renamePageSession('p', '', 'Linux · Firefox')).toBe(false);
+    expect(store.renamePageSession('missing', '', 'Windows · Edge')).toBe(false);
+    expect(store.pageSession('p')).toMatchObject({ label: 'Windows · Edge', usedAt: 100 });
     store.close();
   });
 

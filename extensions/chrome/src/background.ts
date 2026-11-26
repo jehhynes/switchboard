@@ -1,4 +1,4 @@
-import { downloadedIcon, shortcutRequest } from './shortcut.js';
+import { downloadedIcon, shortcutIconFile, shortcutRequest } from './shortcut.js';
 import { REMOTE_FILE, readLocalPage, readRoutes, readSnoozed } from './hub.js';
 import { readCards } from './pills.js';
 import { postSnooze, postUnsnooze, snoozeMessage, unsnoozeMessage } from './snooze.js';
@@ -76,9 +76,10 @@ if (!FIREFOX) {
       sendResponse(await shortcutRequest(sender, hub.origin,
         (origin) => iframeEnabled((url) => fetch(url, { credentials: 'include', cache: 'no-store' }), origin, hub.origin),
         async () => {
-          const bytes = new Uint8Array(await (await fetch(chrome.runtime.getURL('switchboard.ico'))).arrayBuffer());
+          const icon = shortcutIconFile(message);
+          const bytes = new Uint8Array(await (await fetch(chrome.runtime.getURL(icon.asset))).arrayBuffer());
           const data = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''));
-          return downloadedIcon(chrome.downloads, `data:image/x-icon;base64,${data}`);
+          return downloadedIcon(chrome.downloads, `data:${icon.type};base64,${data}`, icon.filename);
         }));
     }).catch(() => sendResponse({ error: 'Could not save the shortcut icon. Check browser downloads and try again.' }));
     return true;

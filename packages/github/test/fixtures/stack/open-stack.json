@@ -1,0 +1,94 @@
+{
+  "data": {
+    "repository": {
+      "open": {
+        "totalCount": 1,
+        "nodes": [
+          {
+            "number": 2,
+            "state": "OPEN",
+            "url": "https://github.com/owner/repo/pull/2",
+            "isInMergeQueue": false,
+            "headRefName": "s2",
+            "headRefOid": "4f47a242f3c842bfc892e2e91abf13aec6b8de91",
+            "baseRefName": "s1",
+            "headRepository": {
+              "nameWithOwner": "owner/repo"
+            },
+            "stack": {
+              "number": 4,
+              "baseRefName": "main",
+              "entries": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": [
+                  {
+                    "position": 1,
+                    "pullRequest": {
+                      "number": 1,
+                      "state": "OPEN",
+                      "url": "https://github.com/owner/repo/pull/1",
+                      "isInMergeQueue": false,
+                      "headRefName": "s1",
+                      "headRefOid": "e80725b6d4556f067ef14cc01adae2e97eda6cf9",
+                      "baseRefName": "main",
+                      "headRepository": {
+                        "nameWithOwner": "owner/repo"
+                      },
+                      "headRef": {
+                        "name": "s1"
+                      }
+                    }
+                  },
+                  {
+                    "position": 2,
+                    "pullRequest": {
+                      "number": 2,
+                      "state": "OPEN",
+                      "url": "https://github.com/owner/repo/pull/2",
+                      "isInMergeQueue": false,
+                      "headRefName": "s2",
+                      "headRefOid": "4f47a242f3c842bfc892e2e91abf13aec6b8de91",
+                      "baseRefName": "s1",
+                      "headRepository": {
+                        "nameWithOwner": "owner/repo"
+                      },
+                      "headRef": {
+                        "name": "s2"
+                      }
+                    }
+                  },
+                  {
+                    "position": 3,
+                    "pullRequest": {
+                      "number": 3,
+                      "state": "OPEN",
+                      "url": "https://github.com/owner/repo/pull/3",
+                      "isInMergeQueue": false,
+                      "headRefName": "s3",
+                      "headRefOid": "7ceab1e1a7c7e97e4d32711190c120e8d9c656cb",
+                      "baseRefName": "s2",
+                      "headRepository": {
+                        "nameWithOwner": "owner/repo"
+                      },
+                      "headRef": {
+                        "name": "s3"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "headRef": {
+              "name": "s2"
+            }
+          }
+        ]
+      },
+      "done": {
+        "nodes": []
+      }
+    }
+  }
+}

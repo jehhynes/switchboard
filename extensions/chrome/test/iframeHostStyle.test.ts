@@ -11,9 +11,10 @@ const short = (colour: string): string => colour.replace(/^#([0-9a-f])\1([0-9a-f
 
 describe('the embedded browser host page', () => {
   it('fills a website frame with the web page theme\'s editor background and colour scheme while it loads, not white', () => {
-    expect(dark).toBe('#1f1f1f');
+    // 2026 Dark's editor colour.
+    expect(dark).toBe('#121314');
     expect(host).toContain(`.browser{position:absolute;border:0;background:${dark};color-scheme:dark}`);
-    expect(host).toContain(`@media (prefers-color-scheme:light){.browser{background:${short(light!)};color-scheme:light}}`);
+    expect(host).toMatch(new RegExp(`@media \\(prefers-color-scheme:light\\)\\{[^@]*\\.browser\\{background:${short(light!)};color-scheme:light\\}\\}`));
     expect(host).not.toMatch(/\.browser\{[^}]*background:white/);
   });
 });

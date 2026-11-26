@@ -8,7 +8,7 @@ import type { LedgerItem, LedgerQuestion, QuestionLedger } from '@switchboard/co
 import { isAnswerMessage, renderAnswersBubble, renderQuestionCard } from '@switchboard/conversation/questionCard';
 import { artifactIcon, awaitingReply, inTurn, sessionEnd, timeline } from './model.js';
 import type { PageState } from './model.js';
-import { copyButton, renderInline, renderMarkdown } from './markdown.js';
+import { copyButton, renderCardText, renderInline, renderMarkdown } from './markdown.js';
 import { dayLabel, deliveryMark, replyRender, withoutQuestions } from './render.js';
 import type { CardDraft, View } from './render.js';
 import { trusted } from './trusted.js';
@@ -97,7 +97,7 @@ function Reply({ item, earlier, view, stamped: shown, card, briefReplies, latest
   const more = (expanded && !trailing) || passage === null ? '' : detailsPreview(opening, passage, markdownPart);
   const tone = toneMark(item.tone, view.details);
   // The copy button comes first on the line under the reply, then the tone and a speech failure with message details on, and the time at the right.
-  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy response'), tone, spokenMark(item.spoken.state, view.details)], item.at, shown);
+  const meta = metaLine([item.provisional ? '' : copyButton('copy-reply', 'Copy reply'), tone, spokenMark(item.spoken.state, view.details)], item.at, shown);
 
   return (
     <li class={`reply ${item.kind}${item.unread ? ' unread' : ''}${expanded ? '' : ' folded'}`} data-unread={item.unread ? item.id : undefined} data-id={item.id} data-speak={item.speak === null ? undefined : '1'} tabIndex={-1}>
@@ -262,7 +262,7 @@ function StillOpen({ keys, ledger, view, state, canAnswer }: { keys: string[]; l
       <h2 class="still-open-title" id="still-open-title">
         Still open
       </h2>
-      <p class="still-open-note">Asked in replies no longer kept.</p>
+      <p class="still-open-note">Asked in a reply that is no longer shown.</p>
       {keys.map((key) => (
         <div class="still-open-card" data-key={`still-open:${key}`} key={key}>
           {cardOf(key, ledger, view, state, canAnswer)}
@@ -278,7 +278,7 @@ function StillOpen({ keys, ledger, view, state, canAnswer }: { keys: string[]; l
  */
 export function cardNote(state: PageState): string | null {
   if (state.scope?.earlier === true) {
-    return 'An earlier session, shown read-only.';
+    return 'Earlier session, read-only.';
   }
 
   const session = state.session;
@@ -308,6 +308,7 @@ export function cardOf(key: string, ledger: QuestionLedger, view: View, state: P
       error: ui?.error ?? null,
       menuOpen: ui?.menuOpen === true,
       inline: renderInline,
+      block: renderCardText,
     }),
   )}</>;
 }
@@ -323,7 +324,7 @@ function startOfDay(at: number): number {
 export function renderTimeline(state: PageState, view: View, now: number = Date.now()): VNode {
   // New conversation…'s draft is empty until its first message starts its session (architecture.md § Web page).
   if (view.newDraft !== null && view.newDraft.workItemId === state.scope?.workItemId) {
-    return <p class="empty new-draft">A new conversation in this work item. It starts when you send its first message; the earlier sessions stay in the dropdown.</p>;
+    return <p class="empty new-draft">A new session in this work item. It starts when you send its first message; earlier sessions stay in the menu above.</p>;
   }
 
   if (state.session === null) {
@@ -483,13 +484,13 @@ export function renderPrompt(prompt: ScreenPrompt, waitingFor: string | null, se
         <button type="button" class="prompt-option secondary" data-action="prompt-key" data-prompt-key="escape" disabled={sending}>
           Cancel (Esc)
         </button>
-        <span class="prompt-note">To type an answer, use the terminal.</span>
+        <span class="prompt-note">Answer it in the terminal.</span>
       </div>
     </div>
   );
 }
 
-const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for session', decline: 'Decline', cancel: 'Cancel' };
+const DECISIONS: Record<string, string> = { accept: 'Allow once', acceptForSession: 'Allow for this session', decline: 'Deny', cancel: 'Cancel' };
 
 /**
  * A Codex session's pending request: a permission with its decisions as buttons, or questions with their options and a field for a typed

@@ -81,8 +81,8 @@ describe('the page in use', () => {
 
     // Before the cutover, a later reply supersedes the card, which takes no answer.
     hello(source, { items: [reply('r1', 2, { opening: asked }), reply('r2', 3, { opening: 'Ignore the question I asked.' })] });
-    expect(root.querySelector('.question-card .qc-state')!.getAttribute('title')).toBe('Superseded');
-    expect(root.querySelector('.question-card .qc-row-detail')!.textContent).toBe('Superseded: a later reply came after it.');
+    expect(root.querySelector('.question-card .qc-state')!.getAttribute('title')).toBe('Unanswered');
+    expect(root.querySelector('.question-card .qc-row-detail')!.textContent).toBe('Unanswered: a later reply came before you answered.');
     expect(root.querySelector('.qc-option, [data-action="card-send"]')).toBeNull();
 
     // After it, a reply with text leaves the question open, and an Answers message shows as its bubble.
@@ -185,7 +185,7 @@ describe('the page in use', () => {
       await flush();
       await flush();
       expect(posts.filter((post) => post.url.includes('/history'))).toHaveLength(2);
-      expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Switchboard could not read the conversation back to its question card.');
+      expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Switchboard could not find the reply that asked these questions.');
       expect(scrolled).toEqual(['reply:r1']);
     } finally {
       delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
@@ -1105,7 +1105,7 @@ describe('the page in use', () => {
 
     hello(FakeSource.last!, { items: [reply('r1', 2, { opening: 'Whole reply.', speak: 'Short.' }), reply('n1', 3, { opening: 'Next.' })], settings: { briefReplies: false } });
     click('.header button.view-options');
-    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message details', 'Collapse details']);
+    expect([...root.querySelectorAll('.view-options-menu .menu-row')].map((row) => row.textContent!.trim()).slice(0, 2)).toEqual(['Show message times and notes', 'Fold reply details']);
     expect(briefRow()!.getAttribute('aria-checked')).toBe('false');
     expect(shownText()).toContain('Whole reply.');
     click('[data-action="toggle-brief-replies"]');
@@ -1165,7 +1165,7 @@ describe('the page in use', () => {
     click('[data-action="more"]');
     expect(shownText()).toContain('Whole reply.');
     click('[data-action="picker"]');
-    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New conversation…']);
+    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New session in this work item…']);
     click('.conversation-menu [data-work-item="2"]');
     await flush();
     expect(posts.find((post) => post.url.endsWith('/select'))?.body['workItemId']).toBe(2);

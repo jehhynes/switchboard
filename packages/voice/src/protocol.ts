@@ -83,7 +83,7 @@ export type HubMessage =
    */
   | { type: 'speak'; gen: number; replyId: string; sessionId: string; text: string; tone: string | null; turn: string | null; voice: TtsVoice; style: SpeechStyle; personality: string | null }
   /**
-   * Stop or drop an offered reply: it was rewritten, reported `skipped`; or, with `off`, Speak replies was turned off, when the reply playing is
+   * Stop or drop an offered reply: it was rewritten, reported `skipped`; or, with `off`, Spoken replies was turned off, when the reply playing is
    * `interrupted` where it stopped, as by Stop speaking, and a waiting one `skipped`, leaving alert lines alone.
    */
   | { type: 'cancel'; replyId: string; off?: true }
@@ -146,7 +146,7 @@ export type VoiceMessage =
    * speech recognition runs, or null before the recogniser loads. `halfDuplex`, only while the open capture has no working echo cancellation,
    * says why, and listening then pauses while the voice plays. `roomHold`, only during a room hold, is when it ends (epoch milliseconds): the voice
    * check heard someone else, so dictated turns are not to be sent on their own until then. `fullDuplex`, only while the open capture has no
-   * working echo cancellation and listens anyway, says why, such as "echo check: none heard" (architecture.md § Dictation).
+   * working echo cancellation and listens anyway, says why, such as "echo check: no echo detected" (architecture.md § Dictation).
    */
   | { type: 'audio'; mic: MicState; engine: string; device: string | null; recognizer: 'gpu' | 'cpu' | null; error: string | null; halfDuplex?: string; fullDuplex?: string; roomHold?: number }
   /** The live words of an utterance, not settled yet; empty once they settled or were dropped. */

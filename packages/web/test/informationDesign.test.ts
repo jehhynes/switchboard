@@ -46,11 +46,11 @@ const showing = (shown: string | null, current: { sessionStartedAt?: number } = 
 
 describe('a session that takes no answers', () => {
   it('CardNote_EarlierSession_SaysItIsReadOnly', () => {
-    expect(cardNote({ ...showing('e1'), session: session({ state: 'ended', conversation: 'read-only' }) })).toBe('An earlier session, shown read-only.');
+    expect(cardNote({ ...showing('e1'), session: session({ state: 'ended', conversation: 'read-only' }) })).toBe('Earlier session, read-only.');
   });
 
   it('CardNote_EndedSessionThePageResumes_PointsToResume', () => {
-    expect(cardNote({ ...showing(null), session: session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Resume continues it.' }) })).toBe('Resume the session to answer.');
+    expect(cardNote({ ...showing(null), session: session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Resume it to send a message.' }) })).toBe('Resume the session to answer.');
   });
 
   it('CardNote_EndedCodexThreadThatTakesAnswers_SaysNothing', () => {

@@ -286,7 +286,7 @@ try {
       await wait(1_000);
       setMode({ down: 502 });
       await send('Page.navigate', { url: base });
-      if (!(await until('document.querySelector(".conn-screen h2")?.textContent === "Can\'t reach Switchboard"', 10_000))) found.push("no Can't reach Switchboard screen: " + (await evaluate('document.body?.innerText?.slice(0, 120)')));
+      if (!(await until('document.querySelector(".conn-screen h2")?.textContent === "Switchboard is not reachable"', 10_000))) found.push("no Switchboard is not reachable screen: " + (await evaluate('document.body?.innerText?.slice(0, 120)')));
       await shot('start-502');
       setMode({ down: null });
       return found;
@@ -305,7 +305,7 @@ try {
       const painted = Date.now() - started;
 
       if (painted > 4_500) found.push('the kept page took ' + painted + ' ms');
-      if (!(await until('document.querySelector(".conn-screen")', 12_000))) found.push("no Can't reach Switchboard screen");
+      if (!(await until('document.querySelector(".conn-screen")', 12_000))) found.push("no Switchboard is not reachable screen");
       await shot('start-hang');
       setMode({ down: null });
       return found;

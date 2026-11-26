@@ -147,7 +147,7 @@ function Entry({ entry, gap }: { entry: HistoryEntry; gap: number | null }) {
             </span>
           )}
           {entry.reconstructed ? (
-            <span class="hist-mark" title="Rebuilt from a stored time; the log had not begun">
+            <span class="hist-mark" title="Time estimated: History began after this happened">
               ≈ reconstructed
             </span>
           ) : null}
@@ -335,7 +335,7 @@ export function renderHistory(open: HistoryOpen | null, state: StateView | null,
           {view.reconstructed && view.recordedSince !== null ? (
             <p class="hist-banner">
               <span class="codicon codicon-info" aria-hidden="true"></span>
-              {`Switchboard began logging on ${stamp(view.recordedSince).slice(0, 16)}. Entries marked ≈ reconstructed were rebuilt from the times stored before then; anything else that happened earlier was not recorded.`}
+              {`Switchboard began logging on ${stamp(view.recordedSince).slice(0, 16)}. Entries marked ≈ are estimated from times stored before then; anything else that happened earlier was not recorded.`}
             </p>
           ) : null}
           {view.sections.map((section, index) => (

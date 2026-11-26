@@ -446,7 +446,7 @@ describe('createHubApp', () => {
 
     const page = app.page!.opened(false);
 
-    expect(await app.post['/v1/conversation/page-poll']!({ window: page })).toEqual({ status: 409, body: { error: 'No source is polled. Turn one on in the header.' } });
+    expect(await app.post['/v1/conversation/page-poll']!({ window: page })).toEqual({ status: 409, body: { error: 'No source is on. Turn one on in the list header.' } });
     expect(await toggleSource(app, { name: 'github', enabled: true })).toEqual({ status: 200, body: { done: true } });
     // A refresh while a read is in flight does not read again, so the first read finishes first.
     await new Promise((done) => setImmediate(done));

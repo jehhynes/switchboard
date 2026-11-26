@@ -54,3 +54,35 @@ export function appShortcut(origin: string, query: URLSearchParams): Buffer {
   properties.writeUInt32LE(8 + storage.length + entry.length + text.length + 8); properties.writeUInt32LE(0xa0000009, 4);
   return Buffer.concat([header, string('Switchboard'), string(args), ...(icon === '' ? [] : [string(icon)]), environment, properties, storage, entry, text, Buffer.alloc(12)]);
 }
+
+/**
+ * A portable GNOME launcher (freedesktop Desktop Entry) for Chrome on Linux. It names `google-chrome` on the receiving computer's PATH and the
+ * icon the extension saved there, never a path on the hub. Its StartupWMClass is the Wayland app ID Chrome gives the extension's app window,
+ * so the window groups under the launcher's icon (mechanics M160).
+ */
+export function linuxAppShortcut(origin: string, query: URLSearchParams): string {
+  const page = new URL(origin);
+  if (page.origin !== origin || page.username !== '' || page.password !== '' ||
+      !(page.protocol === 'https:' || (page.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(page.hostname)))) throw new Error('Invalid hub origin.');
+  for (const key of query.keys()) {
+    if (!['system', 'browser', 'profile', 'icon'].includes(key) || query.getAll(key).length !== 1) throw new Error('Invalid shortcut option.');
+  }
+  const profile = query.get('profile') || 'Default';
+  const icon = query.get('icon') ?? '';
+  if (query.get('system') !== 'linux' || (query.get('browser') ?? 'chrome') !== 'chrome' || !/^(?!\.\.?$)[A-Za-z0-9_ .-]{1,80}$/.test(profile) ||
+      !/^\/[^\x00-\x1f\x7f"$`\\%]+\.png$/.test(icon) || icon.length > 240 || icon.split('/').includes('..')) throw new Error('Invalid shortcut option.');
+  // The Exec value's percent signs are field codes unless doubled; its arguments are quoted, and their characters need no further escape.
+  const url = `chrome-extension://${BROWSER_EXTENSION_ID}/iframeHost.html?origin=${encodeURIComponent(origin)}`.replaceAll('%', '%%');
+  return [
+    '[Desktop Entry]',
+    'Type=Application',
+    'Name=Switchboard',
+    'Comment=Your Switchboard work items',
+    `Exec=google-chrome "--profile-directory=${profile}" "--app=${url}"`,
+    `Icon=${icon}`,
+    'Terminal=false',
+    'Categories=Development;',
+    `StartupWMClass=chrome-${BROWSER_EXTENSION_ID}__iframeHost.html-${profile.replaceAll(' ', '_')}`,
+    '',
+  ].join('\n');
+}

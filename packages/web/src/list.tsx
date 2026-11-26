@@ -72,7 +72,7 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
   // A link's name before its badge and a space, such as `gh ` of `gh 18941`, is read with it but hidden from view, as the link's icon stands for it.
   const pills: { classes: string; glyph: string; label?: string; text: string; title: string; opens?: Record<string, string> }[] = [
     ...row.links.map((link, index) => ({ classes: `link ${link.kind}${link.mentioned ? ' mentioned' : ''}`, glyph: link.glyph ?? LINK_GLYPHS[link.kind], ...(link.label.endsWith(` ${link.badge}`) ? { label: link.label.slice(0, -link.badge.length) } : {}), text: link.badge, title: `${link.label}${link.mentioned ? ', named in the ticket' : ''}\n${link.url}`, opens: opens(String(index)) })),
-    ...(row.returned > 0 ? [{ classes: 'returned', glyph: RETURNED_GLYPH, text: String(row.returned), title: `Returned ${row.returned}: earlier work items with this playbook, or one it is a return of, were done for this ticket` }] : []),
+    ...(row.returned > 0 ? [{ classes: 'returned', glyph: RETURNED_GLYPH, text: String(row.returned), title: `Returned ${row.returned} ${row.returned === 1 ? 'time' : 'times'}: this ticket's work with this playbook was done before` }] : []),
   ];
   const details = row.details.map((detail, index) => [
     index > 0 ? <span class="row-detail-separator" aria-hidden="true">·</span> : null,
@@ -91,7 +91,7 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, positio
           {row.priority === null ? null : <span class="priority" role="img" title={row.priority} aria-label={row.priority}></span>}
           <span class="row-title">{row.title}</span>
           {waiting === 0 ? null : (
-            <span class="questions" role="button" tabIndex={-1} aria-label={waitingText} aria-description="Opens the work item at its card" title={`${waitingText}\nOpens the work item at its card`} data-action="goto-questions" data-work-item={String(row.workItemId)}>
+            <span class="questions" role="button" tabIndex={-1} aria-label={waitingText} aria-description="Opens the work item at its questions" title={`${waitingText}\nOpens the work item at its questions`} data-action="goto-questions" data-work-item={String(row.workItemId)}>
               <span class="codicon codicon-question" aria-hidden="true"></span>
             </span>
           )}

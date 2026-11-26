@@ -326,13 +326,13 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
       rememberFolder: (folder) => remembered.push(folder),
       rowAction: (workItemId, label, snooze) => {
         actions.push([workItemId, label, snooze]);
-        return label === 'Approve' ? 'The work item no longer offers this.' : null;
+        return label === 'Approve' ? 'This work item can no longer do that.' : null;
       },
       rowPaste: async (_workItemId, label) => (label === 'Reply' ? 'Dear Ana' : null),
       uploads: join(dir, 'uploads'),
       rowCommand: async (workItemId, label) => {
         commands.push([workItemId, label]);
-        return label === 'Open report' ? null : 'The work item no longer offers this.';
+        return label === 'Open report' ? null : 'This work item can no longer do that.';
       },
       rowMove: (workItemId, after) => {
         moves.push([workItemId, after]);
@@ -361,7 +361,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     let pollRefusal: string | null = null;
     const refusePoll = (why: string | null) => void (pollRefusal = why);
     const restarts: Array<string | undefined> = [];
-    let header: PageHeader = { notes: [], sources: [{ kind: 'github', label: 'GitHub', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
+    let header: PageHeader = { notes: [], sources: [{ kind: 'github', label: 'GitHub', enabled: true, title: 'gh: on\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
     const opens: Array<[string, string]> = [];
     const pools: Array<[number, string, unknown]> = [];
@@ -510,9 +510,9 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(page.frames.at(-1)!['groups']).toBeInstanceOf(Array);
 
     // A voice problem changes the list's notes outside a build; `pageListChanged` sends it, and nothing when nothing changed.
-    setHeader({ notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item', sources: [], repoRoots: [], schedules: [] });
+    setHeader({ notes: ['Voice: the voice process stopped.'], heldNote: '1 background session without a work item', sources: [], repoRoots: [], schedules: [] });
     service.pageListChanged();
-    expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { notes: ['Voice: the voice process stopped.'], heldNote: '1 held session without a work item' } });
+    expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { notes: ['Voice: the voice process stopped.'], heldNote: '1 background session without a work item' } });
     const sent = page.frames.length;
 
     service.pageListChanged();
@@ -698,7 +698,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
 
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Snooze…', until: 5, comment: '  later ' })).toEqual({ status: 200, body: { done: true } });
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Snooze…', until: 5 })).toEqual({ status: 200, body: { done: true } });
-    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'Approve' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'Approve' })).toEqual({ status: 409, body: { error: 'This work item can no longer do that.' } });
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'c', workItemId: 3, label: 'Add comment…', text: 'Asked Ana', choice: null }).status).toBe(200);
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'd', workItemId: 3, label: 'Add comment…', text: 5 }).status).toBe(400);
     expect(service.rowAction({ window: page.key, scopeGen: 1, opId: 'd', workItemId: 3, label: 'Add comment…', text: 'x'.repeat(100_001) }).status).toBe(400);
@@ -750,7 +750,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(commands).toEqual([]);
     expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
     expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'a', workItemId: 3, label: 'Open report' })).toEqual({ status: 200, body: { done: true } });
-    expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'History' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(await service.rowCommand({ window: page.key, scopeGen: 1, opId: 'b', workItemId: 3, label: 'History' })).toEqual({ status: 409, body: { error: 'This work item can no longer do that.' } });
     expect(commands).toEqual([[3, 'Open report'], [3, 'History']]);
   });
 

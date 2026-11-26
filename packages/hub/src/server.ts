@@ -18,7 +18,7 @@ import { isWebSocketUpgrade } from './webSocket.js';
 import { VOICE_SOCKET_PATH } from './voiceSocket.js';
 import { OTHER_SIGN_IN, PAGE_GONE } from './windows.js';
 import { HUB_LOG_LINES, HUB_LOG_MAX_LINES } from './hubLog.js';
-import { appShortcut } from './appShortcut.js';
+import { appShortcut, linuxAppShortcut } from './appShortcut.js';
 import { zip } from './browserExtension.js';
 import type { VoiceDevice } from './voiceSocket.js';
 
@@ -82,6 +82,8 @@ export interface PageRoutes {
    * `ETag` when it has one; without it the hub serves none.
    */
   changes?(route: string, key: string, query: URLSearchParams, ifNoneMatch: string | undefined): Promise<Reply & { etag?: string }>;
+  /** `file-raw`'s answer: a picture's or a PDF's bytes of the selected conversation's worktree under the Changes routes' checks, or a refusal. */
+  changesRaw?(key: string, query: URLSearchParams): Promise<Reply | { status: 200; raw: { mime: string; bytes: Buffer } }>;
   /** Voice on a paired device (architecture.md § Remote access); without it the hub refuses every voice socket. */
   voice?: PageVoice;
   /**
@@ -121,7 +123,7 @@ export interface PageVoice {
 }
 
 /** The page's read-only change routes, under `/v1/conversation/` (architecture.md § Web page). */
-export const CHANGE_ROUTES = new Set(['changes', 'diff', 'file']);
+export const CHANGE_ROUTES = new Set(['changes', 'diff', 'file', 'stack', 'tree', 'search', 'file-raw']);
 
 /** The page's local file routes, under `/v1/conversation/`: a file's view and a picture's or PDF's bytes (architecture.md § Web page). */
 export const LOCAL_FILE_ROUTES = new Set(['local-file', 'local-file-raw']);
@@ -166,7 +168,7 @@ export const VOICE_OFF = 'Voice is off. Turn it on in Settings on the computer t
 export const VOICE_NOT_ALLOWED = 'Voice is not allowed on this device. Allow it in Pair a device on the computer that runs Switchboard.';
 
 /** Why a pairing link cannot be made with no remote host and login. */
-export const REMOTE_OFF = 'Pairing a device needs remote access: turn on Tailscale, or set the allowed hosts and logins, under Remote access on the General page of Settings, and run tailscale serve.';
+export const REMOTE_OFF = 'Pairing a device needs remote access: turn on Tailscale, or set the allowed hosts and logins, on the Devices page of Settings, and run tailscale serve.';
 
 export interface HubServer {
   pageUrl(): Promise<string>;
@@ -630,7 +632,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
-    if (!page.access.allows(request.headers.cookie, origin)) {
+    if (!page.access.allows(request.headers.cookie, origin, deviceLabel(request.headers['user-agent']))) {
       if (isUpload) logUpload('401', remote ? 'remote' : 'local', 0);
 
       if (request.method === 'GET' && path === '/page/') {
@@ -666,20 +668,22 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
             } else {
               json(response, 200, tail);
             }
-          }).catch(() => json(response, 500, { error: 'The hub log could not be read.' }));
+          }).catch(() => json(response, 500, { error: 'The Switchboard log could not be read.' }));
         }
       }
       return true;
     }
 
-    // A portable Windows shortcut for this signed-in page's origin.
+    // A portable Windows shortcut or Linux launcher for this signed-in page's origin.
     if (request.method === 'GET' && path === '/page/switchboard-shortcut.zip') {
       try {
-        const shortcut = zip([{ name: 'Switchboard.lnk', body: appShortcut(origin.origin, url.searchParams) }]);
+        const shortcut = zip([url.searchParams.has('system')
+          ? { name: 'switchboard.desktop', body: Buffer.from(linuxAppShortcut(origin.origin, url.searchParams)) }
+          : { name: 'Switchboard.lnk', body: appShortcut(origin.origin, url.searchParams) }]);
         response.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="switchboard-shortcut.zip"', 'Content-Length': shortcut.length, 'Cache-Control': 'no-store' });
         response.end(shortcut);
       } catch {
-        json(response, 400, { error: 'Invalid shortcut options. Choose Chrome or Edge, a profile directory and a supported installation location.' });
+        json(response, 400, { error: 'Invalid shortcut options. Choose a supported browser, a profile directory and a supported installation location.' });
       }
       return true;
     }
@@ -826,6 +830,33 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       return true;
     }
 
+    // A picture or PDF of the selected conversation's worktree, under the Changes routes' checks, never the local file routes' (architecture.md § Web page).
+    // A change route's key must be held by an open page stream of the same sign-in and from the same place, as a local file route's must, so
+    // one device never reads the worktree another device's page has open.
+    const ownKey = (): boolean => pageKeyOrigins.get(window) === originOf(origin) && pageKeySessions.get(window) === page.access.sessionOf(request.headers.cookie);
+
+    if (request.method === 'GET' && path === '/v1/conversation/file-raw') {
+      if (page.changesRaw === undefined || !page.isPage(window) || !ownKey()) {
+        json(response, page.changesRaw === undefined ? 404 : 403, { error: page.changesRaw === undefined ? 'not found' : page.isPage(window) ? OTHER_SIGN_IN : PAGE_GONE });
+        return true;
+      }
+
+      void page.changesRaw(window, url.searchParams).then(
+        (reply) => {
+          if (!('raw' in reply)) {
+            json(response, reply.status, reply.body);
+            return;
+          }
+
+          // Every picture and PDF gets the artifacts' sandbox, so an SVG's scripts run with an opaque origin.
+          response.writeHead(200, { 'Content-Type': reply.raw.mime, 'Content-Length': reply.raw.bytes.length, 'Cache-Control': 'no-store', 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': ARTIFACT_CSP });
+          response.end(reply.raw.bytes);
+        },
+        (error: unknown) => json(response, 500, { error: String(error) }),
+      );
+      return true;
+    }
+
     // The selected conversation's worktree changes (architecture.md § Web page), read for a page key.
     if (request.method === 'GET' && CHANGE_ROUTES.has(path.slice('/v1/conversation/'.length))) {
       if (page.changes === undefined) {
@@ -833,8 +864,8 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
         return true;
       }
 
-      if (!page.isPage(window)) {
-        json(response, 403, { error: PAGE_GONE });
+      if (!page.isPage(window) || !ownKey()) {
+        json(response, 403, { error: page.isPage(window) ? OTHER_SIGN_IN : PAGE_GONE });
         return true;
       }
 

@@ -531,12 +531,12 @@ describe('sessionView', () => {
   });
 
   it('names what the view can do with each kind of session', () => {
-    expect(sessionView(session({ codeMode: true, state: 'ended' }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Resume continues it.' });
+    expect(sessionView(session({ codeMode: true, state: 'ended' }), true, true)).toMatchObject({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Resume it to send a message.' });
     expect(sessionView(session({ codeMode: true, state: 'idle' }), true, false)).toMatchObject({ conversation: 'read-only', reason: 'Switchboard cannot track this session while Install hooks is off.' });
     expect(sessionView(session({ state: 'waiting', stateDetail: null }), false, true)).toMatchObject({ waitingFor: 'question', conversation: 'none', current: false });
     expect(sessionView(session({ codeMode: true, state: 'failed' }), true, true)).toMatchObject({ state: 'idle', conversation: 'full' });
     // An ended registered session resumes in the holder, so the page offers Resume; while it runs in the operator's window it has no conversation (PRD R81).
-    expect(sessionView(session({ registered: true, state: 'ended' }), true, true)).toMatchObject({ conversation: 'read-only', reason: 'The session has ended. Resume continues it.' });
+    expect(sessionView(session({ registered: true, state: 'ended' }), true, true)).toMatchObject({ conversation: 'read-only', reason: 'The session has ended. Resume it to send a message.' });
     expect(sessionView(session({ registered: true, state: 'idle' }), true, true)).toMatchObject({ conversation: 'none' });
   });
 
@@ -553,6 +553,8 @@ describe('sessionView', () => {
     expect(sessionView(session({ codeMode: true, state: 'failed', rateLimit: { ...limit, attempts: 1 } }), true, true).limit).toEqual({ until: NOW + 3_780_000, retry: true });
     expect(sessionView(session({ codeMode: true, state: 'running', rateLimit: limit }), true, true).limit).toBeNull();
     expect(sessionView(session({ state: 'failed', rateLimit: limit }), true, true).limit).toBeNull();
+    // A provider's throttle is told apart from a usage limit, so the page names it Rate limited.
+    expect(sessionView(session({ codeMode: true, state: 'failed', rateLimit: { ...limit, kind: 'throttle' } }), true, true).limit).toEqual({ until: NOW + 3_600_000, retry: false, throttle: true });
   });
 
   it("shows the session's persona while voice is on, and its tone section pending until the prompt has the current one (architecture.md § Personas)", () => {

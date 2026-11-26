@@ -56,7 +56,7 @@ export const INPUT_SETTLE_MS = 60_000;
 export const LIMIT_READ_MS = 120_000;
 /** Why a message cannot be typed into a session (architecture.md § Typing a message). */
 export const SESSION_ENDED = 'The session has ended.';
-export const SESSION_RELAUNCHED = 'The session was resumed since the view showed it; send the message again.';
+export const SESSION_RELAUNCHED = 'The session restarted while you typed. Send the message again.';
 /** Why a held session cannot be typed into: its holder is from an older build; `stopAll` is the command that replaces it (`hub.js holder stop --all`). */
 export function holderCannotType(stopAll: string): string {
   return `The terminal holder is from an older build and cannot accept messages from Switchboard. Open the session in a terminal to type there. To update it, run ${stopAll}, review the sessions listed, then run it again with --yes; those sessions will stop.`;
@@ -209,6 +209,8 @@ export class Runtime {
   private readonly deferred = new Set<string>();
   /** The holder's last list (PRD R94); a failed read keeps it. */
   private heldEntries: SessionEntry[] = [];
+  /** When each known held session's idle time started, from the last roster read; the holder's own activity for the rest. */
+  private heldIdleSince = new Map<string, number>();
   private heldError: string | null = null;
   /** Orphans logged, so each is logged once. */
   private readonly orphansLogged = new Set<string>();
@@ -638,7 +640,7 @@ export class Runtime {
     if (this.sources.size === 0) {
       const errors = Object.entries(this.sourceErrors).map(([name, error]) => `${name}: ${error}`);
 
-      return errors.length > 0 ? errors.join(' ') : 'No source is polled. Turn one on in the header.';
+      return errors.length > 0 ? errors.join(' ') : 'No source is on. Turn one on in the list header.';
     }
 
     this.restartPolls();
@@ -1123,6 +1125,7 @@ export class Runtime {
     // Sessions of a terminal holder that is gone, and held sessions past the idle limit (PRD R94, R95).
     const lost: string[] = [];
     const idle: string[] = [];
+    const idleSince: Record<string, number> = {};
     // A question reported while the reads ran makes their result stale for that session, which the next read decides (PRD R70). A held session
     // resumed, or being resumed, meanwhile is left to the next timed read and its markers (PRD R95). Checked once all providers' reads are done,
     // since the event applies them together.
@@ -1154,6 +1157,7 @@ export class Runtime {
       }
 
       idle.push(...(roster.idle ?? []));
+      Object.assign(idleSince, roster.idleSince ?? {});
       observed.push(...roster.sessions);
       forks.push(...(roster.forks ?? []));
       checked.push(...own.map((session) => session.id));
@@ -1191,6 +1195,9 @@ export class Runtime {
       this.deps.log(`session ${sessionId} ended: the terminal holder stopped`);
       this.send({ type: 'holder-lost', sessionId });
     }
+
+    // The held sessions' list shows the idle time the limit measures (PRD R95); a stale read keeps the time read before.
+    this.heldIdleSince = new Map([...[...this.heldIdleSince].filter(([id]) => stale.has(id)), ...Object.entries(idleSince).filter(([id]) => !stale.has(id))]);
 
     for (const sessionId of idle.filter((id) => !stale.has(id))) {
       this.send({ type: 'held-idle', sessionId });
@@ -1815,7 +1822,7 @@ export class Runtime {
     const record = this.holder.record();
 
     if (!('holder' in found) || record === null) {
-      throw new Error('The terminal holder is not running, so the session has no console. Resume continues it.');
+      throw new Error('The terminal holder is not running, so the session has no console. Resume the session to see it.');
     }
 
     if (!found.holder.compatible || !(found.holder.welcome.features ?? []).includes('view')) {
@@ -1829,7 +1836,7 @@ export class Runtime {
       onData: (data) => handlers.onData(data),
       onReplayed: () => handlers.onReplayed(),
       onExit: (exitCode) => handlers.onExit(exitCode),
-      onClose: (error) => handlers.onClose(error === null ? null : /^No session .* is held\.$/.test(error.message) ? 'The terminal holder no longer holds this session. Resume continues it.' : error.message),
+      onClose: (error) => handlers.onClose(error === null ? null : /^No session .* is held\.$/.test(error.message) ? 'The terminal holder no longer holds this session. Resume the session to see it.' : error.message),
     });
   }
 
@@ -2173,6 +2180,7 @@ export class Runtime {
         key: ticket === null ? own.key : `${ticket.source} ${ticket.sourceKey}`,
         nativeSessionId: session.nativeSessionId ?? own.nativeSessionId,
         state: active ? session.state : own.state,
+        idleSince: (active ? this.heldIdleSince.get(entry.session) : undefined) ?? own.idleSince,
         orphan,
       };
     });
@@ -2696,15 +2704,21 @@ export class Runtime {
     // An attach reservation counts as a terminal until its client connects (PRD R95), and an input reservation while a message is typed.
     const reserved = (this.reservations.get(action.sessionId) ?? -Infinity) > this.deps.now();
     const typing = this.inputs.has(action.sessionId);
+    // The idle limit is measured again from what was read now, since a turn can begin and end, or the operator type in a terminal attached
+    // meanwhile, after the read that found the session idle; until it passes again the end waits, as when deferred (PRD R95).
+    const idleSince = 'error' in activity ? null : Math.max(activity.lastInputAt ?? 0, reading !== undefined && !compacted ? reading.at : (activity.lastOutputAt ?? 0));
+    const early = idleSince !== null && this.deps.now() - idleSince < (this.deps.codeModeIdleMs ?? CODE_MODE_IDLE_MS);
+    // A usage limit read after the end was deferred keeps the session, which may be waiting for the reset itself (PRD R111).
+    const limited = waitsOnLimit(session);
 
-    if (!('error' in activity) && activity.clients === 0 && !typed && !reserved && !typing) {
+    if (!('error' in activity) && activity.clients === 0 && !typed && !reserved && !typing && !early && !limited) {
       this.deferred.delete(action.sessionId);
       return true;
     }
 
     if (!this.deferred.has(action.sessionId)) {
       this.deferred.add(action.sessionId);
-      const why = 'error' in activity ? activity.error : activity.clients > 0 ? `${activity.clients} terminal${activity.clients === 1 ? ' is' : 's are'} attached` : reserved ? 'a terminal is attaching' : typing ? 'a message is being typed' : 'input arrived after its turn';
+      const why = 'error' in activity ? activity.error : activity.clients > 0 ? `${activity.clients} terminal${activity.clients === 1 ? ' is' : 's are'} attached` : reserved ? 'a terminal is attaching' : typing ? 'a message is being typed' : limited ? 'it waits on its usage limit' : typed ? 'input arrived after its turn' : 'it was active within the idle limit';
 
       this.deps.log(`end of held session ${action.sessionId} deferred: ${why}`);
     }

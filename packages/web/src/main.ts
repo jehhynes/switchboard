@@ -611,6 +611,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     command: (name, body) => command(name, body),
     workItemId: () => state.scope?.workItemId ?? null,
     diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
+    inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (mainTab() === 'diff' || (wide() && sideTab() === 'diff')),
+    drawDiagrams: (element) => drawDiagrams(element),
+    // A quote of lines joins the end of the message being written, after a blank line, and the box takes the focus.
+    quote: (text) => {
+      input.value = input.value.trim() === '' ? text : `${input.value.replace(/\s+$/, '')}\n\n${text}`;
+      input.setSelectionRange(input.value.length, input.value.length);
+      box.changed(input.value);
+      grow();
+      refresh();
+      keepDraft();
+      input.focus();
+    },
   });
   let changesSession: string | null = null;
   /** The session the Changes tab last followed, so a new session of the work item reads an open tab's list again. */
@@ -642,9 +654,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     drawDiagrams: (pane) => drawDiagrams(pane),
     inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (mainTab() === 'file' || (wide() && sideTab() === 'file')),
     shown: () => `${state.key ?? ''} ${state.scope?.scopeGen ?? ''}`,
+    diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
   });
-  // An open file tab is read again while in view, so a file the session changes shows its new version.
-  const filePoll = setInterval(() => localFiles.refresh(true), deps.filePollMs ?? FILE_POLL_MS);
+  // An open file tab, and the Changes tab's file view of a file on disk, are read again while in view, so a file the session changes shows its new version.
+  const filePoll = setInterval(() => (localFiles.refresh(true), changes.refreshFile(true)), deps.filePollMs ?? FILE_POLL_MS);
   // File type icons, whose mapping loads the first time a list draws one (architecture.md § Web page).
   const dropFileIcons = useFileIcons({ fetch: (...args) => readFetch(...args), loaded: () => draw() });
 
@@ -794,7 +807,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
       if (answer.status !== 200) {
         briefAsked = briefAsked === on ? null : briefAsked;
-        showError(String(answer.body['error'] ?? `Collapse details did not change (status ${answer.status}).`));
+        showError(String(answer.body['error'] ?? `Fold reply details did not change (status ${answer.status}).`));
       }
 
       if (briefAsked === null || briefAsked === on) {
@@ -1005,7 +1018,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
   };
   /** Why a message was not sent: the hub's reason, or the plain words for no answer. */
-  const notSent = (answer: Answer): string => (transient(answer.failure) ? `Not sent. ${String(answer.body['error'])}` : String(answer.body['error'] ?? 'Not sent. Try again.'));
+  const notSent = (answer: Answer): string => (transient(answer.failure) ? `Your message was not sent. ${String(answer.body['error'])}` : String(answer.body['error'] ?? 'Your message was not sent. Try again.'));
   let draftOf: number | null = null;
   const box = composerInput();
   // Why a message of another work item was not sent, shown when the composer shows that work item again.
@@ -1781,7 +1794,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const from = draftOf;
     const answer = await command('send', { sessionId: session.id, launch: session.launch, text: '/compact', command: true });
-    const why = String(answer.body['error'] ?? 'The session did not take /compact.');
+    const why = String(answer.body['error'] ?? 'The session did not run /compact.');
 
     // A refusal shows above the box of the conversation it was sent from, now or when it is selected again.
     if (answer.status !== 200 && from === draftOf) {
@@ -1904,14 +1917,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     input.disabled = !full;
     attachButton.disabled = !live;
     input.placeholder = drafting
-      ? 'First message of the new conversation…'
+      ? 'First message of the new session…'
       : full
       ? 'Message…'
       : state.scope?.earlier === true
-        ? 'Show the current session to send a message.'
+        ? 'Switch to the current session to send a message.'
         : state.session?.state === 'ended' && state.session.conversation !== 'none'
           ? 'Resume the session to send a message.'
-        : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : connection.state === 'offline' ? "Can't send while offline." : connection.state === 'signedOut' ? 'Signed out.' : 'Connecting to Switchboard…'));
+        : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : connection.state === 'offline' ? 'Messages cannot be sent while offline.' : connection.state === 'signedOut' ? 'Signed out.' : 'Connecting to Switchboard…'));
     // The voice controls from packages/conversation, acting on this computer's voice process (architecture.md § Web page).
     mount(voiceControls, renderShared(renderVoice(state.voice, live)));
     syncHint();
@@ -2267,7 +2280,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         if (!read) {
           cardWanted = null;
-          showError('Switchboard could not read the conversation back to its question card.');
+          showError('Switchboard could not find the reply that asked these questions.');
           return;
         }
 
@@ -2685,6 +2698,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // The session may have changed the file shown.
     if (turnEnded) {
       localFiles.refresh();
+      changes.refreshFile();
     }
 
     if (state.scope === null || pending !== null) {
@@ -2950,7 +2964,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     for (const tab of strip.querySelectorAll<HTMLElement>(':scope > [data-id]')) {
       const cut = tab.querySelector('.tab-label');
 
-      measured[tab.dataset['id']!] = Math.ceil(width(tab) - width(cut) + (cut === null ? 0 : label));
+      // A tab cut to its least label is never narrower than its own min-width, as the Changes tab's, whose count may not show yet.
+      measured[tab.dataset['id']!] = Math.ceil(Math.max(width(tab) - width(cut) + (cut === null ? 0 : label), read(tab, 'min-width', 0)));
     }
 
     // The icon, its gap and the border with the label; More's icon, gap and count before it is drawn.
@@ -3340,7 +3355,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   window.addEventListener('pagehide', () => (keepScroll(), rememberTabs()), { signal: listening.signal });
   document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && keepScroll(), { signal: listening.signal });
-  document.addEventListener('visibilitychange', () => localFiles.refresh(), { signal: listening.signal });
+  document.addEventListener('visibilitychange', () => (localFiles.refresh(), changes.refreshFile()), { signal: listening.signal });
 
 
   /** Draws before the next repaint, once however many events ask for it before then. */
@@ -3432,7 +3447,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           type: async (data, size) => {
             const answer = await command('console-input', { sessionId, launch, data, ...size });
 
-            return answer.status === 200 ? null : String(answer.body['error'] ?? `Switchboard answered ${answer.status}.`);
+            return answer.status === 200 ? null : String(answer.body['error'] ?? `The keys were not sent to the session (status ${answer.status}).`);
           },
           copy: (text) => void navigator.clipboard?.writeText(text).catch(() => undefined),
           readOnly: state.scope?.earlier === true,
@@ -4158,7 +4173,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     ui.sending = false;
 
     if (answer.status !== 200 || late !== undefined) {
-      ui.error = late?.error ?? String(answer.body['error'] ?? 'Not sent.');
+      ui.error = late?.error ?? String(answer.body['error'] ?? 'Your message was not sent. Try again.');
       unsent.delete(id ?? '');
     } else {
       ui.sentId = id;
@@ -4777,6 +4792,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         draw();
         break;
+      case 'toggle-spoken-replies':
+        // Spoken replies, experimental and off until turned on here (PRD R105); the voice event redraws the menu's check.
+        void command('speak-replies', { on: state.voice?.speakReplies !== true });
+        break;
       case 'toggle-brief-replies':
         if (!local) {
           view.briefReplies = !(view.briefReplies ?? state.briefReplies);
@@ -4832,7 +4851,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         if (state.session !== null) {
           void command('card-dismiss', { sessionId: state.session.id, card: key, slug: button!.dataset['slug']! }).then((answer) => {
             if (answer.status !== 200) {
-              ui.error = String(answer.body['error'] ?? 'Not dismissed.');
+              ui.error = String(answer.body['error'] ?? 'The question was not skipped.');
               draw();
             }
           });
@@ -4892,7 +4911,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         const message = state.items.find((item) => item.id === id && item.type === 'message');
 
         if (message?.type === 'message') {
-          giveBack(message.workItemId, message.text, 'Check the terminal first: Claude may have this message already.');
+          giveBack(message.workItemId, message.text, 'Check the terminal first: the session may already have this message.');
         }
 
         break;
@@ -5140,7 +5159,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    let changesClosed: 'files' | 'scope' | null = null;
+    let changesClosed: 'files' | 'more' | null = null;
     let cardMenu: HTMLElement | null = null;
     // A question card's open menu that holds the focus, or whose button does, for Up and Down.
     const cardAnchor = document.activeElement instanceof HTMLElement && document.activeElement.closest('.qc-menu-anchor')?.querySelector('.qc-menu') != null ? document.activeElement.closest<HTMLElement>('.qc-menu-anchor') : null;
@@ -5184,7 +5203,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && (changesClosed = changes.escape()) !== null) {
       draw();
-      root.querySelector<HTMLElement>(changesClosed === 'scope' ? '.changes-scope' : '.changes-files')?.focus();
+      root.querySelector<HTMLElement>(changesClosed === 'more' ? '.changes-more' : '.changes-files')?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.drawer !== null) {
       closeDrawer();
@@ -5359,7 +5378,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         ackedSession = null;
       }
     } else if (view.newDraft === draft) {
-      showError(String(answer.body['error'] ?? 'The conversation was not started.'));
+      showError(String(answer.body['error'] ?? 'The session was not started.'));
     }
 
     grow();
@@ -5415,7 +5434,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const answer = await command('prompt-key', { sessionId: state.session.id, launch: state.session.launch, prompt: shown.prompt.id, key });
 
     shown.sending = false;
-    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `The key was not sent (status ${answer.status}).`));
+    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `The key was not sent to the session (status ${answer.status}).`));
     draw();
     void readPrompt();
   };
@@ -5447,7 +5466,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const answer = await post('row-move', { workItemId, after });
 
     if (answer.status !== 200) {
-      showError(String(answer.body['error'] ?? `Not moved (status ${answer.status}).`));
+      showError(String(answer.body['error'] ?? `The work item was not moved (status ${answer.status}).`));
     }
   };
   // Alt+Up and Alt+Down move the selected Ready for review row (PRD R73), with its Move up and Move down; not while typing.
@@ -5580,7 +5599,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const answer = await command('row-command', { workItemId: row.workItemId, label });
 
     view.acting = false;
-    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `Not done (status ${answer.status}).`));
+    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `${label.replace(/…$/, '')} did not work (status ${answer.status}).`));
     draw();
   };
   /**
@@ -5593,11 +5612,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     view.acting = true;
     draw();
 
-    const answer = row === null ? { status: 409, body: { error: 'The row is gone.' } } : row.workItemId !== null ? await command('row-action', { workItemId: row.workItemId, label, ...extra }) : await post('pool-action', { ticketId: row.ticketId, label, ...extra });
+    const answer = row === null ? { status: 409, body: { error: 'This work item is no longer in the list.' } } : row.workItemId !== null ? await command('row-action', { workItemId: row.workItemId, label, ...extra }) : await post('pool-action', { ticketId: row.ticketId, label, ...extra });
 
     view.acting = false;
     view.sheet = null;
-    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `Not done (status ${answer.status}).`));
+    showError(answer.status === 200 ? null : String(answer.body['error'] ?? `${label.replace(/…$/, '')} did not work (status ${answer.status}).`));
     draw();
   };
   const sheetGo = async (): Promise<void> => {
@@ -6032,8 +6051,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           void changes.refresh();
         }
 
-        // So does the file tab shown, which tries again after a failed read.
+        // So does the file tab shown, which tries again after a failed read, and the Changes tab's file view on disk.
         localFiles.refresh();
+        changes.refreshFile();
       }
 
       // The work item being opened has come: its conversation replaces the placeholder.
@@ -6129,7 +6149,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       // A message this page sent that was not sent: a card's answer goes back to its card, any other text to its own work item's draft.
       if (type === 'message' && (data['message'] as { delivery?: string }).delivery === 'not-sent') {
         const message = data['message'] as Extract<ItemView, { type: 'message' }>;
-        const error = message.error ?? 'Not sent.';
+        const error = message.error ?? 'Your message was not sent. Try again.';
         const card = [...view.cards.values()].find((one) => one.sentId === message.id);
 
         if (card !== undefined) {

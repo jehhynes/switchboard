@@ -268,7 +268,7 @@ export interface ParsedReply {
   opening: string;
   state: ReplyState | null;
   /**
-   * The primary response (`splitPrimary`), shown first and read aloud up to its first Markdown structure (`speechPart`) while Speak replies is
+   * The primary response (`splitPrimary`), shown first and read aloud up to its first Markdown structure (`speechPart`) while Spoken replies is
    * on, which `opening` holds too, without the `[details]` line; an older reply's `[speak]` passage, whose markers `opening` leaves out. Null
    * for an aside or a reply with none.
    */

@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { Store } from '@switchboard/core';
 import { PAGE_CSP } from '../src/page.js';
-import { artifactFile, cookieValue, deviceLabel, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pageReportOf, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
+import { artifactFile, cookieValue, deviceLabel, knownDevice, pairHtml, SIGNED_OUT_HTML, PAIR_CODE_TRIES, PAIR_MS, PAIR_SCRIPT, pageOrigin, dockRowOf, findFiles, pageHeader, loopbackHost, PageAccess, pageCookie, PUBLIC_PAGE_FILES, PAGE_LINK_MS, PAGE_SESSION_MS, PAGE_SESSIONS_KEPT, pageActionEvent, pageActions, pageCommandOf, pageGroups, pageList, pageOpens, pageReportOf, pasteText, poolRowOf, rowOpenUrl, tabUrl } from '../src/page.js';
 import { dockView } from '../src/dock.js';
 import type { DockView } from '../src/dock.js';
 import { PAGE_ASSETS } from '@switchboard/web';
@@ -183,6 +183,48 @@ describe('PageAccess', () => {
     expect(pageCookie('ab')).toBe(`sb_page=ab; HttpOnly; SameSite=Strict; Path=/; Max-Age=${PAGE_SESSION_MS / 1000}`);
   });
 
+  it('Allows_SignInWithoutFullName_TakesAFullNameOnceAndKeepsIt', () => {
+    let now = 1_000;
+    const access = new PageAccess(store, () => now);
+    const hashOf = (cookie: string) => createHash('sha256').update(cookie).digest('hex');
+    // A sign-in made before names were kept has none; one made without a User-Agent has the fallback.
+    const unnamed = access.exchange(access.token())!;
+    const fallback = access.exchange(access.token(), undefined, undefined, deviceLabel(undefined))!;
+    const named = access.exchange(access.token(), undefined, undefined, 'Mac · Safari')!;
+
+    expect([unnamed, fallback, named].map((one) => store.pageSession(hashOf(one))?.label)).toEqual(['', 'Unknown device · browser', 'Mac · Safari']);
+    // A name that is not full names nothing.
+    for (const label of [undefined, '', 'Unknown device · browser', 'Windows · browser', 'Unknown device · Edge']) {
+      expect(access.allows(`sb_page=${unnamed}`, undefined, label)).toBe(true);
+    }
+
+    expect(store.pageSession(hashOf(unnamed))?.label).toBe('');
+
+    for (const one of [unnamed, fallback, named]) {
+      expect(access.allows(`sb_page=${one}`, undefined, 'Windows · Edge')).toBe(true);
+    }
+
+    expect([unnamed, fallback, named].map((one) => store.pageSession(hashOf(one))?.label)).toEqual(['Windows · Edge', 'Windows · Edge', 'Mac · Safari']);
+    // Once named, it keeps the name.
+    expect(access.allows(`sb_page=${unnamed}`, undefined, 'Linux · Firefox')).toBe(true);
+    expect(store.pageSession(hashOf(unnamed))?.label).toBe('Windows · Edge');
+
+    // A refused request names nothing: from another origin, or after the sign-in expired.
+    const remote = access.exchange(access.token(), undefined, undefined, '')!;
+    const elsewhere = { host: 'pc.tail.ts.net', login: 'alex@example.com', origin: 'https://pc.tail.ts.net' };
+
+    expect(access.allows(`sb_page=${remote}`, elsewhere, 'Windows · Edge')).toBe(false);
+    expect(store.pageSession(hashOf(remote))?.label).toBe('');
+    now += PAGE_SESSION_MS + 1;
+    expect(access.allows(`sb_page=${remote}`, undefined, 'Windows · Edge')).toBe(false);
+    expect(store.pageSession(hashOf(remote))).toBeNull();
+  });
+
+  it('KnownDevice_FallbackOrEmptyName_IsFalse', () => {
+    expect(['Windows · Edge', 'iPhone · Safari', 'Android · Samsung Internet'].map(knownDevice)).toEqual([true, true, true]);
+    expect(['', 'Unknown device · browser', 'Unknown device · Chrome', 'Linux · browser'].map(knownDevice)).toEqual([false, false, false, false]);
+  });
+
   it('reads a cookie by its name and answers the loopback names only', () => {
     expect(cookieValue('x=1; sb_page=abc=; y=2', 'sb_page')).toBe('abc=');
     expect(cookieValue('x=1', 'sb_page')).toBeNull();
@@ -218,12 +260,12 @@ describe('remote access', () => {
     // A proxied request is never local, even when it names the loopback, so a tailnet client cannot pass for this computer.
     expect(pageOrigin({ ...proxied, host: '127.0.0.1:5000', 'x-forwarded-host': '127.0.0.1:5000' }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
     expect(pageOrigin({ host: '127.0.0.1:5000', forwarded: 'for=1.2.3.4' }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
-    expect(pageOrigin({ ...proxied, host: 'other.tail.ts.net', 'x-forwarded-host': 'other.tail.ts.net' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is not served as this name. Set web.tailscale or web.remoteHosts in settings.json.' });
+    expect(pageOrigin({ ...proxied, host: 'other.tail.ts.net', 'x-forwarded-host': 'other.tail.ts.net' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is not served as this name. Turn on Tailscale or set Allowed hosts in Settings › Devices.' });
     expect(pageOrigin({ ...proxied, 'x-forwarded-proto': 'http' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is served to another device only over HTTPS through tailscale serve.' });
     expect(pageOrigin({ ...proxied, 'x-forwarded-proto': undefined }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
     expect(pageOrigin({ ...proxied, 'x-forwarded-host': 'evil.example' }, '127.0.0.1', 5000, remote)).toHaveProperty('refused');
     expect(pageOrigin({ ...proxied, 'tailscale-funnel-request': '?1' }, '127.0.0.1', 5000, remote)).toEqual({ refused: 'The page is not served through Tailscale Funnel.' });
-    const login = { refused: 'This Tailscale login may not use the page. Set web.tailscale or web.remoteLogins in settings.json.' };
+    const login = { refused: 'This Tailscale login may not use the page. Set Allowed logins in Settings › Devices.' };
 
     expect(pageOrigin({ ...proxied, 'tailscale-user-login': undefined }, '127.0.0.1', 5000, remote)).toEqual(login);
     expect(pageOrigin({ ...proxied, 'tailscale-user-login': 'mallory@example.com' }, '127.0.0.1', 5000, remote)).toEqual(login);
@@ -304,6 +346,17 @@ describe('remote access', () => {
     expect(pageCookie('ab', true)).toBe(`sb_page=ab; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${PAGE_SESSION_MS / 1000}`);
   });
 
+  it('DeviceLabel_ReducedUserAgents_NamesSystemAndBrowser', () => {
+    // User-Agent strings as current browsers send them, Chrome's and Edge's reduced to a fixed system and version.
+    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0')).toBe('Windows · Edge');
+    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36')).toBe('Windows · Chrome');
+    expect(deviceLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36')).toBe('Mac · Chrome');
+    expect(deviceLabel('Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36')).toBe('Android · Chrome');
+    expect(deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1')).toBe('iPhone · Safari');
+    expect(deviceLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:145.0) Gecko/20100101 Firefox/145.0')).toBe('Windows · Firefox');
+    expect(deviceLabel('Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0')).toBe('Linux · Firefox');
+  });
+
   it('names a device by its system and browser', () => {
     expect(deviceLabel('Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36')).toBe('Android · Chrome');
     expect(deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Mobile/15E148 Safari/604.1')).toBe('iPhone · Safari');
@@ -354,7 +407,7 @@ describe('pageList', () => {
     expect(list.map((group) => group.glyph)).toEqual(dock.groups.map((group) => group.glyph));
     const shown = list.flatMap((group) => group.rows).find((row) => row.workItemId === 1)!;
 
-    expect(shown).toMatchObject({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: null, time: { text: '0m', title: 'Working since 2026-10-03 12:00 UTC' }, ticket: 'gh 101', ticketNumber: '101', sourceKind: 'github', url: 'https://github.com/o/r/issues/101', playbook: 'dev:develop', links: [], returned: 0, comment: null, mark: { kind: 'running', title: 'Running' }, details: [{ text: 'Running', title: null, tone: null }], stripe: null, dim: false, host: null, main: null, pastes: [], opens: [{ label: 'Open in VS Code', icon: 'vscode' }], search: 'Fix the badge · gh 101 · dev:develop · In progress', band: null, voice: null, questions: 0, history: { ticketId: 1, key: 'gh 101' } });
+    expect(shown).toMatchObject({ workItemId: 1, ticketId: null, title: 'Fix the badge', priority: null, time: { text: '0m', title: 'Started working 2026-10-03 12:00 UTC' }, ticket: 'gh 101', ticketNumber: '101', sourceKind: 'github', url: 'https://github.com/o/r/issues/101', playbook: 'dev:develop', links: [], returned: 0, comment: null, mark: { kind: 'running', title: 'Working' }, details: [{ text: 'Working', title: null, tone: null }], stripe: null, dim: false, host: null, main: null, pastes: [], opens: [{ label: 'Open in VS Code', icon: 'vscode' }], search: 'Fix the badge · gh 101 · dev:develop · In progress', band: null, voice: null, questions: 0, history: { ticketId: 1, key: 'gh 101' } });
     expect(shown.actions.map((one) => one.label)).toEqual(['Stop session', 'Mark done', 'Snooze…', 'Add comment…', 'Delete']);
     // Each work item's row carries its waiting questions as counted.
     const counted = pageList(dock, view, null, (one) => (one.id === 4 ? 3 : 0)).flatMap((group) => group.rows);
@@ -395,9 +448,9 @@ describe('pageList', () => {
 describe('pageHeader', () => {
   it("carries the list view's notes and its held-session note, which is absent while every held session has a work item", () => {
     const notes = ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'];
-    const header = pageHeader({ notes, heldNote: '2 held sessions without a work item', sources: [], repoRoots: [], schedules: [] });
+    const header = pageHeader({ notes, heldNote: '2 background sessions without a work item', sources: [], repoRoots: [], schedules: [] });
 
-    expect(header).toMatchObject({ notes, heldNote: '2 held sessions without a work item' });
+    expect(header).toMatchObject({ notes, heldNote: '2 background sessions without a work item' });
     expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('heldNote');
     // The holder's notice and restart result, only when the list view has them.
     const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update.', confirm: { question: 'Restart the terminal holder?', detail: 'd', action: 'Restart and resume' } };
@@ -441,14 +494,14 @@ describe('pageList rows', () => {
     const dockRow = {
       key: 'item:3', title: 'Fix it', priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, ticket: 'gh 3', sourceKind: 'github', url: 'https://github.com/o/r/issues/3', playbook: 'dev:build',
       links: [{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false, pr: { state: 'open' } }],
-      returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Rate limited' },
-      details: [{ text: 'Rate limited · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' }, { text: 'Post the reply', title: null, tone: null }],
+      returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Usage limit' },
+      details: [{ text: 'Usage limit · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' }, { text: 'Post the reply', title: null, tone: null }],
       stripe: null, dim: false, controls: [], main: null, pastes: [], commands: [], search: 'Fix it · gh 3 · PR #9 · dev:build', band: 'Yesterday',
     } as unknown as DockView['groups'][number]['rows'][number];
     const dock = { groups: [{ key: 'progress', title: 'In progress', glyph: 'p', empty: null, rows: [dockRow] }] } as Pick<DockView, 'groups'>;
     const [shown] = pageList(dock, snapshot([item(3)]))[0]!.rows;
 
-    expect(shown).toMatchObject({ priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/3', returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Rate limited' }, details: dockRow.details });
+    expect(shown).toMatchObject({ priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/3', returned: 2, comment: { glyph: 'c', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: 'w', title: 'Usage limit' }, details: dockRow.details });
     expect(shown!.links).toEqual([{ label: 'PR #9', url: 'https://github.com/o/r/pull/9', kind: 'pr', badge: '9', glyph: '\u{ea64}', mentioned: false }]);
     // The list's search matches the list view row's search text.
     expect(shown!.search).toBe('Fix it · gh 3 · PR #9 · dev:build');
@@ -480,7 +533,7 @@ describe('pageActions', () => {
   it("builds the action from the row's own control, adds only Snooze's wake time and comment, and refuses one the row does not offer", () => {
     const row = rowOf(item(1, { status: 'unstarted' }));
 
-    const none = { refused: 'The work item no longer offers this.' };
+    const none = { refused: 'This work item can no longer do that.' };
 
     expect(pageActionEvent(row, 'Start', { until: 5, comment: 'x', text: 'ignored' })).toEqual({ event: { type: 'start', workItemId: 1 } });
     expect(pageActionEvent(row, 'Snooze…', { until: 5, comment: 'later' })).toEqual({ event: { type: 'snooze', ticketId: row.controls.find((one) => one.label === 'Snooze…')!.action['ticketId'], until: 5, comment: 'later' } });
@@ -520,10 +573,10 @@ describe('pageActions', () => {
     expect(guided.input?.choice).not.toHaveProperty('field');
     expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '  Use the staging DB ', choice: 'dev:build' })).toEqual({ event: { type: 'start', workItemId: 1, guidance: 'Use the staging DB' } });
     expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '', choice: 'dev:fix' })).toEqual({ event: { type: 'start', workItemId: 1, guidance: '', playbook: 'dev:fix' } });
-    expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '   ', choice: 'dev:build' })).toEqual({ refused: 'Start with guidance needs a text.' });
+    expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: '   ', choice: 'dev:build' })).toEqual({ refused: 'Type the guidance first.' });
     expect(pageActionEvent(row, 'Start with guidance…', { until: null, comment: null, text: 'x', choice: 'ops:wipe' })).toEqual({ refused: 'Choose one of the offered playbooks.' });
     expect(pageActionEvent(row, 'Add comment…', { until: null, comment: null, text: 'Asked Ana' })).toEqual({ event: { type: 'comment', workItemId: 1, text: 'Asked Ana' } });
-    expect(pageActionEvent(row, 'Add comment…', { until: null, comment: null })).toEqual({ refused: 'Add comment needs a text.' });
+    expect(pageActionEvent(row, 'Add comment…', { until: null, comment: null })).toEqual({ refused: 'Type the comment first.' });
 
     const adhoc = rowOf(item(2, { status: 'unstarted', playbook: null, ticket: { ...item(2).ticket, source: 'adhoc', sourceKey: '9', url: '' }, prompt: 'Fix the build' } as never));
     const prompted = pageActions(adhoc).find((one) => one.label === 'Start with prompt…');
@@ -543,18 +596,18 @@ describe('pageActions', () => {
     expect(pageReportOf(review)).toBe('D:/git/wt/101/report.md');
     // The list view's row offers History and Open changes; the page shows History itself and its Changes tab replaces Open changes.
     expect(review.commands.map((one) => one.label)).toEqual(expect.arrayContaining(['History', 'Open changes']));
-    expect(pageCommandOf(review, 'Open changes')).toEqual({ refused: 'The work item no longer offers this.' });
+    expect(pageCommandOf(review, 'Open changes')).toEqual({ refused: 'This work item can no longer do that.' });
     // Open report opens on the page, never through VS Code.
-    expect(pageCommandOf(review, 'Open report')).toEqual({ refused: 'Open report opens on the page.' });
+    expect(pageCommandOf(review, 'Open report')).toEqual({ refused: 'Open report shows in a tab here.' });
     expect(pageCommandOf(review, 'Open in VS Code')).toEqual({ destination: review.window!.file });
-    expect(pageCommandOf(review, 'History')).toEqual({ refused: 'The work item no longer offers this.' });
-    expect(pageCommandOf(review, 'Open in terminal')).toEqual({ refused: 'The work item no longer offers this.' });
+    expect(pageCommandOf(review, 'History')).toEqual({ refused: 'This work item can no longer do that.' });
+    expect(pageCommandOf(review, 'Open in terminal')).toEqual({ refused: 'This work item can no longer do that.' });
 
     // A row with no window opens nothing in VS Code, and still opens its report on the page.
     const windowless = { window: null, commands: review.commands };
 
     expect(pageOpens(windowless)).toEqual([{ label: 'Open report', icon: 'symbol-file', file: 'D:/git/wt/101/report.md' }]);
-    expect(pageCommandOf(windowless, 'Open in VS Code')).toEqual({ refused: 'The work item no longer offers this.' });
+    expect(pageCommandOf(windowless, 'Open in VS Code')).toEqual({ refused: 'This work item can no longer do that.' });
     // A row that is not awaiting approval has no report.
     expect(pageReportOf(rowOf(item(1, { worktree, approvalReport: 'D:/git/wt/101/report.md' })))).toBeNull();
     // A folder-hosted conversation opens its folder.
@@ -817,6 +870,7 @@ describe('the web page routes', () => {
       list: () => [{ kind: 'item', title: 'T', conversations: [] }],
       files: async (key) => (key === 'page-1' ? [{ path: 'a.ts', dir: false }] : null),
       changes: async (route, key, query) => (route === 'changes' && key === 'page-1' ? { status: 200, body: { rows: 'x'.repeat(2000), q: query.get('q') }, etag: 'e1' } : { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } }),
+      changesRaw: async (key, query) => (key === 'page-1' && query.get('path') === 'shot.png' ? { status: 200 as const, raw: { mime: 'image/svg+xml', bytes: Buffer.from('<svg/>') } } : { status: 404, body: { error: 'Only a picture or a PDF of this worktree is sent as a file.' } }),
       artifact: (key, name) => {
         const external = join(folder, 'report.md');
 
@@ -959,7 +1013,7 @@ describe('the web page routes', () => {
     fail = true;
     const failure = await send(server.port, 'GET', '/v1/page/hub-log', { Cookie: cookie });
     expect(failure.status).toBe(500);
-    expect(JSON.parse(failure.body)).toEqual({ error: 'The hub log could not be read.' });
+    expect(JSON.parse(failure.body)).toEqual({ error: 'The Switchboard log could not be read.' });
     fail = false;
     const pending = send(server.port, 'GET', '/v1/page/hub-log', { Cookie: cookie });
     await until(() => release ?? null);
@@ -1130,6 +1184,31 @@ describe('the web page routes', () => {
     expect((await send(server.port, 'GET', '/page/manifest.webmanifest', { Cookie: cookie })).headers['set-cookie']).toBeUndefined();
   });
 
+  it('PageRequest_SignInWithoutName_TakesItsUserAgentsName', async () => {
+    const edge = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0';
+    await serve();
+    // A sign-in made before names were kept, as this computer's browser had: stored without a name.
+    const old = 'ab'.repeat(32);
+    const named = 'cd'.repeat(32);
+    const hashOf = (cookie: string) => createHash('sha256').update(cookie).digest('hex');
+    const labels = async () => (JSON.parse((await send(server.port, 'POST', '/page/devices', { Authorization: `Bearer ${server.token}` })).body) as { devices: Array<{ id: string; label: string }> }).devices.map((one) => [one.id, one.label]);
+
+    store.savePageSession(hashOf(old), Date.now());
+    store.savePageSession(hashOf(named), Date.now(), { label: 'Mac · Safari', host: null, login: null });
+    // A request without a User-Agent leaves it unnamed; a refused one names nothing.
+    expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: `sb_page=${old}` })).status).toBe(200);
+    expect(store.pageSession(hashOf(old))?.label).toBe('');
+    expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: `sb_page=${'ef'.repeat(32)}`, 'User-Agent': edge })).status).toBe(401);
+    expect(store.pageSessions()).toHaveLength(2);
+
+    for (const cookie of [old, named]) {
+      expect((await send(server.port, 'GET', '/v1/page/list', { Cookie: `sb_page=${cookie}`, 'User-Agent': edge })).status).toBe(200);
+    }
+
+    // The unnamed one takes the browser's name; a named one keeps its own.
+    expect(Object.fromEntries(await labels())).toEqual({ [hashOf(old).slice(0, 8)]: 'Windows · Edge', [hashOf(named).slice(0, 8)]: 'Mac · Safari' });
+  });
+
   it("answers ping with the build and whether the browser is signed in, and ticks on a page's stream in place of the heartbeat comment", async () => {
     const { url } = await serve(undefined, 20);
     const cookie = String((await send(server.port, 'GET', `${url.pathname}${url.search}`, {})).headers['set-cookie']).split(';')[0]!;
@@ -1271,7 +1350,7 @@ describe('the web page routes', () => {
     const here = `http://127.0.0.1:${server.port}`;
     const post = (command: string, headers: Record<string, string>, body: Record<string, unknown> = {}) => send(server.port, 'POST', `/v1/conversation/${command}`, { 'Content-Type': 'application/json', ...headers }, { window: 'page-1', ...body });
 
-    expect(JSON.parse((await post('page-pair', { Cookie: localCookie, Origin: here })).body)).toEqual({ error: expect.stringContaining('Pairing a device needs remote access') });
+    expect(JSON.parse((await post('page-pair', { Cookie: localCookie, Origin: here })).body)).toEqual({ error: expect.stringMatching(/^Pairing a device needs remote access: .* on the Devices page of Settings, /) });
     remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com', 'other@example.com'] };
 
     const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '100.64.0.2', 'Tailscale-User-Login': 'alex@example.com', 'User-Agent': 'Mozilla/5.0 (Linux; Android 15) Chrome/141.0 Mobile Safari/537.36' };
@@ -1390,6 +1469,10 @@ describe('the web page routes', () => {
     expect(unzip(local.body).get('Switchboard.lnk')!.toString('utf16le')).toContain(encodeURIComponent(url.origin));
     expect((await download({ Cookie: localCookie }, path + '&origin=https://evil.test')).status).toBe(400);
     expect((await download({ Cookie: localCookie }, '/page/switchboard-shortcut.zip?browser=cmd')).status).toBe(400);
+    const linux = await download({ Cookie: localCookie }, '/page/switchboard-shortcut.zip?system=linux&profile=Default&icon=%2Fhome%2Falex%2FDownloads%2FSwitchboard%2Fswitchboard.png');
+    expect(linux.status).toBe(200); expect([...unzip(linux.body).keys()]).toEqual(['switchboard.desktop']);
+    expect(unzip(linux.body).get('switchboard.desktop')!.toString('utf8')).toContain(encodeURIComponent(url.origin).replaceAll('%', '%%'));
+    expect((await download({ Cookie: localCookie }, '/page/switchboard-shortcut.zip?system=linux&icon=C%3A%5Cswitchboard.ico')).status).toBe(400);
     remoteAccess = { hosts: ['pc.tail.ts.net'], logins: ['alex@example.com'] };
     const ts = { Host: 'pc.tail.ts.net', 'X-Forwarded-Proto': 'https', 'Tailscale-User-Login': 'alex@example.com' };
     const link = new URL(access.pair('pc.tail.ts.net').url);
@@ -1634,6 +1717,18 @@ describe('the web page routes', () => {
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-2', { Cookie: cookie })).status).toBe(403);
     expect((await send(server.port, 'GET', '/v1/conversation/changes?window=page-1', {})).status).toBe(401);
 
+    // A worktree picture under the Changes routes' checks, always with the artifacts' sandbox.
+    const raw = await send(server.port, 'GET', '/v1/conversation/file-raw?window=page-1&path=shot.png&side=disk', { Cookie: cookie });
+
+    expect(raw.status).toBe(200);
+    expect(raw.headers['content-type']).toBe('image/svg+xml');
+    expect(raw.headers['content-security-policy']).toMatch(/^sandbox allow-scripts; default-src 'none'/);
+    expect(raw.headers['x-content-type-options']).toBe('nosniff');
+    expect(raw.body).toBe('<svg/>');
+    expect((await send(server.port, 'GET', '/v1/conversation/file-raw?window=page-1&path=notes.md&side=disk', { Cookie: cookie })).status).toBe(404);
+    expect((await send(server.port, 'GET', '/v1/conversation/file-raw?window=page-2&path=shot.png&side=disk', { Cookie: cookie })).status).toBe(403);
+    expect((await send(server.port, 'GET', '/v1/conversation/file-raw?window=page-1&path=shot.png&side=disk', {})).status).toBe(401);
+
     // The diff viewer's files: kept by the browser, gzipped when taken, and only with the cookie.
     const viewer = await send(server.port, 'GET', '/page/diff/b1/diff.js', { Cookie: cookie, 'Accept-Encoding': 'gzip' });
 
@@ -1829,6 +1924,15 @@ describe('the web page routes', () => {
     // This computer's page cannot read through the phone's key, nor the phone through this computer's.
     expect((await get('/v1/conversation/local-file?window=page-2&path=notes.md')).status).toBe(403);
     expect((await get('/v1/conversation/local-file-raw?window=page-1&path=shot.png', asPhone)).status).toBe(403);
+    // Nor the change routes: the phone cannot read the worktree this computer's page has open, and the reverse.
+    for (const route of ['changes', 'stack', 'tree', 'file-raw']) {
+      const crossed = await get(`/v1/conversation/${route}?window=page-1&path=shot.png&side=disk`, asPhone);
+
+      expect(crossed.status).toBe(403);
+      expect(JSON.parse(crossed.body)).toEqual({ error: "This page's connection belongs to another sign-in or address. Reload the page." });
+      expect((await get(`/v1/conversation/${route}?window=page-2&path=shot.png&side=disk`)).status).toBe(403);
+    }
+
     phoneStream.destroy();
     stream.destroy();
     await until(() => (server.clients() === 0 ? true : null));

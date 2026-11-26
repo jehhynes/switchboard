@@ -284,7 +284,7 @@ export function stateIcon(state: SessionView['state'] | null | undefined, waitin
     const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     const when = at.toDateString() === new Date().toDateString() ? time : `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
 
-    return { icon: SESSION_ICONS.limited, text: `Rate limited · ${limit.retry ? 'retries' : 'resumes'} ${when}`, tone: SESSION_TONES.limited };
+    return { icon: SESSION_ICONS.limited, text: `${limit.throttle === true ? 'Rate limited' : 'Usage limit'} · ${limit.retry ? 'retries' : 'resumes'} ${when}`, tone: SESSION_TONES.limited };
   }
 
   const kind = sessionIcon(state, waitingFor);
@@ -295,7 +295,7 @@ export function stateIcon(state: SessionView['state'] | null | undefined, waitin
 /** Each session icon in words. */
 const SESSION_WORDS: Record<SessionIcon, string> = {
   question: 'Waiting for your answer',
-  limited: 'Rate limited',
+  limited: 'Usage limit',
   permission: 'Waiting for permission',
   running: 'Working',
   idle: 'Idle',

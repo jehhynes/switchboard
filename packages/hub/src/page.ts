@@ -35,7 +35,7 @@ export const PAIR_CODE_TRIES = 10;
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /** Where the page's sign-ins are kept: the hub's store, by each cookie's SHA-256. */
-export type PageSessions = Pick<Store, 'pageSession' | 'pageSessions' | 'savePageSession' | 'deletePageSessions' | 'trimPageSessions' | 'setPageSessionVoice'>;
+export type PageSessions = Pick<Store, 'pageSession' | 'pageSessions' | 'savePageSession' | 'renamePageSession' | 'deletePageSessions' | 'trimPageSessions' | 'setPageSessionVoice'>;
 
 /**
  * The Set-Cookie value that signs a browser in with a cookie value (architecture.md § Web page); `Secure` for a device that reaches the page
@@ -90,7 +90,7 @@ export function pageOrigin(headers: IncomingHttpHeaders, peer: string | undefine
   const login = headers['tailscale-user-login'];
 
   if (!remote.hosts.includes(name)) {
-    return { refused: 'The page is not served as this name. Set web.tailscale or web.remoteHosts in settings.json.' };
+    return { refused: 'The page is not served as this name. Turn on Tailscale or set Allowed hosts in Settings › Devices.' };
   }
 
   if (headers['x-forwarded-proto'] !== 'https' || (headers['x-forwarded-host'] !== undefined && headers['x-forwarded-host'] !== host)) {
@@ -102,7 +102,7 @@ export function pageOrigin(headers: IncomingHttpHeaders, peer: string | undefine
   }
 
   if (typeof login !== 'string' || !remote.logins.includes(login.toLowerCase())) {
-    return { refused: 'This Tailscale login may not use the page. Set web.tailscale or web.remoteLogins in settings.json.' };
+    return { refused: 'This Tailscale login may not use the page. Set Allowed logins in Settings › Devices.' };
   }
 
   return { host: name, login: login.toLowerCase(), origin: `https://${name}` };
@@ -115,6 +115,11 @@ export function deviceLabel(agent: string | undefined): string {
   const browser = /Edg(A|iOS)?\//.test(text) ? 'Edge' : /SamsungBrowser/.test(text) ? 'Samsung Internet' : /Firefox\/|FxiOS/.test(text) ? 'Firefox' : /Chrome\/|CriOS/.test(text) ? 'Chrome' : /Safari\//.test(text) ? 'Safari' : 'browser';
 
   return `${system} · ${browser}`;
+}
+
+/** Whether `deviceLabel` recognised both the system and the browser in a name: false for none, as a sign-in made before names were kept has. */
+export function knownDevice(label: string): boolean {
+  return label !== '' && !label.startsWith('Unknown device') && !label.endsWith(' · browser');
 }
 
 /** A remembered sign-in as the device list shows it: its ID, the start of its hash, its device, when it was made and last used, and whether voice is allowed on it. */
@@ -250,9 +255,10 @@ export class PageAccess {
 
   /**
    * Whether a request's Cookie header carries a sign-in this hub gave out, not revoked and used within `PAGE_SESSION_MS`, made where the request
-   * comes from, which counts as a use.
+   * comes from, which counts as a use. A sign-in whose name does not say its system and browser, as one made before names were kept, takes
+   * `label` when that one does; a full name stays.
    */
-  allows(header: string | undefined, origin: PageOrigin = LOCAL_ORIGIN): boolean {
+  allows(header: string | undefined, origin: PageOrigin = LOCAL_ORIGIN, label?: string): boolean {
     const given = cookieValue(header, PAGE_COOKIE);
 
     if (given === null || !/^[0-9a-f]{64}$/.test(given)) {
@@ -274,6 +280,10 @@ export class PageAccess {
 
     if (now - session.usedAt >= PAGE_SESSION_TOUCH_MS) {
       this.sessions.savePageSession(hash, now);
+    }
+
+    if (label !== undefined && !knownDevice(session.label) && knownDevice(label)) {
+      this.sessions.renamePageSession(hash, session.label, label);
     }
 
     return true;
@@ -354,7 +364,7 @@ export function deviceId(hash: string): string {
 export const PUBLIC_PAGE_FILES = new Set(['manifest.webmanifest', 'sw.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']);
 
 /** What `/page/` answers a browser that is not signed in. */
-export const SIGNED_OUT_HTML = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Switchboard</title><style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{margin:0;display:grid;place-items:center;min-height:100vh;background:#1f1f1f;color:#cccccc;font:14px system-ui,sans-serif}main{max-width:28rem;padding:24px}h1{font-size:18px;font-weight:600;margin:0 0 8px}</style></head><body><main><h1>Not signed in</h1><p>This browser is not signed in to Switchboard. Open the page with a link from <code>hub.js web</code>.</p></main></body></html>';
+export const SIGNED_OUT_HTML = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="#191a1b" media="(prefers-color-scheme: dark)"><meta name="theme-color" content="#fafafd" media="(prefers-color-scheme: light)"><title>Switchboard</title><style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{margin:0;display:grid;place-items:center;min-height:100vh;background:#191a1b;color:#bfbfbf;font:14px system-ui,sans-serif}main{max-width:28rem;padding:24px}h1{font-size:18px;font-weight:600;margin:0 0 8px}@media (prefers-color-scheme:light){body{background:#fafafd;color:#202020}}</style></head><body><main><h1>Not signed in</h1><p>This browser is not signed in to Switchboard. Open the page with a link from <code>hub.js web</code>.</p></main></body></html>';
 
 /**
  * The pairing page's script: it upper-cases the typed code, drops all but letters and digits, keeps 8, and puts the dash after the fourth, keeping
@@ -370,7 +380,7 @@ export const PAIR_CSP = `default-src 'none'; style-src 'unsafe-inline'; script-s
  * after a wrong or expired one, says so.
  */
 export function pairHtml(wrong: boolean): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Switchboard</title><style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{margin:0;display:grid;place-items:center;min-height:100vh;background:#1f1f1f;color:#cccccc;font:16px system-ui,sans-serif}main{max-width:24rem;padding:24px}h1{font-size:20px;font-weight:600;margin:0 0 8px}p{line-height:1.4}.wrong{color:#f48771}input,button{font:inherit;font-size:20px;padding:10px 12px;border-radius:4px;box-sizing:border-box;width:100%;margin-top:8px}input{background:#313131;color:#cccccc;border:1px solid #3c3c3c;text-transform:uppercase;letter-spacing:2px}button{background:#0078d4;color:#ffffff;border:0}</style></head><body><main><h1>Pair this device</h1><p>On the computer that runs Switchboard, open the web page, choose More Actions, then Pair a device, and scan its code, or type the code it shows here.</p>${wrong ? '<p class="wrong" role="alert">That code is wrong or has expired. Get a new one from Pair a device.</p>' : ''}<form method="get" action="/page"><input name="code" autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="go" placeholder="ABCD-EFGH" aria-label="Pairing code" required><button type="submit">Pair</button></form></main><script>${PAIR_SCRIPT}</script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="#191a1b" media="(prefers-color-scheme: dark)"><meta name="theme-color" content="#fafafd" media="(prefers-color-scheme: light)"><title>Switchboard</title><style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{margin:0;display:grid;place-items:center;min-height:100vh;background:#191a1b;color:#bfbfbf;font:16px system-ui,sans-serif}main{max-width:24rem;padding:24px}h1{font-size:20px;font-weight:600;margin:0 0 8px}p{line-height:1.4}.wrong{color:#f48771}input,button{font:inherit;font-size:20px;padding:10px 12px;border-radius:4px;box-sizing:border-box;width:100%;margin-top:8px}input{background:#121314;color:#bfbfbf;border:1px solid #333536;text-transform:uppercase;letter-spacing:2px}button{background:#297aa0;color:#ffffff;border:0}@media (prefers-color-scheme:light){body{background:#fafafd;color:#202020}.wrong{color:#ad0707}input{background:#ffffff;color:#202020;border-color:#d8d8d8}button{background:#0069cc}}</style></head><body><main><h1>Pair this device</h1><p>On the computer that runs Switchboard, open the web page, choose More Actions, then Pair a device, and scan its code, or type the code it shows here.</p>${wrong ? '<p class="wrong" role="alert">That code is wrong or has expired. Get a new one from Pair a device.</p>' : ''}<form method="get" action="/page"><input name="code" autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="go" placeholder="ABCD-EFGH" aria-label="Pairing code" required><button type="submit">Pair</button></form></main><script>${PAIR_SCRIPT}</script></body></html>`;
 }
 
 /** A cookie's value from a Cookie header, or null. */
@@ -560,7 +570,7 @@ export function pageActions(row: Pick<DockRow, 'controls' | 'main' | 'ticket'>):
   return offered
     .map((control) => {
       const action = String(control.action['type']) as PageActionType;
-      const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop the session for ${row.ticket}?`, detail: 'Switchboard stops its running session, and the work item waits for you as Stopped by you.', action: 'Stop session' } : null);
+      const confirm = control.confirm ?? (action === 'stop' ? { question: `Stop the session for ${row.ticket}?`, detail: "Switchboard stops the session's process. The work item then waits for you: as Stopped by you, or for your approval if one was pending.", action: 'Stop session' } : null);
       const input = control.input === undefined ? null : { question: control.input.question, detail: control.input.detail, action: control.input.action, text: control.input.text ?? null, choice: control.input.choice === undefined ? null : { label: control.input.choice.label, value: control.input.choice.value, values: [...control.input.choice.values] } };
 
       return { label: control.label, action, icon: CONTROL_ICONS.get(control.glyph) ?? 'circle-outline', group: groupOf(control), confirm, input };
@@ -585,7 +595,7 @@ export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket
   const offered = pageActions(row).find((one) => one.label === label);
 
   if (offered === undefined) {
-    return { refused: 'The work item no longer offers this.' };
+    return { refused: 'This work item can no longer do that.' };
   }
 
   const control = row.controls.find((one) => one.label === label && one.group === undefined)!;
@@ -608,7 +618,7 @@ export function pageActionEvent(row: Pick<DockRow, 'controls' | 'main' | 'ticket
   }
 
   if (text === '' && choice === null) {
-    return { refused: `${input.question} needs a text.` };
+    return { refused: `Type the ${input.field === 'text' ? 'comment' : input.field} first.` };
   }
 
   return { event: { ...control.action, [input.field]: text, ...(choice === null ? {} : { [input.choice!.field]: choice }) } };
@@ -658,7 +668,7 @@ export function pageCommandOf(row: Pick<DockRow, 'window' | 'commands'>, label: 
   const destination = destinationOf(row);
 
   if (destination === null || label !== OPEN_IN_VSCODE) {
-    return { refused: label === OPEN_REPORT && pageReportOf(row) !== null ? 'Open report opens on the page.' : 'The work item no longer offers this.' };
+    return { refused: label === OPEN_REPORT && pageReportOf(row) !== null ? 'Open report shows in a tab here.' : 'This work item can no longer do that.' };
   }
 
   return { destination };

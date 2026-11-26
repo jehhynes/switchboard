@@ -94,7 +94,7 @@ export function renderScreen(view: ConnectionView, local: boolean, now: number):
     <div class="conn-screen" role="alert">
       <div class="conn-screen-body">
         <img class="conn-screen-icon" src="icon-192.png" alt="" width="48" height="48" />
-        <h2>Can't reach Switchboard</h2>
+        <h2>Switchboard is not reachable</h2>
         <p class="conn-screen-status">{retryText(view, now)}</p>
         <button type="button" class="conn-primary" data-action="conn-retry">
           Try now

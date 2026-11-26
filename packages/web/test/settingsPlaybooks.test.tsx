@@ -31,6 +31,8 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
   };
 
   beforeEach(() => {
+    // A desktop's width, whose navigation opens a group under its entry; the phone's drill-down has tests of its own.
+    window.innerWidth = 1280;
     vi.useFakeTimers();
     posts = [];
     answers = { 'page-settings-read': { status: 200, body: config(file, { inUse: { 'dev:build': 2 } }) }, 'page-settings-check': { status: 200, body: { errors: [] } } };
@@ -56,7 +58,20 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     return pane;
   };
   const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
-  const entry = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label)!;
+  const entry = (label: string) => {
+    const find = () => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label);
+
+    // A group's entries show once it is open: the lists' groups first, then a namespace's, which opens its table.
+    for (const selector of ['.settings-nav-entry.group[aria-expanded="false"]:not([data-page])', '.settings-nav-entry.group[aria-expanded="false"]']) {
+      let closed: HTMLButtonElement | null;
+
+      while (find() === undefined && (closed = host.querySelector<HTMLButtonElement>(selector)) !== null) {
+        closed.click();
+      }
+    }
+
+    return find()!;
+  };
   const control = <T extends HTMLElement>(path: string) => host.querySelector<T>(`[data-path="${path}"] input, [data-path="${path}"] select, [data-path="${path}"] textarea`)!;
   const settle = () => vi.advanceTimersByTimeAsync(0);
   const checked = () => posts.filter((one) => one.name === 'page-settings-check').at(-1)!.body['settings'] as { playbooks: Record<string, unknown> };
@@ -67,13 +82,31 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     box.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
-  it('lists each namespace with its playbooks under Playbooks, then New playbook, marking an entry it cannot read', async () => {
+  it('nests each namespace with its playbooks under Playbooks, then New playbook, marking an entry it cannot read on every group around it', async () => {
     await open();
 
-    const labels = texts('.settings-nav-entry .settings-nav-label');
+    // Playbooks starts closed under Work, counting its playbooks and carrying the error mark of the one it cannot read.
+    const playbooks = host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="playbooks"]')!;
 
-    expect(labels.slice(labels.indexOf('dev'), labels.indexOf('+ New playbook') + 1)).toEqual(['dev', 'build', 'triage', 'ops', 'broken', '+ New playbook']);
-    expect(texts('.settings-nav-heading').slice(0, 2)).toEqual(['Sources', 'Playbooks']);
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
+    expect(playbooks.getAttribute('aria-expanded')).toBe('false');
+    expect(playbooks.querySelector('.settings-nav-count')?.textContent).toBe('3');
+    expect(playbooks.querySelector('.settings-errors')).not.toBeNull();
+    expect(host.querySelector('[data-key="playbook:dev:build"]')).toBeNull();
+    playbooks.click();
+    await settle();
+    expect(playbooks.getAttribute('aria-expanded')).toBe('true');
+    expect(texts('.settings-nav-children[aria-label="Playbooks"] > .settings-nav-entry .settings-nav-label')).toEqual(['dev', 'ops', '+ New playbook']);
+    // A namespace opens its table and its playbooks under it; pressed again there, it closes and the table stays.
+    entry('dev').click();
+    await settle();
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev playbooks');
+    expect(texts('.settings-nav-children[aria-label="dev"] .settings-nav-label')).toEqual(['build', 'triage']);
+    expect(entry('dev').classList.contains('current')).toBe(true);
+    entry('dev').click();
+    await settle();
+    expect(host.querySelector('.settings-nav-children[aria-label="dev"]')).toBeNull();
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev playbooks');
     expect(entry('broken').querySelector('.settings-errors')).not.toBeNull();
     expect(entry('ops').querySelector('.settings-errors')).not.toBeNull();
     expect(entry('build').querySelector('.settings-errors')).toBeNull();
@@ -90,7 +123,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
 
     entry('build').click();
     await settle();
-    expect(control<HTMLSelectElement>('permissionMode').options[0]!.textContent).toBe('Sessions setting (auto)');
+    expect(control<HTMLSelectElement>('permissionMode').options[0]!.textContent).toBe('From Sessions: auto');
     expect(control<HTMLSelectElement>('permissionMode').value).toBe('');
 
     entry('gh').click();
@@ -104,16 +137,19 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     await settle();
 
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev:build');
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Kind', 'Start', 'Reports', 'Approve sends the work', 'Working directory', 'Agent', 'Permission mode', 'Model', 'Return of', 'Focus page', 'Prompt']);
+    // Start and Reports are each a section whose checkboxes need no label of their own; Kind, Return of and Focus page wait under Advanced.
+    expect([...host.querySelectorAll('.settings-section-heading')].map((node) => (node.querySelector('.settings-toggle-label') ?? node).textContent)).toEqual(['About', 'Start', 'Reports', 'Run as', 'Prompt', 'Advanced']);
+    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Approve sends the work', 'Agent', 'Permission mode', 'Model', 'Working directory', 'Prompt']);
+    expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Kind, Return of, Focus page');
     expect(texts('.settings-check label:not(.settings-box)')).toEqual(['Automatically', 'Needs a worktree', 'Done', 'Approval', 'Worktree', 'Playbook', 'Paste']);
-    expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['Sessions setting (auto)', 'default', 'auto', 'plan', 'bypassPermissions']);
-    expect(control<HTMLInputElement>('model').placeholder).toBe('Sessions setting (Claude’s default)');
-    expect(host.querySelector<HTMLButtonElement>('[data-path="template"] .settings-info')!.title).toBe('Variables: {{ticket.title}}. Switchboard adds the commands for the checked reports, with stage and link.');
+    expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['From Sessions: auto', 'default', 'auto', 'plan', 'bypassPermissions']);
+    expect(control<HTMLInputElement>('model').placeholder).toBe('From Sessions: Claude’s default');
+    expect(host.querySelector('[data-path="template"] .settings-help')?.textContent).toBe('Variables: {{ticket.title}}. Switchboard adds the commands for the checked reports, with stage and link.');
 
     // Codex offers its own modes and its sessions setting.
     pick('provider', 'codex');
     await settle();
-    expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['Sessions setting (default)', 'default', 'bypassPermissions']);
+    expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['From Sessions: default', 'default', 'bypassPermissions']);
 
     // Unchecking Approval drops Approve sends with it.
     host.querySelector<HTMLInputElement>('#settings-field-reports_approval')!.click();
@@ -131,16 +167,18 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect(checked().playbooks['dev:build']).toEqual(file.playbooks['dev:build']);
     expect(entry('build').querySelector('.settings-dirty')).toBeNull();
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    expect(host.querySelector('.settings-bar')).toBeNull();
   });
 
   it("shows a triage playbook's few fields, and changing the kind to triage drops the task's reports", async () => {
     await open();
     entry('triage').click();
     await settle();
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Kind', 'Rates importance', 'Classifier instructions']);
+    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Rates importance', 'Classifier instructions']);
 
     entry('build').click();
+    await settle();
+    host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
     await settle();
     pick('kind', 'triage');
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
@@ -157,7 +195,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     // An error that starts with no field's key, such as one about the reports, shows at the top of the page.
     expect(texts('.settings-page > .settings-error')).toEqual(['reports must list known reports.', 'Something else.']);
     expect(texts('.settings-group .settings-field-error')).toEqual([]);
-    expect(entry('General').querySelector('.settings-errors')).toBeNull();
+    expect(entry('Sessions').querySelector('.settings-errors')).toBeNull();
   });
 
   it("edits a namespace's playbooks in a table: Start, Reports with Sends only beside Approval, Repo root and Rates, with each row's dot and errors", async () => {
@@ -207,7 +245,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     const press = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((one) => one.textContent?.trim() === label)!.click();
 
     type('[data-path="description"] input', 'Review it');
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    expect(host.querySelector('.settings-bar')).toBeNull();
     press('Create');
     await settle();
     expect(host.querySelector('[data-path="new-name"] .settings-field-error')?.textContent).toBe('Namespace and name must be lowercase letters, digits and hyphens.');
@@ -234,7 +272,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     await settle();
     [...host.querySelectorAll<HTMLButtonElement>('.settings-ask button')].find((one) => one.textContent === 'Delete')!.click();
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
-    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
     expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
     expect('dev:build' in checked().playbooks).toBe(false);
   });

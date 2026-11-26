@@ -209,7 +209,7 @@ export function reviewOrder(a: Pick<WorkItem, 'id' | 'readyAt' | 'orderAt'>, b: 
 /** What differs between rows of one group (PRD R27): what the operator must do, the working phase, or how the work ended. */
 export type Mark = 'question' | 'permission' | 'send' | 'review' | 'finished' | 'blocked' | 'failed' | 'queued' | 'setup' | 'running' | 'limited' | 'idle' | 'triaging' | 'done-session' | 'done-operator' | 'done-unassigned';
 
-export const DONE_WORDS: Record<DoneReason, string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'Left the assigned state' };
+export const DONE_WORDS: Record<DoneReason, string> = { session: 'Finished by the session', operator: 'Marked done', unassigned: 'No longer yours' };
 
 /** Each mark in words, for its tooltip. */
 export const MARK_TITLES: Record<Mark, string> = {
@@ -217,13 +217,13 @@ export const MARK_TITLES: Record<Mark, string> = {
   permission: 'Approve a permission',
   send: 'Approve to send',
   review: 'Review, then approve',
-  finished: 'Review the finished turn',
+  finished: 'Review the turn',
   blocked: 'Blocked',
   failed: 'Failed',
   queued: 'Queued',
   setup: 'Setting up',
-  running: 'Running',
-  limited: 'Rate limited',
+  running: 'Working',
+  limited: 'Usage limit',
   idle: 'Idle',
   triaging: 'Triaging',
   'done-session': DONE_WORDS.session,

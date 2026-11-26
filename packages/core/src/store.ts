@@ -1390,6 +1390,11 @@ export class Store {
     return this.#one('SELECT * FROM worktrees WHERE ticketId = ?', ticketId);
   }
 
+  /** The newest work item whose ticket's linked worktree is at `path`, with its ticket's title. */
+  workItemAtWorktree(path: string): { id: number; title: string } | null {
+    return this.#one('SELECT w.id AS id, t.title AS title FROM worktrees wt JOIN workItems w ON w.ticketId = wt.ticketId JOIN tickets t ON t.id = wt.ticketId WHERE wt.path = ? ORDER BY w.id DESC LIMIT 1', path);
+  }
+
   /** Links the ticket's worktree, replacing an earlier link. */
   linkWorktree(worktree: NewWorktree): void {
     this.#upsert(
@@ -2015,6 +2020,11 @@ export class Store {
     this.#db
       .prepare('INSERT INTO pageSessions (hash, createdAt, usedAt, label, host, login) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (hash) DO UPDATE SET usedAt = excluded.usedAt')
       .run(hash, at, at, device.label, device.host, device.login);
+  }
+
+  /** Renames a sign-in's device from `from` to `to`; false when it has another name by then, or no sign-in has the hash. */
+  renamePageSession(hash: string, from: string, to: string): boolean {
+    return Number(this.#db.prepare('UPDATE pageSessions SET label = ? WHERE hash = ? AND label = ?').run(to, hash, from).changes) === 1;
   }
 
   /** Forgets one sign-in, or every one without a hash; answers how many. */

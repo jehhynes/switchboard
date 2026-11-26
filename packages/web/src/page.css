@@ -12,16 +12,17 @@ html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: non
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { touch-action: pinch-zoom; }
 textarea { overscroll-behavior: none; }
-/* The page's own colours, which VS Code's theme has no variable for, carried over from the retired dock: in Dark Modern and, with the operating system's light setting,
-   in Light Modern (theme.css). The composer's fill in light follows composer.css's light themes.
-   Surfaces: Dark Modern draws the conversation on the side bar's colour, as Claude Code's panel does. Light Modern keeps white for the editor
-   alone, so in light the conversation is the white surface, its header and tab bars take the side bar's grey as Light Modern's title bar and
-   editor tabs do, and the selected row takes a light selection colour (#E4E6F1, Light Modern's selected activity bar item), since
-   Light Modern's list selection (#E8E8E8) barely shows on the side bar. The list's muted texts take their own grey, which in
-   Light Modern is #717171, not the theme's description colour. */
-:root { --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #7a7a7a; --sb-chat-background: var(--vscode-sideBar-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: var(--vscode-list-activeSelectionBackground); --sb-row-muted: var(--vscode-descriptionForeground); --sb-tab-shade: 25%; }
+/* The page's own colours, which VS Code's theme has no variable for, carried over from the retired dock, in dark and, with the operating
+   system's light setting, in light (theme.css). The composer's fill in light is the input's, white on the conversation's grey, as 2026 Light's chat input is.
+   Surfaces (operator decision 2026-11-25): content, the right column's views, the work item list and the Changes tree, takes the editor's
+   colour, the deepest of the scheme as in VS Code's 2026 themes; the conversation and the bars take the side bar's, a step more moderate.
+   In light the selected row takes #E4E6F1, Light Modern's selected activity bar item: 2026 Light's translucent selection is dark enough to
+   bury the amber status stripe. The list's muted texts take the theme's description colour in both schemes, moved 30% towards the foreground on
+   the selected row, where 2026 Dark's description colour is 3.8:1. Zoho's green, the priority dot and a source's off mark are darker in light,
+   to keep a mark's 3:1 on the selected row. */
+:root { --sb-github: #f0f6fc; --sb-pull-request: #a371f7; --sb-source-off: #8C8C8C; --sb-zoho: #089949; --sb-priority: #e8820c; --sb-content: var(--vscode-editor-background); --sb-chrome: var(--vscode-sideBar-background); --sb-chat-background: var(--sb-chrome); --sb-bar-background: var(--sb-chrome); --sb-row-selected: var(--vscode-list-activeSelectionBackground); --sb-row-muted: var(--vscode-descriptionForeground); --sb-tab-shade: 25%; }
 @media (prefers-color-scheme: light) {
-  :root { --sb-github: #1f2328; --sb-pull-request: #8250df; --sb-source-off: #8a8a8a; --sb-composer-background: color-mix(in srgb, var(--vscode-input-background) 50%, var(--vscode-sideBar-background)); --sb-chat-background: var(--vscode-editor-background); --sb-bar-background: var(--vscode-sideBar-background); --sb-row-selected: #E4E6F1; --sb-row-muted: #717171; --sb-tab-shade: 3.5%; }
+  :root { --sb-github: #1f2328; --sb-pull-request: #8250df; --sb-source-off: #6f6f6f; --sb-zoho: #07803c; --sb-priority: #b35c00; --sb-composer-background: var(--vscode-input-background); --sb-content: var(--vscode-editor-background); --sb-chrome: var(--vscode-sideBar-background); --sb-chat-background: var(--sb-chrome); --sb-bar-background: var(--sb-chrome); --sb-row-selected: #E4E6F1; --sb-tab-shade: 3.5%; }
 }
 body { color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; }
 /* The band at the page's top (#safe-top, below): the status bar's inset, 0 under an iPhone's opaque status bar. Everything at the top starts
@@ -95,7 +96,7 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 /* The list of work items, in its groups and rows (architecture.md § Web page). */
-.side { flex: none; width: 100%; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); }
+.side { flex: none; width: 100%; display: flex; flex-direction: column; background: var(--sb-content); border-right: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); }
 /* The list's header, one title row: the icons keep their width at the right. */
 .side-head { flex: none; }
 .list-header { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-height: 35px; padding: 0 4px 0 20px; background: var(--sb-bar-background); }
@@ -111,7 +112,7 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .list-header button.icon { flex: none; justify-content: center; min-width: 26px; height: 26px; }
 .source-logo { display: block; width: 16px; height: 16px; }
 svg.source-logo.github { color: var(--sb-github); }
-svg.source-logo.zoho { color: #089949; }
+svg.source-logo.zoho { color: var(--sb-zoho); }
 svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-icon-width); }
 .source-logo.off, svg.source-logo.off { color: var(--sb-source-off); }
 .header-separator { flex: none; width: 1px; height: 16px; margin: 0 4px; background: var(--vscode-panel-border); }
@@ -163,6 +164,14 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
 /* Pair a device (architecture.md § Remote access): the QR code on its own light square, the code large enough to type from, then the devices. */
 .pair { display: flex; flex-direction: column; align-items: center; text-align: center; }
 .pair-qr { width: 220px; height: 220px; margin-bottom: 12px; }
+.pair-address { box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; margin: 0 0 12px; }
+.pair-url { min-width: 0; padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; text-align: start; user-select: all; font-family: var(--vscode-editor-font-family, monospace); background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.15)); }
+/* Pair a device keeps its title, code and buttons in view: its device list scrolls in its own area, two rows high at least, and the sheet scrolls only where even that does not fit. */
+.sheet.pair-sheet { display: flex; flex-direction: column; }
+.pair-sheet > * { flex-shrink: 0; }
+.pair-sheet > .device-list { flex-shrink: 1; overflow-y: auto; overscroll-behavior: contain; }
+.pair-sheet > .device-list.many { min-height: 160px; }
+.pair-sheet .pair-qr { width: min(220px, 24vh); height: min(220px, 24vh); }
 .pair-code { margin: 0 0 8px; font: 600 24px var(--vscode-editor-font-family, monospace); letter-spacing: 2px; user-select: all; }
 .device-list { list-style: none; margin: 0 0 12px; padding: 0; }
 .device { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--vscode-widget-border, transparent); }
@@ -195,8 +204,8 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 /* A group's header is a light tint of the focus blue: chevron, the group's codicon, its title and its count. It stays pinned at the
    top of the list while the group's rows scroll under it, until the next group's header pushes it up; mixed with the list's background, so the
    bar is opaque and rows do not show through it. Rows and their menus scroll to below it. */
-.group-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--group-head-height); padding: 4px 8px 4px 6px; border: none; background: color-mix(in srgb, var(--vscode-focusBorder) 10%, var(--vscode-sideBar-background)); color: var(--vscode-foreground); text-align: left; cursor: pointer; }
-.group-head:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 16%, var(--vscode-sideBar-background)); }
+.group-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; width: 100%; min-height: var(--group-head-height); padding: 4px 8px 4px 6px; border: none; background: color-mix(in srgb, var(--vscode-focusBorder) 10%, var(--sb-content)); color: var(--vscode-foreground); text-align: left; cursor: pointer; }
+.group-head:hover { background: color-mix(in srgb, var(--vscode-focusBorder) 16%, var(--sb-content)); }
 .work-list .row, .work-list .row-menu { scroll-margin-top: var(--group-head-height); }
 .group-head .group-icon { font-size: 16px; }
 .group-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
@@ -212,7 +221,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .group-empty { margin: 0; padding: 6px 12px 4px 11px; color: var(--vscode-descriptionForeground); font-style: italic; }
 /* A row: three lines, each 18 px tall with 3 px between them, in its 13 px text (its pills' 12 px); a 1 px stripe on its left
    edge, inset so neighbouring stripes stay apart, in its status colour (--sb-status-* in theme.css). Colours: the foreground for
-   texts and marks, its muted grey (--sb-row-muted) for the namespace, time, comment and details, and the same colours on the selected row. */
+   texts and marks, its muted grey (--sb-row-muted) for the namespace, time, comment and details, and the same colours on the selected row, its muted grey a little lighter there (above). */
 .row { position: relative; display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 44px; padding: 5px 8px 6px 11px; border: none; border-top: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border)); background: transparent; color: var(--vscode-foreground); line-height: normal; text-align: left; cursor: pointer; }
 /* The first row in its band has no rule and no rule's 1 px. */
 .rows > li:first-child > .row { border-top: none; }
@@ -222,7 +231,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row.stripe-turn::before { background: var(--sb-status-turn); }
 .row:hover { background: var(--vscode-list-hoverBackground); }
 /* The selected row: the selection colour and its stripe the full height; no outline, so only a keyboard focus draws the focus ring. */
-.row.selected { background: var(--sb-row-selected); }
+.row.selected { --sb-row-muted: color-mix(in srgb, var(--vscode-descriptionForeground) 70%, var(--vscode-foreground)); background: var(--sb-row-selected); }
 .row.selected::before { top: 0; bottom: 0; }
 /* A dimmed row keeps its waiting questions at full strength, so their icon keeps its 3:1 contrast. */
 .row.dim > :not(.row-head), .row.dim > .row-head > :not(.questions) { opacity: 0.6; }
@@ -236,7 +245,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row.drop-below::after { bottom: -1px; }
 /* Line 1: the priority dot, the title, the waiting questions, the mic mark and the time at its end, muted; its texts at the line's top. */
 .row-head { display: flex; align-items: flex-start; gap: 6px; height: 18px; min-width: 0; }
-.row-head .priority { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: #e8820c; }
+.row-head .priority { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--sb-priority); }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 /* The mic mark before the time on the voice target's row: 8 px after the title. */
 .row-head .voice-mark { flex: none; align-self: center; margin-left: 2px; }
@@ -291,8 +300,8 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .row-line .pill[data-action]:hover { background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); }
 .row-line .pill.ticket.source-github, .row-line .pill.link.issue { border-color: var(--sb-github); background: color-mix(in srgb, var(--sb-github) 18%, transparent); }
 .row-line .pill.ticket.source-github[data-action]:hover, .row-line .pill.link.issue:hover { background: color-mix(in srgb, var(--sb-github) 32%, transparent); }
-.row-line .pill.ticket.source-zoho { border-color: #089949; background: color-mix(in srgb, #089949 18%, transparent); }
-.row-line .pill.ticket.source-zoho[data-action]:hover { background: color-mix(in srgb, #089949 32%, transparent); }
+.row-line .pill.ticket.source-zoho { border-color: var(--sb-zoho); background: color-mix(in srgb, var(--sb-zoho) 18%, transparent); }
+.row-line .pill.ticket.source-zoho[data-action]:hover { background: color-mix(in srgb, var(--sb-zoho) 32%, transparent); }
 .row-line .pill.link.pr { border-color: var(--sb-pull-request); background: color-mix(in srgb, var(--sb-pull-request) 18%, transparent); }
 .row-line .pill.link.pr:hover { background: color-mix(in srgb, var(--sb-pull-request) 32%, transparent); }
 .row-line .pill.link.mentioned { border-color: var(--sb-row-muted); background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent); color: var(--sb-row-muted); }
@@ -345,7 +354,7 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
  * a backdrop dims the page under it and takes the press that closes it.
  */
 .header > .list-toggle, .sliver { display: none; }
-.sliver { position: fixed; top: 0; bottom: 0; left: env(safe-area-inset-left); z-index: var(--sb-z-sliver); width: 1px; background: var(--vscode-sideBar-background); }
+.sliver { position: fixed; top: 0; bottom: 0; left: env(safe-area-inset-left); z-index: var(--sb-z-sliver); width: 1px; background: var(--sb-content); }
 .sliver > i { position: absolute; left: 0; width: 1px; }
 .sliver > .stripe-warning { background: var(--sb-status-warning); }
 .sliver > .stripe-error { background: var(--sb-status-error); }
@@ -389,12 +398,13 @@ button.picker .picker-text > * { overflow: hidden; text-overflow: ellipsis; whit
 button.picker .picker-session { font-size: 11px; line-height: 13px; font-weight: normal; color: var(--vscode-descriptionForeground); }
 button.picker > .codicon, button.picker > .provider, button.picker > .count, .header > button.icon { flex: none; }
 .provider { flex: none; display: inline-flex; align-items: center; color: var(--vscode-foreground); font-size: 16px; }
-/* Claude's mark in its brand colour, #D97757, on no background of its own: 5.7:1 on Dark Modern's side bar (#181818) and 5.3:1 on its menus (#1F1F1F). It keeps
-   that colour on a hovered or focused session dropdown row, as Codex's mark keeps its own (the operator's decision). On a pressed button's blue and on
-   Light Modern's greys, where it would be under 3:1, it takes the text colour around it. */
+/* Claude's mark in its brand colour, #D97757, on no background of its own: 5.6:1 on 2026 Dark's side bar (#191A1B) and 5.2:1 on its menus (#202122). It keeps
+   that colour on a hovered or focused session dropdown row, as Codex's mark keeps its own (the operator's decision). In light it stays orange, a
+   darker #C96442, 3.7:1 on 2026 Light's side bar, 3.9:1 on its menus and 3.1:1 on the selected row, where #D97757 is 2.5:1 (operator decision
+   2026-11-26). On a pressed button's blue it takes the text colour around it. */
 :is(.provider, .provider-option-mark)[aria-label="Claude"] { color: #D97757; }
 [aria-pressed="true"] :is(.provider, .provider-option-mark)[aria-label="Claude"] { color: inherit; }
-@media (prefers-color-scheme: light) { :is(.provider, .provider-option-mark)[aria-label="Claude"] { color: inherit; } }
+@media (prefers-color-scheme: light) { :is(.provider, .provider-option-mark)[aria-label="Claude"] { color: #C96442; } }
 /* The view options menu's Persona… row dims its icon while the persona's tone waits for a resume. */
 .persona-row.pending .menu-gutter .codicon { opacity: 0.6; }
 button.icon, a.icon { display: inline-flex; align-items: center; border: none; background: transparent; color: var(--vscode-icon-foreground); padding: 3px; border-radius: 4px; cursor: pointer; }
@@ -478,7 +488,7 @@ button.picker > .codicon-chevron-down { order: 2; }
 .tab:hover { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); }
 .tab.selected { color: var(--vscode-panelTitle-activeForeground); background: var(--sb-tab-surface); border-top-color: var(--vscode-panelTitle-activeBorder); border-bottom-color: var(--sb-tab-surface); }
 .main { --sb-tab-surface: var(--sb-chat-background); }
-.detail { --sb-tab-surface: var(--vscode-sideBar-background); }
+.detail { --sb-tab-surface: var(--sb-content); }
 .main, .detail { --sb-tab-strip: color-mix(in srgb, var(--sb-tab-surface), #000 var(--sb-tab-shade)); }
 /* An artifact's tab has its kind's icon, its title cut with an ellipsis, and a close mark. */
 .tab:has(> .tab-close) { min-width: calc(var(--sb-tab-pad) + 23px + var(--sb-tab-label-least) + var(--sb-tab-close-room)); }
@@ -563,7 +573,7 @@ button.picker > .codicon-chevron-down { order: 2; }
 .delivery.uncertain { color: var(--vscode-editorWarning-foreground); }
 .meta .resend { flex: none; padding: 0; border: none; background: transparent; color: var(--vscode-textLink-foreground); font: inherit; cursor: pointer; }
 .meta .resend:hover { text-decoration: underline; }
-.day { display: flex; align-items: center; gap: 10px; color: var(--vscode-disabledForeground); font-size: 0.9em; }
+.day { display: flex; align-items: center; gap: 10px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
 .day::before, .day::after { content: ""; flex: 1; height: 1px; background: currentColor; opacity: 0.5; }
 .message { display: flex; flex-direction: column; align-items: flex-end; }
 .message .bubble { display: flex; flex-direction: column; align-items: flex-end; max-width: 85%; }
@@ -822,7 +832,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 .menu-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .menu-description { font-size: 0.85em; color: var(--vscode-descriptionForeground); white-space: normal; }
 .menu-empty { padding: 8px; text-align: center; color: var(--vscode-descriptionForeground); }
-/* The voice's cluster beside the mic and Send: Speak replies as an icon, or Talk here alone while the voice is elsewhere, whose label is cut short
+/* The voice's cluster beside the mic and Send: Spoken replies as an icon, or Talk here alone while the voice is elsewhere, whose label is cut short
    rather than pushing Send off a narrow footer. */
 .voice-controls { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .voice-controls .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 6px; border: none; border-radius: 4px; background: none; color: var(--vscode-descriptionForeground); font-size: 0.85em; cursor: pointer; }
@@ -1032,7 +1042,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 #root.off-conversation #note, #root.off-conversation #composer { display: none; }
 :where(html:not(.phone)) #root.wide > .main { flex: 0 1 var(--chat-width, 940px); }
 :where(html:not(.phone)) #root.wide > .chat-sash { display: block; }
-:where(html:not(.phone)) #root.wide > .detail { display: flex; flex: 1 1 360px; flex-direction: column; min-width: 360px; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
+:where(html:not(.phone)) #root.wide > .detail { display: flex; flex: 1 1 360px; flex-direction: column; min-width: 360px; background: var(--sb-content); border-left: 1px solid var(--vscode-panel-border); }
 /* Maximized (main.ts), the column covers the whole page, the list and the conversation too, which keep their places under it; its strip's last
    button restores it. */
 .tab.panel-max { flex: none; min-width: 0; max-width: none; justify-content: center; margin-left: auto; padding: 0 10px; border-right: none; cursor: pointer; }
@@ -1083,7 +1093,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 /* Why it ended or did not type, with Reconnect once it ended. */
 .console-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; }
 .console-foot[hidden] { display: none; }
-.console-note { flex: 1; min-width: 0; margin: 0; color: var(--vscode-errorForeground, #f85149); }
+.console-note { flex: 1; min-width: 0; margin: 0; color: var(--vscode-errorForeground); }
 /* The keys a phone's keyboard lacks (console.ts `CONSOLE_KEYS`), on a bar under the screen, only on a touch screen while the console types. A phone
    keeps the page's layout when its keyboard opens, so console.ts sets --sb-keys-lift, how far the keyboard covers the bar, and the console pads its
    bottom by it, raising the bar over the keyboard and shrinking the screen above it; where the browser lays its keyboard over the page instead
@@ -1122,7 +1132,7 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 .history-view button.hist-link:hover { background: var(--vscode-list-hoverBackground); text-decoration: underline; }
 .hist-link.off { color: var(--vscode-descriptionForeground); cursor: default; }
 .hist-hero-links .hist-link { padding: 2px 8px; }
-.hist-toolbar { position: sticky; top: -16px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; background: var(--vscode-editor-background); border-bottom: 1px solid var(--vscode-widget-border, transparent); }
+.hist-toolbar { position: sticky; top: -16px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; background: var(--sb-content); border-bottom: 1px solid var(--vscode-widget-border, transparent); }
 .hist-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .history-view button.hist-chip { border-radius: 12px; padding: 2px 10px; background: transparent; color: var(--vscode-descriptionForeground); border-color: var(--vscode-widget-border, var(--vscode-descriptionForeground)); }
 .history-view button.hist-chip.on { background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent); color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
@@ -1153,7 +1163,7 @@ ol.hist-timeline { list-style: none; margin: 0; padding: 4px 12px 10px; }
 .hist-entry:hover { background: var(--vscode-list-hoverBackground); }
 .hist-entry::before { content: ''; position: absolute; left: 81px; top: 0; bottom: 0; border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 15%, transparent); }
 .hist-entry time { padding-top: 2px; text-align: right; font-family: var(--vscode-editor-font-family); font-size: 12px; color: var(--vscode-descriptionForeground); }
-.hist-dot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--vscode-editor-background); box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
+.hist-dot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--sb-content); box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
 .hist-entry-body { min-width: 0; padding-top: 2px; }
 .hist-text { line-height: 18px; overflow-wrap: anywhere; }
 .hist-gap { padding-top: 2px; font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
@@ -1213,12 +1223,12 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 /* The connection (architecture.md § Web page, Connection; connectionView.tsx): the dot in the heads, the offline banner over the list and the
    conversation, the dimmed content it explains, the screen in the page's place, and the Update ready chip. */
 .conn-dot { flex: none; display: inline-block; width: 8px; height: 8px; margin: 0 8px 0 4px; border-radius: 50%; align-self: center; }
-.conn-dot.live { background: var(--vscode-testing-iconPassed, #73c991); }
-.conn-dot.waiting { background: var(--vscode-editorWarning-foreground, #cca700); }
-.conn-dot.off { background: var(--vscode-descriptionForeground, #9d9d9d); }
+.conn-dot.live { background: var(--vscode-testing-iconPassed); }
+.conn-dot.waiting { background: var(--vscode-editorWarning-foreground); }
+.conn-dot.off { background: var(--vscode-descriptionForeground); }
 .header > .conn-dot { margin-left: 2px; }
 .conn-banner-host:empty { display: none; }
-.conn-banner { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; color: var(--vscode-editorWarning-foreground, #cca700); background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 14%, var(--vscode-editor-background)); border-bottom: 1px solid var(--vscode-panel-border, transparent); }
+.conn-banner { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; color: var(--vscode-editorWarning-foreground); background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 14%, var(--vscode-editor-background)); border-bottom: 1px solid var(--vscode-panel-border, transparent); }
 .conn-banner-text { flex: 1; min-width: 0; }
 .conn-banner button, .conn-update button, .conn-primary { font: inherit; border: 0; border-radius: 2px; padding: 3px 10px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; text-decoration: none; }
 .conn-banner button:hover, .conn-update button:hover, .conn-primary:hover { background: var(--vscode-button-hoverBackground); }
@@ -1261,7 +1271,7 @@ button.picker.opening-title { background: transparent; cursor: default; font-wei
 .iframe-toolbar select { flex: 1; min-width: 100px; max-width: 100%; }
 .iframe-toolbar button { min-height: 30px; }
 .iframe-warning { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.iframe-browser iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--vscode-editor-background); }
+.iframe-browser iframe { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--sb-content); }
 .iframe-browser .iframe-slot { flex: 1; min-height: 0; width: 100%; }
 .iframe-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .iframe-actions button { min-height: 30px; }

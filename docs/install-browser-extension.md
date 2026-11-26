@@ -20,7 +20,7 @@ Load it in the same browser and profile as the paired page: the extension reache
 
 ## Embedded browser tabs
 
-Enable **Embedded browser tabs** (`web.iframeBrowser`, off by default during rollout) under Settings → General → Web page on the hub computer, then reload. Load the current `extensions/chrome/dist`, or download a fresh copy from the paired page after updating the hub. Use Chrome or Edge 145 or later in the same profile as the signed-in Switchboard page. No separate extension pairing is needed.
+Enable **Embedded browser tabs** (`web.iframeBrowser`, off by default during rollout) under Settings → Advanced → Experiments on the hub computer, then reload. Load the current `extensions/chrome/dist`, or download a fresh copy from the paired page after updating the hub. Use Chrome or Edge 145 or later in the same profile as the signed-in Switchboard page. No separate extension pairing is needed.
 
 Select a link tab and **Open with sign-in support** to open the existing Switchboard page inside its extension host. It reuses that host for the hub and opens the selected work item. Ctrl+click a work item's link pill to open the linked site outside and sign in using the same profile, then close and reopen its link tab. The hosted view fills the tab content area without an extra toolbar or hint. Scroll the link strip with a trackpad or Shift+wheel; keyboard focus also reveals clipped tabs. Each link has a closable tab; visited frames keep their navigation, scroll position and forms while another tab shows. Closing a link or selecting another work item disposes its frame. Selecting a work item creates tabs for its ticket URL and every attached HTTP or HTTPS link. A normal link-pill click selects its work item and opens or focuses that tab. Ctrl+click (or Meta+click) opens externally without selecting: in the default browser on this computer, or an outside tab on a paired device.
 
@@ -44,5 +44,17 @@ No installer, Node or local hub is needed. The file opens this page's hub throug
 For a browser installed only for your Windows user or in the other Program Files folder, expand Browser installation and choose its location. If Windows cannot find the browser, choose the matching location and download again. Environment variables resolve these locations on the computer opening the file. An extension cannot read the native profile directory automatically.
 
 The shortcut has Switchboard's icon and a Windows app identity matched to the selected browser profile. The extension host supplies a multi-size icon for its window. This does not register an installed PWA or write your Start menu automatically. Each launch can create another window.
+
+### App shortcut on Linux
+
+On a Linux computer with GNOME on Wayland and Google Chrome:
+
+1. Open the signed-in Switchboard web page in Chrome, in the profile with the extension.
+2. Choose More Actions → Download app shortcut…, select Linux, enter the profile directory as for Windows and select Download shortcut.
+3. Extract `switchboard-shortcut.zip` and move `switchboard.desktop` to `~/.local/share/applications`.
+4. Keep `Switchboard/switchboard.png` in your Downloads folder; the launcher names its actual location.
+5. Open Switchboard from Activities, then right-click its dock icon and choose Pin to Dash.
+
+The launcher runs `google-chrome` from your PATH. Its window groups under the launcher's icon because the launcher names the window's app ID, which follows the profile directory; download a new launcher if the hub origin, profile or icon location changes. A Chrome web app installed from the address bar is a separate app without embedded browser tabs; remove it if you use this launcher. Chromium, Edge, Flatpak or Snap builds of Chrome, X11 sessions and other desktops are not supported.
 
 Open the app once while connected to verify the hub and warm its shell cache. Later offline starts and reloads may show that cached shell for the verified origin; it contains no work items or conversations. Website frames stay hidden until live origin, setting and sign-in checks pass again. An unknown origin or explicit refusal cannot use the offline fallback; a refusal forgets the earlier verification. When connectivity returns, the open app verifies again and reconnects. Desktop notification permission must still be granted from the ordinary page.

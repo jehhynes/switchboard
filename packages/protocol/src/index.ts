@@ -27,7 +27,8 @@ export interface SessionView {
   provider?: string;
   requests?: NativeRequest[];
   /** While the session waits for a usage or rate limit to reset: when it resumes, and `retry` for the hub's next attempt. */
-  limit?: { until: number; retry: boolean } | null;
+  /** `throttle` for a provider's rate limit rather than a usage limit (architecture.md § Rate limits). */
+  limit?: { until: number; retry: boolean; throttle?: boolean } | null;
   /** The session's context size, null while the hub cannot read it (architecture.md § Context meter). */
   context?: ContextView | null;
   /**
@@ -423,6 +424,8 @@ export interface DiffData {
   tooLarge: 'sides' | 'patch' | null;
   /** True for the patch alone, asked for with `sides=0`: the sides are read with a full `diff` when an unchanged region is expanded. */
   partial?: true;
+  /** Asked for with `ws=ignore`, and the file differs only in whitespace: the patch is empty. */
+  same?: true;
 }
 
 /** The `file` answer: a file read whole, on disk or at the base. */
@@ -432,4 +435,65 @@ export interface FileData {
   contents: string | null;
   binary: boolean;
   tooLarge: boolean;
+  /** The file's size, null or left out when unknown. */
+  bytes?: number | null;
+  /** A picture's or a PDF's media type, whose bytes `file-raw` sends; null or left out for any other file. */
+  media?: string | null;
+}
+
+export type PullState = 'open' | 'merged' | 'closed' | 'queued';
+
+/** A branch the current branch is stacked on (`below`), or one stacked on it in a GitHub stack (`above`), in the `stack` answer (PRD R128). */
+export interface StackLink {
+  name: string;
+  relation: 'below' | 'above';
+  source: 'github-stack' | 'pr-base' | 'reflog' | 'unknown';
+  pr?: { number: number; state: PullState; url: string };
+  tip: string | null;
+  tipSource: 'local' | 'github' | null;
+  forkPoint: string | null;
+  behind: number | null;
+  lacks?: number | null;
+  upstreamMissing: boolean;
+  branchDeleted: boolean;
+  notInClone: boolean;
+  localDiffers: boolean;
+  workItem?: { id: number; title: string };
+  commitIds: string[];
+  more: boolean;
+  actions: { expand: boolean; diffSince: boolean };
+}
+
+/** The `stack` answer: the current branch's stacked bases, measured against HEAD. */
+export interface StackData {
+  scopeGen: number;
+  /** The repository's name and the worktree's top folder. */
+  repo: string;
+  root: string;
+  branch: string | null;
+  head: string;
+  commitIds: string[];
+  /** Each listed commit's first parent, subject and time, and the paths it changes. */
+  infos?: (CommitInfo & { files?: string[] })[];
+  more: boolean;
+  incomplete: boolean;
+  github: { state: 'fresh' | 'stale' | 'unavailable' | 'pending' | 'none'; observedAt: number | null; reason?: string };
+  pr?: { number: number; state: PullState; url: string };
+  links: StackLink[];
+  main: { ref: string | null; behind: number | null; fetchedAt: number | null };
+}
+
+/** The `tree` answer: the paths git lists in the worktree, sorted. */
+export interface TreeData {
+  scopeGen: number;
+  paths: string[];
+  more: boolean;
+}
+
+/** The `search` answer: matching lines by file. */
+export interface SearchData {
+  scopeGen: number;
+  gen: number;
+  files: { path: string; matches: { line: number; text: string }[] }[];
+  more: boolean;
 }

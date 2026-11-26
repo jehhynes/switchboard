@@ -26,6 +26,8 @@ describe('Settings schedules (architecture.md § Web page)', () => {
   };
 
   beforeEach(() => {
+    // A desktop's width, whose navigation opens a group under its entry; the phone's drill-down has tests of its own.
+    window.innerWidth = 1280;
     vi.useFakeTimers();
     posts = [];
     host = document.createElement('div');
@@ -54,7 +56,20 @@ describe('Settings schedules (architecture.md § Web page)', () => {
     return pane;
   };
   const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
-  const entry = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label)!;
+  const entry = (label: string) => {
+    const find = () => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label);
+
+    // A group's entries show once it is open: the lists' groups first, then a namespace's, which opens its table.
+    for (const selector of ['.settings-nav-entry.group[aria-expanded="false"]:not([data-page])', '.settings-nav-entry.group[aria-expanded="false"]']) {
+      let closed: HTMLButtonElement | null;
+
+      while (find() === undefined && (closed = host.querySelector<HTMLButtonElement>(selector)) !== null) {
+        closed.click();
+      }
+    }
+
+    return find()!;
+  };
   const control = <T extends HTMLElement>(path: string) => host.querySelector<T>(`[data-path="${path}"] input, [data-path="${path}"] select, [data-path="${path}"] textarea`)!;
   const checked = () => posts.filter((one) => one.name === 'page-settings-check').at(-1)!.body['settings'] as { schedules: Record<string, unknown> };
   const pick = (path: string, value: string) => {
@@ -68,10 +83,11 @@ describe('Settings schedules (architecture.md § Web page)', () => {
   it('lists the schedules in file order under Schedules with New schedule, after the playbooks', async () => {
     await open();
 
-    const labels = texts('.settings-nav-entry .settings-nav-label');
-
-    expect(texts('.settings-nav-heading').slice(0, 3)).toEqual(['Sources', 'Playbooks', 'Schedules']);
-    expect(labels.slice(labels.indexOf('+ New playbook') + 1, labels.indexOf('+ New schedule') + 1)).toEqual(['weekly', 'adhoc', '+ New schedule']);
+    expect(texts('.settings-nav-heading')[0]).toBe('Work');
+    expect(texts('.settings-nav-category:first-child .settings-nav-list > .settings-nav-entry .settings-nav-label').slice(-2)).toEqual(['Playbooks', 'Schedules']);
+    host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="schedules"]')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(texts('.settings-nav-children[aria-label="Schedules"] .settings-nav-label')).toEqual(['weekly', 'adhoc', '+ New schedule']);
   });
 
   it("shows the day and time only for the period that uses them, and a new period drops the old one's day, and by hand its time", async () => {
@@ -79,7 +95,9 @@ describe('Settings schedules (architecture.md § Web page)', () => {
     entry('weekly').click();
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(texts('.settings-caption label')).toEqual(['Playbook', 'Repo root', 'Runs', 'Day', 'Time']);
+    // The fields the hub needs say so after their labels, and an example shows as one.
+    expect(texts('.settings-caption label')).toEqual(['PlaybookRequired', 'Repo rootRequired', 'Runs', 'DayRequired', 'TimeRequired']);
+    expect(control<HTMLInputElement>('schedules.weekly.at').placeholder).toBe('e.g. 09:00');
     // Only task playbooks run on a schedule.
     expect([...control<HTMLSelectElement>('schedules.weekly.playbook').options].map((one) => one.value)).toEqual(['', 'dev:clean']);
     expect([...control<HTMLSelectElement>('schedules.weekly.day').options].map((one) => one.value)).toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
@@ -87,13 +105,13 @@ describe('Settings schedules (architecture.md § Web page)', () => {
 
     pick('schedules.weekly.every', 'month');
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
-    expect(texts('.settings-caption label')).toEqual(['Playbook', 'Repo root', 'Runs', 'Day of the month', 'Time']);
+    expect(texts('.settings-caption label')).toEqual(['PlaybookRequired', 'Repo rootRequired', 'Runs', 'Day of the monthRequired', 'TimeRequired']);
     expect(control<HTMLInputElement>('schedules.weekly.day').value).toBe('');
     expect(checked().schedules['weekly']).toEqual({ playbook: 'dev:clean', repoRoot: 'D:/r', every: 'month', at: '09:00' });
 
     pick('schedules.weekly.every', '');
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
-    expect(texts('.settings-caption label')).toEqual(['Playbook', 'Repo root', 'Runs']);
+    expect(texts('.settings-caption label')).toEqual(['PlaybookRequired', 'Repo rootRequired', 'Runs']);
     expect(checked().schedules['weekly']).toEqual({ playbook: 'dev:clean', repoRoot: 'D:/r' });
 
     // A playbook the file no longer has stays chosen, marked missing.
@@ -102,7 +120,7 @@ describe('Settings schedules (architecture.md § Web page)', () => {
     expect(control<HTMLSelectElement>('schedules.adhoc.playbook').selectedOptions[0]?.textContent).toBe('dev:gone (missing)');
   });
 
-  it('New schedule refuses a taken name and adds an empty entry; Remove schedule takes it out of the draft and opens General', async () => {
+  it('New schedule refuses a taken name and adds an empty entry; Remove schedule takes it out of the draft and opens Sessions', async () => {
     await open();
     entry('+ New schedule').click();
     await vi.advanceTimersByTimeAsync(0);
@@ -129,9 +147,9 @@ describe('Settings schedules (architecture.md § Web page)', () => {
 
     press('Remove schedule');
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
-    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
     expect('nightly' in checked().schedules).toBe(false);
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    expect(host.querySelector('.settings-bar')).toBeNull();
   });
 
   it("places the hub's errors for an incomplete schedule on its fields and its page, and Save refuses while they stand", async () => {

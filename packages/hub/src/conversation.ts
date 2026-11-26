@@ -79,7 +79,7 @@ export interface SessionView {
    * While the session waits for a usage or rate limit to reset (architecture.md § Rate limits): when it resumes, and `retry` when that is the hub's
    * next attempt rather than the reset. Absent from an older hub.
    */
-  limit?: { until: number; retry: boolean } | null;
+  limit?: { until: number; retry: boolean; throttle?: boolean } | null;
   /** The session's context size (architecture.md § Context meter), null while not known. Absent from an older hub. */
   context?: ContextView | null;
   /**
@@ -155,7 +155,7 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
       : session.state === 'ended' && !resumable
         ? // The page's Resume resumes a held session (PRD R109); an app-server session without a thread has nothing to resume.
           held
-          ? 'The session has ended. Resume continues it.'
+          ? 'The session has ended. Resume it to send a message.'
           : SESSION_ENDED
         : conversation === 'read-only'
           ? 'Switchboard cannot track this session while Install hooks is off.'
@@ -180,14 +180,16 @@ export function sessionView(session: Session, current: boolean, hooks: boolean, 
 }
 
 /** When a held session waiting on its limit resumes: Claude Code's own reset when it waits itself, else the hub's next attempt. */
-function limitOf(session: Session): { until: number; retry: boolean } | null {
+function limitOf(session: Session): { until: number; retry: boolean; throttle?: boolean } | null {
   const limit = session.rateLimit;
 
   if (limit == null || !waitsOnLimit(session) || (session.codeMode !== true && session.execution !== 'app-server')) {
     return null;
   }
 
-  return limit.cli && limit.resetsAt !== null && limit.attempts === 0 ? { until: limit.resetsAt, retry: false } : { until: limit.nextAt, retry: limit.resetsAt === null || limit.attempts > 0 };
+  const throttle = limit.kind === 'throttle' ? { throttle: true } : {};
+
+  return limit.cli && limit.resetsAt !== null && limit.attempts === 0 ? { until: limit.resetsAt, retry: false, ...throttle } : { until: limit.nextAt, retry: limit.resetsAt === null || limit.attempts > 0, ...throttle };
 }
 
 /** A session's persona as its view shows it, or null with voice off, an empty roster or a persona no longer in it. */
@@ -2304,7 +2306,7 @@ export class ConversationService {
       return { status: 400, body: { error: `No schedule is named ${schedule}.` } };
     }
 
-    const made = this.deps.runSchedule?.(schedule) ?? { refused: 'This hub creates no work items from the page.' };
+    const made = this.deps.runSchedule?.(schedule) ?? { refused: 'This Switchboard cannot start new sessions from the page.' };
 
     if ('refused' in made) {
       return { status: 409, body: { error: made.refused } };
@@ -2942,7 +2944,7 @@ export class ConversationService {
 
   /**
    * The voice commands (architecture.md § Voice): `talk-here` moves the voice to the window's selected conversation's session, `stop-speaking`
-   * and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Speak replies on or off. Refused with 403 outside the
+   * and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Spoken replies on or off. Refused with 403 outside the
    * window's scope, 409 for a stale `scopeGen` and with the voice's refusal, and 404 while voice is not part of this hub.
    */
   voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic' | 'mic-timing' | 'composer', body: Record<string, unknown>): { status: number; body: unknown } {
@@ -3130,7 +3132,7 @@ export class ConversationService {
     }
 
     const workItemId = scope!.workItemId!;
-    const made = this.deps.newItemSession?.(workItemId, text, provider) ?? { refused: 'The conversation was not started.' };
+    const made = this.deps.newItemSession?.(workItemId, text, provider) ?? { refused: 'The session was not started.' };
 
     if ('refused' in made) {
       return { status: 409, body: { error: made.refused } };

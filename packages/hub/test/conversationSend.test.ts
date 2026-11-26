@@ -60,7 +60,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(held.reservations).toEqual([{ sessionId: 's2', launch: 'launch-1' }]);
 
     store.updateSession('s2', { state: 'ended' });
-    expect(service.continueAfterLimit('s2', 'Continue.')).toBe('The session has ended. Resume continues it.');
+    expect(service.continueAfterLimit('s2', 'Continue.')).toBe('The session has ended. Resume it to send a message.');
     expect(service.continueAfterLimit('nope', 'Continue.')).toBe('The session has ended.');
     expect(held.writes).toHaveLength(2);
   });
@@ -346,7 +346,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     await settled(() => expect(store.message((typed.body as { message: { id: string } }).message.id)?.delivery).toBe('sent'));
   });
 
-  it('runs the voice commands for the window only: Talk here, Stop speaking, Speak replies and Replay, with their refusals', () => {
+  it('runs the voice commands for the window only: Talk here, Stop speaking, Spoken replies and Replay, with their refusals', () => {
     const { voice, calls } = fakeVoice();
     const { service, open, view } = setupSend(new FakeHeld(), undefined, voice);
     const mine = open(2);
@@ -430,7 +430,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(refused({ scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
     expect(refused({ text: '  \n ' })).toEqual({ status: 400, body: { error: 'The message is empty.' } });
     expect(refused({ text: 'x'.repeat(10_001) })).toEqual({ status: 400, body: { error: 'The message is longer than 10,000 characters.' } });
-    expect(refused({ launch: 'launch-0' })).toEqual({ status: 409, body: { error: 'The session was resumed since the view showed it; send the message again.' } });
+    expect(refused({ launch: 'launch-0' })).toEqual({ status: 409, body: { error: 'The session restarted while you typed. Send the message again.' } });
     held.cannotType_ = 'The terminal holder is from an older build and cannot type. To switch to this build, run hub.js holder stop --all.';
     expect(refused({})).toEqual({ status: 409, body: { error: held.cannotType_ } });
     held.cannotType_ = null;
@@ -438,7 +438,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(refused({})).toEqual({ status: 409, body: { error: 'Switchboard cannot track this session while Install hooks is off.' } });
     setHooks(true);
     store.updateSession('s2', { state: 'ended' });
-    expect(refused({})).toEqual({ status: 409, body: { error: 'The session has ended. Resume continues it.' } });
+    expect(refused({})).toEqual({ status: 409, body: { error: 'The session has ended. Resume it to send a message.' } });
 
     expect(store.conversation('s2', null, 10).items).toEqual([]);
     expect(held.writes).toEqual([]);
@@ -661,7 +661,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     expect(held.writes).toEqual(['\u0015']);
     expect(given(later).map((one) => [one.id, one.error]).sort()).toEqual([
       ['m-old', 'Switchboard restarted while the message was being typed and could not read its input box: check the terminal before sending it again.'],
-      ['m-resumed', 'The session was resumed since the view showed it; send the message again.'],
+      ['m-resumed', 'The session restarted while you typed. Send the message again.'],
     ]);
 
     // A window that closed while its message was settled gets it back when a window shows the session again.

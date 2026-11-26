@@ -16,22 +16,22 @@
 <style>
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; color-scheme: dark; background: {{themeColor}}; }
 html, body { height: 100%; margin: 0; }
-#boot { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; background: {{themeColor}}; color: #9d9d9d; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; }
+#boot { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 24px; background: {{themeColor}}; color: #8c8c8c; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; }
 #boot img { display: block; width: 48px; height: 48px; margin: 0 auto 14px; }
-#boot h2 { margin: 0 0 14px; color: #cccccc; font-size: 17px; font-weight: 600; }
-#boot button { font: inherit; border: 0; border-radius: 2px; padding: 6px 14px; color: #ffffff; background: #0078d4; }
+#boot h2 { margin: 0 0 14px; color: #bfbfbf; font-size: 17px; font-weight: 600; }
+#boot button { font: inherit; border: 0; border-radius: 2px; padding: 6px 14px; color: #ffffff; background: #297aa0; }
 #boot .boot-failed, #boot.failed .boot-wait { display: none; }
 #boot.failed .boot-failed { display: block; }
 @media (prefers-color-scheme: light) {
   html { color-scheme: light; background: {{themeColorLight}}; }
-  #boot { background: {{themeColorLight}}; color: #616161; }
-  #boot h2 { color: #3b3b3b; }
-  #boot button { background: #005fb8; }
+  #boot { background: {{themeColorLight}}; color: #606060; }
+  #boot h2 { color: #202020; }
+  #boot button { background: #0069cc; }
 }
 </style>
 </head>
 <body>
-<div id="boot" role="status"><div><img src="icon-192.png" alt=""><p class="boot-wait">Connecting…</p><div class="boot-failed"><h2>Can't reach Switchboard</h2><button type="button">Try now</button></div></div></div>
+<div id="boot" role="status"><div><img src="icon-192.png" alt=""><p class="boot-wait">Connecting…</p><div class="boot-failed"><h2>Switchboard is not reachable</h2><button type="button">Try now</button></div></div></div>
 <script>{{boot}}</script>
 <div id="safe-top" aria-hidden="true"></div>
 <div id="root"></div>

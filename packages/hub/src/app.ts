@@ -40,6 +40,9 @@ import { launcher } from './launch.js';
 import type { Launcher } from './launch.js';
 import { pageAsset } from './pageAssets.js';
 import { PageChanges, VIEWED_REFUSED } from './changes.js';
+import { githubGhPath, PageStack, pullLinkOf } from './stack.js';
+import { PageTree } from './tree.js';
+import { spawnGh } from '@switchboard/github';
 import { needsMessage, needsReason, newlyNeeding, rowFor } from './needs.js';
 import { systemNotifier } from './systemAlerts.js';
 import { installedProviders } from './installed.js';
@@ -554,7 +557,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
    */
   const commandInWindow = async (workItemId: number, label: string): Promise<string | null> => {
     const row = dockRowOf(views().dock, workItemId);
-    const built = row === null ? { refused: 'The work item is gone.' } : pageCommandOf(row, label);
+    const built = row === null ? { refused: 'This work item is no longer in the list.' } : pageCommandOf(row, label);
 
     if ('refused' in built) {
       return built.refused;
@@ -610,6 +613,15 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       }
     },
   });
+  // The Changes tab's stacked bases (PRD R128): git in the page's selected conversation's folder, and GitHub through gh, read-only.
+  const pageStack = new PageStack({
+    isPage: (key) => scopes.isPage(key),
+    scope: (key) => scopes.scope(key),
+    gh: (repo) => spawnGh(githubGhPath(config.settings.sources, repo)),
+    pullLink: (workItemId) => pullLinkOf(store, workItemId),
+    workItemAt: (path) => store.workItemAtWorktree(path),
+  });
+  const pageTree = new PageTree({ isPage: (key) => scopes.isPage(key), scope: (key) => scopes.scope(key) });
   const pageConsole = new PageConsole({
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
@@ -660,7 +672,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const { refused } = runtime.send({ type: 'item-session', workItemId, prompt, ...(provider === undefined ? {} : { provider }) });
       const made = store.sessionsFor(workItemId).at(-1);
 
-      return refused === null && made !== undefined && made.id !== before ? { sessionId: made.id } : { refused: refused ?? 'The conversation was not started.' };
+      return refused === null && made !== undefined && made.id !== before ? { sessionId: made.id } : { refused: refused ?? 'The session was not started.' };
     },
     newStandalone: (folder, provider, model, prompt) => madeAdhoc({ type: 'new-session', repoRoot: folder, provider, model, ...(prompt === null ? {} : { prompt }) }, 'The session was not made.'),
     newTask: (folder, provider, model, prompt, start) => madeAdhoc({ type: 'adhoc', prompt, repoRoot: folder, start, provider, model }, 'The task was not made.'),
@@ -723,7 +735,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     // The page's row actions run the hub's own controls, rechecked against the row as it is now (architecture.md § Web page).
     rowAction: (workItemId, label, extra) => {
       const row = dockRowOf(views().dock, workItemId);
-      const built = row === null ? { refused: 'The work item is gone.' } : pageActionEvent(row, label, extra);
+      const built = row === null ? { refused: 'This work item is no longer in the list.' } : pageActionEvent(row, label, extra);
 
       if ('refused' in built) {
         return built.refused;
@@ -731,7 +743,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       const parsed = parseAction(built.event);
 
-      return parsed === null ? 'The work item no longer offers this.' : runtime.send(parsed).refused;
+      return parsed === null ? 'This work item can no longer do that.' : runtime.send(parsed).refused;
     },
     // The page's Resume: the attach terminal's resume of a Code Mode session or an ended registered one, without the terminal, or a Codex
     // app-server thread's.
@@ -779,7 +791,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       const target = row === null ? null : rowOpenUrl(row, url);
 
       if (target === null) {
-        return row === null ? 'The work item is gone.' : 'The work item no longer links to this.';
+        return row === null ? 'This work item is no longer in the list.' : 'This work item no longer links to this.';
       }
 
       try {
@@ -887,7 +899,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
    */
   const restartHolder = (detail: unknown): string | null => {
     if (typeof detail === 'string' && detail !== views().dock.holderNotice?.confirm?.detail) {
-      return 'The held sessions changed since you were asked. Press Restart and resume again to see them.';
+      return 'The background sessions changed since you were asked. Press Restart and resume again to see them.';
     }
 
     return runtime.restartHolder();
@@ -940,7 +952,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         enabled: Object.fromEntries(Object.keys(config.settings.sources).map((name) => [name, runtime.enabledSources().has(name)])),
       },
     }),
-    // The Voice page's Enroll my voice (architecture.md § Voice check and barge-in): starts or cancels enrolment, or reads how it stands.
+    // Dictation's Enroll my voice (architecture.md § Voice check and barge-in): starts or cancels enrolment, or reads how it stands.
     enroll: async (body: unknown) => {
       const action = isRecord(body) ? body['action'] : undefined;
 
@@ -1097,7 +1109,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         await runtime.listHeld();
         const held = builder.buildNow().dock.held?.find((one) => one.session === body['id']);
         if (held === undefined) return { status: 404, body: { error: `No held session ${body['id']}.` } };
-        if (held.terminal === null) return { status: 409, body: { error: 'This held session has no terminal to open.' } };
+        if (held.terminal === null) return { status: 409, body: { error: 'This background session has no terminal to open.' } };
         if (launch.openTerminal === undefined) return { status: 409, body: { error: 'This hub cannot open the terminal app.' } };
         try {
           await launch.openTerminal({ ...held.terminal, ...terminalRun(held.terminal) });
@@ -1284,14 +1296,21 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       },
       upload: (key, scopeGen, name, bytes) => conversation.pageUpload(key, scopeGen, name, bytes),
       console: (key, sessionId, send, end) => pageConsole.open(key, sessionId, send, end),
+      changesRaw: (key, query) => pageChanges.fileRaw(key, query.get('path'), query.get('side'), query.get('from'), query.get('to')),
       changes: (route, key, query) =>
         route === 'changes'
           ? pageChanges.changes(key, query.get('from'), query.get('to'))
           : route === 'diff'
-            ? pageChanges.diff(key, query.get('path'), query.get('sides'), query.get('from'), query.get('to'))
+            ? pageChanges.diff(key, query.get('path'), query.get('sides'), query.get('from'), query.get('to'), query.get('ws'))
             : route === 'file'
               ? pageChanges.file(key, query.get('path'), query.get('side'), query.get('from'), query.get('to'))
-              : Promise.resolve({ status: 404, body: { error: 'not found' } }),
+              : route === 'stack'
+                ? pageStack.stack(key, query.get('refresh'))
+                : route === 'tree'
+                  ? pageTree.tree(key)
+                  : route === 'search'
+                    ? pageTree.search(key, query)
+                    : Promise.resolve({ status: 404, body: { error: 'not found' } }),
       voice: {
         enabled: () => config.settings.voice.enabled,
         accept: (request, socket, head, device) => voiceSockets.accept(request, socket, head, device),

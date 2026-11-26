@@ -54,33 +54,37 @@ function hue(colour: string): number {
   return sector * 60;
 }
 
-function contrast(text: string, background: string): number {
-  const [high, low] = [luminance(text), luminance(background)].sort((x, y) => y - x);
+/** A colour with alpha laid over an opaque `under`, as #rrggbb. */
+function over(colour: string, under: string): string {
+  const digits = (hex: string) => (hex.slice(1).length === 3 ? [...hex.slice(1)].map((digit) => digit + digit).join('') : hex.slice(1));
+  const rgba = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(colour);
+  const top = rgba === null ? digits(colour) : [1, 2, 3].map((at) => Number(rgba[at]).toString(16).padStart(2, '0')).join('') + Math.round(Number(rgba[4]) * 255).toString(16).padStart(2, '0');
+  const base = digits(under);
+  const alpha = top.length === 8 ? parseInt(top.slice(6, 8), 16) / 255 : 1;
+
+  return `#${[0, 2, 4].map((at) => Math.round(parseInt(top.slice(at, at + 2), 16) * alpha + parseInt(base.slice(at, at + 2), 16) * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Text's contrast on a background, either of which may be translucent: the background over `under`, the text over that. */
+function contrast(text: string, background: string, under = '#ffffff'): number {
+  const surface = over(background, under);
+  const [high, low] = [luminance(over(text, surface)), luminance(surface)].sort((x, y) => y - x);
 
   return (high! + 0.05) / (low! + 0.05);
 }
 
-/** A translucent #rrggbbaa or rgba() colour laid over an opaque #rrggbb one, as #rrggbb. */
-function over(top: string, under: string): string {
-  const rgba = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(top);
-  const [r, g, b, a] = rgba !== null ? [Number(rgba[1]), Number(rgba[2]), Number(rgba[3]), Number(rgba[4])] : [1, 3, 5, 7].map((at) => (top.length > at ? parseInt(top.slice(at, at + 2), 16) : 255)).map((value, index) => (index === 3 ? value / 255 : value));
-  const base = [1, 3, 5].map((at) => parseInt(under.slice(at, at + 2), 16));
-
-  return '#' + [r!, g!, b!].map((value, index) => Math.round(value * a! + base[index]! * (1 - a!)).toString(16).padStart(2, '0')).join('');
-}
-
 describe('the theme copy', () => {
-  it('sets every Dark Modern variable again for the light scheme, and only those', () => {
+  it('sets every dark variable again for the light scheme, and only those', () => {
     const { dark, light } = blocks();
     const colours = [...dark.keys()].filter((name) => !/font/.test(name));
 
     expect(colours.length).toBeGreaterThan(60);
     expect([...light.keys()].sort()).toEqual(colours.sort());
-    expect(light.get('--vscode-sideBar-background')).toBe('#F8F8F8');
-    expect(light.get('--vscode-foreground')).toBe('#3B3B3B');
+    expect(light.get('--vscode-sideBar-background')).toBe('#FAFAFD');
+    expect(light.get('--vscode-foreground')).toBe('#202020');
   });
 
-  it('switches with the operating system, Dark Modern being the default', () => {
+  it('switches with the operating system, 2026 Dark being the default', () => {
     const css = PAGE_ASSETS['theme.css']!.body;
 
     expect(css.indexOf(':root {')).toBeLessThan(css.indexOf('@media (prefers-color-scheme: light)'));
@@ -98,8 +102,9 @@ describe('the theme copy', () => {
 
       expect(contrast(colours.get('--vscode-button-foreground')!, colours.get('--vscode-button-background')!), `button in ${scheme}`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(colours.get('--vscode-input-placeholderForeground')!, colours.get('--vscode-input-background')!), `placeholder in ${scheme}`).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(colours.get('--vscode-list-activeSelectionForeground')!, colours.get('--vscode-list-activeSelectionBackground')!), `selected row in ${scheme}`).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(colours.get('--vscode-menu-selectionForeground')!, colours.get('--vscode-menu-selectionBackground')!), `menu row in ${scheme}`).toBeGreaterThanOrEqual(4.5);
+      // 2026's selections are translucent, so each is read over what it lies on: the list over the editor's colour, a menu over its own.
+      expect(contrast(colours.get('--vscode-list-activeSelectionForeground')!, colours.get('--vscode-list-activeSelectionBackground')!, colours.get('--vscode-editor-background')), `selected row in ${scheme}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(colours.get('--vscode-menu-selectionForeground')!, colours.get('--vscode-menu-selectionBackground')!, colours.get('--vscode-menu-background')), `menu row in ${scheme}`).toBeGreaterThanOrEqual(4.5);
     }
   });
 
@@ -109,7 +114,7 @@ describe('the theme copy', () => {
 
       expect(background, scheme).toBe(colours.get('--vscode-panel-background'));
       expect(contrast(colours.get('--vscode-terminal-foreground')!, background), `text in ${scheme}`).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(colours.get('--vscode-terminal-foreground')!, colours.get('--vscode-terminal-selectionBackground')!), `selected text in ${scheme}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(colours.get('--vscode-terminal-foreground')!, colours.get('--vscode-terminal-selectionBackground')!, background), `selected text in ${scheme}`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(colours.get('--vscode-terminalCursor-foreground')!, background), `cursor in ${scheme}`).toBeGreaterThanOrEqual(3);
     }
 
@@ -125,8 +130,9 @@ describe('the theme copy', () => {
     const pageLight = /@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(page)?.[1] ?? '';
     const { dark, light } = blocks();
     const schemes = {
-      dark: { status: status(theme.slice(0, start)), backgrounds: [dark.get('--vscode-sideBar-background')!, dark.get('--vscode-list-hoverBackground')!, dark.get('--vscode-list-activeSelectionBackground')!] },
-      light: { status: status(theme.slice(start)), backgrounds: [light.get('--vscode-sideBar-background')!, light.get('--vscode-list-hoverBackground')!, /--sb-row-selected: (#[0-9A-Fa-f]{6});/.exec(pageLight)?.[1] ?? ''] },
+      // The list lies on the editor's colour; its hover and selection are translucent over it.
+      dark: { status: status(theme.slice(0, start)), backgrounds: [dark.get('--vscode-editor-background')!, dark.get('--vscode-list-hoverBackground')!, dark.get('--vscode-list-activeSelectionBackground')!].map((one) => over(one, dark.get('--vscode-editor-background')!)) },
+      light: { status: status(theme.slice(start)), backgrounds: [light.get('--vscode-editor-background')!, light.get('--vscode-list-hoverBackground')!, /--sb-row-selected: (#[0-9A-Fa-f]{6,8});/.exec(pageLight)?.[1] ?? light.get('--vscode-list-activeSelectionBackground')!].map((one) => over(one, light.get('--vscode-editor-background')!)) },
     };
 
     // The dark selected row is the list's selection colour; the light one is the page's own.
@@ -191,7 +197,7 @@ describe('the theme copy', () => {
     const css = PAGE_ASSETS['page.css']!.body;
     const light = /@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1] ?? '';
 
-    for (const name of ['--sb-github', '--sb-pull-request', '--sb-source-off', '--sb-composer-background', '--sb-chat-background', '--sb-bar-background', '--sb-row-selected']) {
+    for (const name of ['--sb-github', '--sb-pull-request', '--sb-source-off', '--sb-composer-background', '--sb-chat-background', '--sb-bar-background']) {
       expect(light, name).toContain(`${name}:`);
     }
 
@@ -225,18 +231,49 @@ describe('the theme copy', () => {
     expect(css).not.toMatch(/\.console\.typing \{[^}]*outline/);
   });
 
-  it('gives light its Light Modern surfaces: the conversation white, its bars and the side bar grey, and a selected row that shows and stays readable', () => {
+  it("tints our messages' bubble with Modern's button blue, not 2026's grey-teal, readable in both schemes", () => {
+    const css = PAGE_ASSETS['page.css']!.body;
+    const { dark, light } = blocks();
+
+    // light-dark() follows theme.css's color-scheme, which follows the operating system's setting.
+    expect(css).toContain('--sb-message-bubble: color-mix(in srgb, light-dark(#005fb8, #0078d4) 15%, transparent);');
+    expect(PAGE_ASSETS['theme.css']!.body).toMatch(/@media \(prefers-color-scheme: light\) \{[^@]*color-scheme: light;/);
+    // 15% of the blue over the conversation's side bar colour, under the foreground.
+    expect(contrast(dark.get('--vscode-foreground')!, '#0078d426', dark.get('--vscode-sideBar-background')!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(light.get('--vscode-foreground')!, '#005fb826', light.get('--vscode-sideBar-background')!)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("makes content the scheme's deepest colour, the editor's, and the conversation and bars the side bar's, as VS Code's 2026 themes do", () => {
+    const css = PAGE_ASSETS['page.css']!.body;
+    const dark = /:root \{([^}]*--sb-github: #f0f6fc;[^}]*)\}/.exec(css)?.[1] ?? '';
+    const light = /@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    const { dark: darkColours, light: lightColours } = blocks();
+
+    expect(dark).toContain('--sb-content: var(--vscode-editor-background); --sb-chrome: var(--vscode-sideBar-background);');
+    expect(light).toContain('--sb-content: var(--vscode-editor-background); --sb-chrome: var(--vscode-sideBar-background);');
+    expect(dark).toContain('--sb-chat-background: var(--sb-chrome); --sb-bar-background: var(--sb-chrome);');
+    expect(css).toContain('.detail { --sb-tab-surface: var(--sb-content); }');
+    expect(css).toMatch(/#root\.wide > \.detail \{[^}]*background: var\(--sb-content\)/);
+    expect(css).toMatch(/\.side \{[^}]*background: var\(--sb-content\)/);
+    expect(css).toMatch(/\.main \{[^}]*background: var\(--sb-chat-background\)/);
+    // 2026 Dark and 2026 Light.
+    expect([darkColours.get('--vscode-editor-background'), darkColours.get('--vscode-sideBar-background')]).toEqual(['#121314', '#191A1B']);
+    expect([lightColours.get('--vscode-editor-background'), lightColours.get('--vscode-sideBar-background')]).toEqual(['#FFFFFF', '#FAFAFD']);
+  });
+
+  it("gives light its 2026 Light surfaces: content white, the conversation and its bars grey, and a selected row of its own that shows and stays readable", () => {
     const css = PAGE_ASSETS['page.css']!.body;
     const light = /@media \(prefers-color-scheme: light\) \{\s*:root \{([^}]*)\}/.exec(css)?.[1] ?? '';
     const { light: colours } = blocks();
+    const white = colours.get('--vscode-editor-background')!;
     const selected = /--sb-row-selected: (#[0-9A-Fa-f]{6});/.exec(light)?.[1] ?? '';
 
-    expect(light).toContain('--sb-chat-background: var(--vscode-editor-background);');
-    expect(light).toContain('--sb-bar-background: var(--vscode-sideBar-background);');
-    expect(colours.get('--vscode-editor-background')).toBe('#FFFFFF');
-    expect(contrast(selected, colours.get('--vscode-sideBar-background')!)).toBeGreaterThan(contrast(colours.get('--vscode-list-activeSelectionBackground')!, colours.get('--vscode-sideBar-background')!));
+    expect(light).toContain('--sb-chat-background: var(--sb-chrome);');
+    expect(light).toContain('--sb-bar-background: var(--sb-chrome);');
+    expect(white).toBe('#FFFFFF');
+    expect(contrast(selected, white)).toBeGreaterThan(1.2);
 
-    for (const text of ['--vscode-foreground', '--vscode-descriptionForeground', '--vscode-list-activeSelectionForeground']) {
+    for (const text of ['--vscode-foreground', '--vscode-list-activeSelectionForeground']) {
       expect(contrast(colours.get(text)!, selected), text).toBeGreaterThanOrEqual(4.5);
     }
   });

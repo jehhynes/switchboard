@@ -108,7 +108,7 @@ describe('question cards in replies', () => {
     expect(host.querySelector('.question-card.qc-collapsed .qc-progress')?.textContent).toBe('Question answered');
     // Before the cutover, the old rules: the next message skips it.
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: 'Later.' })]), newView()));
-    expect(host.querySelector('.question-card .qc-state')?.getAttribute('title')).toBe('Skipped');
+    expect(host.querySelector('.question-card .qc-state')?.getAttribute('title')).toBe('Unanswered');
     host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: ending }), message('m1', 2, { text: '1B', delivery: 'open' })]), newView()));
     expect(host.querySelector('.question-card .qc-option')).not.toBeNull();
   });
@@ -205,6 +205,33 @@ describe('question cards in replies', () => {
     expect(host.querySelector('.qc-options + .qc-comment-box textarea.qc-comment')).not.toBeNull();
     // The shared styles reach the page's bundle.
     expect(readFileSync(join(__dirname, '../build.mjs'), 'utf8')).toContain("'@switchboard/conversation/questionCard.css'");
+  });
+
+  it("draws a context's and a description's lists and paragraphs, and no markup a session wrote", () => {
+    const host = document.createElement('div');
+    const asked = [
+      "1. **State.** Merge fix 4's state work into `main`? {#state-merge}",
+      '   This also confirms:',
+      '   - mid-turn `[state]` is not relied on;',
+      '   - **n/total** is optional. <img src=x onerror=alert(1)>',
+      '',
+      '   Verify passes.',
+      '   - A) Accept and merge (recommended) — the data moves:',
+      '     1. statuses',
+      '     2. stages <script>alert(1)</script> [run](javascript:alert(1))',
+      '   - B) Change something first',
+    ].join('\n');
+
+    host.innerHTML = html(renderTimeline(pageState([reply('r1', 1, { opening: asked })]), newView()));
+    const context = host.querySelector('.qc-context')!;
+
+    expect([...context.children].map((one) => one.tagName)).toEqual(['P', 'UL', 'P']);
+    expect([...context.querySelectorAll('li')].map((one) => one.textContent)).toEqual(['mid-turn [state] is not relied on;', 'n/total is optional. <img src=x onerror=alert(1)>']);
+    expect(context.querySelector('li strong')?.textContent).toBe('n/total');
+    const description = host.querySelector('.qc-option .qc-desc')!;
+
+    expect([...description.querySelectorAll('ol > li')].map((one) => one.textContent)).toEqual(['statuses', 'stages <script>alert(1)</script> [run](javascript:alert(1))']);
+    expect(host.querySelector('.question-card img, .question-card script, .question-card [onerror], .question-card a[href^="javascript"]')).toBeNull();
   });
 });
 
@@ -549,7 +576,7 @@ describe('drawing', () => {
     expect(html(renderArtifactView('key', artifact('chat/v.mp4', 'video', 'mp4')))).toContain('<video');
     // Only a file of another kind is a download, in place of a preview.
     expect(html(renderArtifactView('key', artifact('chat/d.pdf', 'file', 'pdf')))).not.toContain('download');
-    expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).toContain('The page cannot show this kind of file.');
+    expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).toContain('This kind of file cannot be shown here.');
     expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).not.toContain('download');
 
     // The head: the kind as a badge, the title and Open in new window, and no Download; each version's file loads afresh.
@@ -638,11 +665,11 @@ describe('drawing', () => {
       { label: 'gh 18800', url: 'https://github.com/o/r/issues/18800', kind: 'issue', badge: '18800', glyph: null, mentioned: true },
     ];
     const details: PageRow['details'] = [
-      { text: 'Rate limited · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' },
+      { text: 'Usage limit · resumes 1:20 PM', title: 'Resets at 1:20 PM', tone: 'warning' },
       { text: 'Setup <failed>', title: null, tone: 'error' },
       { text: 'Post the reply', title: null, tone: null },
     ];
-    const full = listRow(1, { priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/1', links, returned: 2, comment: { glyph: '\u{ea6b}', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: '\u{eba2}', title: 'Rate limited' }, details });
+    const full = listRow(1, { priority: 'Priority: P1', time: { text: '2h', title: 'In queue since 11:40' }, url: 'https://github.com/o/r/issues/1', links, returned: 2, comment: { glyph: '\u{ea6b}', title: 'Nov 20\nWaits on Sam' }, mark: { kind: 'limited', glyph: '\u{eba2}', title: 'Usage limit' }, details });
 
     root.innerHTML = html(renderList([listGroup('progress', [full, listRow(2)])], null, new Set()));
 
@@ -676,7 +703,7 @@ describe('drawing', () => {
     expect(line3!.className).toBe('row-line row-details');
     expect(line3!.firstElementChild!.className).toBe('codicon codicon-watch mark');
     expect([...line3!.querySelectorAll('.row-detail')].map((one) => [one.className, one.textContent, one.getAttribute('title')])).toEqual([
-      ['row-detail warning', 'Rate limited · resumes 1:20 PM', 'Resets at 1:20 PM'],
+      ['row-detail warning', 'Usage limit · resumes 1:20 PM', 'Resets at 1:20 PM'],
       ['row-detail error', 'Setup <failed>', null],
       ['row-detail', 'Post the reply', null],
     ]);
@@ -726,7 +753,7 @@ describe('drawing', () => {
 
     const badge = root.querySelector<HTMLElement>('[data-work-item="1"] .questions')!;
 
-    expect([badge.getAttribute('role'), badge.getAttribute('aria-label'), badge.getAttribute('title'), badge.dataset['action'], badge.dataset['workItem'], badge.tabIndex]).toEqual(['button', '2 questions waiting', '2 questions waiting\nOpens the work item at its card', 'goto-questions', '1', -1]);
+    expect([badge.getAttribute('role'), badge.getAttribute('aria-label'), badge.getAttribute('title'), badge.dataset['action'], badge.dataset['workItem'], badge.tabIndex]).toEqual(['button', '2 questions waiting', '2 questions waiting\nOpens the work item at its questions', 'goto-questions', '1', -1]);
     // The icon alone shows (the operator's decision, 2026-11-25); the count is in its name and tooltip only.
     expect([...badge.children].map((child) => [child.className, child.getAttribute('aria-hidden')])).toEqual([['codicon codicon-question', 'true']]);
     expect(badge.textContent).toBe('');
@@ -800,6 +827,14 @@ describe('drawing', () => {
     expect(renderMicButton).toBe(viewMicButton);
     expect(renderMicButton({ enabled: true, here: true, mic: 'paused-by-voice', speaking: null, speakReplies: true, error: null })).toContain('data-on="true"');
     expect(renderMicButton({ enabled: true, here: true, mic: 'hearing', speaking: 'r1', speakReplies: true, error: null, halfDuplex: 'no echo cancellation' })).toContain('class="mic held"');
+    // Each mic state names the actor: you dictate, and Switchboard speaks replies.
+    const mic = (patch: Partial<Parameters<typeof renderMicButton>[0] & object>): string => renderMicButton({ enabled: true, here: true, speaking: null, speakReplies: true, error: null, ...patch });
+    expect(mic({ mic: 'listening' })).toContain('title="Mic on: Switchboard is ready for your dictation. It sends when you pause.');
+    expect(mic({ mic: 'hearing' })).toContain('title="Mic on: Switchboard is taking dictation.');
+    expect(mic({ mic: 'hearing', speaking: 'r1', halfDuplex: 'no echo cancellation' })).toContain('title="Mic on, dictation paused while Switchboard speaks the reply (no echo cancellation): it resumes when the reply ends.');
+    expect(mic({ mic: 'listening', halfDuplex: 'no echo cancellation' })).toContain('Dictation pauses while Switchboard speaks a reply (no echo cancellation), so you cannot stop the reply by speaking over it.');
+    expect(mic({ mic: 'listening', fullDuplex: 'echo cancelled' })).toContain('Full duplex (echo cancelled): you can stop a spoken reply by speaking over it.');
+    expect(mic({ mic: 'listening', roomHold: true })).toContain('Switchboard heard another voice, so your dictation waits in the composer until you send it.');
   });
 
   it('draws the spinner after the newest item while the session is in a turn, so progress and replies written mid-turn show above it', () => {
@@ -1089,11 +1124,12 @@ describe("the list's CSS", () => {
     // A key takes at most 60% of the line, so the playbook keeps its room; GitHub's key in GitHub's colour, not the foreground.
     expect(one('.row-line .pill.ticket')).toContain('max-width: 60%');
     expect(one('.row-line .pill.ticket.source-github')).toContain('border-color: var(--sb-github)');
-    // Marks in the foreground at 14 px, Failed in the error colour; the muted texts in the list's grey, #717171 in Light Modern.
+    // Marks in the foreground at 14 px, Failed in the error colour; the muted texts in the theme's description colour, in both schemes.
     expect(one('.row-details .mark')).toContain('font-size: 14px');
     expect(one('.row-details .mark')).not.toMatch(/(^|[ ;])color:/);
     expect(one('.row-details .mark.failed')).toContain('color: var(--vscode-testing-iconFailed)');
-    expect(css).toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-muted: #717171;/);
+    expect(css).toMatch(/^:root \{[^}]*--sb-row-muted: var\(--vscode-descriptionForeground\);/m);
+    expect(css).not.toMatch(/@media \(prefers-color-scheme: light\) \{\s*:root \{[^}]*--sb-row-muted/);
     expect(one('.row-time')).toContain('color: var(--sb-row-muted)');
   });
 
@@ -1166,7 +1202,7 @@ describe("the list's CSS", () => {
     expect(head).toContain('min-height: var(--group-head-height)');
     // Mixed with the list's background, never with transparent, so rows do not show through.
     for (const rule of [head, declarationsOf((selector) => selector === '.group-head:hover').join(' ')]) {
-      expect(rule).toMatch(/background: color-mix\(in srgb, var\(--vscode-focusBorder\) \d+%, var\(--vscode-sideBar-background\)\)/);
+      expect(rule).toMatch(/background: color-mix\(in srgb, var\(--vscode-focusBorder\) \d+%, var\(--sb-content\)\)/);
     }
     // A margin outside the section would unpin the header 8 px before the next one arrives.
     expect(declarationsOf((selector) => selector === '.group')).toEqual([]);

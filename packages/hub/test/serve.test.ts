@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createServer as createHttpServer, request } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
 import { createServer } from 'node:net';
@@ -30,6 +30,16 @@ describe('serveHub', () => {
     // The record names the runtime the hub runs under.
     expect(record.execPath).toBe(process.execPath);
     expect(await findHub(home)).toEqual(record);
+  });
+
+  it.runIf(process.platform !== 'win32')('writes the record, which holds the hub token, readable only by its user', async () => {
+    // A record an older hub left readable, and a temporary file of this process ID left by a crash.
+    mkdirSync(dirname(hubRecordPath(home)), { recursive: true });
+    writeFileSync(hubRecordPath(home), '{}', { mode: 0o644 });
+    writeFileSync(`${hubRecordPath(home)}.${process.pid}.tmp`, '{}', { mode: 0o644 });
+    served(await serve());
+
+    expect(statSync(hubRecordPath(home)).mode & 0o777).toBe(0o600);
   });
 
   it('reports the existing hub instead of starting a second', async () => {

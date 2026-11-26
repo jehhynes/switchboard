@@ -540,18 +540,36 @@ export function copyButton(action: 'copy-code' | 'copy-reply', label: string): s
   return `<button class="copy" type="button" data-action="${action}" title="${label}" aria-label="${label} to clipboard"><span class="codicon codicon-copy" aria-hidden="true"></span></button>`;
 }
 
+/** What a link resolver answers for a link to a path: the attributes of its `<a>`, null to open it in a file tab, or why it may not open. */
+export type LinkAnswer = string | null | { denied: string };
+
 /**
  * Markdown as HTML: a web link opens in a new tab with no referrer; a link to a place in the text (`#name`) scrolls to it; a link to a path
  * keeps its text, shows its target as a tooltip and opens in a file tab of the page (`data-action="local-file"`). `base`, when given, turns an
- * image's relative source into the artifact file route, for an artifact's Markdown, and `link` a relative link's target into the attributes
- * of its `<a>`, or null to keep it as text.
+ * image's relative source into the artifact file route, for an artifact's Markdown, and `link` a link's target into the attributes of its
+ * `<a>`, null for a file tab, or `denied` for plain text that says why it does not open, so a link the caller refuses never falls back to
+ * the file tab's wider route.
  */
-export function renderMarkdown(text: string, base?: (path: string) => string | null, link?: (href: string) => string | null): string {
+export function renderMarkdown(text: string, base?: (path: string) => string | null, link?: (href: string) => LinkAnswer): string {
   return linkify(markdown.render(text), base, link);
 }
 
 export function renderInline(text: string): string {
   return linkify(markdown.renderInline(text));
+}
+
+/**
+ * The Markdown a question card draws in a question's context and an option's description (architecture.md § Question cards): paragraphs,
+ * lists, hard line breaks, emphasis, strikethrough, code spans and links. Anything else, such as a heading, a table, a picture or raw HTML,
+ * stays text.
+ */
+const cardMarkdown = new MarkdownIt('zero', { html: false, linkify: true, breaks: false }).enable(['list', 'newline', 'escape', 'entity', 'backticks', 'emphasis', 'strikethrough', 'link', 'autolink', 'linkify']);
+
+cardMarkdown.validateLink = markdown.validateLink;
+
+/** A card's context or description as HTML, its links as `renderMarkdown` draws them. */
+export function renderCardText(text: string): string {
+  return linkify(cardMarkdown.render(text)).trimEnd();
 }
 
 /** The place a `#name` link names, as written before markdown-it escaped and encoded it. */
@@ -565,7 +583,7 @@ function anchorTarget(href: string): string {
   }
 }
 
-function linkify(html: string, base?: (path: string) => string | null, link?: (href: string) => string | null): string {
+function linkify(html: string, base?: (path: string) => string | null, link?: (href: string) => LinkAnswer): string {
   return html
     .replace(/<a href="([^"]*)"/g, (_match, href: string) => {
       if (webLink(href)) {
@@ -581,6 +599,11 @@ function linkify(html: string, base?: (path: string) => string | null, link?: (h
       }
 
       const to = link?.(href) ?? null;
+
+      if (to !== null && typeof to === 'object') {
+        // Text with no action: nothing the page could open, with why as its tooltip.
+        return `<a class="path-link denied" aria-disabled="true" title="${escape(to.denied)}"`;
+      }
 
       // The page opens a path's file in a tab (`LocalFilesController`); a focusable link, though it has no href a browser could follow.
       return to === null ? `<a class="path-link" title="${href}" tabindex="0" role="link" data-action="local-file" data-target="${href}"` : `<a ${to}`;

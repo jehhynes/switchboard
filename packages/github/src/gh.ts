@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 
 export type GhResult = { json: unknown } | { error: string };
 
-/** Runs `gh api graphql` with string and integer variables. */
-export type Gh = (query: string, variables: Record<string, string | number>) => Promise<GhResult>;
+/** Runs `gh api graphql` with string and integer variables; `signal` stops gh, answering an error. */
+export type Gh = (query: string, variables: Record<string, string | number>, signal?: AbortSignal) => Promise<GhResult>;
 
 const TIMEOUT_MS = 30_000;
 
@@ -36,9 +36,14 @@ export function ghArgs(query: string, variables: Record<string, string | number>
 }
 
 export function spawnGh(ghPath: string): Gh {
-  return (query, variables) =>
+  return (query, variables, signal) =>
     new Promise((resolve) => {
-      execFile(ghPath, ghArgs(query, variables), { maxBuffer: 32 * 1024 * 1024, windowsHide: true, timeout: TIMEOUT_MS }, (error, stdout, stderr) => {
+      execFile(ghPath, ghArgs(query, variables), { maxBuffer: 32 * 1024 * 1024, windowsHide: true, timeout: TIMEOUT_MS, ...(signal === undefined ? {} : { signal }) }, (error, stdout, stderr) => {
+        if (signal?.aborted === true) {
+          resolve({ error: 'Stopped before GitHub answered.' });
+          return;
+        }
+
         if (error !== null) {
           resolve({ error: ghError(ghPath, error.code, error.killed === true, stderr) });
           return;

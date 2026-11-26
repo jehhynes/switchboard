@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { ClaudeRunner, conversationRules, markerState, projectSlug, readMarkers, rosterState } from '@switchboard/claude';
+import { ClaudeRunner, CODE_MODE_IDLE_MS, conversationRules, markerState, projectSlug, readMarkers, rosterState } from '@switchboard/claude';
 import type { RosterEntry } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import type { Exec, ExecResult } from '@switchboard/claude';
@@ -471,7 +471,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     runtime.stop();
   });
 
-  it('defers an end while input after the turn may be a prompt not yet observed, and ends it once that input is old', async () => {
+  it('defers an end while input after the turn may be a prompt not yet observed, and ends it only once that input is an idle limit old (PRD R95)', async () => {
     let now = T0;
     const codeMode = fakeRunner({ heldActivity: async () => ({ clients: 0, lastInputAt: T0 + 1_000 }) });
     const claude = fakeRunner();
@@ -488,7 +488,20 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     expect(codeMode.stops).toEqual([]);
     expect(context.logs).toContain('end of held session s1 deferred: input arrived after its turn');
 
+    // Input a minute old is no longer a prompt on its way, but the operator was there: the end waits for the idle limit from it.
     now = T0 + 1_000 + INPUT_SETTLE_MS;
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+
+    now = T0 + 1_000 + CODE_MODE_IDLE_MS - 1;
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+
+    now = T0 + 1_000 + CODE_MODE_IDLE_MS;
     await context.runtime.readRoster();
     await context.runtime.settled();
 
@@ -523,7 +536,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
     context.runtime.stop();
   });
 
-  it('ends a session whose last marker is a manual compaction once its input and output are older than the settle time', async () => {
+  it('ends a session whose last marker is a manual compaction once its input and output are an idle limit old', async () => {
     let now = T0 + 3_000;
     const marker = { at: T0 + 2_000, observed: null, recheck: false, compacted: true as const };
     const codeMode = fakeRunner({ heldActivity: async () => ({ clients: 0, lastInputAt: T0 + 1_000, lastOutputAt: T0 + 2_500 }), markers: () => new Map([['s1-native', marker]]) as never });
@@ -539,11 +552,66 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
 
     expect(codeMode.stops).toEqual([]);
 
-    now = T0 + 2_500 + INPUT_SETTLE_MS;
+    now = T0 + 2_500 + CODE_MODE_IDLE_MS - 1;
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+
+    now = T0 + 2_500 + CODE_MODE_IDLE_MS;
     await context.runtime.readRoster();
     await context.runtime.settled();
 
     expect(codeMode.stops).toEqual(['s1']);
+    context.runtime.stop();
+  });
+
+  it('defers an end when a turn began and ended after the read that found the session idle, until the idle limit passes from that turn end (PRD R95)', async () => {
+    let now = T0 + CODE_MODE_IDLE_MS;
+    let marker = { at: T0, observed: { state: 'idle' as const, detail: null }, recheck: false };
+    const codeMode = fakeRunner({ heldActivity: async () => ({ clients: 0, lastInputAt: null }), markers: () => new Map([['s1-native', marker]]) as never });
+    const claude = fakeRunner();
+    const context = setup(config(), () => now, { claude, codeMode });
+
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+    context.store.updateSession('s1', { codeMode: true, launchId: 'launch-1', state: 'idle', stateAt: T0, releasing: true });
+    codeMode.observe = async () => ({ error: 'not read in this test' });
+    // A wakeup ran a whole turn between the idle read and the end.
+    marker = { at: now - 1_000, observed: { state: 'idle', detail: null }, recheck: false };
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+    expect(context.logs).toContain('end of held session s1 deferred: it was active within the idle limit');
+
+    now = marker.at + CODE_MODE_IDLE_MS;
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual(['s1']);
+    context.runtime.stop();
+  });
+
+  it('keeps a session whose end was deferred once a usage limit is found, however long it has been idle (PRD R95, R111)', async () => {
+    const now = T0 + 2 * CODE_MODE_IDLE_MS;
+    const marker = { at: T0, observed: { state: 'idle' as const, detail: null }, recheck: false };
+    const codeMode = fakeRunner({ heldActivity: async () => ({ clients: 0, lastInputAt: null }), markers: () => new Map([['s1-native', marker]]) as never });
+    const claude = fakeRunner();
+    const context = setup(config(), () => now, { claude, codeMode });
+
+    context.runtime.send({ type: 'adhoc', prompt: 'held', repoRoot: 'D:/git/widgets', start: true });
+    await context.runtime.settled();
+    context.store.updateSession('s1', {
+      codeMode: true, launchId: 'launch-1', state: 'idle', stateAt: T0, releasing: true,
+      rateLimit: { kind: 'usage', window: null, message: null, resetsAt: now + 60_000, exact: true, cli: false, since: now, at: now, launchId: 'launch-1', attempts: 0, nextAt: now + 60_000 },
+    });
+    codeMode.observe = async () => ({ error: 'not read in this test' });
+    await context.runtime.readRoster();
+    await context.runtime.settled();
+
+    expect(codeMode.stops).toEqual([]);
+    expect(context.logs).toContain('end of held session s1 deferred: it waits on its usage limit');
     context.runtime.stop();
   });
 

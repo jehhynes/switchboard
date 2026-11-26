@@ -28,7 +28,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
         <div id="composer" hidden></div>
       </main>
       <div class="sash chat-sash" role="separator" aria-orientation="vertical" aria-label="Conversation width" aria-controls="panel" tabindex={0} aria-valuemin={chat.min} aria-valuemax={chat.max} title="Drag to resize; double-click to reset"></div>
-      <aside id="detail" class="detail" aria-label="History and artifacts">
+      <aside id="detail" class="detail" aria-label="Side panel">
         <div class="detail-head"></div>
         <div class="detail-body scroll"></div>
       </aside>
@@ -63,7 +63,7 @@ export function renderComposer(): VNode {
         </div>
         {/* While the box has the focus and the mic is on here: dictation joins the draft and waits for Send (architecture.md § Dictation). */}
         <div class="composer-hint" hidden>
-          Dictating into the draft — press Send
+          Your dictation goes into the draft — press Send
         </div>
         <div class="composer-footer">
           <div class="composer-controls">
@@ -139,7 +139,7 @@ export function renderEndedNote(session: PageState['session'], resuming: boolean
     return (
       <div class="session-note" role="status">
         <span class="codicon codicon-history state-icon tone-muted" aria-hidden="true"></span>
-        <span class="session-note-text">An earlier session of this work item, shown read-only.</span>
+        <span class="session-note-text">Earlier session, read-only.</span>
         <button type="button" class="session-resume" data-action="select" data-work-item={String(earlierOf)}>
           Show current session
         </button>
@@ -156,7 +156,7 @@ export function renderEndedNote(session: PageState['session'], resuming: boolean
   return (
     <div class="session-note" role="status">
       <span class="codicon codicon-stop-circle state-icon tone-muted" aria-hidden="true"></span>
-      <span class="session-note-text">{resumable ? 'The session has ended. Resume continues it.' : (session.reason ?? 'The session has ended.')}</span>
+      <span class="session-note-text">{resumable ? 'The session has ended. Resume it to send a message.' : (session.reason ?? 'The session has ended.')}</span>
       {resumable ? (
         <button type="button" class="session-resume" data-action="resume" disabled={resuming}>
           {resuming ? 'Resuming…' : 'Resume'}
@@ -177,7 +177,7 @@ export function renderDraftNote(draft: NewDraft): VNode {
   return (
     <div class="session-note draft-note" role="status">
       <span class="codicon codicon-add state-icon tone-muted" aria-hidden="true"></span>
-      <span class="session-note-text">{draft.sending ? 'Starting the new conversation…' : 'New conversation. It starts when you send the first message.'}</span>
+      <span class="session-note-text">{draft.sending ? 'Starting the session…' : 'New session. It starts when you send the first message.'}</span>
       {installed.length > 1 ? (
         <div class="provider-switch" role="group" aria-label="Provider">
           {PROVIDERS.filter((one) => installed.includes(one.provider)).map((one) => (

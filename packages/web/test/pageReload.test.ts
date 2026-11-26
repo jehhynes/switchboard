@@ -71,7 +71,7 @@ describe('the page in use', () => {
     source.emit('message', { message: message('m8', 8, { delivery: 'not-sent', error: 'x', text: 'not mine' }) });
     expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('lost words');
     expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The holder did not answer.');
-    // While the voice is elsewhere, one Talk here takes the cluster's place; here, Speak replies, with no Stop beside it while a reply plays.
+    // While the voice is elsewhere, one Talk here takes the cluster's place; here, Spoken replies, with no Stop beside it while a reply plays.
     expect(root.querySelector('[data-voice="speak-replies"]')).toBeNull();
     click('[data-voice="talk-here"]');
     source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
@@ -81,7 +81,7 @@ describe('the page in use', () => {
     expect(root.querySelectorAll('.voice-controls button')).toHaveLength(1);
     expect(root.querySelector('.voice-controls .codicon-debug-stop')).toBeNull();
     expect(root.querySelector('[data-voice="speak-replies"]')!.getAttribute('title')).toBe(SPEAKING_TIP);
-    // The speaker turns Speak replies off, which stops the reply playing.
+    // The speaker turns Spoken replies off, which stops the reply playing.
     click('[data-voice="speak-replies"]');
     await flush();
     expect(posts.filter((post) => /talk-here|speak-replies/.test(post.url)).map((post) => post.body['on'] ?? 'talk')).toEqual(['talk', false]);
@@ -92,7 +92,19 @@ describe('the page in use', () => {
     click('[data-voice="stop"]');
     await flush();
     expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(true);
+    // Off and silent, the composer has no speaker at all: experimental spoken replies are turned on in View options (PRD R105).
+    source.emit('voice', { voice: { enabled: true, here: true, speaking: null, speakReplies: false, error: null } });
+    expect(root.querySelector('.voice-controls [data-voice]')).toBeNull();
+    expect(root.querySelector('.composer-mic [data-voice="mic"]')).not.toBeNull();
+    click('.header button.view-options');
+    expect(root.querySelector('[data-action="toggle-spoken-replies"]')!.getAttribute('aria-checked')).toBe('false');
+    expect(root.querySelector('[data-action="toggle-spoken-replies"] .menu-note')!.textContent).toBe('Experimental');
+    click('[data-action="toggle-spoken-replies"]');
+    await flush();
+    expect(posts.filter((post) => post.url.endsWith('/speak-replies')).map((post) => post.body['on'])).toEqual([false, true]);
     source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
+    expect(root.querySelector('[data-action="toggle-spoken-replies"]')!.getAttribute('aria-checked')).toBe('true');
+    click('.header button.view-options');
 
     // The mic is packages/conversation's button, and drives the computer's voice process.
     expect(root.querySelector('.composer-mic')!.innerHTML).toBe(renderMicButton({ enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null }));
@@ -124,14 +136,14 @@ describe('the page in use', () => {
     const { page, source } = start();
 
     hello(source);
-    source.emit('message', { message: message('m7', 7, { delivery: 'unconfirmed', error: 'The transcript does not show this message.', text: 'lost words' }) });
+    source.emit('message', { message: message('m7', 7, { delivery: 'unconfirmed', error: "The session's record does not show this message.", text: 'lost words' }) });
     await flush();
     expect(root.querySelector('li[data-id="m7"] .delivery')!.textContent).toBe('not confirmed');
-    expect(root.querySelector('li[data-id="m7"] .delivery')!.getAttribute('title')).toBe('The transcript does not show this message.');
+    expect(root.querySelector('li[data-id="m7"] .delivery')!.getAttribute('title')).toBe("The session's record does not show this message.");
     click('li[data-id="m7"] [data-action="resend-message"]');
     await flush();
     expect(root.querySelector('textarea')!.value).toBe('lost words');
-    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('Check the terminal first: Claude may have this message already.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('Check the terminal first: the session may already have this message.');
     expect(posts.some((post) => post.url.endsWith('/send'))).toBe(false);
     page.close();
   });
@@ -629,7 +641,8 @@ describe('the page in use', () => {
     answers['/v1/conversation/changes'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } };
 
     const { page, source } = start();
-    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?')).length;
+    // The list's reads; the tree reads the uncommitted changes beside it.
+    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?') && !post.url.endsWith('&from=HEAD&to=worktree')).length;
 
     hello(source);
     click('#head [data-action="diff-tab"]');
@@ -708,10 +721,10 @@ describe('the page in use', () => {
 
     source.emit('scope', { scope: shown });
     hello(source, { scope: shown, sessions: [session({ id: 's1', title: 'Task session s1', state: 'ended', conversation: 'read-only', reason: 'This is an earlier session of the work item, shown read-only.' })], items: [reply('old', 1)] });
-    expect(root.querySelector('.session-note-text')!.textContent).toBe('An earlier session of this work item, shown read-only.');
+    expect(root.querySelector('.session-note-text')!.textContent).toBe('Earlier session, read-only.');
     expect(root.querySelector('[data-action="resume"]')).toBeNull();
     expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.disabled).toBe(true);
-    expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.placeholder).toBe('Show the current session to send a message.');
+    expect(root.querySelector<HTMLTextAreaElement>('#composer textarea, textarea')!.placeholder).toBe('Switch to the current session to send a message.');
     // The button shows the work item's title over the earlier session's name, with its provider's mark, both in its tooltip.
     expect(root.querySelector('button.picker .title')!.textContent).toBe('Fix it');
     expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('Task session s1');
@@ -785,7 +798,8 @@ describe('the page in use', () => {
     // The Changes tab, kept through a reconnect, reads its list again once the new stream shows the work item.
     answers['/v1/conversation/changes'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } };
     click('#head [data-action="diff-tab"]');
-    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?')).length;
+    // The list's reads; the tree reads the uncommitted changes beside it.
+    const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/changes?') && !post.url.endsWith('&from=HEAD&to=worktree')).length;
     const before = reads();
 
     expect(before).toBeGreaterThan(0);

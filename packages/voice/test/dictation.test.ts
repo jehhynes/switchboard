@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from '@switchboard/core/settings';
 import type { VoiceSettings } from '@switchboard/core/settings';
 import { ASR_RATE, PHRASE_SILENCE_MS } from '../src/asr.js';
-import { Dictation, WARM_RELEASE_MS, WARM_RETRY_MS, WARM_SETTLE_MS, WARM_SOON_MS } from '../src/dictation.js';
+import { Dictation, RECOGNISER_IDLE_MS, WARM_RELEASE_MS, WARM_RETRY_MS, WARM_SETTLE_MS, WARM_SOON_MS } from '../src/dictation.js';
 import type { AudioDevices } from '../src/micUse.js';
 import { ENROLL_SECONDS } from '../src/protocol.js';
 import type { VoiceMessage } from '../src/protocol.js';
@@ -543,6 +543,189 @@ describe('Dictation', () => {
     expect(missing.loads).toHaveLength(1);
     expect(missing.dictation.error).toBeNull();
     expect(missing.logs.filter((line) => line.startsWith('No speech recognition model'))).toEqual([]);
+  });
+
+  it('frees the recogniser once capture has gone unused for 30 minutes, never while it listens, and counts again from each Mic on', async () => {
+    // The mic idle timeout is longer than the limit, so capture stays open through it.
+    const { dictation, engine, loads, logs, clock, watch, listening } = setup({ settings: { micIdleMinutes: 120 } });
+    const freedLine = 'recogniser freed: capture was not used for 30 minutes; it loads again at Mic on';
+
+    await listening();
+    clock.advance(RECOGNISER_IDLE_MS + 1_000);
+    expect([engine.freed, dictation.recognizer, dictation.state]).toEqual([0, 'cpu', 'listening']);
+
+    dictation.mic(false);
+    clock.advance(RECOGNISER_IDLE_MS - 1);
+    expect(engine.freed).toBe(0);
+    clock.advance(1);
+    expect([engine.freed, dictation.recognizer]).toEqual([1, null]);
+    expect(logs.filter((line) => line === freedLine)).toHaveLength(1);
+
+    // Mic on loads it again, once the freed one's memory has gone; a Mic on before the limit starts the count over.
+    clock.advance(WARM_RELEASE_MS);
+    dictation.mic(true);
+    watch.changed!(false, []);
+    await settle();
+    expect([loads.length, dictation.state]).toEqual([2, 'listening']);
+    dictation.mic(false);
+    clock.advance(RECOGNISER_IDLE_MS - 1_000);
+    dictation.mic(true);
+    await settle();
+    dictation.mic(false);
+    clock.advance(RECOGNISER_IDLE_MS - 1);
+    expect(engine.freed).toBe(1);
+    clock.advance(1);
+    expect(engine.freed).toBe(2);
+
+    // A closed dictation frees nothing later.
+    const closing = setup();
+
+    await closing.listening();
+    closing.dictation.mic(false);
+    closing.dictation.close();
+    closing.clock.advance(RECOGNISER_IDLE_MS * 2);
+    expect(closing.engine.freed).toBe(0);
+  });
+
+  it('frees nothing while capture opens, an enrolment records or a spoken alert waits for its answer', async () => {
+    const opening = setup();
+
+    opening.capture.hold = new Promise(() => undefined);
+    opening.dictation.target(1, 's1', 'acme/app');
+    opening.dictation.mic(true);
+    opening.watch.changed!(false, []);
+    await settle();
+    opening.clock.advance(RECOGNISER_IDLE_MS * 2);
+    expect([opening.loads.length, opening.engine.freed, opening.dictation.state]).toEqual([1, 0, 'starting']);
+
+    // The enrolment's recording stops the count, which starts over once it ends.
+    const enrolling = setup({ voiceprint: fakeVoiceprint() });
+
+    enrolling.dictation.settingsChanged();
+    enrolling.clock.advance(RECOGNISER_IDLE_MS - 1_000);
+    enrolling.dictation.enroll('start');
+    await settle();
+    enrolling.clock.advance(ENROLL_SECONDS * 1000);
+    await settle();
+    expect(enrolling.dictation.enrolling).toBe(false);
+    enrolling.clock.advance(RECOGNISER_IDLE_MS - 1);
+    expect(enrolling.engine.freed).toBe(0);
+    enrolling.clock.advance(1);
+    expect(enrolling.engine.freed).toBe(1);
+
+    // A spoken alert waiting for its answer, even with the mic off, keeps it; the count starts once the alert stops listening.
+    const alert = setup();
+
+    alert.dictation.settingsChanged();
+    alert.clock.advance(WARM_SETTLE_MS);
+    alert.dictation.listen(() => undefined);
+    alert.clock.advance(RECOGNISER_IDLE_MS * 2);
+    expect(alert.engine.freed).toBe(0);
+    alert.dictation.listen(null);
+    alert.clock.advance(RECOGNISER_IDLE_MS - 1);
+    expect(alert.engine.freed).toBe(0);
+    alert.clock.advance(1);
+    expect(alert.engine.freed).toBe(1);
+  });
+
+  it('loads nothing ahead after a free for disuse: not a load ahead waiting then, a target, the settings or an enrolment; Mic on loads one', async () => {
+    const { dictation, loads, engine, clock, watch } = setup({ voiceprint: fakeVoiceprint() });
+
+    dictation.settingsChanged();
+    clock.advance(WARM_SETTLE_MS);
+    expect(loads).toHaveLength(1);
+    // A target that settles after the free: its load ahead was waiting when the free came.
+    clock.advance(RECOGNISER_IDLE_MS - WARM_SETTLE_MS - 1_000);
+    dictation.target(1, 's1', 'acme/app');
+    clock.advance(1_000);
+    expect(engine.freed).toBe(1);
+    clock.advance(WARM_SETTLE_MS * 2);
+    expect(loads).toHaveLength(1);
+
+    dictation.target(2, 's2', 'acme/web');
+    clock.advance(WARM_SETTLE_MS + WARM_RETRY_MS);
+    dictation.warm();
+    dictation.settingsChanged();
+    clock.advance(WARM_SETTLE_MS);
+    dictation.enroll('start');
+    await settle();
+    clock.advance(ENROLL_SECONDS * 1000 + WARM_SETTLE_MS);
+    await settle();
+    expect(loads).toHaveLength(1);
+
+    dictation.mic(true);
+    watch.changed!(false, []);
+    await settle();
+    expect([loads.length, loads[1]![1], dictation.state]).toEqual([2, 'acme/web', 'listening']);
+  });
+
+  it('frees the recogniser 30 minutes after capture fails or pauses for another app with the mic on, and loads it again when listening resumes', async () => {
+    const failing = setup({ settings: { micIdleMinutes: 120 } });
+
+    await failing.listening();
+    failing.capture.stream!.onError(new Error('device gone'));
+    await settle();
+    expect(failing.dictation.state).toBe('unavailable');
+    failing.clock.advance(RECOGNISER_IDLE_MS - 1);
+    expect(failing.engine.freed).toBe(0);
+    failing.clock.advance(1);
+    expect([failing.engine.freed, failing.dictation.recognizer]).toEqual([1, null]);
+
+    const paused = setup({ settings: { micIdleMinutes: 120 } });
+
+    await paused.listening();
+    paused.watch.changed!(true, ['Teams']);
+    await settle();
+    expect(paused.dictation.state).toBe('paused-other-app');
+    paused.clock.advance(RECOGNISER_IDLE_MS);
+    expect(paused.engine.freed).toBe(1);
+    paused.clock.advance(WARM_RELEASE_MS);
+    paused.watch.changed!(false, []);
+    await settle();
+    expect([paused.loads.length, paused.dictation.state]).toEqual([2, 'listening']);
+  });
+
+  it('loads again after a free for disuse for a spoken alert with no target, and at once for a phone taking the voice', async () => {
+    const alert = setup();
+
+    alert.dictation.settingsChanged();
+    alert.clock.advance(WARM_SETTLE_MS);
+    // The mic is on with no target: nothing listens, so the count runs.
+    alert.dictation.mic(true);
+    alert.watch.changed!(false, []);
+    await settle();
+    expect(alert.dictation.state).toBe('idle-off');
+    alert.clock.advance(RECOGNISER_IDLE_MS);
+    expect([alert.engine.freed, alert.dictation.recognizer]).toEqual([1, null]);
+    alert.dictation.listen(() => undefined);
+    await settle();
+    expect([alert.loads.length, alert.dictation.state]).toEqual([2, 'listening']);
+
+    const phone = setup();
+
+    phone.dictation.settingsChanged();
+    phone.clock.advance(RECOGNISER_IDLE_MS);
+    expect(phone.engine.freed).toBe(1);
+    phone.dictation.warmSoon();
+    phone.dictation.target(1, 's1', 'acme/phone');
+    phone.clock.advance(WARM_SOON_MS + WARM_RELEASE_MS);
+    expect(phone.loads.map((terms) => terms[1])).toEqual(['stop listening', 'acme/phone']);
+  });
+
+  it('loads exactly one recogniser for a Mic on that comes while the one freed for disuse still holds its memory', async () => {
+    const { dictation, loads, recognizers, clock, watch } = setup();
+
+    dictation.target(1, 's1', 'acme/app');
+    clock.advance(RECOGNISER_IDLE_MS);
+    expect(recognizers.map((one) => one.load)).toEqual([true, false]);
+    dictation.mic(true);
+    watch.changed!(false, []);
+    await settle();
+    expect([loads.length, dictation.state]).toEqual([1, 'starting']);
+    clock.advance(WARM_RELEASE_MS);
+    await settle();
+    expect([loads.length, dictation.state]).toEqual([2, 'listening']);
+    expect(recognizers[2]!.at - recognizers[1]!.at).toBeGreaterThanOrEqual(WARM_RELEASE_MS);
   });
 
   it('turns live words into pieces after their pause and ends the utterance after the end-of-message pause, as final', async () => {
@@ -1152,7 +1335,7 @@ describe('Dictation', () => {
     const measured = t.logs.find((line) => line.startsWith('echo check: '));
 
     expect(measured).toMatch(/^echo check: echo \(r 0\.\d+ at \d+ ms, level -\d+(\.\d)? dBFS, range \d+(\.\d)? dB, 1\.\d s played; hint: none over Remote Desktop, whose Remote Audio says nothing of headphones\)$/);
-    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Remote Audio; echo check: echo heard');
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Remote Audio; echo check: echo detected');
     expect(t.dictation.fullDuplex).toBeNull();
     expect(t.sent).toEqual([]);
   });
@@ -1167,14 +1350,14 @@ describe('Dictation', () => {
     expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: not measured yet');
     playOver(t, echoWav('quiet.wav'), 'r2');
     expect(t.logs.filter((line) => line.startsWith('echo check: ')).at(-1)).toMatch(/2 of 2 in a row\)$/);
-    expect(t.logs.at(-1)).toBe('listening: full duplex (echo check: none heard; no echo cancellation on Microphone)');
-    expect([t.dictation.halfDuplex, t.dictation.fullDuplex]).toEqual([null, 'echo check: none heard']);
+    expect(t.logs.at(-1)).toBe('listening: full duplex (echo check: no echo detected; no echo cancellation on Microphone)');
+    expect([t.dictation.halfDuplex, t.dictation.fullDuplex]).toEqual([null, 'echo check: no echo detected']);
 
     // Full duplex: a reply plays and its own words are heard over it, as when the headphones come off; half-duplex at once, and the words
     // that are not the reply's neither barge in nor reach the session, though no voiceprint is enrolled.
     playOver(t, echoWav('quiet.wav'), 'r3', () => (t.engine.text = 'tests passed and stop now'));
     expect(t.logs).toContain('echo check: 3 of 5 words heard over the reply are its own (tests passed and stop now): half-duplex again');
-    expect(t.logs).toContain('listening: half-duplex (no echo cancellation on Microphone; echo check: echo heard)');
+    expect(t.logs).toContain('listening: half-duplex (no echo cancellation on Microphone; echo check: echo detected)');
     expect(t.logs).toContain('listening paused while the voice plays (half-duplex): words heard over the reply dropped as its echo: tests passed and stop now');
     expect(t.speech.interrupts).toBe(0);
     expect(t.sent).toEqual([]);
@@ -1189,10 +1372,10 @@ describe('Dictation', () => {
     await t.listening();
     playOver(t, echoWav('quiet.wav'), 'r1');
     playOver(t, echoWav('quiet.wav'), 'r2');
-    expect(t.dictation.fullDuplex).toBe('echo check: none heard');
+    expect(t.dictation.fullDuplex).toBe('echo check: no echo detected');
     playOver(t, echoWav('echo-local.wav'), 'r3');
     expect(t.logs.filter((line) => line.startsWith('echo check: ')).at(-1)).toMatch(/^echo check: echo \(.*\): half-duplex again$/);
-    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: echo heard');
+    expect(t.dictation.halfDuplex).toBe('no echo cancellation on Microphone; echo check: echo detected');
 
     t.dictation.mic(false);
     t.dictation.mic(true);
@@ -1225,7 +1408,7 @@ describe('Dictation', () => {
     expect(t.logs).toContain('devices: playback "Headphones (WH-1000XM4)" (headphones), capture "Microphone (WH-1000XM4)", on this computer');
     playOver(t, echoWav('quiet.wav'), 'r1');
     expect(t.logs.filter((line) => line.startsWith('echo check: '))).toEqual([expect.stringMatching(/hint: headphones \(form factor headphones of "Headphones \(WH-1000XM4\)"\); 1 of 1 in a row\)$/)]);
-    expect(t.dictation.fullDuplex).toBe('echo check: none heard');
+    expect(t.dictation.fullDuplex).toBe('echo check: no echo detected');
 
     // Speakers now: the check starts over, half-duplex, and two checks are needed again.
     t.watch.devices!({ output: 'LG HDR 4K', outputId: 'LG HDR 4K#1', formFactor: 'speakers', input: 'Microphone (BRIO)', inputId: 'Microphone (BRIO)#1', remote: false });

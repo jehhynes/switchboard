@@ -77,7 +77,7 @@ describe('standalone interactive sessions', () => {
     const h = new Harness();
     expect(h.act({ type: 'new-session', repoRoot: 'D:/git/switchboard', provider: 'claude' })).toMatchObject([{ type: 'start-session', codeMode: true, withoutCodeMode: true }]);
     const hooks = new Harness({ settings: settings({ sessions: { codeMode: true, installHooks: false } }) });
-    expect(hooks.send({ type: 'new-session', repoRoot: 'D:/git/switchboard', provider: 'claude' }).refused).toContain('installHooks');
+    expect(hooks.send({ type: 'new-session', repoRoot: 'D:/git/switchboard', provider: 'claude' }).refused).toContain('Install hooks');
     expect(hooks.store.workItemsWithStatus('running')).toHaveLength(0);
   });
 

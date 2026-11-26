@@ -33,7 +33,7 @@ export function renderOpening(opening: Opening): VNode {
   if (opening.error !== null) {
     return (
       <div class="opening-failed" role="alert">
-        <h3>Couldn't open this work item</h3>
+        <h3>This work item did not open</h3>
         <p class="opening-why">{opening.error}</p>
         <div class="opening-actions">
           <button type="button" class="conn-primary" data-action="open-retry">

@@ -4,8 +4,18 @@ import type { DiffData, FileData } from '@switchboard/protocol';
 
 export type { DiffData, FileData } from '@switchboard/protocol';
 
+/** Lines selected in a view: from `start` to `end`, on the new side (`additions`) or the old one (`deletions`) of a diff. */
+export interface LineRange {
+  start: number;
+  end: number;
+  side?: 'additions' | 'deletions';
+  endSide?: 'additions' | 'deletions';
+}
+
 export interface FileMountOptions {
   wrap: boolean;
+  /** Lines selected by dragging over their numbers; null when the selection is cleared. */
+  onSelect?(range: LineRange | null): void;
   /** The line to scroll to and select, null for the top. */
   line: number | null;
   /** What the file's header shows before its name and after it. */
@@ -13,6 +23,8 @@ export interface FileMountOptions {
   suffix?: HTMLElement;
   /** What the file's header shows at its end. */
   meta?: HTMLElement;
+  /** False to draw no header; drawn by default. */
+  header?: boolean;
 }
 
 export interface DiffMountOptions {
@@ -59,6 +71,8 @@ export interface ChangesMountOptions {
   headerPrefix?(path: string): HTMLElement | null;
   /** A file's own header was clicked, away from the page's controls in it. */
   onHeader?(path: string): void;
+  /** Lines were selected in a file's diff by dragging over their numbers, or the selection was cleared (null). */
+  onSelect?(path: string | null, range: LineRange | null): void;
 }
 
 export interface ChangesMount {

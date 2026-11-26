@@ -145,7 +145,7 @@ describe('Speech', () => {
     expect(speech.playing).toBeNull();
   });
 
-  it('interrupts the playing reply where it stopped when Speak replies is turned off, and skips a waiting one, as Stop speaking would', async () => {
+  it('interrupts the playing reply where it stopped when Spoken replies is turned off, and skips a waiting one, as Stop speaking would', async () => {
     const { clock, tts, output, reports, speech, states, logs } = setup();
 
     speech.speak(item('r1', 'm1', 'x'.repeat(10)));
@@ -161,8 +161,8 @@ describe('Speech', () => {
     speech.cancel('r1', true);
     speech.cancel('r2', true);
     expect(states()).toEqual(['r1 playing', 'r1 interrupted', 'r2 skipped']);
-    expect(reports.find((one) => one.type === 'speech' && one.state === 'interrupted')).toMatchObject({ atMs: 400, said: 4, reason: 'Speak replies turned off' });
-    expect(logs.some((line) => line.includes('r1') && line.includes('interrupted (Speak replies turned off)'))).toBe(true);
+    expect(reports.find((one) => one.type === 'speech' && one.state === 'interrupted')).toMatchObject({ atMs: 400, said: 4, reason: 'Spoken replies turned off' });
+    expect(logs.some((line) => line.includes('r1') && line.includes('interrupted (Spoken replies turned off)'))).toBe(true);
     expect(output.playbacks[0]!.stopped).toBe(true);
     // Only the replies named are touched: a waiting alert line still plays, as it would not after Stop speaking.
     expect(speech.playing?.replyId).toBe('r3');

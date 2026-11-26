@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { imageType, MAX_UPLOAD_BYTES, safeName, writeUpload } from '../src/uploads.js';
+import { imageType, MAX_UPLOAD_BYTES, safeName, UPLOAD_DIR, writeUpload } from '../src/uploads.js';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
 const NOW = new Date(2026, 10, 19, 21, 5, 9).getTime();
@@ -18,6 +18,29 @@ afterEach(() => {
 });
 
 describe('files a web page attaches', () => {
+  it.runIf(process.platform !== 'win32')('keeps the folder and its files private to the user, in a folder named for the user, tightening a folder others can read', () => {
+    expect(UPLOAD_DIR).toBe(join(tmpdir(), `switchboard-pasted-${process.getuid!()}`));
+    const fresh = join(dir, 'fresh');
+    const notes = writeUpload('notes.txt', Buffer.from('hello'), NOW, fresh);
+    expect(statSync(fresh).mode & 0o777).toBe(0o700);
+    expect(statSync((notes as { path: string }).path).mode & 0o777).toBe(0o600);
+    chmodSync(fresh, 0o775);
+    expect(writeUpload('more.txt', Buffer.from('hello'), NOW, fresh)).toHaveProperty('path');
+    expect(statSync(fresh).mode & 0o777).toBe(0o700);
+  });
+
+  it.runIf(process.platform !== 'win32')('refuses a folder another user owns, writing, tightening and deleting nothing there', () => {
+    const theirs = join(dir, 'theirs');
+    mkdirSync(theirs, { mode: 0o777 });
+    chmodSync(theirs, 0o777);
+    writeFileSync(join(theirs, 'pasted-20261101-000000-abcdef.png'), PNG);
+    utimesSync(join(theirs, 'pasted-20261101-000000-abcdef.png'), WEEK_AGO, WEEK_AGO);
+
+    expect(writeUpload('notes.txt', Buffer.from('hello'), NOW, theirs, process.getuid!() + 1)).toEqual({ error: `notes.txt was not saved: ${theirs} belongs to another user.` });
+    expect(readdirSync(theirs)).toEqual(['pasted-20261101-000000-abcdef.png']);
+    expect(statSync(theirs).mode & 0o777).toBe(0o777);
+  });
+
   it('knows PNG, JPEG, GIF and WebP pictures by their first bytes, and nothing else', () => {
     expect(imageType(PNG)).toBe('png');
     expect(imageType(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('jpg');

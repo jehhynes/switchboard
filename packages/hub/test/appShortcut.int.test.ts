@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { appShortcut } from '../src/appShortcut.js';
+import { appShortcut, linuxAppShortcut } from '../src/appShortcut.js';
 
 const temporary: string[] = [];
 afterEach(() => { for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true, maxRetries: 5 }); });
@@ -20,5 +20,15 @@ describe('portable Windows app shortcut', () => {
     expect(value.args).toBe(`"--profile-directory=${profile}" "--app=chrome-extension://hlbibnhgkgnjkbfledhgjblacloneije/iframeHost.html?origin=https%3A%2F%2Fpc.tail.ts.net"`);
     expect(value.name).toBe('Switchboard'); expect(value.icon).toBe(`${icon},0`);
     expect(value.appId).toBe(appId);
+  });
+});
+
+describe('portable Linux app launcher', () => {
+  const icon = '/home/alex/My Downloads/Switchboard/switchboard.png';
+  it.runIf(process.platform === 'linux' && existsSync('/usr/bin/desktop-file-validate'))('passes desktop-file-validate', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'switchboard-desktop-')); temporary.push(dir);
+    const path = join(dir, 'switchboard.desktop');
+    writeFileSync(path, linuxAppShortcut('https://pc.tail.ts.net', new URLSearchParams({ system: 'linux', profile: 'Profile 1', icon })));
+    expect(execFileSync('desktop-file-validate', [path], { encoding: 'utf8' })).toBe('');
   });
 });

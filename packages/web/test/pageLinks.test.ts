@@ -323,7 +323,7 @@ describe('the page in use', () => {
     hello(source);
     typed('The work item draft');
     click('[data-action="picker"]');
-    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New conversation…']);
+    expect([...root.querySelectorAll('.conversation-menu .menu-row')].map((row) => row.textContent)).toEqual(['Fix it', 'Side', 'New session in this work item…']);
     click('[data-action="new-conversation"]');
     await flush();
 
@@ -331,8 +331,8 @@ describe('the page in use', () => {
     expect(root.querySelector('.conversation-menu')).toBeNull();
     expect(root.querySelector('#panel .new-draft')!.textContent).toContain('It starts when you send its first message');
     expect(root.querySelector('button.picker .title')!.textContent).toBe('Fix it');
-    expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('New conversation');
-    expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('New conversation · Fix it');
+    expect(root.querySelector('button.picker .picker-session')!.textContent).toBe('New session');
+    expect(root.querySelector('button.picker')!.getAttribute('title')).toBe('New session · Fix it');
     expect(input.value).toBe('');
     expect(document.activeElement).toBe(input);
     expect([...root.querySelectorAll('.draft-note [data-action="draft-provider"]')].map((one) => [one.textContent, one.getAttribute('aria-pressed')])).toEqual([['Claude', 'true'], ['Codex', 'false']]);
@@ -630,7 +630,7 @@ describe('the page in use', () => {
     // The tab chosen selects, not the first one.
     click(`#detail [data-action="iframe-open"][data-url="${pr.url}"]`); await flush();
     expect(selected()).toBe(pr.url);
-    expect(root.querySelector('#detail')!.textContent).toContain('Load the experimental Switchboard Chrome/Edge extension in this browser, then select Retry.');
+    expect(root.querySelector('#detail')!.textContent).toContain('Install the Switchboard browser extension in this browser, then select Retry.');
     expect(button('Retry')).not.toBeUndefined();
     button('Open in a browser tab')!.click();
     expect(opened.mock.calls).toEqual([[pr.url]]);
@@ -683,7 +683,7 @@ describe('the page in use', () => {
     const frame = root.querySelector<HTMLIFrameElement>('iframe[title="GitHub browser experiment"]')!;
     expect(root.textContent).toContain('Open with sign-in support');
     // With the extension, the pane offers neither a browser tab nor the extension.
-    expect(root.textContent).not.toContain('Open in a browser tab');
+    expect(root.querySelector('.iframe-actions')).toBeNull();
     expect(root.textContent).not.toContain('Get the browser extension');
     source.emit('reply', { reply: reply('r9', 9) }); expect(root.querySelector('iframe[title="GitHub browser experiment"]')).toBe(frame);
     click('[data-action="artifact"][data-path="chat/p.html"]');

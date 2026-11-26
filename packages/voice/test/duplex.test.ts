@@ -22,10 +22,10 @@ describe('AutoDuplex', () => {
     expect(auto.measured(NONE)).toBe(false);
     expect(auto.measured(UNCLEAR)).toBe(false);
     expect(auto.measured(ECHO)).toBe(true);
-    expect(auto.reason).toBe('echo check: echo heard');
+    expect(auto.reason).toBe('echo check: echo detected');
     expect(auto.measured(NONE)).toBe(false);
     expect(auto.measured(NONE)).toBe(true);
-    expect([auto.full, auto.reason]).toEqual([true, 'echo check: none heard']);
+    expect([auto.full, auto.reason]).toEqual([true, 'echo check: no echo detected']);
     expect(logs).toEqual([
       'echo check: none (r 0.1 at 300 ms, level -70 dBFS, range 3 dB, 2 s played; hint: none; 1 of 2 in a row)',
       "echo check: unclear, sound that is not the reply's echo, such as talk (r 0.3 at 200 ms, level -25 dBFS, range 25 dB, 2 s played); nothing changes",
@@ -79,7 +79,7 @@ describe('AutoDuplex', () => {
     expect(auto.heardWhilePlaying('wait stop that', reply)).toBe(false);
     expect(auto.full).toBe(true);
     expect(auto.heardWhilePlaying('wait the session token', reply)).toBe(true);
-    expect([auto.full, auto.reason]).toEqual([false, 'echo check: echo heard']);
+    expect([auto.full, auto.reason]).toEqual([false, 'echo check: echo detected']);
     expect(logs.at(-1)).toBe('echo check: 3 of 4 words heard over the reply are its own (wait the session token): half-duplex again');
   });
 });

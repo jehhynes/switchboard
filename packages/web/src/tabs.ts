@@ -48,8 +48,8 @@ export type DocTab =
 export const filePath = (tab: LocalTab): string => (tab.entry.state === 'ok' ? tab.entry.data.path : tab.target);
 
 /**
- * The strip's tabs in order, each only while it applies: Conversation (narrow strip only), History, the links (or Browser),
- * the artifacts newest first but those closed, unless shown, the file tabs in the order they were opened, Changes, then Console.
+ * The strip's tabs in order, each only while it applies: Conversation (narrow strip only), Changes, History, the links (or Browser),
+ * the artifacts newest first but those closed, unless shown, the file tabs in the order they were opened, then Console.
  */
 export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
   const { shown } = state;
@@ -60,11 +60,11 @@ export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
 
   return [
     ...(layout === 'narrow' ? [fixed('conversation')] : []),
+    ...(state.changes ? [{ id: 'changes', kind: 'changes' as const, selected: shown === 'diff' }] : []),
     fixed('history'),
     ...(state.links === undefined ? (state.browser ? [fixed('browser')] : []) : state.links.map((link): DocTab => ({ id: `link:${link.url}`, kind: 'link', link, selected: shown === 'browser' && state.link === link.url }))),
     ...artifacts.map((artifact): DocTab => ({ id: `artifact:${artifact.path}`, kind: 'artifact', artifact, selected: shown === 'artifacts' && artifact.path === state.open })),
     ...state.files.tabs.map((file): DocTab => ({ id: `file:${filePath(file)}`, kind: 'file', file, selected: shown === 'file' && file.id === state.files.open })),
-    ...(state.changes ? [{ id: 'changes', kind: 'changes' as const, selected: shown === 'diff' }] : []),
     ...(state.console ? [fixed('console')] : []),
   ];
 }
@@ -88,11 +88,14 @@ export const UNMEASURED: TabFit = { width: 0, more: 0, plain: 0, closable: 0, me
 /** Whether a tab has a close mark: a link, an artifact or a file. */
 export const closable = (tab: DocTab): boolean => tab.kind === 'link' || tab.kind === 'artifact' || tab.kind === 'file';
 
+/** The tabs a strip short of room keeps first after the selected one, in this order. */
+const FIRST_KEPT = ['conversation', 'changes', 'history'];
+
 /**
  * Which of a strip's tabs show and which go in More, each list in strip order. Every tab shows while all fit at their least widths, with More
  * beside them when `menu` (closed artifacts for it to list). Else More takes its room and the tabs are kept in this order while they fit: the
- * selected tab, Conversation, History, then the rest in strip order, stopping at the first that does not fit; so a very narrow strip drops History
- * first, then Conversation, and keeps the selected tab whatever its width, every tab reachable through More. An unmeasured strip shows them all.
+ * selected tab, Conversation, Changes, History, then the rest in strip order, stopping at the first that does not fit; so a very narrow strip drops
+ * History first, then Changes, then Conversation, and keeps the selected tab whatever its width, every tab reachable through More. An unmeasured strip shows them all.
  */
 export function fitTabs(tabs: readonly DocTab[], fit: TabFit, menu = false): { shown: DocTab[]; hidden: DocTab[] } {
   const least = (tab: DocTab): number => fit.measured[tab.id] ?? (closable(tab) ? fit.closable : fit.plain);
@@ -102,7 +105,7 @@ export function fitTabs(tabs: readonly DocTab[], fit: TabFit, menu = false): { s
     return { shown: [...tabs], hidden: [] };
   }
 
-  const order = [...tabs.filter((tab) => tab.selected), ...['conversation', 'history'].flatMap((id) => tabs.filter((tab) => tab.id === id && !tab.selected)), ...tabs.filter((tab) => !tab.selected && tab.id !== 'conversation' && tab.id !== 'history')];
+  const order = [...tabs.filter((tab) => tab.selected), ...FIRST_KEPT.flatMap((id) => tabs.filter((tab) => tab.id === id && !tab.selected)), ...tabs.filter((tab) => !tab.selected && !FIRST_KEPT.includes(tab.id))];
   const kept = new Set<DocTab>();
   let room = fit.width - fit.more;
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { systemNotifier, TOAST_SCRIPT, toastInput, toastXml } from '../src/systemAlerts.js';
-import type { RunHelper, SystemAlert } from '../src/systemAlerts.js';
+import { NOTIFY_SCRIPT, systemNotifier, TOAST_SCRIPT, toastInput, toastXml } from '../src/systemAlerts.js';
+import type { DetachHelper, RunHelper, SystemAlert } from '../src/systemAlerts.js';
 
 const ALERT: SystemAlert = { workItemId: 7, title: 'Fix <b> & "quote" it\'s', reason: 'Review, then approve', url: 'http://127.0.0.1:47616/page/#w=7' };
 
@@ -98,33 +98,21 @@ describe('systemNotifier', () => {
     expect(logs).toEqual(['system notification not shown: none on freebsd']);
   });
 
-  it('shows each alert with notify-send on Linux and opens its URL when the operator chose Open, and nothing when it was dismissed', async () => {
+  it('shows each alert on Linux through a detached shell that outlives the hub, with the URL and notify-send arguments as its own arguments', () => {
     const logs: string[] = [];
-    const { calls, run } = fakeRun((file, args) => (file === 'notify-send' ? { code: 0, stdout: args.includes('Second') ? '\n' : 'default\n' } : { code: 0 }));
+    const { calls, run } = fakeRun();
+    const detached: Array<{ file: string; args: string[] }> = [];
+    const detach: DetachHelper = (file, args, _env, failed) => { detached.push({ file, args }); if (args.includes('Broken')) failed(new Error('spawn sh ENOENT')); };
 
-    systemNotifier((line) => logs.push(line), run, 'linux', {}).notify([ALERT, { ...ALERT, workItemId: 8, title: 'Second', url: 'http://x/page/#w=8' }], false);
-    await settle();
-    await settle();
-    expect(calls).toEqual([
-      { file: 'notify-send', args: ['--app-name=Switchboard', '--hint=boolean:suppress-sound:true', '--action=default=Open', '--wait', '--', ALERT.title, 'Review, then approve'] },
-      { file: 'notify-send', args: ['--app-name=Switchboard', '--hint=boolean:suppress-sound:true', '--action=default=Open', '--wait', '--', 'Second', 'Review, then approve'] },
-      { file: 'xdg-open', args: [ALERT.url] },
+    systemNotifier((line) => logs.push(line), run, 'linux', {}, detach).notify([ALERT, { ...ALERT, workItemId: 8, title: 'Broken', url: 'http://x/page/#w=8' }], false);
+    expect(calls).toEqual([]);
+    expect(detached).toEqual([
+      { file: 'sh', args: ['-c', NOTIFY_SCRIPT, 'switchboard-notify', 'xdg-open', ALERT.url, '--app-name=Switchboard', '--hint=boolean:suppress-sound:true', '--', ALERT.title, 'Review, then approve'] },
+      { file: 'sh', args: ['-c', NOTIFY_SCRIPT, 'switchboard-notify', 'xdg-open', 'http://x/page/#w=8', '--app-name=Switchboard', '--hint=boolean:suppress-sound:true', '--', 'Broken', 'Review, then approve'] },
     ]);
-    expect(logs).toEqual([]);
-  });
-
-  it('shows the notification again without an action where notify-send has none, logging when that fails too', async () => {
-    const logs: string[] = [];
-    const { calls, run } = fakeRun((_file, args) => (args.includes('--wait') ? { code: 1, stderr: 'Unknown option --action' } : { code: 2, stderr: 'no bus' }));
-
-    systemNotifier((line) => logs.push(line), run, 'linux', {}).notify([ALERT], true);
-    await settle();
-    await settle();
-    expect(calls.map((call) => call.args)).toEqual([
-      ['--app-name=Switchboard', '--action=default=Open', '--wait', '--', ALERT.title, 'Review, then approve'],
-      ['--app-name=Switchboard', '--', ALERT.title, 'Review, then approve'],
-    ]);
-    expect(logs).toEqual(['system notification not shown (notify-send): exit 2: no bus']);
+    expect(logs).toEqual(['system notification not shown (notify-send): Error: spawn sh ENOENT']);
+    systemNotifier(() => {}, run, 'linux', {}, (file, args) => detached.push({ file, args })).notify([ALERT], true);
+    expect(detached[2]!.args.slice(5)).toEqual(['--app-name=Switchboard', '--', ALERT.title, 'Review, then approve']);
   });
 
   it('passes the title and reason to osascript as arguments on macOS, with the sound only when it may', async () => {

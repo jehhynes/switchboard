@@ -327,8 +327,8 @@ describe('the page in use', () => {
     hello(source);
     // Pinned by default: a column, and the pin offers to unpin it.
     expect(root.classList.contains('drawers')).toBe(false);
-    expect(pin().getAttribute('aria-label')).toBe('Unpin sidebar');
-    expect(pin().title).toBe('Unpin sidebar');
+    expect(pin().getAttribute('aria-label')).toBe('Let list hide');
+    expect(pin().title).toBe('Let list hide');
     expect(pin().querySelector('.codicon-pinned')).not.toBeNull();
     // Unpinned, the list is a drawer at any width, hidden, with the focus on the button that shows it.
     pin().focus();
@@ -337,7 +337,7 @@ describe('the page in use', () => {
     expect(root.classList.contains('drawer-open')).toBe(false);
     expect(localStorage.getItem('switchboard.listCollapsed')).toBe('1');
     expect(document.activeElement).toBe(root.querySelector('.header > .list-toggle'));
-    expect(pin().getAttribute('aria-label')).toBe('Pin sidebar');
+    expect(pin().getAttribute('aria-label')).toBe('Keep list open');
     expect(pin().querySelector('.codicon-pin')).not.toBeNull();
     resizeTo(1920);
     expect(root.classList.contains('drawers')).toBe(true);
@@ -379,13 +379,13 @@ describe('the page in use', () => {
 
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' } })])] });
     expect(root.classList.contains('drawers')).toBe(true);
-    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin sidebar');
+    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Keep list open');
     // History is a tab of the open work item, so the list stays the drawer and keeps its pin.
     click('[data-action="actions"]');
     click('.actions-menu [data-action="row-history"]');
     expect(root.querySelector('[data-tab="history"], [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(root.classList.contains('drawers')).toBe(true);
-    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin sidebar');
+    expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Keep list open');
     page.close();
   });
 

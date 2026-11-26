@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { CHECK_DELAY_MS, settings } from '../src/settings.js';
-import { bar, EditorState, fieldOfError, getAt, parseConfig, readField, setAt, withCurrent, sourceFields, sourceTitle } from '../src/settingsModel.js';
+import { bar, EditorState, errorPages, fieldOfError, getAt, parseConfig, readField, setAt, withCurrent, sourceFields, sourceTitle } from '../src/settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -26,10 +26,12 @@ describe('the Settings model (settingsModel.ts)', () => {
     })));
     expect(sourceTitle(state, 'helpdesk')).toBe('helpdesk (Community)');
     const sections = sourceFields(state, 'helpdesk');
-    expect(sections.map(section => section.heading)).toEqual(['Source', 'Community', 'Advanced']);
-    expect(sections[1]!.fields.map(field => [field.path, field.kind])).toEqual([['sources.helpdesk.userId', 'text'], ['sources.helpdesk.enabled', 'boolean'], ['sources.helpdesk.names', 'list']]);
-    expect(sections[1]!.fields[1]!.fallback).toBe(true);
-    expect(sections[2]!.fields[0]).toMatchObject({ path: 'sources.helpdesk.limit', kind: 'integer', placeholder: '20' });
+    expect(sections.map(section => section.heading)).toEqual(['Connection', 'Work', 'Advanced']);
+    expect(sections[0]!.fields.map(field => [field.path, field.kind])).toEqual([['sources.helpdesk.userId', 'text'], ['sources.helpdesk.enabled', 'boolean'], ['sources.helpdesk.names', 'list']]);
+    expect(sections[0]!.fields[1]!.fallback).toBe(true);
+    // Advanced holds the rarely changed kind, then the plugin's advanced fields.
+    expect(sections[2]!.fields.map(field => field.path)).toEqual(['sources.helpdesk.kind', 'sources.helpdesk.limit']);
+    expect(sections[2]!.fields[1]).toMatchObject({ path: 'sources.helpdesk.limit', kind: 'integer', placeholder: '20' });
   });
 
   it('offers configurable Zoho scope and pool fields with no organization defaults', () => {
@@ -83,12 +85,15 @@ describe('the Settings model (settingsModel.ts)', () => {
   it('says Saved only after a save since Settings opened, Unsaved changes while a draft differs, and the errors alone otherwise', () => {
     const state = new EditorState(parseConfig(config({ sessions: { concurrency: 2 } })));
 
-    expect(bar(state).status).toBe('');
+    expect(bar(state)).toMatchObject({ status: '', shown: false, buttons: false });
     state.errors = ['x'];
-    expect(bar(state).status).toBe('1 error');
+    expect(bar(state)).toMatchObject({ status: '1 error', shown: true, buttons: false });
     state.errors = [];
+    state.warnings = ['dock is no longer used.'];
+    expect(bar(state)).toMatchObject({ status: '', shown: true, buttons: false });
+    state.warnings = [];
     state.setDraft({ sessions: { concurrency: 3 } });
-    expect(bar(state).status).toBe('Unsaved changes');
+    expect(bar(state)).toMatchObject({ status: 'Unsaved changes', shown: true, buttons: true, canSave: true });
     // A read of the file that changes nothing is no save.
     state.refresh(parseConfig(config({ sessions: { concurrency: 2 } })));
     expect(bar(state).status).toBe('Unsaved changes');
@@ -96,11 +101,28 @@ describe('the Settings model (settingsModel.ts)', () => {
     expect(bar(state).status).toBe('');
     state.setDraft({ sessions: { concurrency: 3 } });
     state.wrote({ sessions: { concurrency: 3 } }, 'v2');
-    expect(bar(state).status).toBe('Saved');
+    // Saved shows without buttons, since there is nothing to save or discard.
+    expect(bar(state)).toMatchObject({ status: 'Saved', shown: true, buttons: false });
     state.setDraft({ sessions: { concurrency: 4 } });
     expect(bar(state).status).toBe('Unsaved changes');
     state.dropDraft();
     expect(bar(state).status).toBe('Saved');
+  });
+
+  it("places an error that names a settings.json section but no field on the page that shows that section's settings", () => {
+    const state = new EditorState(parseConfig(config({})));
+
+    state.errors = ['web must be an object.', 'sessions must be an object.', 'triage must be an object.', 'alerts must be an object.', 'voice must be an object.', 'voice.pitchLowFactor must be a number from 1 to 3.', 'Unknown key: extra.'];
+    expect([...errorPages(state).entries()]).toEqual([
+      ['web must be an object.', 'advanced'],
+      ['sessions must be an object.', 'sessions'],
+      ['triage must be an object.', 'triage'],
+      ['alerts must be an object.', 'display'],
+      ['voice must be an object.', 'spoken-replies'],
+      // The pitch check's factors are settings.json only, so their errors go to Dictation, which has the voice check.
+      ['voice.pitchLowFactor must be a number from 1 to 3.', 'dictation'],
+      ['Unknown key: extra.', null],
+    ]);
   });
 
   it('keeps a draft over a read unless it holds no edit, and marks a draft whose file changed on disk', () => {
@@ -122,6 +144,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
   let answers: Record<string, Answer | ((body: Record<string, unknown>) => Answer)>;
 
   beforeEach(() => {
+    // A desktop's width, whose navigation opens a group under its entry; the phone's drill-down has tests of its own.
+    window.innerWidth = 1280;
     vi.useFakeTimers();
     posts = [];
     answers = { 'page-settings-read': { status: 200, body: config({ sessions: { installHooks: false } }) }, 'page-settings-check': { status: 200, body: { errors: [] } }, 'page-devices': { status: 200, body: { devices: [] } } };
@@ -164,43 +188,137 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     box.dispatchEvent(new Event('input', { bubbles: true }));
   };
   const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
+  const headings = () => [...host.querySelectorAll('.settings-section-heading')].map((node) => (node.querySelector('.settings-toggle-label') ?? node).textContent);
   const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((one) => one.textContent?.trim() === label)!;
   const buttonIn = (selector: string, label: string) => [...host.querySelectorAll<HTMLButtonElement>(`${selector} button`)].find((one) => one.textContent?.trim() === label)!;
   const named = (name: string) => posts.filter((one) => one.name === name);
+  const go = async (page: string) => {
+    host.querySelector<HTMLButtonElement>(`.settings-nav-entry[data-key="${page}"]`)!.click();
+    await settle();
+  };
 
-  it('reads settings.json and draws General: its sections in order, the file, Saved, and Advanced collapsed', async () => {
+  it('reads settings.json and opens on Sessions: the categories, its sections in order with a line under the title, and no bar', async () => {
     await opened();
 
     expect(named('page-settings-read')).toHaveLength(1);
-    expect(texts('.settings-nav-entry .settings-nav-label').slice(0, 5)).toEqual(['General', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
-    expect(host.querySelector('.settings-nav-entry.current')?.textContent).toContain('General');
-    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
-    // The hub keeps the config folder outside settings.json, so General names it and the command that changes it.
-    expect(texts('.settings-note')).toContain('Config folder: C:/home/.switchboard. Change it with hub.js config set configDir <folder>.');
-    expect(host.querySelector('.settings-file')?.textContent).toBe('C:/home/.switchboard/settings.json');
-    expect(texts('.settings-section-heading')).toEqual(['Sessions', 'Claude sessions', 'Codex sessions', 'Triage', 'Alerts', 'Web page', 'Diff viewer', 'Remote access', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Default agent', 'Concurrency', 'Code Mode (experimental)', 'Friction debriefs', 'Model', 'Permission mode', 'Model', 'Permission mode', 'Concurrency', 'Model', 'Timeout (seconds)', 'Needs-you alerts from', 'Embedded browser tabs', 'Layout', 'Wrap long lines', 'Tailscale', 'Allowed hosts', 'Allowed logins']);
-    expect(host.querySelector('[data-path="sessions.installHooks"]')).toBeNull();
-    // The diff viewer's layout and wrapping, set once for every page.
-    expect([...field<HTMLSelectElement>('web.diffLayout').options].map((one) => one.value)).toEqual(['auto', 'split', 'stacked']);
-    expect([...field<HTMLSelectElement>('web.diffWrap').options].map((one) => one.textContent)).toContain('Off');
-    expect(host.querySelector('.settings-toggle')?.getAttribute('aria-expanded')).toBe('false');
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
-    expect(button('Save').disabled).toBe(true);
-    expect(button('Discard').disabled).toBe(true);
-    // A field shows its default as its placeholder, and a select its default choice.
-    expect(field<HTMLInputElement>('sessions.concurrency').placeholder).toBe('2');
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['Sessions', 'Triage', 'Sources', 'Playbooks', 'Schedules', 'Alerts and display', 'Devices', 'Advanced', 'Spoken replies', 'Dictation', 'Personas']);
+    expect(texts('.settings-nav-entry.group[aria-expanded="false"] .settings-nav-label')).toEqual(['Sources', 'Playbooks', 'Schedules', 'Personas']);
+    expect(host.querySelector('.settings-nav-entry.current')?.textContent).toContain('Sessions');
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
+    expect(host.querySelector('.settings-lede')?.textContent).toBe('How playbook and ad-hoc sessions run. A playbook can set its own agent, model and permission mode.');
+    expect(headings()).toEqual(['All agents', 'Claude', 'Codex']);
+    expect(texts('.settings-caption label')).toEqual(['Default agent', 'Sessions at once', 'Model', 'Permission mode', 'Model', 'Permission mode']);
+    // A clean file has nothing to say, so the bar and its Save and Discard do not show.
+    expect(host.querySelector('.settings-bar')).toBeNull();
+    expect(button('Save')).toBeUndefined();
+    // An empty field says what applies: a default as Default, a description of it as itself; a select shows its default choice.
+    expect(field<HTMLInputElement>('sessions.concurrency').placeholder).toBe('Default: 2');
+    expect(field<HTMLInputElement>('sessions.model').placeholder).toBe("Claude's default");
     expect(field<HTMLSelectElement>('sessions.provider').value).toBe('claude');
     expect([...field<HTMLSelectElement>('sessions.provider').options].map((option) => option.textContent)).toEqual(['Claude', 'Codex']);
     expect(field<HTMLSelectElement>('sessions.codex.permissionMode').value).toBe('auto');
     expect(host.querySelector('[data-path^="dock."]')).toBeNull();
-    expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Web app when open', 'Web page when open', 'System notification']);
+  });
 
-    // Advanced opens to show the executable paths, and Install hooks shows the file's false over its default true.
+  it("draws Triage, Alerts and display, Devices and Advanced, each with its sections, and settings.json's path only on Advanced", async () => {
+    await opened();
+
+    const shown = async (page: string) => {
+      await go(page);
+      return { title: host.querySelector('.settings-page-title h2')?.textContent, headings: headings(), labels: texts('.settings-section:not(.advanced) .settings-caption label') };
+    };
+
+    expect(await shown('triage')).toEqual({ title: 'Triage', headings: ['Classifier', 'Advanced'], labels: ['Model', 'Triages at once'] });
+    expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Give up after');
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
     await settle();
-    expect(texts('.settings-section.advanced .settings-caption label')).toEqual(['Install hooks', 'Claude Code path', 'Codex path', 'Node.js path']);
+    // A number's unit follows it rather than sitting in its label.
+    expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-unit')?.textContent).toBe('s');
+    expect(await shown('display')).toEqual({ title: 'Alerts and display', headings: ['Notifications', 'Replies', 'Diffs'], labels: ['Show alerts in', 'Needs-you sound', 'Fold reply details', 'Layout', 'Wrap long lines'] });
+    // Spoken alerts are on Spoken replies, which a line in Notifications opens.
+    expect(host.querySelector('.settings-link-row')?.textContent).toBe('Spoken alerts are on Spoken replies.Open Spoken replies');
+    host.querySelector<HTMLButtonElement>('.settings-link-row button')!.click();
+    await settle();
+    expect(host.querySelector('.settings-page-title h2')?.firstChild?.textContent).toBe('Spoken replies');
+    expect(host.querySelector('.settings-page-title h2 .settings-experimental')?.textContent).toBe('Experimental');
+    expect(host.querySelector('.settings-experimental-note')?.textContent).toBe('Spoken replies may be unreliable. Replies are spoken only after you turn them on in a conversation’s View options; spoken alerts have their own switch below.');
+    await go('display');
+    expect([...field<HTMLSelectElement>('alerts.surface').options].map((option) => option.textContent)).toEqual(['Installed app, else a notification', 'Any open page, else a notification', 'Notifications only']);
+    // The diff viewer's layout and wrapping, set once for every page.
+    expect([...field<HTMLSelectElement>('web.diffLayout').options].map((one) => one.value)).toEqual(['auto', 'split', 'stacked']);
+    expect([...field<HTMLSelectElement>('web.diffWrap').options].map((one) => one.textContent)).toContain('Off');
+    expect(await shown('devices')).toEqual({ title: 'Devices', headings: ['Paired devices', 'Remote access', 'Advanced'], labels: ['Tailscale'] });
+    expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Allowed hosts, Allowed logins');
+    expect(await shown('advanced')).toEqual({ title: 'Advanced', headings: ['Experiments', 'Programs', 'Developer', 'Settings file'], labels: ['Code Mode', 'Embedded browser tabs', 'Claude Code path', 'Codex path', 'Node.js path', 'Install hooks', 'Friction debriefs'] });
+    // Install hooks shows the file's false over its default true.
     expect(field<HTMLInputElement>('sessions.installHooks').checked).toBe(false);
+    // The hub keeps the config folder outside settings.json, so Advanced names it and how to change it, without a warning's colour.
+    expect(texts('[data-key="settings-file"] .settings-file')).toEqual(['C:/home/.switchboard/settings.json']);
+    expect(texts('[data-key="settings-config-folder"] .settings-help')).toEqual(['C:/home/.switchboard', 'Change it with hub.js config set configDir <folder>; Settings then reads the new folder.']);
+    expect(host.querySelector('.settings-note')).toBeNull();
+    await go('sessions');
+    expect(host.querySelector('.settings-file')).toBeNull();
+  });
+
+  it('keeps each moved setting on its settings.json key: an edit on its new page drafts the same key, and marks that page alone', async () => {
+    await opened();
+
+    const moved: Array<[page: string, path: string, input: string | boolean, value: unknown]> = [
+      ['sessions', 'sessions.provider', 'codex', 'codex'],
+      ['sessions', 'sessions.concurrency', '3', 3],
+      ['sessions', 'sessions.model', 'opus', 'opus'],
+      ['sessions', 'sessions.permissionMode', 'plan', 'plan'],
+      ['sessions', 'sessions.codex.model', 'gpt', 'gpt'],
+      ['sessions', 'sessions.codex.permissionMode', 'bypassPermissions', 'bypassPermissions'],
+      ['triage', 'triage.model', 'haiku', 'haiku'],
+      ['triage', 'triage.concurrency', '4', 4],
+      ['triage', 'triage.timeoutSeconds', '60', 60],
+      ['display', 'alerts.surface', 'system', 'system'],
+      ['display', 'web.diffLayout', 'split', 'split'],
+      ['display', 'web.diffWrap', 'on', 'on'],
+      ['display', 'voice.needsYouSound', false, false],
+      ['display', 'voice.briefReplies', true, true],
+      ['devices', 'web.tailscale', true, true],
+      ['devices', 'web.remoteHosts', 'pc.tail.ts.net', ['pc.tail.ts.net']],
+      ['devices', 'web.remoteLogins', 'a@b.c', ['a@b.c']],
+      ['advanced', 'sessions.codeMode', true, true],
+      ['advanced', 'web.iframeBrowser', true, true],
+      ['advanced', 'sessions.claudePath', 'C:/claude', 'C:/claude'],
+      ['advanced', 'sessions.codexPath', 'C:/codex', 'C:/codex'],
+      ['advanced', 'sessions.nodePath', 'C:/node', 'C:/node'],
+      ['advanced', 'sessions.installHooks', true, true],
+      ['advanced', 'sessions.debriefs', true, true],
+    ];
+
+    for (const [page, path, input, value] of moved) {
+      await go(page);
+
+      // Advanced sections are opened to reach their fields.
+      for (const toggle of host.querySelectorAll<HTMLButtonElement>('.settings-toggle[aria-expanded="false"]')) {
+        toggle.click();
+      }
+
+      await settle();
+
+      const control = field<HTMLInputElement & HTMLSelectElement>(path);
+
+      if (typeof input === 'boolean') {
+        control.click();
+      } else {
+        control.value = input;
+        control.dispatchEvent(new Event(control.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+      }
+
+      await settle(CHECK_DELAY_MS);
+      expect(getAt(named('page-settings-check').at(-1)!.body['settings'] as never, path), path).toEqual(value);
+      // Only the page that shows the key is marked, though Sessions, Devices and Advanced share their settings.json objects.
+      expect(texts('.settings-nav-entry:not(.group):has(.settings-dirty) .settings-nav-label'), path).toEqual([host.querySelector(`.settings-nav-entry[data-key="${page}"] .settings-nav-label`)?.textContent]);
+      button('Discard').click();
+      await settle();
+      start().pane.open();
+      await settle();
+    }
   });
 
   it('checks the draft 250 ms after the last edit, shows each error on its field and the page in the navigation, and refuses to save while one stands', async () => {
@@ -240,6 +358,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     expect(texts('.settings-bar .settings-warning')).toEqual([retired]);
     expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    // Nothing to save, so the bar has no buttons.
+    expect(host.querySelector('.settings-bar-buttons')).toBeNull();
 
     type('sessions.concurrency', '3');
     await settle(CHECK_DELAY_MS);
@@ -247,9 +367,12 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(button('Save').disabled).toBe(false);
   });
 
-  it('edits remote access under General: the Tailscale switch and the allowed hosts and logins, one per line, each error on its list', async () => {
+  it('edits remote access on Devices: the Tailscale switch and, under Advanced, the allowed hosts and logins, one per line, each error on its list', async () => {
     answers['page-settings-check'] = (body) => ({ status: 200, body: { errors: (getAt(body['settings'] as never, 'web.remoteHosts') as string[] | undefined)?.includes('https://pc') === true ? ['web.remoteHosts must be a list of host names such as pc.tailnet.ts.net, without a port.'] : [] } });
     await opened();
+    await go('devices');
+    host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
+    await settle();
 
     expect(field<HTMLInputElement>('web.tailscale').checked).toBe(false);
     expect(field<HTMLTextAreaElement>('web.remoteHosts').value).toBe('');
@@ -266,7 +389,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, web: { tailscale: true, remoteLogins: ['Alex@Example.com'] } });
   });
 
-  it('lists the paired devices under Remote access, signs one out, and pairs a device with a QR code and code, showing a refusal', async () => {
+  it('lists the paired devices on Devices once it shows, signs one out, and pairs a device with a QR code and code, showing a refusal', async () => {
     const now = Date.now();
     const phone = { id: '0123abcd', label: 'Android · Chrome', host: 'pc.tail.ts.net', login: 'alex@example.com', createdAt: now, usedAt: now, current: false };
     const own = { id: '89abcdef', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true };
@@ -275,11 +398,14 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     answers['page-pair'] = { status: 409, body: { error: 'Pairing a device needs remote access.' } };
     const { pane } = await opened();
 
+    // The list is read when Devices first shows, not when Settings opens.
+    expect(named('page-devices')).toHaveLength(0);
+    await go('devices');
     expect(named('page-devices')).toHaveLength(1);
     expect(texts('.settings-devices .device-name')).toEqual(['Android · Chrome', 'Windows · Edge (this browser)']);
     expect(texts('.settings-devices .device-detail').map((text) => text?.split(' · ')[0])).toEqual(['pc.tail.ts.net as alex@example.com', 'This computer']);
-    // The list sits in the Remote access section, after its fields.
-    expect(host.querySelector('.settings-devices')?.closest('.settings-section')?.querySelector('.settings-section-heading')?.textContent).toBe('Remote access');
+    // The list is its own section, before Remote access.
+    expect(host.querySelector('.settings-devices')?.closest('.settings-section')?.querySelector('.settings-section-heading')?.textContent).toBe('Paired devices');
 
     // Voice is allowed only on a paired device, never this computer's sign-in, and the list then says so.
     expect([...host.querySelectorAll('[data-key="device-89abcdef"] button')].map((one) => one.textContent)).toEqual(['Sign out']);
@@ -315,15 +441,26 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-devices .settings-error')).toBeNull();
     expect(host.querySelector('.settings-devices .pair-qr')).not.toBeNull();
     expect(host.querySelector('.settings-devices .pair-code')?.textContent).toBe('ABCD-EFGH');
-    expect(host.querySelector('.settings-devices .pair strong')?.textContent).toBe('https://pc.tail.ts.net/');
+    expect(host.querySelector('.settings-devices .pair-address .pair-url')?.textContent).toBe('https://pc.tail.ts.net/');
+    expect(host.querySelector('.settings-devices .pair-address button')?.textContent).toBe('Copy');
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    buttonIn('.settings-devices .pair-address', 'Copy').click();
+    await settle();
+    Reflect.deleteProperty(navigator, 'clipboard');
+    expect(writeText).toHaveBeenCalledWith('https://pc.tail.ts.net/');
+    expect(host.querySelector('.settings-devices .pair-address button')?.textContent).toBe('Copied');
     expect(button('New code')).toBeDefined();
     // Pairing changes nothing in settings.json.
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    expect(host.querySelector('.settings-bar')).toBeNull();
 
-    // Closing drops the code; opening again lists the devices again.
+    // Closing drops the code; opening Devices again lists the devices again.
     pane.requestClose();
     pane.open();
     await settle();
+    expect(named('page-devices')).toHaveLength(6);
+    await go('devices');
     expect(named('page-devices')).toHaveLength(7);
     expect(host.querySelector('.settings-devices .pair')).toBeNull();
   });
@@ -341,7 +478,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     type('sessions.concurrency', '');
     await settle(CHECK_DELAY_MS);
     expect(named('page-settings-check').at(-1)!.body['settings']).toEqual({ sessions: { installHooks: false }, playbooks: { 'dev:x': { description: 'X', template: 'Do' } } });
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    expect(host.querySelector('.settings-bar')).toBeNull();
   });
 
   it('saves the whole draft at the version it started from, reads the file again and closes; Ctrl+S saves and stays open', async () => {
@@ -351,6 +488,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
       answers['page-settings-read'] = { status: 200, body: config(body['value'], { settings: { path: 'C:/home/.switchboard/settings.json', version: 'v2', value: body['value'], error: null } }) };
       return { status: 200, body: { saved: true, version: 'v2' } };
     };
+    await go('advanced');
     field<HTMLInputElement>('sessions.codeMode').click();
     await settle();
     host.querySelector('.settings')!.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
@@ -359,6 +497,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(pane.isOpen()).toBe(true);
     expect(host.querySelector('.settings-status')?.textContent).toBe('Saved');
 
+    await go('display');
     field<HTMLSelectElement>('alerts.surface').value = 'system';
     field<HTMLSelectElement>('alerts.surface').dispatchEvent(new Event('change', { bubbles: true }));
     expect(host.querySelector('.settings-nav-entry.current .settings-dirty')).not.toBeNull();
@@ -374,6 +513,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     const { pane } = await opened();
 
     answers['page-settings-save'] = { status: 409, body: { errors: ['settings.json changed on disk after the editor read it. Discard your changes and open Settings again to load it.'] } };
+    await go('triage');
     type('triage.model', 'haiku');
     button('Save').click();
     await settle();
@@ -479,17 +619,23 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(named('page-settings-save')).toHaveLength(0);
   });
 
-  it('shows an error that names no field at the top of the page, opens Advanced for a new error there, and says when settings.json cannot be read', async () => {
-    answers['page-settings-check'] = { status: 200, body: { errors: ['Unknown key: extra.', 'sessions.nodePath must not contain spaces.'] } };
+  it('shows an error that names no field at the top of every page, opens Advanced for a new error there, and says when settings.json cannot be read', async () => {
+    answers['page-settings-check'] = { status: 200, body: { errors: ['Unknown key: extra.', 'triage.timeoutSeconds must be a whole number from 10 to 3600.', 'sessions.nodePath must not contain spaces.'] } };
     await opened();
 
-    expect(texts('.settings-page > .settings-error')).toEqual(['Unknown key: extra.']);
+    expect(texts('.settings-page > .settings-error')).toEqual(['Unknown key: extra. Fix it in settings.json: C:/home/.switchboard/settings.json']);
+    // Each field's error marks its own page: Triage and Advanced, not Sessions, though nodePath sits in the sessions object.
+    expect(texts('.settings-nav-entry:has(.settings-errors) .settings-nav-label')).toEqual(['Triage', 'Advanced']);
+    await go('triage');
+    expect(texts('.settings-page > .settings-error')).toEqual(['Unknown key: extra. Fix it in settings.json: C:/home/.switchboard/settings.json']);
     expect(host.querySelector('.settings-toggle')?.getAttribute('aria-expanded')).toBe('true');
-    expect(host.querySelector('[data-path="sessions.nodePath"] .settings-field-error')?.textContent).toBe('sessions.nodePath must not contain spaces.');
+    expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-field-error')?.textContent).toBe('triage.timeoutSeconds must be a whole number from 10 to 3600.');
     // The operator can close it again.
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
     await settle();
-    expect(host.querySelector('[data-path="sessions.nodePath"]')).toBeNull();
+    expect(host.querySelector('[data-path="triage.timeoutSeconds"]')).toBeNull();
+    await go('advanced');
+    expect(host.querySelector('[data-path="sessions.nodePath"] .settings-field-error')?.textContent).toBe('sessions.nodePath must not contain spaces.');
 
     answers['page-settings-read'] = { status: 200, body: config(undefined, { settings: { path: 'C:/s.json', version: null, value: undefined, error: 'Unexpected token } in JSON at position 4' } }) };
     answers['page-settings-check'] = { status: 200, body: { errors: [] } };
@@ -500,7 +646,8 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     other.pane.open();
     await settle();
-    expect(texts('.settings-page .settings-error')).toEqual(['Unexpected token } in JSON at position 4']);
+    // settings.json's path shows with its error, since no page shows it then.
+    expect(texts('.settings-page .settings-error')).toEqual(['C:/s.json: Unexpected token } in JSON at position 4']);
     expect(host.querySelector('.settings-page .settings-message')?.textContent).toBe('Fix the file in an editor; the page reads it again when it changes.');
     expect(host.querySelector('.settings-status')?.textContent).toBe('settings.json cannot be read');
   });
@@ -538,44 +685,93 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-nav .settings-nav-message')?.textContent).toBe('Switchboard did not answer: offline');
   });
 
-  it('on a phone shows the navigation first, drills into a page and goes back with Back', async () => {
-    await opened();
-
-    expect(host.querySelector('.settings')?.getAttribute('data-drill')).toBe('nav');
-    host.querySelector<HTMLButtonElement>('.settings-nav-entry')!.click();
-    await settle();
-    expect(host.querySelector('.settings')?.getAttribute('data-drill')).toBe('page');
-    host.querySelector<HTMLButtonElement>('.settings-back')!.click();
-    await settle();
-    expect(host.querySelector('.settings')?.getAttribute('data-drill')).toBe('nav');
-    expect(document.activeElement?.textContent).toContain('General');
-
-    // In the phone's layout, here a phone on its side, the page's title takes the focus from the hidden navigation, also after an Add entry.
-    const width = window.innerWidth;
-
+  it('on a phone shows the navigation first, drills into a group and a page, and goes back up one level at a time with Back', async () => {
+    // A phone on its side: the phone's layout by its screen, though the window is wide.
     vi.stubGlobal('screen', { width: 390, height: 844 });
     window.innerWidth = 844;
     onTestFinished(() => {
-      window.innerWidth = width;
       vi.unstubAllGlobals();
     });
-
-    [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.textContent?.includes('New GitHub source'))!.click();
-    await settle();
-    expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
-    expect(document.activeElement?.textContent).toBe('GitHub');
-  });
-
-  it('shows a field\'s help under it when its info icon is tapped, as well as in its tooltip', async () => {
+    answers['page-settings-read'] = { status: 200, body: config({ sessions: { installHooks: false }, playbooks: { 'dev:x': { description: 'X', template: 'Do' } } }) };
     await opened();
 
-    const info = host.querySelector<HTMLButtonElement>('[data-path="sessions.concurrency"] .settings-info')!;
+    const settingsBox = host.querySelector('.settings')!;
+    const back = () => host.querySelector<HTMLButtonElement>('.settings-back')!.click();
+    const go = async (key: string) => {
+      host.querySelector<HTMLButtonElement>(`.settings-nav-entry[data-key="${key}"]`)!.click();
+      await settle();
+    };
 
-    expect(info.title).toBe('Sessions that run at once, 1 to 10. A start with no free slot waits as queued.');
-    info.click();
+    expect(settingsBox.getAttribute('data-drill')).toBe('nav');
+    expect(settingsBox.getAttribute('data-depth')).toBe('0');
+    await go('sessions');
+    expect(settingsBox.getAttribute('data-drill')).toBe('page');
+    expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
+    back();
     await settle();
-    expect(host.querySelector('[data-path="sessions.concurrency"] .settings-help')?.textContent).toBe('Sessions that run at once, 1 to 10. A start with no free slot waits as queued.');
-    expect(host.querySelector('[data-path="triage.timeoutSeconds"] .settings-info')).toBeNull();
+    expect(settingsBox.getAttribute('data-drill')).toBe('nav');
+    expect(document.activeElement?.textContent).toContain('Sessions');
+
+    // Playbooks drills into its own list, a namespace into its, which starts with the namespace's table.
+    await go('playbooks');
+    expect(settingsBox.getAttribute('data-depth')).toBe('1');
+    expect(texts('.settings-nav-heading')).toEqual(['Playbooks']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['dev', '+ New playbook']);
+    await go('namespace:dev');
+    expect(texts('.settings-nav-heading')).toEqual(['dev']);
+    expect(texts('.settings-nav-entry .settings-nav-label')).toEqual(['All dev playbooks', 'x']);
+    await go('playbook:dev:x');
+    expect(settingsBox.getAttribute('data-drill')).toBe('page');
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev:x');
+
+    // Back goes up one level at a time: the namespace's list, Playbooks' list, then the categories with the focus on Playbooks.
+    back();
+    await settle();
+    expect(texts('.settings-nav-heading')).toEqual(['dev']);
+    expect(host.querySelector('.settings-nav-entry.current')?.getAttribute('data-key')).toBe('playbook:dev:x');
+    back();
+    await settle();
+    expect(texts('.settings-nav-heading')).toEqual(['Playbooks']);
+    expect(document.activeElement?.getAttribute('data-key')).toBe('namespace:dev');
+    back();
+    await settle();
+    expect(settingsBox.getAttribute('data-depth')).toBe('0');
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
+    expect(document.activeElement?.getAttribute('data-key')).toBe('playbooks');
+
+    // An Add entry's new page takes the focus from the hidden navigation.
+    await go('sources');
+    await go('add-source:github');
+    expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
+    expect(document.activeElement?.textContent).toBe('GitHub');
+
+    // Removing it opens Sessions, from which Back goes to the categories, not the Sources list it was reached from.
+    button('Remove source').click();
+    await settle();
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
+    back();
+    await settle();
+    expect(settingsBox.getAttribute('data-depth')).toBe('0');
+    expect(texts('.settings-nav-heading')).toEqual(['Work', 'App', 'Voice']);
+  });
+
+  it("shows a field's help under its label, read with its control, and no help where it has none", async () => {
+    await opened();
+
+    const help = host.querySelector('[data-path="sessions.concurrency"] .settings-help')!;
+
+    expect(help.textContent).toBe('1 to 10. A start waits as queued while this many sessions run.');
+    expect(help.closest('.settings-caption')?.querySelector('label')?.textContent).toBe('Sessions at once');
+    expect(field<HTMLInputElement>('sessions.concurrency').getAttribute('aria-describedby')).toBe(help.id);
+    await go('triage');
+    host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
+    await settle();
+    expect(host.querySelector('[data-path="triage.concurrency"] .settings-help')).toBeNull();
+    expect(field<HTMLInputElement>('triage.concurrency').hasAttribute('aria-describedby')).toBe(false);
+    // An on/off setting is a switch on its row's right.
+    await go('advanced');
+    expect(field<HTMLInputElement>('sessions.codeMode').getAttribute('role')).toBe('switch');
+    expect(field<HTMLInputElement>('sessions.codeMode').closest('.settings-input')?.previousElementSibling?.classList.contains('settings-caption')).toBe(true);
   });
 });
 
@@ -590,6 +786,8 @@ describe('Settings sources (architecture.md § Web page)', () => {
   };
 
   beforeEach(() => {
+    // A desktop's width, whose navigation opens a group under its entry; the phone's drill-down has tests of its own.
+    window.innerWidth = 1280;
     vi.useFakeTimers();
     posts = [];
     answers = { 'page-settings-read': { status: 200, body: config(file, { enabled: { github: true } }) }, 'page-settings-check': { status: 200, body: { errors: [] } } };
@@ -615,27 +813,49 @@ describe('Settings sources (architecture.md § Web page)', () => {
     return pane;
   };
   const texts = (selector: string) => [...host.querySelectorAll(selector)].map((node) => node.textContent);
-  const entry = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label)!;
+  const headings = () => [...host.querySelectorAll('.settings-section-heading')].map((node) => (node.querySelector('.settings-toggle-label') ?? node).textContent);
+  const entry = (label: string) => {
+    const find = () => [...host.querySelectorAll<HTMLButtonElement>('.settings-nav-entry')].find((one) => one.querySelector('.settings-nav-label')?.textContent === label);
+
+    // A group's entries show once it is open: the lists' groups first, then a namespace's, which opens its table.
+    for (const selector of ['.settings-nav-entry.group[aria-expanded="false"]:not([data-page])', '.settings-nav-entry.group[aria-expanded="false"]']) {
+      let closed: HTMLButtonElement | null;
+
+      while (find() === undefined && (closed = host.querySelector<HTMLButtonElement>(selector)) !== null) {
+        closed.click();
+      }
+    }
+
+    return find()!;
+  };
   const control = <T extends HTMLElement>(path: string) => host.querySelector<T>(`[data-path="${path}"] input, [data-path="${path}"] select, [data-path="${path}"] textarea`)!;
   const settle = () => vi.advanceTimersByTimeAsync(0);
 
   it("lists the sources in file order under Sources, noting one that is off, then New <kind> source for each kind without one and New source", async () => {
     await open();
 
-    expect(texts('.settings-nav-heading')[0]).toBe('Sources');
-    expect(texts('.settings-nav-entry .settings-nav-label').slice(0, 6)).toEqual(['General', 'GitHub', 'personal (GitHub)', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
+    const sources = host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="sources"]')!;
+
+    // Closed, Sources counts its sources, leaving out the Add entries.
+    expect(sources.querySelector('.settings-nav-count')?.textContent).toBe('2');
+    sources.click();
+    await settle();
+    expect(texts('.settings-nav-children[aria-label="Sources"] .settings-nav-label')).toEqual(['GitHub', 'personal (GitHub)', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
     expect(entry('GitHub').querySelector('.settings-nav-note')).toBeNull();
     expect(entry('personal (GitHub)').querySelector('.settings-nav-note')?.textContent).toBe('off');
   });
 
-  it("draws a source page with its fields: Kind, the common ones, its kind's own and a collapsed Advanced, and the triage playbooks to choose", async () => {
+  it("draws a source page: its kind's Connection fields, the Work fields, and a collapsed Advanced with Kind first, and the triage playbooks to choose", async () => {
     await open();
     entry('GitHub').click();
     await settle();
 
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('GitHub');
-    expect(texts('.settings-section-heading')).toEqual(['Source', 'GitHub', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Kind', 'Poll interval (seconds)', 'Repo root', 'Namespace', 'Triage playbook', 'Setup prompt', 'Repository', 'Logins', 'Require assignee', 'Wait for blockers', 'Include closed issues', 'Project owner', 'Project number', 'Status field', 'Assigned statuses']);
+    expect(headings()).toEqual(['Connection', 'Work', 'Advanced']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Repository', 'Logins', 'Require assignee', 'Wait for blockers', 'Include closed issues', 'Project owner', 'Project number', 'Status field', 'Assigned statuses', 'Repo root', 'Namespace', 'Triage playbook', 'Setup prompt', 'Poll every']);
+    expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Kind, Roles file, Branch pattern, gh path, Page limit');
+    host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
+    await settle();
     expect([...control<HTMLSelectElement>('sources.github.kind').options].map((one) => one.textContent)).toEqual(['Same as the name (github)', 'GitHub', 'Zoho Desk', 'Forum']);
     expect([...control<HTMLSelectElement>('sources.github.triagePlaybook').options].map((one) => one.value)).toEqual(['', 'dev:triage']);
     expect([...control<HTMLSelectElement>('sources.github.namespace').options].map((one) => one.value)).toEqual(['', 'dev']);
@@ -649,6 +869,8 @@ describe('Settings sources (architecture.md § Web page)', () => {
     await open();
     entry('personal (GitHub)').click();
     await settle();
+    host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
+    await settle();
 
     const kind = control<HTMLSelectElement>('sources.personal.kind');
 
@@ -656,13 +878,14 @@ describe('Settings sources (architecture.md § Web page)', () => {
     kind.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('personal (Zoho Desk)');
-    expect(texts('.settings-section-heading')).toEqual(['Source', 'Zoho Desk', 'Advanced']);
+    expect(headings()).toEqual(['Connection', 'Work', 'Advanced']);
+    expect(host.querySelector('[data-path="sources.personal.orgId"]')).not.toBeNull();
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect((posts.at(-1)!.body['settings'] as { sources: unknown }).sources).toEqual({ github: file.sources.github, personal: { kind: 'zoho' } });
     expect(entry('personal (Zoho Desk)').querySelector('.settings-dirty')).not.toBeNull();
   });
 
-  it('adds a source of a missing kind, removes a source to General, and shows a source error on its field and its page', async () => {
+  it('adds a source of a missing kind, removes a source to Sessions, and shows a source error on its field and its page', async () => {
     answers['page-settings-check'] = (body) => ({ status: 200, body: { errors: getAt(body['settings'] as never, 'sources.zoho') === undefined ? [] : ['sources.zoho.orgId is required.'] } });
     await open();
 
@@ -676,15 +899,19 @@ describe('Settings sources (architecture.md § Web page)', () => {
 
     [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')][0]!.click();
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
-    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('General');
+    expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
     expect(texts('.settings-nav-entry .settings-nav-label')).toContain('+ New Zoho Desk source');
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    expect(host.querySelector('.settings-bar')).toBeNull();
 
     entry('GitHub').click();
     await settle();
     [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')][0]!.click();
     await settle();
-    expect(texts('.settings-nav-entry .settings-nav-label').slice(0, 6)).toEqual(['General', 'personal (GitHub)', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
+    expect(texts('.settings-nav-children[aria-label="Sources"] .settings-nav-label')).toEqual(['personal (GitHub)', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
+    // Sources, closed, carries the unsaved mark of the source removed from it.
+    host.querySelector<HTMLButtonElement>('.settings-nav-entry[data-key="sources"]')!.click();
+    await settle();
+    expect(host.querySelector('.settings-nav-entry[data-key="sources"] .settings-dirty')).not.toBeNull();
     expect(host.querySelector('.settings-status')?.textContent).toBe('Unsaved changes');
   });
 
@@ -713,7 +940,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
     name('adhoc');
     expect(host.querySelector('[data-path="new-name"] .settings-field-error')?.textContent).toBe("adhoc names Switchboard's own tickets; choose another name.");
     name('widgets-dashboard');
-    expect(host.querySelector('.settings-status')?.textContent).toBe('');
+    expect(host.querySelector('.settings-bar')).toBeNull();
 
     const kind = host.querySelector<HTMLSelectElement>('#settings-new-kind')!;
 

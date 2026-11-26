@@ -1,6 +1,6 @@
 /**
  * The composer's voice controls, drawn by the web page (architecture.md § Voice, § Dictation): the mic
- * button with its states, Speak replies and Talk here. They control the computer's one voice process through the hub. Imports nothing, for
+ * button with its states, Spoken replies and Talk here. They control the computer's one voice process through the hub. Imports nothing, for
  * browser bundles.
  */
 
@@ -24,15 +24,15 @@ export interface VoiceControlsView {
 export type VoicePlace = 'window' | 'page';
 
 /** The mic's tooltip while the operator paused it by voice. */
-export const PAUSED_BY_VOICE_TIP = 'Paused: you said "stop listening". Say "start listening", or click to listen again.';
+export const PAUSED_BY_VOICE_TIP = 'Paused: you said "stop listening". Say "start listening", or click to resume dictation.';
 /** Talk here's tooltip while the voice is here but no device has it. */
 export const DEVICE_OFF_TIP = 'Voice is off. Click to use it on this computer.';
-/** Speak replies' tooltip while it is on and this window's session speaks: its click stops the reply too. */
-export const SPEAKING_TIP = 'Speak replies: on. Click to stop and stop speaking replies (Escape stops only this reply).';
-/** The speaker's tooltip while Speak replies is off and a Replay plays: its click stops the Replay and leaves Speak replies off. */
-export const REPLAY_TIP = 'Speak replies: off. Click to stop this replay (Escape).';
+/** Spoken replies's tooltip while it is on and this window's session speaks: its click stops the reply too. */
+export const SPEAKING_TIP = 'Spoken replies (experimental): on. Click to stop this reply and turn them off (Escape stops only this reply).';
+/** The speaker's tooltip while Spoken replies is off and a Replay plays: its click stops the Replay and leaves Spoken replies off. */
+export const REPLAY_TIP = 'Spoken replies: off. Click to stop this reply (Escape).';
 /** The mic's tooltip while a room hold keeps dictation in the box. */
-export const ROOM_HOLD_TIP = 'Dictation is waiting after another voice was detected. Press Enter to send it.';
+export const ROOM_HOLD_TIP = 'Switchboard heard another voice, so your dictation waits in the composer until you send it.';
 
 function escape(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
@@ -40,10 +40,10 @@ function escape(text: string): string {
 
 /**
  * The composer footer's voice controls (architecture.md § Voice), ghost icon buttons as in Claude Code's footer, in one cluster with the mic
- * beside Send: Speak replies as a speaker toggle while the voice is here, which also stops the reply playing, so the composer has no separate Stop
+ * beside Send: Spoken replies as a speaker toggle while the voice is here, which also stops the reply playing, so the composer has no separate Stop
  * (Escape stops speaking from the keyboard); one Talk here in its place while it is elsewhere, only for a session it can speak for (`live`). Nothing while voice is off. `place` names where it is drawn, for
  * the Talk here tooltip; the web page passes `page`. Every page controls the same voice process on this computer. While the voice is here but no device has it, after the phone
- * left, "Voice is off — Talk here" stands before Speak replies, so a reply is not skipped unnoticed.
+ * left, "Voice is off — Talk here" stands before Spoken replies, so a reply is not skipped unnoticed.
  */
 export function renderVoiceControls(voice: VoiceControlsView | null, live = true, place: VoicePlace = 'window'): string {
   if (voice === null || !voice.enabled) {
@@ -52,14 +52,15 @@ export function renderVoiceControls(voice: VoiceControlsView | null, live = true
 
   const icon = (name: string, title: string, data: string, extra = ''): string =>
     `<button class="ghost icon" type="button" data-key="voice-${data}" data-voice="${data}" title="${escape(title)}" aria-label="${escape(title)}"${extra}><span class="codicon codicon-${name}" aria-hidden="true"></span></button>`;
-  // While this window's session speaks, a click stops the reply: turning Speak replies off stops it with everything offered (the hub sends `stop`
-  // first), and while it is off, a reply still plays only as a Replay, which the click stops, leaving Speak replies off.
+  // While this window's session speaks, a click stops the reply: turning Spoken replies off stops it with everything offered (the hub sends `stop`
+  // first), and while it is off, a reply still plays only as a Replay or an alert's answer, which the click stops, leaving Spoken replies off.
+  // Spoken replies are experimental and off until turned on in View options, so while off and silent the composer shows no speaker at all.
   const speaking = voice.here && voice.speaking !== null;
   const speakReplies = voice.speakReplies
-    ? icon('unmute', speaking ? SPEAKING_TIP : 'Speak replies: on. Click to stop speaking replies.', 'speak-replies', ' aria-pressed="true"')
+    ? icon('unmute', speaking ? SPEAKING_TIP : 'Spoken replies (experimental): on. Click to turn them off.', 'speak-replies', ' aria-pressed="true"')
     : speaking
       ? icon('mute', REPLAY_TIP, 'stop')
-      : icon('mute', 'Speak replies: off. Click to speak replies.', 'speak-replies', ' aria-pressed="false"');
+      : '';
   const talkHere =
     !voice.here && live
       ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="Click to use voice for this session.">Talk here</button>`
@@ -214,20 +215,20 @@ export function renderMicButton(voice: VoiceControlsView | null, pending: MicPen
   // Where recognition runs, once the recogniser loaded; half-duplex capture does not listen while the voice speaks, and full duplex with no echo
   // cancellation says why it does (architecture.md § Dictation).
   const where = voice.recognizer === null ? '' : ` Speech recognition runs on the ${voice.recognizer === 'gpu' ? 'GPU' : 'CPU'}.`;
-  const halfDuplex = voice.halfDuplex !== undefined ? ` Listening pauses while a reply plays (${voice.halfDuplex}), so talking over it does not stop it.` : voice.fullDuplex !== undefined ? ` Full duplex (${voice.fullDuplex}): talking over a reply stops it.` : '';
+  const halfDuplex = voice.halfDuplex !== undefined ? ` Dictation pauses while Switchboard speaks a reply (${voice.halfDuplex}), so you cannot stop the reply by speaking over it.` : voice.fullDuplex !== undefined ? ` Full duplex (${voice.fullDuplex}): you can stop a spoken reply by speaking over it.` : '';
   // The room hold (architecture.md § Voice check and barge-in): spoken turns stay in the box.
   const held = voice.roomHold === true ? ` ${ROOM_HOLD_TIP}` : '';
 
   // Half-duplex capture holding the mic while this window's reply plays.
   if (voice.halfDuplex !== undefined && voice.speaking !== null && (voice.mic === 'listening' || voice.mic === 'hearing')) {
-    return button(micGlyph('filled', 'held'), `Mic on, held while the reply plays (${voice.halfDuplex}): it listens again when the reply ends.${where} Click to turn the mic off.`, false, 'held');
+    return button(micGlyph('filled', 'held'), `Mic on, dictation paused while Switchboard speaks the reply (${voice.halfDuplex}): it resumes when the reply ends.${where} Click to turn the mic off.`, false, 'held');
   }
 
   switch (voice.mic) {
     case 'listening':
-      return button(micGlyph('filled'), `Mic on: listening. ${held === '' ? 'Dictation sends when you stop talking.' : ROOM_HOLD_TIP}${where}${halfDuplex} Click to turn the mic off.`, false, 'listening');
+      return button(micGlyph('filled'), `Mic on: Switchboard is ready for your dictation. ${held === '' ? 'It sends when you pause.' : ROOM_HOLD_TIP}${where}${halfDuplex} Click to turn the mic off.`, false, 'listening');
     case 'hearing':
-      return button(micGlyph('filled'), `Mic on: hearing you.${held}${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing');
+      return button(micGlyph('filled'), `Mic on: Switchboard is taking dictation.${held}${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing');
     case 'typing':
       return button(micGlyph('outline', 'pause'), `Mic paused while you type: dictation goes on when you send or leave the box.${where} Click to turn the mic off.`, false, 'paused');
     case 'paused-other-app':

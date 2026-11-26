@@ -13,7 +13,7 @@ copyFileSync(createRequire(import.meta.url).resolve('@vscode/codicons/dist/codic
 
 copyFileSync('assets/switchboard.ico', 'dist/switchboard.ico');
 
-for (const size of [16, 32, 48, 128]) {
+for (const size of [16, 32, 48, 128, 256]) {
   copyFileSync(`assets/icon-${size}.png`, `dist/icon-${size}.png`);
 }
 

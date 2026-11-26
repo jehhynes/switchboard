@@ -167,7 +167,7 @@ describe('the page', () => {
     expect(root.classList.contains('off-conversation')).toBe(false);
 
     source.emit('session', { session: session({ state: 'ended', conversation: 'read-only', reason: 'The session has ended. Open it in the terminal to resume it.' }) });
-    expect(root.querySelector('#note .session-note-text')?.textContent).toBe('The session has ended. Resume continues it.');
+    expect(root.querySelector('#note .session-note-text')?.textContent).toBe('The session has ended. Resume it to send a message.');
     expect(input.placeholder).toBe('Resume the session to send a message.');
     root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     expect(root.querySelector('#panel .notice')).toBeNull();

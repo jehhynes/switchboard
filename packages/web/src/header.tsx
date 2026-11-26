@@ -52,7 +52,7 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
 const waiting = (view: Pick<View, 'acting' | 'connection'>): boolean => view.acting || (view.connection != null && view.connection.tone !== 'live');
 
 /** Why a row's action waits while offline, as its tooltip. */
-const offlineTitle = (view: Pick<View, 'connection'>): string | undefined => (view.connection != null && view.connection.tone !== 'live' ? "Can't do this while offline." : undefined);
+const offlineTitle = (view: Pick<View, 'connection'>): string | undefined => (view.connection != null && view.connection.tone !== 'live' ? 'This cannot be done while offline.' : undefined);
 
 export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 'copyMenu' | 'connection'>): VNode[] {
   const actions = row.actions;
@@ -123,11 +123,11 @@ function Actions({ row, view }: { row: PageRow | null; view: View }) {
         </button>
       )}
       <div class="menu-anchor actions-anchor">
-        <button type="button" class="actions" data-action="actions" aria-haspopup="menu" aria-expanded={view.actions} title="Actions" aria-label="Actions">
+        <button type="button" class="actions" data-action="actions" aria-haspopup="menu" aria-expanded={view.actions} title="Work item actions" aria-label="Work item actions">
           <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
         </button>
         {view.actions ? (
-          <ul class="glass menu actions-menu" role="menu" aria-label="Actions">
+          <ul class="glass menu actions-menu" role="menu" aria-label="Work item actions">
             {rows}
           </ul>
         ) : null}
@@ -244,10 +244,10 @@ function PersonaRow({ session }: { session: PageState['session'] }) {
 }
 
 /**
- * The header's view options button and its menu: Show message details, Collapse details, the persona, and the Chrome
+ * The header's view options button and its menu: Show message details, Collapse details, Spoken replies while voice is on, the persona, and the Chrome
  * pane's state and pairing while it is on.
  */
-function ViewOptions({ view, briefReplies, session }: { view: View; briefReplies: boolean; session: PageState['session'] }) {
+function ViewOptions({ view, briefReplies, session, voice }: { view: View; briefReplies: boolean; session: PageState['session']; voice: PageState['voice'] }) {
   return (
     <div class="menu-anchor view-options-anchor">
       <button type="button" class="icon view-options" data-action="view-menu" aria-haspopup="menu" aria-expanded={view.viewMenu} title="View options" aria-label="View options">
@@ -257,12 +257,19 @@ function ViewOptions({ view, briefReplies, session }: { view: View; briefReplies
         <div class="glass menu view-options-menu" role="menu" aria-label="View options">
           <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={view.details} data-action="toggle-details">
             <Gutter checked={view.details} />
-            <span class="title">Show message details</span>
+            <span class="title">Show message times and notes</span>
           </button>
           <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={briefReplies} data-action="toggle-brief-replies">
             <Gutter checked={briefReplies} />
-            <span class="title">Collapse details</span>
+            <span class="title">Fold reply details</span>
           </button>
+          {voice?.enabled === true ? (
+            <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={voice.speakReplies} data-action="toggle-spoken-replies" title="Switchboard speaks the replies of the session the voice is on. Experimental: it may be unreliable.">
+              <Gutter checked={voice.speakReplies} />
+              <span class="title">Spoken replies</span>
+              <span class="menu-note">Experimental</span>
+            </button>
+          ) : null}
           <PersonaRow session={session} />
         </div>
       ) : null}
@@ -285,7 +292,7 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
   const drafting = view.newDraft !== null && view.newDraft.workItemId === scope.workItemId;
   const pickerMenu =
     view.picker ? (
-      <ul class="glass menu conversation-menu" role="menu" aria-label="Conversations">
+      <ul class="glass menu conversation-menu" role="menu" aria-label="Work items and sessions">
         {scope.conversations.flatMap((entry) => [
           <li role="none" key={entry.workItemId}>
             <button type="button" class="menu-row conversation-row" role="menuitemradio" aria-checked={entry.workItemId === scope.workItemId && scope.earlier !== true && !drafting} data-action="select" data-work-item={String(entry.workItemId)}>
@@ -301,7 +308,7 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
             <span class="menu-gutter" aria-hidden="true">
               <span class="codicon codicon-add"></span>
             </span>
-            <span class="title">New conversation…</span>
+            <span class="title">New session in this work item…</span>
           </button>
         </li>
       </ul>
@@ -315,9 +322,9 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
         <span class="codicon codicon-layout-sidebar-left" aria-hidden="true"></span>
       </button>
       <div class="menu-anchor picker-anchor">
-        <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker} title={drafting ? `New conversation · ${title}` : tooltip}>
+        <button type="button" class="picker" data-action="picker" aria-haspopup="menu" aria-expanded={view.picker} title={drafting ? `New session · ${title}` : tooltip}>
           {drafting ? (
-            <PickerLabel icon={<span class="codicon codicon-add state-icon tone-muted" aria-hidden="true"></span>} title={title} session="New conversation" />
+            <PickerLabel icon={<span class="codicon codicon-add state-icon tone-muted" aria-hidden="true"></span>} title={title} session="New session" />
           ) : earlier !== null ? (
             <PickerLabel icon={<Codicon {...stateIcon(state.session?.state, state.session?.waitingFor, state.session?.limit)} />} provider={state.session?.provider ?? earlier.provider} title={title} session={earlier.title} />
           ) : selected === null ? (
@@ -330,7 +337,7 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
         {pickerMenu}
       </div>
       <Actions row={selectedRow(state)} view={view} />
-      <ViewOptions view={view} briefReplies={view.briefReplies ?? state.briefReplies} session={state.session} />
+      <ViewOptions view={view} briefReplies={view.briefReplies ?? state.briefReplies} session={state.session} voice={state.voice} />
       <ConnectionDot dot={view.connection} />
     </header>
   );
@@ -524,16 +531,13 @@ function stripContent(layout: StripLayout, shown: Tab, state: PageState, browser
   return [...fitted.map((tab) => cloneElement(draw(tab), { key: tab.id, 'data-id': tab.id })), hidden.length + shut.length > 0 ? <MoreMenu hidden={hidden} closed={shut} strip={strip} attr={attr} /> : null];
 }
 
-/** The column's tab strip named by its tabs, in their order: "History, browser and artifacts". */
-const stripLabel = (names: string[]): string => `${names.slice(0, -1).join(', ')} and ${names.at(-1)!}`;
-
 /**
  * The tab strip atop the column right of the conversation on a wide screen, in `stripTabs`' order (`stripContent`); the conversation keeps its own
  * pane beside it. `end`, as the maximize button, closes the strip.
  */
 export function renderSideSwitch(side: SideTab, state: PageState, browser = false, strip: ArtifactStrip = { open: null, menu: false, now: 0 }, console = true, end: ComponentChildren = null): VNode {
   return (
-    <nav class="tabs side-switch" role="tablist" aria-label={stripLabel(['History', ...(browser || strip.links !== undefined ? ['browser'] : []), 'artifacts', ...(console ? ['console'] : [])])}>
+    <nav class="tabs side-switch" role="tablist" aria-label="Side panel">
       {stripContent('wide', side, state, browser, strip, console)}
       {end}
     </nav>

@@ -130,7 +130,7 @@ describe('limits and the one-session-in-a-turn rule', () => {
     expect(h.item(1).unassignedAt).toBeNull();
 
     h.act({ type: 'marker', sessionId: session, state: 'idle', detail: null });
-    expect(h.item(1)).toMatchObject({ status: 'blocked', error: 'The turn ended without a done report.', warning: null });
+    expect(h.item(1)).toMatchObject({ status: 'blocked', error: 'The session finished its turn without reporting done.', warning: null });
   });
 
   it('holds a reassigned ticket’s new work item while the done work item’s session is still in its turn', () => {

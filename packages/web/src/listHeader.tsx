@@ -206,14 +206,14 @@ export const PROVIDERS = [
   { provider: 'codex', name: 'Codex' },
 ];
 
-/** How the New session form runs a first message (PRD R122): a conversation now, a task when a slot is free, or a task that waits for Start. */
+/** How the New session form runs a first message (PRD R122): an interactive session now, a task when there is room, or a task that waits for Start. */
 export type RunAs = 'now' | 'queue' | 'wait';
 
 /** The Run as choices, in the form's order. */
 export const RUN_AS: ReadonlyArray<{ value: RunAs; label: string }> = [
-  { value: 'now', label: 'Conversation, start now' },
-  { value: 'queue', label: 'Task, start when a slot is free' },
-  { value: 'wait', label: 'Task, wait for Start' },
+  { value: 'now', label: 'Interactive, start now' },
+  { value: 'queue', label: 'Task, start when there is room' },
+  { value: 'wait', label: 'Task, wait for me to start it' },
 ];
 
 /** Where this device keeps the Run as chosen last, which the form offers next time. */
@@ -278,7 +278,7 @@ export type HeaderSheet =
   | { kind: 'extension'; remote: boolean }
   | { kind: 'shortcut' }
   | { kind: 'holder'; busy: boolean; error: string | null }
-  | { kind: 'devices'; pairing: Pairing | null; devices: Device[] | null; busy: boolean; error: string | null };
+  | { kind: 'devices'; pairing: Pairing | null; copied: boolean | null; devices: Device[] | null; busy: boolean; error: string | null };
 
 /**
  * What the header has open: a source kind's menu (`source:<kind>`), the range menu (`range`), More Actions (`more`), or nothing; and a sheet over
@@ -314,7 +314,7 @@ function HeaderNotes({ header }: { header: PageHeader | null }) {
         </p>
       ))}
       {header?.heldNote === undefined ? null : (
-        <button type="button" class="list-note held-note" data-action="list-later-held" title="Open held sessions">
+        <button type="button" class="list-note held-note" data-action="list-later-held" title="Open background sessions">
           {header.heldNote}
         </button>
       )}
@@ -424,14 +424,14 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           <span class="codicon codicon-add" aria-hidden="true"></span>
         </button>
         <div class="menu-anchor" data-key="more">
-          <button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded={view.menu === 'more'} title="More Actions…" aria-label="More Actions">
+          <button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded={view.menu === 'more'} title="More actions" aria-label="More actions">
             <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
           </button>
           {view.menu === 'more' ? renderMoreMenu(header, view.local === true, view.phoneVoice ?? null) : null}
         </div>
         {/* Outside the phone's layout (page.css), as VS Code's pin: pinned, the list is a column; unpinned, a drawer. Left out where it changes nothing (main.ts). */}
         {view.pinned === undefined ? null : (
-          <button type="button" class="icon list-pin" data-action="list-pin" title={view.pinned ? 'Unpin sidebar' : 'Pin sidebar'} aria-label={view.pinned ? 'Unpin sidebar' : 'Pin sidebar'} aria-controls="list">
+          <button type="button" class="icon list-pin" data-action="list-pin" title={view.pinned ? 'Let list hide' : 'Keep list open'} aria-label={view.pinned ? 'Let list hide' : 'Keep list open'} aria-controls="list">
             <span class={`codicon codicon-${view.pinned ? 'pinned' : 'pin'}`} aria-hidden="true"></span>
           </button>
         )}
@@ -488,8 +488,8 @@ function MoreRow({ action, icon, label }: { action: string; icon: string; label:
 const Separator = ({ classes = 'menu-separator' }: { classes?: string }) => <li class={classes} role="separator"></li>;
 
 /**
- * More Actions (PRD R71), in groups: Held sessions; Refresh sources,
- * Reload, Show hub log and Get the browser extension…; then Pair a device, Open Settings and, while the voice is not on this computer, Voice on the computer, on this computer's
+ * More actions (PRD R71), in groups: Background sessions; Check sources now,
+ * Reload page, Show Switchboard log and Get the browser extension…; then Pair a device, Settings… and, while the voice is not on this computer, Voice on the computer, on this computer's
  * page only, or Voice on this phone, on a paired device's.
  * On a phone, where the header has no room for them, the source icons come first as a check row per source.
  */
@@ -507,20 +507,20 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
   );
 
   return (
-    <ul class="glass menu more-menu" role="menu" aria-label="More Actions">
+    <ul class="glass menu more-menu" role="menu" aria-label="More actions">
       {sources.length === 0 ? null : [...sources, <Separator classes="menu-separator more-source" />]}
-      <MoreRow action="list-later-held" icon="terminal" label="Held sessions" />
+      <MoreRow action="list-later-held" icon="terminal" label="Background sessions" />
       <Separator />
-      <MoreRow action="list-poll" icon="refresh" label="Refresh sources" />
-      <MoreRow action="list-reload" icon="debug-restart" label="Reload" />
-      <MoreRow action="list-log" icon="output" label="Show hub log" />
+      <MoreRow action="list-poll" icon="refresh" label="Check sources now" />
+      <MoreRow action="list-reload" icon="debug-restart" label="Reload page" />
+      <MoreRow action="list-log" icon="output" label="Show Switchboard log" />
       <MoreRow action="list-extension" icon="extensions" label="Get the browser extension…" />
       <MoreRow action="list-shortcut" icon="desktop-download" label="Download app shortcut…" />
       {local ? (
         <>
           <Separator />
           <MoreRow action="list-devices" icon="device-mobile" label="Pair a device…" />
-          <MoreRow action="list-settings" icon="settings-gear" label="Open Settings" />
+          <MoreRow action="list-settings" icon="settings-gear" label="Settings…" />
           {header?.voiceDevice === undefined ? null : (
             <li role="none">
               <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked="false" data-action="list-voice-computer" title={header.voiceDevice === 'phone' ? "Voice is on a paired device. Select Voice on the computer to use this computer's microphone and speaker." : "Voice is off. Select Voice on the computer to use this computer's microphone and speaker."}>
@@ -573,6 +573,33 @@ export function QrCode({ text }: { text: string }) {
   );
 }
 
+/** Puts the pairing address on the clipboard; false when the browser refuses. */
+export function copyAddress(host: string): Promise<boolean> {
+  return navigator.clipboard?.writeText(`https://${host}/`).then(() => true, () => false) ?? Promise.resolve(false);
+}
+
+/**
+ * The address a device opens to type the pairing code, on its own line, whole where it fits and broken anywhere where it does not, with Copy,
+ * which says Copied, or why it could not copy. `copy` is the button's `data-action` or click handler.
+ */
+export function PairAddress({ host, copied, copy }: { host: string; copied: boolean | null; copy: string | (() => void) }) {
+  return (
+    <>
+      <div class="pair-address">
+        <code class="pair-url">https://{host}/</code>
+        <button type="button" class="sheet-button secondary" title="Copy the address" {...(typeof copy === 'string' ? { 'data-action': copy } : { onClick: copy })}>
+          <span aria-live="polite">{copied === true ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
+      {copied === false ? (
+        <p class="sheet-error" role="alert">
+          The browser did not allow the clipboard. Select the address and copy it.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 /** When a device was last used, as the device list says it. */
 export function usedText(at: number): string {
   return new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -589,6 +616,7 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
   return (
     <Frame
       title="Pair a device"
+      wide="pair-sheet"
       buttons={
         <>
           <button type="button" class="sheet-button secondary" data-action="list-sheet-go" disabled={sheet.busy}>
@@ -605,9 +633,8 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
       ) : (
         <div class="pair" data-key="pair">
           <QrCode text={pairing.url} />
-          <p class="sheet-detail">
-            Scan this with the device's camera, or open <strong>https://{pairing.host}/</strong> on it and type this code:
-          </p>
+          <p class="sheet-detail">Scan this with the device's camera, or open this address on it and type the code below:</p>
+          <PairAddress host={pairing.host} copied={sheet.copied} copy="list-pair-copy" />
           <p class="pair-code">{pairing.code}</p>
           <p class="sheet-detail">{minutes > 0 ? `It works once, for ${minutes === 1 ? '1 more minute' : `${minutes} more minutes`}.` : 'It has expired. Choose New code.'}</p>
         </div>
@@ -619,7 +646,7 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
       ) : sheet.devices.length === 0 ? (
         <p class="sheet-detail">No device is signed in.</p>
       ) : (
-        <ul class="device-list">
+        <ul class={`device-list${sheet.devices.length > 2 ? ' many' : ''}`}>
           {sheet.devices.map((one) => (
             <li class="device" data-key={`device-${one.id}`}>
               <span class="device-text">
@@ -677,20 +704,20 @@ function Select({ label, field, items, chosen, after }: { label: string; field: 
 
 function HeldSheet({ sheet }: { sheet: Extract<HeaderSheet, { kind: 'held' }> }) {
   const stopping = sheet.stopping;
-  return <Frame title="Held sessions" wide="held-sheet" buttons={<>
+  return <Frame title="Background sessions" wide="held-sheet" buttons={<>
     <button type="button" class="sheet-button secondary" data-action="list-held-refresh" disabled={sheet.busy}>Refresh</button>
     <button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>
   </>}>
-    <p class="sheet-detail">Code Mode sessions the terminal holder keeps alive, with or without a work item. Stop ends a session's process.</p>
+    <p class="sheet-detail">Code Mode sessions Switchboard keeps running in the background, with or without a work item. Stop ends a session's process.</p>
     {sheet.error === null ? null : <p class="sheet-error" role="alert">{sheet.error}</p>}
     {sheet.listError === null ? null : <p class="sheet-error" role="alert">{sheet.listError}</p>}
     {sheet.result === null ? null : <p role="status">{sheet.result}</p>}
     {stopping === null ? null : <div class="held-confirm" role="group" aria-label="Confirm Stop">
-      <h3 class="sheet-title">{stopping.orphan ? `Stop held session ${stopping.session}?` : `Stop the held session of ${stopping.item}?`}</h3>
+      <h3 class="sheet-title">{stopping.orphan ? `Stop background session ${stopping.session}?` : `Stop the background session of ${stopping.item}?`}</h3>
       <p class="sheet-detail">{`Session ${stopping.session} in ${stopping.cwd}. Its process ends and anything it is doing stops.`}</p>
       <div class="sheet-buttons"><button type="button" class="sheet-button secondary" data-action="list-held-cancel" disabled={sheet.busy}>Cancel</button><button type="button" class="sheet-button primary" data-action="list-held-confirm" disabled={sheet.busy}>Stop</button></div>
     </div>}
-    {sheet.rows === null ? (sheet.listError === null ? <p class="sheet-detail" role="status">Loading…</p> : null) : sheet.rows.length === 0 ? <p class="sheet-detail">No held sessions. Code Mode sessions appear here while the terminal holder keeps them.</p> : <div class="held-rows">
+    {sheet.rows === null ? (sheet.listError === null ? <p class="sheet-detail" role="status">Loading…</p> : null) : sheet.rows.length === 0 ? <p class="sheet-detail">No background sessions. Code Mode sessions appear here while they run.</p> : <div class="held-rows">
       {sheet.rows.map((row) => <section class="held-row" key={row.session} aria-label={`${row.item}: ${row.session}`}>
         <dl>{[['Work item', row.item], ['Switchboard ID', row.session], ['Claude ID', row.nativeSessionId], ['Folder', row.cwd], ['State', row.state], ['Idle', row.idle], ['Memory', row.memory], ['Terminals', String(row.clients)]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd title={value}>{value}</dd></div>)}</dl>
         <div class="sheet-buttons"><button type="button" class="sheet-button secondary" data-action="list-held-open" data-id={row.session} disabled={sheet.busy || row.terminal === null}>Open in terminal</button><button type="button" class="sheet-button secondary" data-action="list-held-stop" data-id={row.session} disabled={sheet.busy || row.exited}>Stop</button></div>
@@ -723,8 +750,8 @@ function ExtensionSheet({ remote }: { remote: boolean }) {
     >
       <p class="sheet-detail">
         {remote
-          ? 'The extension shows Switchboard on GitHub project boards. This copy reaches Switchboard through this page, signed in as this browser is, so load it in this browser.'
-          : 'The extension shows Switchboard on GitHub project boards. This copy reaches Switchboard on this computer.'}
+          ? 'The extension shows Switchboard on GitHub project boards and lets the Browser tab open signed-in pages. This copy reaches Switchboard through this page, signed in as this browser is, so load it in this browser.'
+          : 'The extension shows Switchboard on GitHub project boards and lets the Browser tab open signed-in pages. This copy reaches Switchboard on this computer.'}
       </p>
       <ol class="sheet-detail extension-steps">
         <li>Download the extension and extract the zip.</li>
@@ -754,7 +781,7 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
   }
 
   if (sheet.kind === 'log') {
-    return <Frame title="Hub log" wide="hub-log-sheet" buttons={<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>}><HubLog fetch={read} /></Frame>;
+    return <Frame title="Switchboard log" wide="hub-log-sheet" buttons={<button type="button" class="sheet-button primary" data-action="list-sheet-cancel">Close</button>}><HubLog fetch={read} /></Frame>;
   }
   if (sheet.kind === 'held') return <HeldSheet sheet={sheet} />;
 
@@ -868,7 +895,7 @@ function Browser({ browser, places, local }: { browser: FolderBrowser; places: F
     >
       {browser.path === null ? null : (
         <p class="folder-crumbs" title={browser.path}>
-          <button type="button" class="icon folder-places" data-action="list-browse-places" title="Starting places" aria-label="Starting places">
+          <button type="button" class="icon folder-places" data-action="list-browse-places" title="Folder shortcuts" aria-label="Folder shortcuts">
             <span class="codicon codicon-home" aria-hidden="true"></span>
           </button>
           {pathParts(browser.path).map((part, index) => (
@@ -905,7 +932,7 @@ function Browser({ browser, places, local }: { browser: FolderBrowser; places: F
           {browser.error}
         </p>
       )}
-      {local ? null : <p class="sheet-detail">On a paired device: only folders under recent folders, repo roots and worktrees.</p>}
+      {local ? null : <p class="sheet-detail">On a paired device only recent folders, repo roots and worktrees are listed.</p>}
     </Frame>
   );
 }
@@ -926,7 +953,7 @@ function NewSession({ sheet, header, cancel, error, local }: { sheet: NewSession
   const configured = sheet.models[sheet.provider] ?? '';
   const choices = sheet.choices[sheet.provider] ?? [];
   const ready = !sheet.busy && (scheduled || (sheet.folder.trim() !== '' && sheet.folderError === null && installed !== null && installed.length > 0 && (sheet.model !== OTHER_MODEL || sheet.otherModel.trim() !== '')));
-  const label = scheduled ? 'Run' : message && sheet.run === 'wait' ? 'Create' : 'Start';
+  const label = scheduled ? 'Run' : message && sheet.run === 'wait' ? 'Add' : 'Start';
   const groups = folderGroups(sheet.places, sheet.folder);
 
   return (
@@ -1005,7 +1032,7 @@ function NewSession({ sheet, header, cancel, error, local }: { sheet: NewSession
           </label>
           <label class="sheet-field">
             <span class="sheet-label">First message</span>
-            <textarea class="sheet-prompt" data-field="prompt" rows={4} placeholder="Optional. Leave empty to open an empty session." value={sheet.prompt}></textarea>
+            <textarea class="sheet-prompt" data-field="prompt" rows={4} placeholder="Optional. Leave empty to start without a message." value={sheet.prompt}></textarea>
           </label>
           {message ? (
             <fieldset class="sheet-field run-as">
@@ -1162,7 +1189,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     }
 
     search.pending = false;
-    search.error = answer.status === 200 ? null : `The hub could not search further back: ${String(answer.body['error'] ?? 'no answer')}`;
+    search.error = answer.status === 200 ? null : `Switchboard could not search further back: ${String(answer.body['error'] ?? 'no answer')}`;
     search.older = answer.status === 200 ? ((answer.body['rows'] as PageRow[] | undefined) ?? []) : [];
     search.more = answer.status === 200 && answer.body['more'] === true;
     redraw();
@@ -1254,10 +1281,10 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     const answer = await deps.post('page-poll', {});
 
     if (answer.status !== 200) {
-      deps.refused(String(answer.body['error'] ?? 'The sources were not polled.'));
+      deps.refused(String(answer.body['error'] ?? 'The sources were not checked.'));
     }
   };
-  /** The Run as this device chose last, Conversation, start now by default. */
+  /** The Run as this device chose last, Interactive, start now by default. */
   const lastRun = (): RunAs => {
     try {
       const kept = globalThis.localStorage?.getItem(RUN_AS_KEY);
@@ -1417,13 +1444,14 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
     sheet.busy = false;
     sheet.pairing = pairing.status === 200 ? (pairing.body as unknown as Pairing) : null;
+    sheet.copied = null;
     sheet.error = pairing.status === 200 ? null : String(pairing.body['error'] ?? 'Switchboard did not give a code.');
     sheet.devices = devices.status === 200 ? ((devices.body['devices'] as Device[] | undefined) ?? []) : (sheet.devices ?? []);
     redraw();
   };
   /** Pair a device…: a new pairing link and the signed-in devices. */
   const openDevices = async (): Promise<void> => {
-    const sheet: Extract<HeaderSheet, { kind: 'devices' }> = { kind: 'devices', pairing: null, devices: null, busy: true, error: null };
+    const sheet: Extract<HeaderSheet, { kind: 'devices' }> = { kind: 'devices', pairing: null, copied: null, devices: null, busy: true, error: null };
 
     view.sheet = sheet;
     redraw();
@@ -1468,7 +1496,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     if (answer.status === 200) {
       sheet.rows = (answer.body['held'] as HeldRow[] | undefined) ?? [];
       sheet.listError = null;
-    } else sheet.listError = String(answer.body['error'] ?? 'Held sessions could not be listed.');
+    } else sheet.listError = String(answer.body['error'] ?? 'Background sessions could not be listed.');
     redraw();
     heldTimer = setTimeout(() => { if (sheet.stopping === null) void refreshHeld(sheet); }, 5000);
   };
@@ -1484,7 +1512,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     if (view.sheet !== sheet) return;
     sheet.busy = false;
     if (answer.status !== 200) sheet.error = String(answer.body['error'] ?? 'Switchboard did not answer.');
-    else sheet.result = command === 'held-stop' ? `Stopped held session ${id}.` : 'Opening terminal…';
+    else sheet.result = command === 'held-stop' ? `Stopped background session ${id}.` : 'Opening terminal…';
     sheet.stopping = null;
     redraw();
     await refreshHeld(sheet);
@@ -1685,6 +1713,16 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
       }
     } else if (button?.dataset['action'] === 'list-sheet-go') {
       void sheetGo();
+    } else if (action === 'list-pair-copy' && view.sheet?.kind === 'devices' && view.sheet.pairing !== null) {
+      const sheet = view.sheet;
+      const pairing = sheet.pairing;
+
+      void copyAddress(pairing!.host).then((copied) => {
+        if (view.sheet === sheet && sheet.pairing === pairing) {
+          sheet.copied = copied;
+          redraw();
+        }
+      });
     } else if (button?.dataset['action'] === 'list-device-revoke') {
       void revokeDevice(button.dataset['id'] ?? '');
     } else if (button?.dataset['action'] === 'list-device-voice') {

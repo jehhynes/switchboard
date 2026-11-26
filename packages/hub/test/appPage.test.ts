@@ -128,13 +128,13 @@ describe('createHubApp', () => {
 
     expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o1', workItemId: 1, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 200, body: { opened: true } });
     expect(opened).toEqual(['https://github.com/o/r/pull/5']);
-    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o2', workItemId: 1, url: 'https://evil.test/' })).toEqual({ status: 409, body: { error: 'The work item no longer links to this.' } });
-    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o3', workItemId: 99, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 409, body: { error: 'The work item is gone.' } });
+    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o2', workItemId: 1, url: 'https://evil.test/' })).toEqual({ status: 409, body: { error: 'This work item no longer links to this.' } });
+    expect(await app.post['/v1/conversation/row-open']!({ window: page, opId: 'o3', workItemId: 99, url: 'https://github.com/o/r/pull/5' })).toEqual({ status: 409, body: { error: 'This work item is no longer in the list.' } });
     expect(await app.post['/v1/conversation/pool-action']!({ window: page, opId: 'o4', ticketId: 99, label: 'Start' })).toEqual({ status: 409, body: { error: 'The ticket is no longer in the pool.' } });
 
     // Open in VS Code runs on the page's selected work item; an ad-hoc work item with no session has no window to open.
     expect(await app.post['/v1/conversation/select']!({ window: page, opId: 'o5', workItemId: 1 })).toMatchObject({ status: 200 });
-    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen: 1, opId: 'o6', workItemId: 1, label: 'Open in VS Code' })).toEqual({ status: 409, body: { error: 'The work item no longer offers this.' } });
+    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen: 1, opId: 'o6', workItemId: 1, label: 'Open in VS Code' })).toEqual({ status: 409, body: { error: 'This work item can no longer do that.' } });
     expect(opened).toHaveLength(1);
   });
 
@@ -196,7 +196,7 @@ describe('createHubApp', () => {
     expect(existsSync(join(temp.home, '.switchboard', 'window-queue.json'))).toBe(false);
 
     // Open report opens on the page: never VS Code, and the local-file route reads that one draft outside the work item's folders, no other.
-    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId: 'c2', workItemId: 1, label: 'Open report' })).toEqual({ status: 409, body: { error: 'Open report opens on the page.' } });
+    expect(await app.post['/v1/conversation/row-command']!({ window: page, scopeGen, opId: 'c2', workItemId: 1, label: 'Open report' })).toEqual({ status: 409, body: { error: 'Open report shows in a tab here.' } });
     expect(opened).toHaveLength(1);
     expect((await app.page!.localFile!(page, report, false))?.view).toMatchObject({ kind: 'markdown', contents: '# Reply\n' });
     expect(await app.page!.localFile!(page, join(drafts, 'other.md'), false)).toBeNull();

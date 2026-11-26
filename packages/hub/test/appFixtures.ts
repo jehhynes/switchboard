@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import type { Exec } from '@switchboard/claude';
 import { CodexRunner } from '@switchboard/codex';
 import { Store } from '@switchboard/core';
@@ -29,7 +29,8 @@ export let closers: (() => void | Promise<void>)[] = [];
 
 beforeEach(() => {
   temp = tempHome();
-
+  // No test may start the real Codex. Outside Windows the default `codex` is found on PATH, also while a test's settings fail to load.
+  vi.stubEnv('PATH', (process.env['PATH'] ?? '').split(delimiter).filter((dir) => !['codex', 'codex.cmd', 'codex.exe'].some((name) => existsSync(join(dir, name)))).join(delimiter));
 });
 
 afterEach(async () => {
@@ -37,6 +38,7 @@ afterEach(async () => {
     await close();
   }
 
+  vi.unstubAllEnvs();
   temp.remove();
 });
 

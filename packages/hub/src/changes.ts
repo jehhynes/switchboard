@@ -119,11 +119,16 @@ const GIT_KEPT = new Set(['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_
  * git without a shell, never taking the index lock a session's own git commands need (`GIT_OPTIONAL_LOCKS=0`), with paths as literal pathspecs,
  * paths printed unquoted, and no prompt. The hub's other `GIT_*` variables are left out.
  */
+export function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GIT_') || GIT_KEPT.has(name.toUpperCase())));
+
+  return Object.assign(env, { GIT_OPTIONAL_LOCKS: '0', GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0' });
+}
+
+/** Runs git with {@link gitEnv}, without a shell. */
 export const nodeGit: Git = (args, cwd, options = {}) =>
   new Promise((resolve) => {
-    const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.toUpperCase().startsWith('GIT_') || GIT_KEPT.has(name.toUpperCase())));
-
-    Object.assign(env, { GIT_OPTIONAL_LOCKS: '0', GIT_LITERAL_PATHSPECS: '1', GIT_TERMINAL_PROMPT: '0' });
+    const env = gitEnv();
 
     const child = execFile(
       'git',
@@ -190,6 +195,37 @@ export function parseNumstat(output: Buffer): Map<string, { additions: number | 
   }
 
   return counts;
+}
+
+const IMAGES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml' };
+
+/** A picture's or a PDF's media type by its extension, the only files sent as bytes; null for any other. */
+export function rawMime(path: string): string | null {
+  const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
+  const dot = name.lastIndexOf('.');
+  const ext = dot <= 0 ? '' : name.slice(dot + 1).toLowerCase();
+
+  return ext === 'pdf' ? 'application/pdf' : (IMAGES[ext] ?? null);
+}
+
+/** The bytes' leading marks each media type must have; an SVG must be text holding an `<svg` element. */
+const MAGIC: Record<string, (bytes: Buffer) => boolean> = {
+  'image/png': (bytes) => bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/jpeg': (bytes) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff,
+  'image/gif': (bytes) => bytes.subarray(0, 4).toString('latin1') === 'GIF8',
+  'image/webp': (bytes) => bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP',
+  'image/bmp': (bytes) => bytes.subarray(0, 2).toString('latin1') === 'BM',
+  'image/x-icon': (bytes) => bytes.subarray(0, 4).equals(Buffer.from([0, 0, 1, 0])),
+  'image/avif': (bytes) => bytes.subarray(4, 12).toString('latin1') === 'ftypavif',
+  'image/svg+xml': (bytes) => !looksBinary(bytes) && /<svg[\s>]/i.test(bytes.subarray(0, 64 * 1024).toString('utf8')),
+  'application/pdf': (bytes) => bytes.subarray(0, 5).toString('latin1') === '%PDF-',
+};
+
+/** The media type of a file whose extension and leading bytes agree, else null, so a file named `.png` that holds text is not sent as a picture. */
+export function mediaOf(path: string, bytes: Buffer): string | null {
+  const mime = rawMime(path);
+
+  return mime !== null && MAGIC[mime]!(bytes) ? mime : null;
 }
 
 /** Whether bytes look binary, as git decides: a NUL in the first 8,000. */
@@ -639,6 +675,8 @@ export interface DiffView {
   tooLarge: 'sides' | 'patch' | null;
   /** True when the sides were not asked for (`readDiff`'s `withSides` false): the patch alone, its unchanged lines read only on request. */
   partial?: true;
+  /** Read ignoring whitespace (`ws=ignore`) and the file differs only in whitespace: the patch is empty. */
+  same?: true;
 }
 
 const DIFF_ARGS = ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-relative', '--src-prefix=a/', '--dst-prefix=b/'];
@@ -670,7 +708,7 @@ const BINARY_PATCH = /^(Binary files .* differ|GIT binary patch)$/m;
  * `<commit>:<path>` at a commit of the range `readChanges` checked, and a disk-side path by real path inside the worktree. Without the sides no side is read:
  * a binary file is known by git's numstat or its patch's binary line.
  */
-export async function readDiff(changes: WorktreeChanges, path: string, git: Git = nodeGit, withSides = true): Promise<DiffView | null> {
+export async function readDiff(changes: WorktreeChanges, path: string, git: Git = nodeGit, withSides = true, ignoreSpace = false): Promise<DiffView | null> {
   const row = changes.view.rows.find((one) => one.path === path);
   const sides = changes.sides.get(path);
 
@@ -680,10 +718,13 @@ export async function readDiff(changes: WorktreeChanges, path: string, git: Git 
 
   const base: DiffView = { path, ...(row.from === undefined ? {} : { from: row.from }), status: row.status, patch: null, old: null, new: null, binary: false, tooLarge: null, ...(withSides ? {} : { partial: true as const }) };
   const paths = [...new Set([sides.original?.path, sides.modified?.path].filter((one): one is string => one !== undefined))];
+  const args = ignoreSpace ? [...DIFF_ARGS, '-w'] : DIFF_ARGS;
   const patchRead = () =>
     sides.untracked
-      ? git([...DIFF_ARGS, '--no-index', '--', '/dev/null', path], changes.root, { maxBytes: PATCH_MAX_BYTES })
-      : git([...DIFF_ARGS, '-M1%', changes.ref, ...(changes.to === null ? [] : [changes.to]), '--', ...paths], changes.root, { maxBytes: PATCH_MAX_BYTES });
+      ? git([...args, '--no-index', '--', '/dev/null', path], changes.root, { maxBytes: PATCH_MAX_BYTES })
+      : git([...args, '-M1%', changes.ref, ...(changes.to === null ? [] : [changes.to]), '--', ...paths], changes.root, { maxBytes: PATCH_MAX_BYTES });
+  // Ignoring whitespace, a file that differs only in whitespace has an empty patch, said so rather than shown as unreadable.
+  const sameIgnoringSpace = (patch: GitResult) => ignoreSpace && (patch.code === 0 || (sides.untracked && patch.code === 1)) && patch.stdout.length === 0 && !patch.tooLarge;
 
   if (!withSides) {
     if (row.binary) {
@@ -695,6 +736,10 @@ export async function readDiff(changes: WorktreeChanges, path: string, git: Git 
 
     if (patch.tooLarge) {
       return { ...base, tooLarge: 'patch' };
+    }
+
+    if (sameIgnoringSpace(patch)) {
+      return { ...base, patch: '', same: true };
     }
 
     if (!patchOk || patch.stdout.length === 0) {
@@ -720,6 +765,10 @@ export async function readDiff(changes: WorktreeChanges, path: string, git: Git 
 
   if (patch.tooLarge) {
     return { ...base, tooLarge: 'patch' };
+  }
+
+  if (sameIgnoringSpace(patch)) {
+    return { ...base, patch: '', same: true, old: old instanceof Buffer ? old.toString('utf8') : null, new: now instanceof Buffer ? now.toString('utf8') : null };
   }
 
   if (!patchOk || patch.stdout.length === 0) {
@@ -755,6 +804,94 @@ export interface FileView {
   contents: string | null;
   binary: boolean;
   tooLarge: boolean;
+  /** The file's size, null when it could not be read. */
+  bytes: number | null;
+  /** A picture's or a PDF's media type, when its extension and leading bytes agree (`mediaOf`); `file-raw` sends its bytes. */
+  media: string | null;
+  /** A hash of the bytes read (past the cap, of the leading bytes, size, and the file's identity and time), so the answer's ETag changes with a file whose contents it does not carry. */
+  digest: string;
+}
+
+/** The most bytes `file-raw` sends of a picture or PDF. */
+export const RAW_MAX_BYTES = 32 * 1024 * 1024;
+/** The leading bytes read to tell a large file's media type. */
+const HEAD_BYTES = 64 * 1024;
+
+/** A file of the worktree at a commit (`ref`) or on disk (null), read whole up to `cap`: its bytes or `large`, and its size; null when it is not there. */
+async function readAt(root: string, path: string, ref: string | null, git: Git, cap: number): Promise<{ bytes: Buffer | 'large'; size: number; head: Buffer; stamp: string } | null> {
+  if (ref !== null) {
+    const [size, blob] = await Promise.all([git(['cat-file', '-s', `${ref}:${path}`], root), git(['cat-file', 'blob', `${ref}:${path}`], root, { maxBytes: cap })]);
+    const bytes = Number(size.stdout.toString('utf8').trim());
+
+    if (size.code !== 0 || !Number.isSafeInteger(bytes) || (blob.code !== 0 && !blob.tooLarge)) {
+      return null;
+    }
+
+    // A blob at a commit never changes.
+    return { bytes: blob.tooLarge ? 'large' : blob.stdout, size: bytes, head: blob.stdout.subarray(0, HEAD_BYTES), stamp: `${ref}:${path}` };
+  }
+
+  const real = await fileInside(root, path);
+
+  if (real === null) {
+    return null;
+  }
+
+  const [read, info] = await Promise.all([readCapped(real, cap), stat(real, { bigint: true }).catch(() => null)]);
+
+  if (read === null || info === null) {
+    return null;
+  }
+
+  const head = read === 'large' ? await headOf(real).catch(() => null) : read.subarray(0, HEAD_BYTES);
+
+  return head === null ? null : { bytes: read, size: Number(info.size), head, stamp: `${info.ino} ${info.mtimeNs}` };
+}
+
+/** A file's first {@link HEAD_BYTES}, read through one handle. */
+async function headOf(real: string): Promise<Buffer> {
+  const handle = await open(real, 'r');
+
+  try {
+    const buffer = Buffer.alloc(HEAD_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
+
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+function viewOf(path: string, side: 'disk' | 'base', read: { bytes: Buffer | 'large'; size: number; head: Buffer; stamp: string }): FileView {
+  const media = mediaOf(path, read.head);
+  const digest = createHash('sha256')
+    // Past the cap, the file's identity and modification time stand for the bytes not read.
+    .update(read.bytes === 'large' ? Buffer.concat([read.head, Buffer.from(` ${read.size} ${read.stamp}`)]) : read.bytes)
+    .digest('hex')
+    .slice(0, 32);
+  const facts = { path, side, bytes: read.size, media, digest };
+
+  if (read.bytes === 'large') {
+    return { ...facts, contents: null, binary: looksBinary(read.head), tooLarge: true };
+  }
+
+  return looksBinary(read.bytes) ? { ...facts, contents: null, binary: true, tooLarge: false } : { ...facts, contents: read.bytes.toString('utf8'), binary: false, tooLarge: false };
+}
+
+/** Whether git lists `path` in the worktree at `root`, tracked or untracked and not ignored. */
+async function listed(root: string, path: string, git: Git): Promise<boolean> {
+  const found = await git(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', path], root);
+
+  return found.code === 0 && fields(found.stdout).includes(path);
+}
+
+/** Where a file view's side is read: the row's commit, or for a disk side to disk, a commit or null. */
+function sideOf(changes: WorktreeChanges, path: string, side: 'disk' | 'base'): { path: string; ref: string | null } | 'disk' | null {
+  if (side === 'base') {
+    return [...changes.sides.values()].find((one) => one.original?.path === path)?.original ?? null;
+  }
+
+  return changes.to !== null ? ([...changes.sides.values()].find((one) => one.modified?.path === path)?.modified ?? null) : 'disk';
 }
 
 /**
@@ -763,37 +900,40 @@ export interface FileView {
  * for a range to a commit, `disk` is a change row's file in that commit. Null for any other path.
  */
 export async function readFileView(changes: WorktreeChanges, path: string, side: 'disk' | 'base', git: Git = nodeGit): Promise<FileView | null> {
-  let bytes: Buffer | 'large' | null;
+  const at = sideOf(changes, path, side);
 
-  if (side === 'base') {
-    const row = [...changes.sides.values()].find((one) => one.original?.path === path);
-
-    bytes = row?.original == null ? null : await readSide(changes, row.original, git);
-  } else if (changes.to !== null) {
-    const row = [...changes.sides.values()].find((one) => one.modified?.path === path);
-
-    bytes = row?.modified == null ? null : await readSide(changes, row.modified, git);
-  } else {
-    const listed = await git(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', path], changes.root);
-
-    bytes = listed.code === 0 && fields(listed.stdout).includes(path) ? await readSide(changes, { path, ref: null }, git) : null;
+  if (at === 'disk') {
+    return readDiskFile(changes.root, path, git);
   }
 
-  if (bytes === null) {
+  const read = at === null ? null : await readAt(changes.root, at.path, at.ref, git, SIDE_MAX_BYTES);
+
+  return read === null ? null : viewOf(path, side, read);
+}
+
+/** A file on disk for the file view, checked as {@link readFileView} checks one, without reading the change list. */
+export async function readDiskFile(root: string, path: string, git: Git = nodeGit): Promise<FileView | null> {
+  const read = (await listed(root, path, git)) ? await readAt(root, path, null, git, SIDE_MAX_BYTES) : null;
+
+  return read === null ? null : viewOf(path, 'disk', read);
+}
+
+/** A picture's or a PDF's bytes for `file-raw`, read as {@link readFileView} reads the side, up to {@link RAW_MAX_BYTES}; null for any other file. */
+async function readRaw(root: string, at: { path: string; ref: string | null }, git: Git): Promise<{ mime: string; bytes: Buffer } | null> {
+  if (at.ref === null && !(await listed(root, at.path, git))) {
     return null;
   }
 
-  if (bytes === 'large') {
-    return { path, side, contents: null, binary: false, tooLarge: true };
-  }
+  const read = await readAt(root, at.path, at.ref, git, RAW_MAX_BYTES);
+  const mime = read === null || read.bytes === 'large' ? null : mediaOf(at.path, read.bytes);
 
-  return looksBinary(bytes) ? { path, side, contents: null, binary: true, tooLarge: false } : { path, side, contents: bytes.toString('utf8'), binary: false, tooLarge: false };
+  return mime === null ? null : { mime, bytes: read!.bytes as Buffer };
 }
 
 const RANGE_REFUSED = { status: 400, body: { error: 'Expected from base, HEAD or a commit, and to worktree or a commit.' } };
 
 /** Why a page key gets no changes: not a page's, or no selected conversation with a folder yet. */
-function unscoped(deps: PageChangesDeps, key: string): ChangesReply | WindowScope {
+export function unscoped(deps: PageChangesDeps, key: string): ChangesReply | WindowScope {
   const known = deps.isPage(key);
   const scope = known ? deps.scope(key) : null;
 
@@ -804,8 +944,22 @@ function unscoped(deps: PageChangesDeps, key: string): ChangesReply | WindowScop
   return scope.cwd === null ? { status: 409, body: { error: 'This conversation has no folder yet.' } } : scope;
 }
 
+/** The folder's real path when it is its repository's top, as `readChanges` requires; why not otherwise. */
+async function topOf(folder: string, git: Git): Promise<{ root: string } | { error: string }> {
+  const top = await git(['rev-parse', '--show-toplevel'], folder);
+  const root = top.stdout.toString('utf8').trim();
+
+  if (top.code !== 0 || root === '') {
+    return { error: `${folder} is not in a git repository.` };
+  }
+
+  const [realRoot, realFolder] = await Promise.all([realpath(root).catch(() => root), realpath(folder).catch(() => folder)]);
+
+  return (process.platform === 'win32' ? realRoot.toLowerCase() === realFolder.toLowerCase() : realRoot === realFolder) ? { root } : { error: `${folder} is not the top of its git repository, ${root}.` };
+}
+
 /** Whether the page still shows the conversation it asked for, after the reads. */
-function same(deps: PageChangesDeps, key: string, scope: WindowScope): boolean {
+export function same(deps: PageChangesDeps, key: string, scope: WindowScope): boolean {
   const now = deps.scope(key);
 
   return now !== null && now.scopeGen === scope.scopeGen && now.cwd === scope.cwd && now.workItemId === scope.workItemId;
@@ -976,13 +1130,13 @@ export class PageChanges {
   }
 
   /**
-   * `GET /v1/conversation/diff?window=<page key>&path=<path>[&sides=0][&from=<point>][&to=<point>]`: one change row's `DiffView`, for a path
+   * `GET /v1/conversation/diff?window=<page key>&path=<path>[&sides=0][&from=<point>][&to=<point>][&ws=ignore]`: one change row's `DiffView`, for a path
    * that is one of the selected conversation's change rows in the range now, with both sides, or with `sides` `0` the patch alone. 400 for a
    * path that is not a plain relative one or another `sides`, `from` or `to`, 404 for one that is no row.
    */
-  async diff(key: string, path: unknown, sides: unknown = null, from: unknown = null, to: unknown = null): Promise<ChangesReply> {
-    if (!relativePath(path) || (sides !== null && sides !== '0' && sides !== '1')) {
-      return { status: 400, body: { error: 'Expected a path relative to the worktree, and sides 0 or 1.' } };
+  async diff(key: string, path: unknown, sides: unknown = null, from: unknown = null, to: unknown = null, ws: unknown = null): Promise<ChangesReply> {
+    if (!relativePath(path) || (sides !== null && sides !== '0' && sides !== '1') || (ws !== null && ws !== 'ignore')) {
+      return { status: 400, body: { error: 'Expected a path relative to the worktree, sides 0 or 1, and ws ignore or none.' } };
     }
 
     const range = parseRange(from, to);
@@ -1007,7 +1161,7 @@ export class PageChanges {
           return null;
         }
 
-        const view = await readDiff(changes, path, this.deps.git, sides !== '0');
+        const view = await readDiff(changes, path, this.deps.git, sides !== '0', ws === 'ignore');
 
         return kept && view !== null && view.patch === null && !view.binary && view.tooLarge === null ? null : view;
       },
@@ -1051,7 +1205,23 @@ export class PageChanges {
       return scope;
     }
 
-    // The base side is a row's: its paths are checked as a diff's are. A disk file is checked by `readFileView` itself.
+    // A file on disk is read without the change list, so reading it again while it shows costs one listing and one read.
+    if (side === 'disk' && range.to === 'worktree') {
+      const root = await topOf(scope.cwd!, this.deps.git ?? nodeGit);
+      const view = 'error' in root ? null : await readDiskFile(root.root, path, this.deps.git);
+
+      if (!same(this.deps, key, scope)) {
+        return { status: 409, body: { error: CONVERSATION_MOVED } };
+      }
+
+      if ('error' in root) {
+        return { status: 409, body: root };
+      }
+
+      return view === null ? { status: 404, body: { error: `${path} is not a file of this worktree.` } } : { status: 200, body: view, etag: etagOf(view) };
+    }
+
+    // The base side is a row's: its paths are checked as a diff's are.
     const { read, value: view } = await this.#fromRead(
       key,
       scope,
@@ -1073,6 +1243,51 @@ export class PageChanges {
     }
 
     return view === null ? { status: 404, body: { error: `${path} is not a file of this worktree.` } } : { status: 200, body: view, etag: etagOf(view) };
+  }
+
+  /**
+   * `GET /v1/conversation/file-raw?window=<page key>&path=<path>&side=disk|base[&from=<point>][&to=<point>]`: a picture's or a PDF's bytes,
+   * for a file `file` would read (`readFileView`'s checks), whose extension and leading bytes agree (`mediaOf`), up to {@link RAW_MAX_BYTES}.
+   */
+  async fileRaw(key: string, path: unknown, side: unknown, from: unknown = null, to: unknown = null): Promise<ChangesReply | { status: 200; raw: { mime: string; bytes: Buffer } }> {
+    if (!relativePath(path) || (side !== 'disk' && side !== 'base')) {
+      return { status: 400, body: { error: 'Expected a path relative to the worktree and a side, disk or base.' } };
+    }
+
+    const range = parseRange(from, to);
+
+    if (range === null) {
+      return RANGE_REFUSED;
+    }
+
+    const scope = unscoped(this.deps, key);
+
+    if ('status' in scope) {
+      return scope;
+    }
+
+    const git = this.deps.git ?? nodeGit;
+    let raw: { mime: string; bytes: Buffer } | null;
+
+    if (side === 'disk' && range.to === 'worktree') {
+      const root = await topOf(scope.cwd!, git);
+
+      raw = 'error' in root ? null : await readRaw(root.root, { path, ref: null }, git);
+    } else {
+      const { read, value } = await this.#fromRead(key, scope, range, async (changes) => {
+        const at = sideOf(changes, path, side);
+
+        return at === null || at === 'disk' ? null : readRaw(changes.root, at, git);
+      });
+
+      raw = 'error' in read ? null : value;
+    }
+
+    if (!same(this.deps, key, scope)) {
+      return { status: 409, body: { error: CONVERSATION_MOVED } };
+    }
+
+    return raw === null ? { status: 404, body: { error: 'Only a picture or a PDF of this worktree is sent as a file.' } } : { status: 200, raw };
   }
 
   /**

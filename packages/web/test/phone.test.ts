@@ -38,9 +38,10 @@ describe('the page on a phone', () => {
     // Where the composer hides off the Conversation tab, by the same condition, the other tabs keep the inset.
     expect(css).toContain('#root.off-conversation #note, #root.off-conversation #composer { display: none; }');
     expect(css).toContain('\n#root.off-conversation > .main { --sb-end: env(safe-area-inset-bottom); }\n');
-    // Full-screen Settings runs to the edge too, its bar holding the inset.
+    // Full-screen Settings runs to the edge too, its bar holding the inset, or without the bar its page and navigation.
     expect(css).toContain('.settings-backdrop { padding: var(--sb-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);');
-    expect(css).toContain('.settings-bar { flex-wrap: wrap; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }');
+    expect(css).toContain('.settings-bar { min-height: calc(52px + env(safe-area-inset-bottom)); padding: 3px 12px calc(3px + env(safe-area-inset-bottom)); }');
+    expect(css).toContain('.settings:not(:has(> .settings-bar)) :is(.settings-page, .settings-nav) { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }');
   });
 
   it('gives a conversation under 600 px wide, by its own width, its side padding, dot gutter, list indent and bubble room, and leaves a wider one as it was', () => {

@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { nodeGit, PageChanges, readCapped, readChanges, readDiff, readFileView, SIDE_MAX_BYTES } from '../src/changes.js';
-import type { WorktreeChanges } from '../src/changes.js';
+import type { Git, WorktreeChanges } from '../src/changes.js';
 import type { WindowScope } from '../src/windows.js';
 import { busyRepo, isolateGit, lines, makeRepo, removeRepos } from './gitFixture.js';
 
@@ -159,6 +159,27 @@ describe('PageChanges.diff', gitTimeout, () => {
     expect((await new PageChanges({ isPage: () => false, scope: () => scope(repo.root) }).diff('p1', 'edited.md')).status).toBe(403);
   });
 
+  it('ignores whitespace when asked, answering same for a file that differs only in whitespace', async () => {
+    const repo = busyRepo();
+
+    repo.write('src/kept.ts', lines(5).replace('line 2', 'line   2'));
+    repo.write('edited.md', 'line 1\nchanged  \nline 3\n');
+
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+
+    for (const sides of [null, '0']) {
+      expect(await changes.diff('p1', 'src/kept.ts', sides, null, null, 'ignore')).toMatchObject({ status: 200, body: { patch: '', same: true } });
+      expect((await changes.diff('p1', 'src/kept.ts', sides)).body).toMatchObject({ patch: expect.stringContaining('line   2') });
+      expect((await changes.diff('p1', 'src/kept.ts', sides)).body).not.toHaveProperty('same');
+    }
+
+    const real = await changes.diff('p1', 'edited.md', null, null, null, 'ignore');
+
+    expect(real.body).toMatchObject({ patch: expect.stringContaining('+changed') });
+    expect(real.body).not.toHaveProperty('same');
+    expect((await changes.diff('p1', 'edited.md', null, null, null, 'all')).status).toBe(400);
+  });
+
   it('Diff_WithSidesZero_AnswersThePatchAloneWithItsOwnETag', async () => {
     const repo = busyRepo();
     const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
@@ -180,7 +201,7 @@ describe('the file view', gitTimeout, () => {
     const repo = busyRepo();
     const changes = (await readChanges(repo.root)) as WorktreeChanges;
 
-    expect(await readFileView(changes, 'src/kept.ts', 'disk')).toEqual({ path: 'src/kept.ts', side: 'disk', contents: lines(5), binary: false, tooLarge: false });
+    expect(await readFileView(changes, 'src/kept.ts', 'disk')).toEqual({ path: 'src/kept.ts', side: 'disk', contents: lines(5), binary: false, tooLarge: false, bytes: lines(5).length, media: null, digest: expect.stringMatching(/^[0-9a-f]{32}$/) });
     expect(await readFileView(changes, 'notes/new.txt', 'disk')).toMatchObject({ contents: 'one\ntwo\nthree' });
     expect(await readFileView(changes, 'image.bin', 'disk')).toMatchObject({ contents: null, binary: true });
     expect(await readFileView(changes, 'src/old-name.ts', 'base')).toMatchObject({ side: 'base', contents: lines(8) });
@@ -200,5 +221,121 @@ describe('the file view', gitTimeout, () => {
     expect((await changes.file('p1', 'src/kept.ts', 'index')).status).toBe(400);
     expect((await changes.file('p1', '../x', 'disk')).status).toBe(400);
     expect(await changes.file('p1', 'ignored.log', 'disk')).toEqual({ status: 404, body: { error: 'ignored.log is not a file of this worktree.' } });
+  });
+
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)]);
+
+  it("gives a file's size and, when its extension and leading bytes agree, its media type", async () => {
+    const repo = busyRepo();
+
+    repo.write('shot.png', PNG);
+    repo.write('fake.png', 'just text\n');
+    repo.write('doc.pdf', '%PDF-1.7\n');
+    repo.write('icon.svg', '<svg xmlns="http://www.w3.org/2000/svg"></svg>\n');
+
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+    const body = async (path: string) => (await changes.file('p1', path, 'disk')).body;
+
+    expect(await body('shot.png')).toMatchObject({ media: 'image/png', binary: true, bytes: PNG.length, contents: null });
+    expect(await body('fake.png')).toMatchObject({ media: null, binary: false, contents: 'just text\n' });
+    expect(await body('doc.pdf')).toMatchObject({ media: 'application/pdf' });
+    expect(await body('icon.svg')).toMatchObject({ media: 'image/svg+xml', contents: expect.stringContaining('<svg') });
+  });
+
+  it("changes its ETag when a picture's bytes change at the same size", async () => {
+    const repo = busyRepo();
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+
+    repo.write('shot.png', PNG);
+
+    const before = await changes.file('p1', 'shot.png', 'disk');
+
+    repo.write('shot.png', Buffer.concat([PNG.subarray(0, PNG.length - 1), Buffer.from([9])]));
+
+    const after = await changes.file('p1', 'shot.png', 'disk');
+
+    expect((after.body as { bytes: number }).bytes).toBe((before.body as { bytes: number }).bytes);
+    expect(after.etag).not.toBe(before.etag);
+  });
+
+  it("changes its ETag when a picture past the text cap changes at the same size", async () => {
+    const repo = busyRepo();
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+    const big = Buffer.concat([PNG, Buffer.alloc(SIDE_MAX_BYTES + 1024)]);
+
+    repo.write('big.png', big);
+
+    const before = await changes.file('p1', 'big.png', 'disk');
+
+    big[big.length - 1] = 7;
+    repo.write('big.png', big);
+    utimesSync(join(repo.root, 'big.png'), new Date(), new Date(Date.now() + 5_000));
+
+    const after = await changes.file('p1', 'big.png', 'disk');
+
+    expect(before.body).toMatchObject({ tooLarge: true, media: 'image/png' });
+    expect(after.etag).not.toBe(before.etag);
+  });
+
+  it('reads a file on disk without reading the change list, whatever range is chosen', async () => {
+    const repo = busyRepo();
+    const calls: string[][] = [];
+    const git: Git = (args, cwd, options) => (calls.push(args), nodeGit(args, cwd, options));
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root), git });
+    const head = repo.git('rev-parse', 'HEAD').trim();
+
+    expect(await changes.file('p1', 'src/kept.ts', 'disk', 'HEAD', 'worktree')).toMatchObject({ status: 200, body: { contents: lines(5) } });
+    expect(await changes.file('p1', 'edited.md', 'disk', head, 'worktree')).toMatchObject({ status: 200, body: { contents: 'line 1\nchanged\nline 3\n' } });
+    expect(calls.map((args) => args[0])).toEqual(['rev-parse', 'ls-files', 'rev-parse', 'ls-files']);
+
+    const again = await changes.file('p1', 'src/kept.ts', 'disk');
+
+    expect((await changes.file('p1', 'src/kept.ts', 'disk')).etag).toBe(again.etag);
+    expect(await changes.file('p1', 'ignored.log', 'disk')).toMatchObject({ status: 404 });
+    expect(await new PageChanges({ isPage: () => true, scope: () => scope(join(repo.root, 'src')) }).file('p1', 'kept.ts', 'disk')).toMatchObject({ status: 409, body: { error: expect.stringContaining('is not the top') } });
+  });
+
+  it('refuses a link or a junction on the file-only path', async () => {
+    const repo = busyRepo();
+    const outside = mkdtempSync(join(tmpdir(), 'sb-out-'));
+
+    writeFileSync(join(outside, 'secret.txt'), 'secret\n');
+    symlinkSync(join(outside, 'secret.txt'), join(repo.root, 'link.txt'));
+    symlinkSync(outside, join(repo.root, 'dir'), 'junction');
+
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+
+    expect((await changes.file('p1', 'link.txt', 'disk')).status).toBe(404);
+    expect((await changes.file('p1', 'dir/secret.txt', 'disk')).status).toBe(404);
+  });
+
+  it("sends a picture's or PDF's bytes on disk and at a commit, and refuses an ignored file, a link, a mislabelled file and any other", async () => {
+    const repo = busyRepo();
+
+    repo.write('shot.png', PNG);
+    repo.git('add', 'shot.png');
+    repo.git('commit', '-qm', 'picture');
+    repo.write('shot.png', Buffer.concat([PNG, Buffer.from([2])]));
+    repo.write('.gitignore', 'ignored.log\nhidden.png\n');
+    repo.write('hidden.png', PNG);
+    repo.write('fake.png', 'text\n');
+    symlinkSync(join(repo.root, 'shot.png'), join(repo.root, 'linked.png'));
+
+    const changes = new PageChanges({ isPage: () => true, scope: () => scope(repo.root) });
+    const head = repo.git('rev-parse', 'HEAD').trim();
+    const disk = await changes.fileRaw('p1', 'shot.png', 'disk');
+
+    expect(disk).toMatchObject({ status: 200, raw: { mime: 'image/png' } });
+    expect('raw' in disk && disk.raw.bytes.length).toBe(PNG.length + 1);
+
+    const base = await changes.fileRaw('p1', 'shot.png', 'base', head, 'worktree');
+
+    expect('raw' in base && base.raw.bytes.length).toBe(PNG.length);
+
+    for (const path of ['hidden.png', 'fake.png', 'linked.png', 'src/kept.ts', 'missing.png']) {
+      expect((await changes.fileRaw('p1', path, 'disk')).status).toBe(404);
+    }
+
+    expect((await changes.fileRaw('p1', '../x.png', 'disk')).status).toBe(400);
   });
 });

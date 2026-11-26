@@ -547,7 +547,7 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
       const context = await attaching(codeMode, config({ installHooks: false }));
 
       endIt(context);
-      expect(await context.runtime.attach('s1')).toEqual({ refused: 'Claude sessions need sessions.installHooks.', status: 409 });
+      expect(await context.runtime.attach('s1')).toEqual({ refused: 'Claude sessions need Install hooks turned on in Settings › Advanced.', status: 409 });
       expect(codeMode.resumes).toEqual([]);
       context.runtime.stop();
     });
@@ -875,6 +875,17 @@ describe('Code Mode sessions (PRD R93-R95)', () => {
           { session: 's1', label: label('adhoc 1', 'old-native'), workItemId: 1, key: 'adhoc 1', nativeSessionId: CLAUDE, cwd: 'D:/git/widgets', state: 'running', idleSince: T0 + 9, memoryBytes: 300 * 1024 * 1024, clients: 2, exitedAt: null, exitCode: null, orphan: false },
         ]);
         expect(context.logs.filter((line) => line.startsWith('held session'))).toEqual([`held session gone-1 has no work item: ${label('gh 7', 'aaaabbbb-0000')}`]);
+        context.runtime.stop();
+      });
+
+      it('shows the idle time the roster read measured for a known session, and the holder\'s own activity for an orphan (PRD R95)', async () => {
+        const context = await attaching(resumer({ observe: async (sessions) => ({ sessions: sessions.map((one) => ({ sessionId: one.id, state: 'running' as const, detail: null, interactive: false })), idle: [], idleSince: Object.fromEntries(sessions.map((one) => [one.id, T0 + 3])) }) }));
+
+        context.entries.splice(0, 1, { ...held('s1'), lastOutputAt: T0 + 9 }, { ...held('gone-1'), lastOutputAt: T0 + 7 });
+        await context.runtime.readRoster();
+        await context.runtime.readRoster();
+
+        expect((context.runtime.snapshot().held ?? []).map((one) => [one.session, one.idleSince])).toEqual([['gone-1', T0 + 7], ['s1', T0 + 3]]);
         context.runtime.stop();
       });
 

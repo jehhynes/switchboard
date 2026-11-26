@@ -1,8 +1,9 @@
 /* The conversation's bubbles and text sizes, drawn by the web page, whose build puts this file before its
    own styles (architecture.md § Conversation view). */
 :root {
-  /* Our messages, on the right: a 15% tint of the theme's button blue, #0078D426 in Dark Modern, light enough for the theme's foreground. */
-  --sb-message-bubble: color-mix(in srgb, var(--vscode-button-background, #0078d4) 15%, transparent);
+  /* Our messages, on the right: a 15% tint of Dark Modern's button blue, #0078D4, and Light Modern's, #005FB8, kept from before the page took
+     2026's colours (operator decision 2026-11-26): 2026 Dark's button blue, #297AA0, tints the bubble a muted grey-teal. */
+  --sb-message-bubble: color-mix(in srgb, light-dark(#005fb8, #0078d4) 15%, transparent);
 }
 
 /* Text sizes as fractions of the theme's size, which the list item and the timeline keep: a reply's (`--sb-reply-scale`), its primary response
@@ -30,7 +31,7 @@
 
 /* Above a message that answered a question card: a quoted line per question answered, which goes to the card. Each line keeps to one line, the
    question giving way before the answer. */
-.answer-ref { display: flex; flex-direction: column; gap: 1px; box-sizing: border-box; max-width: 100%; margin: 0 0 4px auto; padding: 2px 8px; border: none; border-left: 2px solid var(--vscode-textBlockQuote-border, var(--vscode-button-background, #0078d4)); border-radius: 2px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; font-size: 0.85em; text-align: left; cursor: pointer; }
+.answer-ref { display: flex; flex-direction: column; gap: 1px; box-sizing: border-box; max-width: 100%; margin: 0 0 4px auto; padding: 2px 8px; border: none; border-left: 2px solid var(--vscode-textBlockQuote-border, var(--vscode-button-background)); border-radius: 2px; background: transparent; color: var(--vscode-descriptionForeground); font: inherit; font-size: 0.85em; text-align: left; cursor: pointer; }
 .answer-ref:hover, .answer-ref:focus-visible { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15)); outline: none; }
 .answer-ref-line { display: flex; gap: 4px; min-width: 0; white-space: nowrap; }
 .answer-ref-mark { flex: none; }
@@ -38,7 +39,7 @@
 .answer-ref-answer { flex: 0 1000 auto; min-width: 4em; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 
 /* A card's link to the message that answered it, at the end of its footer. */
-.question-link { display: inline-flex; align-items: center; gap: 4px; max-width: 60%; padding: 2px 6px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-textLink-foreground, var(--vscode-button-background, #0078d4)); font: inherit; font-size: 0.85em; cursor: pointer; }
+.question-link { display: inline-flex; align-items: center; gap: 4px; max-width: 60%; padding: 2px 6px; border: none; border-radius: 4px; background: transparent; color: var(--vscode-textLink-foreground, var(--vscode-button-background)); font: inherit; font-size: 0.85em; cursor: pointer; }
 .question-link:hover, .question-link:focus-visible { text-decoration: underline; outline: none; background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.15)); }
 .question-link > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -47,7 +48,7 @@
 
 /* A card or a message an answer link went to, highlighted for a moment: a message on its bubble only, never on its full-width row, so the
    highlight is one ring in its bubble's shape; with reduced motion, a still outline instead of the fading ring. */
-@keyframes sb-linked { from { box-shadow: 0 0 0 2px var(--vscode-focusBorder, #0078d4); } to { box-shadow: 0 0 0 2px transparent; } }
+@keyframes sb-linked { from { box-shadow: 0 0 0 2px var(--vscode-focusBorder); } to { box-shadow: 0 0 0 2px transparent; } }
 .linked:not(.message) { animation: sb-linked 1.6s ease-out; border-radius: 8px; }
 .message.linked .box { animation: sb-linked 1.6s ease-out; }
-@media (prefers-reduced-motion: reduce) { .linked:not(.message), .message.linked .box { animation: none; outline: 2px solid var(--vscode-focusBorder, #0078d4); } }
+@media (prefers-reduced-motion: reduce) { .linked:not(.message), .message.linked .box { animation: none; outline: 2px solid var(--vscode-focusBorder); } }

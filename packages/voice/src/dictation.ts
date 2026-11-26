@@ -36,6 +36,11 @@ export const WARM_RETRY_MS = 5_000;
 export const WARM_SOON_MS = 50;
 /** A load ahead waits this long after freeing the recogniser it replaces, whose memory goes a few turns of the event loop later (M131). */
 export const WARM_RELEASE_MS = 100;
+/**
+ * The recogniser is freed once capture has not been open or wanted for this long, since it holds gigabytes of memory (mechanics.md M131), and
+ * no load ahead runs again until listening is asked for or a phone takes the voice.
+ */
+export const RECOGNISER_IDLE_MS = 30 * 60_000;
 /** The spoken commands (architecture.md § Dictation), recognised only as a whole utterance in the operator's voice and never sent. */
 export const SPOKEN_COMMANDS: Readonly<Record<string, SpokenCommand>> = {
   'stop listening': 'stop-listening',
@@ -219,6 +224,11 @@ export class Dictation {
   #warmTimer: unknown = null;
   /** A phone took the voice: the next target loads its recogniser at once rather than after it settles. */
   #warmUrgent = false;
+  /** Frees the recogniser once capture has not been in use for {@link RECOGNISER_IDLE_MS}. */
+  #unloadTimer: unknown = null;
+  /** The recogniser was freed for disuse: no load ahead runs until Mic on, a spoken alert's answer, capture for dictation or `warmSoon`. */
+  #unloaded = false;
+  #closed = false;
 
   constructor(private readonly deps: DictationDeps) {
     this.#auto = new AutoDuplex(deps.log);
@@ -271,7 +281,7 @@ export class Dictation {
     return this.#roomHoldUntil;
   }
 
-  /** Why the open capture listens while the voice plays though it cancels no echo, such as "echo check: none heard"; null otherwise. */
+  /** Why the open capture listens while the voice plays though it cancels no echo, such as "echo check: no echo detected"; null otherwise. */
   get fullDuplex(): string | null {
     return this.#stream === null ? null : this.#fullDuplex;
   }
@@ -342,6 +352,10 @@ export class Dictation {
 
     this.#answer = answer;
 
+    if (answer !== null) {
+      this.#unloaded = false;
+    }
+
     if (accepted) {
       this.#idleOff = false;
       this.#armIdle();
@@ -352,6 +366,10 @@ export class Dictation {
 
   /** The operator turned the mic on or off. Turning it on starts again after the idle timeout, an error or a pause by voice. */
   mic(on: boolean): void {
+    if (on) {
+      this.#unloaded = false;
+    }
+
     if (on === this.#micOn) {
       if (on && (this.#idleOff || this.#error !== null || this.#pausedByVoice)) {
         if (this.#pausedByVoice) {
@@ -473,6 +491,7 @@ export class Dictation {
    * move, while the page opens the phone's microphone.
    */
   warmSoon(): void {
+    this.#unloaded = false;
     this.#warmUrgent = true;
 
     if (this.#warmTimer !== null) {
@@ -499,7 +518,8 @@ export class Dictation {
 
     // With no target yet, as when the process has just started, the recogniser loads for no repository's terms, so the first Mic on after a
     // restart finds one; a target's terms load it again only when they differ.
-    if ((this.#target === null && this.#engine !== null) || this.#enrollment !== null || this.#recognizerFailed || !this.deps.settings().enabled || this.#engine?.key === this.#termsKey()) {
+    // After a free for disuse nothing loads ahead, so moving the focus between pages does not load gigabytes back.
+    if (this.#unloaded || (this.#target === null && this.#engine !== null) || this.#enrollment !== null || this.#recognizerFailed || !this.deps.settings().enabled || this.#engine?.key === this.#termsKey()) {
       return;
     }
 
@@ -533,6 +553,7 @@ export class Dictation {
 
     this.#engine!.engine.stream().accept(new Float32Array(ASR_RATE));
     this.deps.log(`recogniser loaded ahead of the mic in ${Math.round(loaded - at)} ms, its first decode ${Math.round(this.deps.now() - loaded)} ms`);
+    this.#armUnload();
   }
 
   /** The words the recogniser is biased toward for the target: its repository's terms and the spoken commands, which are heard as said. */
@@ -605,11 +626,12 @@ export class Dictation {
 
     // The process started, as onto a new build, or voice was turned on: the recogniser loads before the first Mic on asks for it.
     this.#warmUnloaded();
+    this.#armUnload();
   }
 
   /** Schedules the load ahead when no recogniser is loaded or due, as after the settings come or an enrolment that put it off. */
   #warmUnloaded(): void {
-    if (this.#engine === null && this.#warmTimer === null && this.deps.settings().enabled) {
+    if (this.#engine === null && this.#warmTimer === null && !this.#unloaded && this.deps.settings().enabled) {
       this.#warmTimer = this.#timer(() => this.warm(), WARM_SETTLE_MS);
     }
   }
@@ -704,6 +726,8 @@ export class Dictation {
     this.#watch = null;
     this.#stopCapture();
     this.#endRoomHold();
+    this.#closed = true;
+    this.#clearUnload();
     this.deps.turn?.close();
   }
 
@@ -765,6 +789,60 @@ export class Dictation {
     if (text !== this.#reported) {
       this.#reported = text;
       this.deps.changed();
+    }
+
+    this.#armUnload();
+  }
+
+  /**
+   * Whether capture is in use: open, opening or reloading, wanted for dictation or an enrolment, about to be wanted once the other-app watcher first answers, or waiting for a spoken alert's answer. A pause
+   * for the composer or another app, and a failed capture, close it, so they count as unused; a pause by voice keeps it open.
+   */
+  #inUse(): boolean {
+    return this.#wanted() || this.#awaitingWatcher() || this.#stream !== null || this.#opening || this.#reloading || this.#answer !== null;
+  }
+
+  /** Mic on for a target waits for the other-app watcher's first answer before capture opens. */
+  #awaitingWatcher(): boolean {
+    return this.#micOn && this.#otherApp === null && !this.#idleOff && this.#target !== null;
+  }
+
+  /** Stops the disuse clock while capture is in use, and starts it, once, when capture is not. */
+  #armUnload(): void {
+    if (this.#inUse()) {
+      this.#clearUnload();
+    } else if (this.#unloadTimer === null && !this.#unloaded && !this.#closed) {
+      this.#unloadTimer = this.#timer(() => this.#unloadIdle(), RECOGNISER_IDLE_MS);
+    }
+  }
+
+  #clearUnload(): void {
+    if (this.#unloadTimer !== null) {
+      this.#clearTimer(this.#unloadTimer);
+      this.#unloadTimer = null;
+    }
+  }
+
+  /** Capture was not in use for {@link RECOGNISER_IDLE_MS}: the recogniser is freed and no load ahead waiting runs. */
+  #unloadIdle(): void {
+    this.#unloadTimer = null;
+
+    if (this.#inUse()) {
+      return;
+    }
+
+    this.#unloaded = true;
+    this.#warmUrgent = false;
+
+    if (this.#warmTimer !== null) {
+      this.#clearTimer(this.#warmTimer);
+      this.#warmTimer = null;
+    }
+
+    if (this.#engine !== null) {
+      this.#releaseEngine();
+      this.deps.log(`recogniser freed: capture was not used for ${RECOGNISER_IDLE_MS / 60_000} minutes; it loads again at Mic on`);
+      this.#report();
     }
   }
 
@@ -896,6 +974,11 @@ export class Dictation {
 
   async #startCapture(): Promise<void> {
     const forEnrollment = this.#enrollment !== null;
+
+    // Capture for dictation is use, as when a target comes while the mic is on; an enrolment's needs no recogniser.
+    if (!forEnrollment) {
+      this.#unloaded = false;
+    }
 
     // A recogniser for other terms is freed, and one being freed has gone, before this one loads.
     if (!forEnrollment && (this.#engine?.key !== this.#termsKey() || this.#released !== null)) {

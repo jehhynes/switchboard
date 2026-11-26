@@ -246,7 +246,7 @@ describe('Runtime', () => {
       expect(source.polls).toBe(5);
 
       expect(runtime.setSourceEnabled('github', false)).toBeNull();
-      expect(runtime.pollNow()).toBe('No source is polled. Turn one on in the header.');
+      expect(runtime.pollNow()).toBe('No source is on. Turn one on in the list header.');
       await vi.advanceTimersByTimeAsync(300_000);
       expect(source.polls).toBe(5);
       runtime.stop();

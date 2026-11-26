@@ -87,9 +87,9 @@ describe('VoiceService', () => {
     hooks.changed();
     expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', recognizer: null, error: null, halfDuplex: 'no echo cancellation on Remote Audio' });
     halfDuplex = null;
-    fullDuplex = 'echo check: none heard';
+    fullDuplex = 'echo check: no echo detected';
     hooks.changed();
-    expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', recognizer: null, error: null, fullDuplex: 'echo check: none heard' });
+    expect(sent.at(-1)).toEqual({ type: 'audio', mic: 'listening', engine: 'fake', device: 'Headset', recognizer: null, error: null, fullDuplex: 'echo check: no echo detected' });
     hooks.send({ type: 'words', gen: 1, utteranceId: 'u', sessionId: 's1', text: 'hi' });
     expect(sent.at(-1)).toMatchObject({ type: 'words', text: 'hi' });
 

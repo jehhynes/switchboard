@@ -31,6 +31,18 @@ describe('the question card (design § 6)', () => {
   const ledger = questionLedger([reply('r1', NEW)]);
   const card = ledger.cards.get('reply:r1')!;
 
+  it("draws the context and the descriptions with the front end's block renderer, and inline without one", () => {
+    const listed = questionLedger([reply('r2', '1. Merge it? {#merge-it}\n   It also confirms:\n   - one;\n   - two.\n   - A) Merge — the hub restarts:\n     - data moves\n   - B) Wait')]).cards.get('reply:r2')!;
+    const block = (text: string): string => `<div class="block">${inline(text)}</div>`;
+    const drawn = host(renderQuestionCard(listed, undefined, { canAnswer: true, inline, block }));
+
+    expect(drawn.querySelector('.qc-context > .block')?.textContent).toBe('It also confirms:\n- one;\n- two.');
+    expect([...drawn.querySelectorAll('.qc-desc > .block')].map((one) => one.textContent)).toEqual(['The hub restarts:\n- data moves']);
+    // The question and the labels stay inline.
+    expect(drawn.querySelector('.qc-question .block, .qc-label .block')).toBeNull();
+    expect(host(renderQuestionCard(listed, undefined, { canAnswer: true, inline })).querySelector('.qc-context')?.innerHTML).toBe('It also confirms:\n- one;\n- two.');
+  });
+
   it('shows one question at a time with its progress, topic, context, options without letters and a Comment field, no slug, and Next disabled until a pick', () => {
     const view = host(renderQuestionCard(card, undefined, { canAnswer: true, inline }));
 
@@ -136,11 +148,11 @@ describe('the question card (design § 6)', () => {
     const mixed = questionLedger([reply('r1', ask), { type: 'message', id: 'm1', text: '[answers]', withdrawn: false, delivery: 'sent', at: 20, answers: [{ replyId: 'r1', slug: 'port-choice', letters: ['A'], other: 'and log it', via: 'card' }, { replyId: 'r1', slug: 'keep-route', letters: [], other: '', via: 'card', dismissed: true }] }]);
     const view = host(renderQuestionCard(mixed.cards.get('reply:r1')!, undefined, { canAnswer: true, inline }));
 
-    expect(view.querySelector('.qc-done .qc-progress')?.textContent).toBe('All 2 questions settled');
+    expect(view.querySelector('.qc-done .qc-progress')?.textContent).toBe('All 2 questions closed');
     expect(view.querySelector('.qc-collapsed')).toBeNull();
     expect([...view.querySelectorAll('.qc-row')].map((row) => [row.querySelector('.qc-state')?.getAttribute('title'), row.querySelector('.qc-state .codicon')?.className, row.querySelector('.qc-row-main')?.textContent])).toEqual([
       ['Answered', 'codicon codicon-check', 'Port: 8765; the default port; Comment: and log it'],
-      ['Dismissed', 'codicon codicon-dash', 'Keep the old route for now?You dismissed it; the session was told.'],
+      ['Skipped', 'codicon codicon-dash', 'Keep the old route for now?You skipped it; the session was told.'],
     ]);
     expect(view.textContent).not.toMatch(/port-choice|keep-route|A\)|recommended/);
   });
@@ -149,8 +161,8 @@ describe('the question card (design § 6)', () => {
     const dismissed = questionLedger([reply('r1', NEW)], { dismissed: ['reply:r1#persona-registered', 'reply:r1#phone-layout', 'reply:r1#design-first'] });
     const view = host(renderQuestionCard(dismissed.cards.get('reply:r1')!, undefined, { canAnswer: true, inline }));
 
-    expect(view.querySelector('.qc-done')?.textContent).toBe('All 3 questions settled');
-    expect(view.querySelector('.qc-row-detail')?.textContent).toBe('You dismissed it; the session is told with your next answers.');
+    expect(view.querySelector('.qc-done')?.textContent).toBe('All 3 questions closed');
+    expect(view.querySelector('.qc-row-detail')?.textContent).toBe('You skipped it; the session is told with your next answers.');
   });
 
   it('says how many more questions wait after the first four', () => {
@@ -201,7 +213,7 @@ describe('the Answers bubble (design § 4)', () => {
     expect([...view.querySelectorAll('.answers-line')].map((line) => [line.querySelector('.answers-question')?.textContent, line.querySelector('.answers-answer, .answers-dismissed')?.textContent])).toEqual([
       ['Persona registration:', 'Register on save'],
       ['Mock it up first?', 'Comment: a → b'],
-      ['How should the list look?', 'Dismissed'],
+      ['How should the list look?', 'Skipped'],
       ['Which?', 'Two; Three'],
     ]);
     // An unknown question's comment keeps what looks like a letter, and an older Other line reads as a comment.

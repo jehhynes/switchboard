@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renameSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
-import { allowedPath, LOCAL_DIR_MAX, LOCAL_TEXT_MAX_BYTES, localRoots, localTarget, mainCheckout, openLocalFile, openPageFile, rawMime } from '../src/localFiles.js';
+import { allowedPath, claudeTempName, LOCAL_DIR_MAX, LOCAL_TEXT_MAX_BYTES, localRoots, localTarget, mainCheckout, openLocalFile, openPageFile, rawMime } from '../src/localFiles.js';
 import type { LocalRoots } from '../src/localFiles.js';
 
 let dir: string;
@@ -13,6 +13,7 @@ let work: string;
 let temp: string;
 let roots: LocalRoots;
 const SESSION = '0f1e2d3c-aaaa-bbbb-cccc-000000000001';
+const CLAUDE = claudeTempName();
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'hub-local-'));
@@ -22,15 +23,15 @@ beforeEach(() => {
   mkdirSync(join(work, '.git'), { recursive: true });
   mkdirSync(join(work, 'src'), { recursive: true });
   mkdirSync(join(dir, 'outside'), { recursive: true });
-  mkdirSync(join(temp, 'claude', 'proj', SESSION, 'scratchpad'), { recursive: true });
-  mkdirSync(join(temp, 'claude', 'proj', 'another-session', 'scratchpad'), { recursive: true });
+  mkdirSync(join(temp, CLAUDE, 'proj', SESSION, 'scratchpad'), { recursive: true });
+  mkdirSync(join(temp, CLAUDE, 'proj', 'another-session', 'scratchpad'), { recursive: true });
   writeFileSync(join(work, 'src', 'a.ts'), 'export const a = 1;\n');
   writeFileSync(join(work, '.wip', 'notes.md'), '# Notes\n');
   writeFileSync(join(work, '.git', 'config'), '[remote]\n');
   writeFileSync(join(dir, 'outside', 'secret.txt'), 'secret');
-  writeFileSync(join(temp, 'claude', 'proj', SESSION, 'scratchpad', 'out.txt'), 'mine');
-  writeFileSync(join(temp, 'claude', 'proj', SESSION, 'other.txt'), 'not the scratchpad');
-  writeFileSync(join(temp, 'claude', 'proj', 'another-session', 'scratchpad', 'out.txt'), 'theirs');
+  writeFileSync(join(temp, CLAUDE, 'proj', SESSION, 'scratchpad', 'out.txt'), 'mine');
+  writeFileSync(join(temp, CLAUDE, 'proj', SESSION, 'other.txt'), 'not the scratchpad');
+  writeFileSync(join(temp, CLAUDE, 'proj', 'another-session', 'scratchpad', 'out.txt'), 'theirs');
   roots = { cwd: work, folders: [work], sessionIds: [SESSION], temp };
 });
 
@@ -163,21 +164,35 @@ describe('allowedPath', () => {
   });
 
   it("takes only the conversation's own sessions' scratchpads, and nothing else in Claude's temporary folder", async () => {
-    const claude = join(temp, 'claude', 'proj');
+    const claude = join(temp, CLAUDE, 'proj');
 
     expect(await allowedPath(roots, join(claude, SESSION, 'scratchpad', 'out.txt'))).toBe(join(claude, SESSION, 'scratchpad', 'out.txt'));
     expect(await allowedPath(roots, join(claude, SESSION, 'scratchpad'))).toBe(join(claude, SESSION, 'scratchpad'));
     expect(await allowedPath(roots, join(claude, 'another-session', 'scratchpad', 'out.txt'))).toBeNull();
     expect(await allowedPath(roots, join(claude, SESSION, 'other.txt'))).toBeNull();
     expect(await allowedPath(roots, join(claude, SESSION))).toBeNull();
-    expect(await allowedPath(roots, join(temp, 'claude'))).toBeNull();
+    expect(await allowedPath(roots, join(temp, CLAUDE))).toBeNull();
     expect(await allowedPath({ ...roots, sessionIds: [] }, join(claude, SESSION, 'scratchpad', 'out.txt'))).toBeNull();
   });
 
-  it('refuses a link in a scratchpad that leads out of it', async () => {
-    symlinkSync(join(dir, 'outside'), join(temp, 'claude', 'proj', SESSION, 'scratchpad', 'linked'), 'junction');
+  it("names Claude Code's temporary folder per platform, as each keeps it", () => {
+    expect(claudeTempName('win32', undefined)).toBe('claude');
+    expect(claudeTempName('linux', 1000)).toBe('claude-1000');
+    expect(claudeTempName('darwin', 501)).toBe('claude-501');
+  });
 
-    expect(await allowedPath(roots, join(temp, 'claude', 'proj', SESSION, 'scratchpad', 'linked', 'secret.txt'))).toBeNull();
+  it("refuses a scratchpad under the other platform's folder name", async () => {
+    const other = CLAUDE === 'claude' ? 'claude-1000' : 'claude';
+    mkdirSync(join(temp, other, 'proj', SESSION, 'scratchpad'), { recursive: true });
+    writeFileSync(join(temp, other, 'proj', SESSION, 'scratchpad', 'out.txt'), 'elsewhere');
+
+    expect(await allowedPath(roots, join(temp, other, 'proj', SESSION, 'scratchpad', 'out.txt'))).toBeNull();
+  });
+
+  it('refuses a link in a scratchpad that leads out of it', async () => {
+    symlinkSync(join(dir, 'outside'), join(temp, CLAUDE, 'proj', SESSION, 'scratchpad', 'linked'), 'junction');
+
+    expect(await allowedPath(roots, join(temp, CLAUDE, 'proj', SESSION, 'scratchpad', 'linked', 'secret.txt'))).toBeNull();
   });
 });
 
@@ -361,7 +376,7 @@ describe('openLocalFile for a paired device', () => {
   });
 
   it("refuses the session's scratchpad, which only this computer's page reads", async () => {
-    expect(await read(join(temp, 'claude', 'proj', SESSION, 'scratchpad', 'out.txt'))).toBeNull();
+    expect(await read(join(temp, CLAUDE, 'proj', SESSION, 'scratchpad', 'out.txt'))).toBeNull();
   });
 
   it('refuses a junction or link out of the working folder', async () => {

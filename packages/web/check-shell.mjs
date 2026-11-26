@@ -19,6 +19,24 @@ import { join } from 'node:path';
 import { PAGE_ASSETS } from './dist/index.js';
 
 /**
+ * Settings' views: each page, by the navigation entries pressed to reach it. On a phone a list's entry drills into its list and on a desktop
+ * opens under it, so the same presses reach the page on both.
+ */
+const SETTINGS_PAGES = {
+  settings: ['sessions'],
+  'settings-triage': ['triage'],
+  'settings-source': ['sources', 'source:github'],
+  'settings-playbook': ['playbooks', 'namespace:dev', 'playbook:dev:build'],
+  'settings-schedule': ['schedules', 'schedule:weekly'],
+  'settings-display': ['display'],
+  'settings-devices': ['devices'],
+  'settings-advanced': ['advanced'],
+  'settings-spoken-replies': ['spoken-replies'],
+  'settings-dictation': ['dictation'],
+  'settings-personas': ['personas', 'personas/page'],
+  'settings-persona': ['personas', 'persona:0'],
+};
+/**
  * iPhone 16 Pro in the installed app under the opaque status bar: 393 by 852 pt, less the 59 pt status bar in portrait; none in landscape. Both
  * draw the phone's layout. iPad Air 11" on its side, 1180 by 820 pt less its 24 pt status bar, draws the drawer.
  */
@@ -26,12 +44,15 @@ const SIZES = [
   { device: 'iphone', orientation: 'portrait', width: 393, height: 793, screen: [393, 852], insets: { top: 0, bottom: 34, left: 0, right: 0 }, phone: true },
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
-  // A desktop with a mouse, for the tabs view only: its close marks are the small ones, not touch targets.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs'] },
+  // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, and Settings' pages.
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'pair'] },
 ];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings', 'settings-table', 'drawer', 'sheet', 'persona', 'tabs'];
+/** Settings' views that show switches or checkboxes, so their touch targets are measured. */
+const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'persona', 'tabs'];
 const report = process.argv.includes('--report');
-/** --shots <dir> saves a screenshot of each view there. */
+/** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
+const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
 
 const browsers = [
@@ -137,8 +158,11 @@ if (listing) {
 // History's tab reads a ticket with one entry per day over a week, so its pane scrolls.
 const historyView = { key: 'gh 1', title: 'Fix it', url: '', facts: [{ label: 'Status', value: 'Running' }], links: [], reconstructed: false, recordedSince: null, sections: [{ key: 'w1', workItemId: 1, title: 'dev:build', status: 'Running', tone: 'accent', facts: [], prompt: null, entries: Array.from({ length: 40 }, (_, i) => ({ key: 'e' + i, at: now - (40 - i) * 3600000, category: 'session', icon: 'play', text: 'Entry ' + i, lines: [], detail: null, shortId: null, links: [], tone: null, reconstructed: false, refused: null, stateChange: false })) }] };
 // Settings reads a file with checkboxes on General and in the playbooks' table.
-const settingsRead = { settings: { path: 'C:/home/settings.json', version: 'v1', value: { sessions: { codeMode: true }, playbooks: { 'dev:build': { description: 'Build it', template: 'Build.' }, 'dev:plan': { description: 'Plan it', template: 'Plan.', autoStart: true } } }, error: null }, permissionModes: ['default', 'auto'], codexPermissionModes: ['default'], providers: ['claude', 'codex'], templateVariables: [], sourceKinds: ['github'], sourceLabels: { github: 'GitHub' }, inUse: {}, enabled: {}, configDir: 'C:/home' };
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
+const settingsRead = { settings: { path: 'C:/Users/someone/.switchboard/settings.json', version: 'v1', value: { sessions: { codeMode: true }, web: { tailscale: true }, sources: { github: { repo: 'o/r', logins: ['me'], repoRoot: 'D:/git/r' } }, schedules: { weekly: { playbook: 'dev:build', repoRoot: 'D:/git/r', every: 'week', day: 'mon', at: '09:00' } }, voice: { enabled: true, personas: [{ id: 'nova', name: 'Nova', voice: 'cedar' }], playbookPersonas: { 'dev:build': 'nova' } }, playbooks: { 'dev:build': { description: 'Build it', template: 'Build.', reports: ['done', 'approval'] }, 'dev:plan': { description: 'Plan it', template: 'Plan.', autoStart: true } } }, error: null }, permissionModes: ['default', 'auto'], codexPermissionModes: ['default'], providers: ['claude', 'codex'], templateVariables: [], sourceKinds: ['github'], sourceLabels: { github: 'GitHub' }, inUse: {}, enabled: { github: true }, configDir: 'C:/Users/someone/.switchboard' };
+// Pair a device and Devices list more devices than the sheet shows at once, so its list scrolls, and a pairing address longer than a phone's line.
+const pairDevices = [{ id: 'a1', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true }, { id: 'b2', label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now, current: false, voice: true }, ...['Android · Chrome', 'iPad · Safari', 'Mac · Safari', 'Windows · Chrome', 'Linux · Firefox', 'Android · Firefox'].map((label, i) => ({ id: 'c' + i, label, host: 'some-long-computer-name.tail1234ab.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now - i * 86400000, current: false }))];
+const pairing = { url: 'https://some-long-computer-name.tail1234ab.ts.net/page?t=' + 'a'.repeat(64), code: 'ABCD-EFGH', host: 'some-long-computer-name.tail1234ab.ts.net', expiresAt: now + 5 * 60000 };
+window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/personas') ? { personas } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'session', label: 'Sessions', icon: 'terminal' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : {}), text: async () => '' });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -275,6 +299,9 @@ const measure = `(() => {
       return {
         tabs: tabs.length,
         more: strip.querySelector('.tab-more') !== null,
+        // Whether History shows, and how many artifact tabs show besides the one chosen: the tabs whose unread dots the tabs view expects.
+        history: tabs.some((tab) => tab.dataset.id === 'history'),
+        artifacts: tabs.filter((tab) => (tab.dataset.id ?? '').startsWith('artifact:') && !tab.classList.contains('selected') && tab.querySelector('[aria-selected="true"]') === null).length,
         cut: [...strip.querySelectorAll('.tab-label')].filter((label) => !shown(label) || label.getBoundingClientRect().width < Math.min(43.5, label.scrollWidth - 0.5)).map((label) => label.textContent),
         past: tabs.filter((tab) => { const box = tab.getBoundingClientRect(); return box.left < edge.left - 0.5 || box.right > edge.right + 0.5; }).map(name),
         // Each unread dot of a tab: where it lies against its label, its tab and its close mark, and whether hiding it changes the tab's width.
@@ -325,6 +352,48 @@ const measure = `(() => {
   };
 })()`;
 
+/**
+ * Settings' page as drawn (architecture.md § Settings): the font of its title, of its first section heading and of its first setting's label;
+ * whether it scrolls sideways or anything in it passes its right edge, a wide table's own scroller aside; and the bar's height, or null when it
+ * does not show.
+ */
+const SETTINGS = `(() => {
+  const page = document.querySelector('.settings-page');
+  if (!page || getComputedStyle(page).display === 'none') return null;
+  const name = (node) => node.tagName.toLowerCase() + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/ +/).join('.') : '');
+  const font = (node) => (node === null ? null : { size: parseFloat(getComputedStyle(node).fontSize), weight: Number(getComputedStyle(node).fontWeight) });
+  const box = page.getBoundingClientRect();
+  const inside = box.right - parseFloat(getComputedStyle(page).paddingRight) + 0.5;
+  const past = [...page.querySelectorAll('*')].filter((node) => { const one = node.getBoundingClientRect(); return one.width > 0 && one.height > 0 && one.right > inside && !node.closest('.settings-table-scroll'); }).map(name);
+  const bar = document.querySelector('.settings-bar');
+  return { title: font(page.querySelector('.settings-page-title h2')), heading: font(page.querySelector('.settings-section-heading')), label: font(page.querySelector('.settings-caption label')), wide: page.scrollWidth > page.clientWidth + 1, past: past.slice(0, 5), bar: bar === null ? null : Math.round(bar.getBoundingClientRect().height) };
+})()`;
+
+/** Types into the page's first text field, so the draft differs from the file, and answers the bar's height and whether it offers Save. */
+const DIRTY = `(async () => {
+  const box = document.querySelector('.settings-page input.settings-text');
+  if (!box) return null;
+  box.value = box.value + '1';
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  await new Promise((done) => setTimeout(done, 100));
+  const bar = document.querySelector('.settings-bar');
+  return bar === null ? { bar: null } : { bar: Math.round(bar.getBoundingClientRect().height), save: [...bar.querySelectorAll('button')].some((one) => one.textContent.trim() === 'Save') };
+})()`;
+
+/** Checks Settings' page: three distinct levels of text, nothing past its right edge, and the bar only when it has something to say. */
+function settingsFailures(view, size, s) {
+  const out = [];
+
+  if (s === null) return ['Settings showed no page'];
+  if (s.title === null || s.title.size < 19.5 || s.title.weight < 600) out.push("the page's title is " + JSON.stringify(s.title) + ', not 20 px semibold');
+  if (s.heading !== null && s.label !== null && !(s.heading.weight >= 600 && s.label.weight < 600 && s.heading.size > s.label.size && s.title.size > s.heading.size + 3)) out.push('a section heading ' + JSON.stringify(s.heading) + ' is not set apart from a label ' + JSON.stringify(s.label) + ' and the title ' + JSON.stringify(s.title));
+  if (view !== 'settings-table' && s.heading === null) out.push('the page shows no section heading');
+  if (s.wide) out.push('the page scrolls sideways');
+  if (s.past.length > 0) out.push('passes the page\'s right edge: ' + s.past.join(', '));
+  if (s.bar !== null) out.push('the bar shows ' + s.bar + ' px tall with nothing to say');
+  return out;
+}
+
 /** What each view opens with, clicked in order. */
 /**
  * The touch targets under 44 px in the open view (architecture.md § Web page, Phones first), each as its name and size; `checks` counts the checkboxes
@@ -368,18 +437,24 @@ const TOUCH = `(() => {
 
 /** A toast with its work item's link and Dismiss (toast.tsx), and the console's foot with Reconnect (console.ts). */
 const PROBES = `(() => {
-  document.getElementById('toast').insertAdjacentHTML('beforeend', '<div class="toast warning"><button type="button" class="toast-text toast-open">A failed thing</button><button type="button" class="icon dismiss" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>');
+  document.getElementById('toast').insertAdjacentHTML('beforeend', '<div class="toast warning"><button type="button" class="toast-text toast-open">This work item can no longer do that.</button><button type="button" class="icon dismiss" aria-label="Dismiss"><span class="codicon codicon-close"></span></button></div>');
   document.body.insertAdjacentHTML('beforeend', '<div class="console" style="position: fixed; left: 0; bottom: 0; width: 300px"><div class="console-foot"><p class="console-note">Ended.</p><button type="button" class="console-reconnect">Reconnect</button></div></div>');
 })()`;
 
 const OPEN = {
   history: ['[data-action=actions]', '[data-action=row-history]'],
-  // General, which a phone's Settings opens on its navigation rather than shows.
-  settings: ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry.item'],
+  // Settings as it opens: on a phone its navigation's categories alone.
+  'settings-nav': ['[data-action=list-more]', '[data-action=list-settings]'],
+  ...Object.fromEntries(Object.entries(SETTINGS_PAGES).map(([view, keys]) => [view, ['[data-action=list-more]', '[data-action=list-settings]', ...keys.map((key) => (key.endsWith('/page') ? '.settings-nav-entry[data-key="' + key + '"], .settings-page-title h2' : '.settings-nav-entry[data-key="' + key + '"]'))]])),
   // A namespace's playbooks table.
-  'settings-table': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry.namespace'],
+  // On a phone Playbooks and the namespace drill into their lists, the namespace's starting with its table; on a desktop they open in place.
+  'settings-table': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="playbooks"]', '.settings-nav-entry[data-key="namespace:dev"]', '.settings-nav-entry.item[data-page="namespace:dev"], .settings-page-title h2'],
   drawer: ['[data-action=drawer]'],
   sheet: ['[data-action=actions]', '[data-action=row-action][data-label=Delete]'],
+  // Pair a device with more devices than fit, whose list scrolls in its own area.
+  pair: ['[data-action=list-more]', '[data-action=list-devices]'],
+  // Devices with a pairing address shown.
+  'settings-pair': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="devices"]', '.settings-devices > .sheet-button'],
   persona: ['[data-action=view-menu]', '[data-action=persona]'],
   // An artifact chosen from More, so the strip keeps it beside the tabs it always keeps: the oldest, so the newest stays unread where it has room.
   tabs: ['.tab-more-button', '.tab-menu [data-action=artifact][data-path="chat/a0.md"]'],
@@ -499,11 +574,11 @@ function failures(view, size, m) {
     if (one.close !== null && one.dot.right > one.close.left - 0.5 && one.dot.left < one.close.right + 0.5 && one.dot.bottom > one.close.top - 0.5 && one.dot.top < one.close.bottom + 0.5) out.push(where + ' covers its close mark');
     if (Math.abs(one.widthChange) > 0.5) out.push(where + ' changes its tab\'s or label\'s width by ' + one.widthChange + ' px');
   }
-  // The tabs view's state and artifacts are unread: History's dot, a tab without a close mark, shows at every size, and an artifact's, with a
-  // close mark, cut or not, wherever the strip has room for an artifact tab besides the one shown.
+  // The tabs view's state and artifacts are unread: History's dot, a tab without a close mark, shows wherever History has room after Changes,
+  // and an artifact's, with a close mark, cut or not, wherever the strip has room for an artifact tab besides the one shown.
   if (view === 'tabs') {
-    if (!dots.some((one) => !one.closable)) out.push('no unread dot on a tab without a close mark');
-    if (!(size.phone && size.orientation === 'portrait') && !dots.some((one) => one.closable)) out.push('no unread dot on an artifact tab');
+    if (m.strips.some((strip) => strip.history) && !dots.some((one) => !one.closable)) out.push('no unread dot on a tab without a close mark');
+    if (m.strips.some((strip) => strip.artifacts > 0) && !dots.some((one) => one.closable)) out.push('no unread dot on an artifact tab');
     if (size.device === 'ipad' && !(dots.some((one) => one.closable && one.cut) && dots.some((one) => one.closable && !one.cut))) out.push('no unread dot on both a cut and a whole artifact title');
   }
   // The tabs view's strip has more tabs than fit, so More holds the rest.
@@ -530,7 +605,7 @@ function failures(view, size, m) {
   // status bar, so no colour is painted there, and its bars, inside the notch's insets, are under 90% of the width. The iPad is not checked for it.
   if (size.device === 'iphone' && size.orientation === 'portrait') {
     const edge = m.edge;
-    const own = view === 'sheet' ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head|persona-head)(\.|$)/.test(edge.name ?? '');
+    const own = view === 'sheet' || view === 'pair' ? edge.kind === 'viewport' : edge.kind === 'bar' && /^[a-z]+\.(header|list-header|hist-bar|settings-head|persona-head)(\.|$)/.test(edge.name ?? '');
 
     if (!own) out.push('WebKit finds ' + (edge.name ?? 'no fixed or sticky box (hit ' + edge.hit + ')') + (edge.kind ? ' (' + edge.kind + ')' : '') + ' at the top edge, not the view\'s top bar');
     else if (edge.kind === 'bar' && (edge.top !== 0 || edge.height <= 10 || edge.background !== m.bar)) out.push('the top bar ' + edge.name + ' is at ' + edge.top + ', ' + edge.height + ' px tall, ' + edge.background + ' for the bars\' ' + m.bar);
@@ -609,6 +684,7 @@ try {
         // A phone shows the list or the conversation, never a drawer, in either orientation.
         if (view === 'drawer' && size.phone) continue;
         if (size.views !== undefined && !size.views.includes(view)) continue;
+        if (only !== null && !only.includes(view)) continue;
         // A list wider than the screen is not a width this screen has.
         if (view.startsWith('narrow-') && Number(view.slice(7)) > size.width) continue;
         await send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, screenWidth: size.screen[0], screenHeight: size.screen[1], deviceScaleFactor: size.phone ? 3 : 2, mobile: size.mouse !== true });
@@ -641,6 +717,8 @@ try {
           m.header.main.name = nodes.find((node) => !node.ignored)?.name?.value ?? null;
         }
         const found = missing.length > 0 ? ['could not open the view: no ' + missing.join(', ')] : failures(view, size, m);
+
+        if (view.startsWith('settings') && view !== 'settings-nav' && missing.length === 0) found.push(...settingsFailures(view, size, await evaluate(SETTINGS)));
 
         if (view === 'tabs' && missing.length === 0) {
           const more = await evaluate(moreOnTop);
@@ -733,7 +811,7 @@ try {
             }
           }
           for (const one of small) found.push('a touch target under 44 px: ' + one);
-          if (view.startsWith('settings') && checks === 0) found.push('Settings showed no checkbox to measure');
+          if (SWITCHED.includes(view) && checks === 0) found.push('Settings showed no switch or checkbox to measure');
         }
 
         // Each link pill's and key's accessible name is its text, whether it shows its text or its icon alone.
@@ -774,6 +852,15 @@ try {
           // Back to the view's own width, for its screenshot.
           await resize(330);
           await evaluate('window.__paused = false');
+        }
+
+        // An edit shows the bar with Save, one 52 px row on a phone above the home indicator's inset.
+        if (view === 'settings' && missing.length === 0) {
+          const dirty = await evaluate(DIRTY);
+
+          if (dirty === null) found.push('Settings showed no text field to edit');
+          else if (dirty.bar === null || !dirty.save) found.push('an edit did not show the bar with Save');
+          else if (size.phone && dirty.bar > 52 + size.insets.bottom + 0.5) found.push('the bar is ' + dirty.bar + ' px tall on a phone, more than one 52 px row');
         }
 
         results.push({ name, ...m });

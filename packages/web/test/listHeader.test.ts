@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'preact/test-utils';
 import { startPage } from '../src/main.js';
 import { bareKey, filterGroups, FOLDER_CHECK_MS, isKey, OTHER_MODEL, rangeSince, renderListHeader, renderMoreMenu, RUN_AS_KEY, SEARCH_DELAY_MS } from '../src/listHeader.js';
 import { html } from './html.js';
@@ -29,8 +30,8 @@ class FakeSource {
 
 const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => ({ workItemId, ticketId: null, title: `Item ${workItemId}`, priority: null, time: null, ticket: `gh ${workItemId}`, sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null, ...patch });
 const listGroup = (key: string, rows: PageRow[], patch: Partial<PageGroup> = {}): PageGroup => ({ key, title: key, glyph: '\u{ea70}', empty: null, rows, ...patch });
-const github: SourceGroup = { kind: 'github', enabled: true, title: 'gh: polled\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] };
-const zoho: SourceGroup = { kind: 'zoho', label: 'Zoho Desk', enabled: true, title: 'desk: polled\nhelp: not polled\nClick to choose', sources: [{ name: 'desk', enabled: true }, { name: 'help', enabled: false }] };
+const github: SourceGroup = { kind: 'github', enabled: true, title: 'gh: on\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] };
+const zoho: SourceGroup = { kind: 'zoho', label: 'Zoho Desk', enabled: true, title: 'desk: on\nhelp: off\nClick to choose', sources: [{ name: 'desk', enabled: true }, { name: 'help', enabled: false }] };
 const header = (patch: Partial<PageHeader> = {}): PageHeader => ({ notes: [], sources: [github, zoho], repoRoots: ['D:/w1'], schedules: [], ...patch });
 const closed = (): SearchView => ({ open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null });
 
@@ -87,7 +88,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(title?.querySelector('img.list-title-icon')?.getAttribute('src')).toBe('icon-192.png');
     expect(title?.querySelector('img')?.getAttribute('alt')).toBe('');
     expect(buttons.map((one) => one.getAttribute('aria-label'))).toEqual(['gh', 'Zoho Desk', 'jira']);
-    expect(buttons[0]!.title).toBe('gh: polled\nClick to stop polling gh');
+    expect(buttons[0]!.title).toBe('gh: on\nClick to stop polling gh');
     expect(buttons[0]!.getAttribute('aria-pressed')).toBe('true');
     expect(buttons[1]!.getAttribute('aria-haspopup')).toBe('menu');
     expect(buttons[0]!.querySelector('svg.source-logo.github:not(.off)')).not.toBeNull();
@@ -302,7 +303,7 @@ describe('the list header (architecture.md § Web page)', () => {
     replies.push({ status: 500, body: { error: 'disk full' } });
     releases.shift()!();
     await settle();
-    expect(root.querySelector('.search-note')?.textContent).toBe('The hub could not search further back: disk full');
+    expect(root.querySelector('.search-note')?.textContent).toBe('Switchboard could not search further back: disk full');
     click('[data-action="list-search-further"]');
     replies.push({ status: 200, body: { rows: [], more: false } });
     releases.shift()!();
@@ -335,7 +336,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(source);
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
-    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'Held sessions', '-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', 'Download app shortcut…', '-', 'Pair a device…', 'Open Settings']);
+    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'Background sessions', '-', 'Check sources now', 'Reload page', 'Show Switchboard log', 'Get the browser extension…', 'Download app shortcut…', '-', 'Pair a device…', 'Settings…']);
     // The source rows are the phone's: page.css hides them outside the phone's layout, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
@@ -345,7 +346,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.more-menu')).not.toBeNull();
 
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ sources: [] }) });
-    expect(menuRows()[0]).toBe('Held sessions');
+    expect(menuRows()[0]).toBe('Background sessions');
 
     // Refresh sources polls; the hub's refusal shows in the toast.
     answers['/page-poll'] = { status: 409, body: { error: 'Every source is off.' } };
@@ -366,8 +367,8 @@ describe('the list header (architecture.md § Web page)', () => {
 
     click('.more-actions');
     click('.more-menu [data-action="list-log"]');
-    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Hub log');
-    expect(root.querySelector('[aria-label="Filter hub log"]')).not.toBeNull();
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Switchboard log');
+    expect(root.querySelector('[aria-label="Filter Switchboard log"]')).not.toBeNull();
     click('#list-sheet [data-action="list-sheet-cancel"].sheet-button');
 
     // Get the browser extension downloads this computer's copy and says how to load it unpacked (PRD R121).
@@ -480,11 +481,11 @@ describe('the list header (architecture.md § Web page)', () => {
 
     hello(source);
     expect(root.querySelector('.list-note')).toBeNull();
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'], heldNote: '1 held session without a work item' }) });
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'], heldNote: '1 background session without a work item' }) });
     expect([...root.querySelectorAll('p.list-note')].map((note) => note.textContent)).toEqual(['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.']);
-    expect(root.querySelector('button.held-note')?.textContent).toBe('1 held session without a work item');
+    expect(root.querySelector('button.held-note')?.textContent).toBe('1 background session without a work item');
     click('button.held-note');
-    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Held sessions');
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Background sessions');
     // The notes leave with the hub's next list that has none.
     source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header() });
     expect(root.querySelector('.list-note')).toBeNull();
@@ -495,7 +496,7 @@ describe('the list header (architecture.md § Web page)', () => {
     const orphan = { session: 'orphan', item: 'No work item', nativeSessionId: '-', cwd: 'D:/scratch/<folder>', state: 'live', idle: '2h 5m', memory: '128 MB', clients: 0, orphan: true, exited: false, terminal: null };
     const owned = { ...orphan, session: 'owned', item: 'gh 8', nativeSessionId: 'native-8', state: 'idle', clients: 2, orphan: false, terminal: {} };
     answers['/held-list'] = { status: 200, body: { held: [orphan, owned, { ...owned, session: 'exited', state: 'exited', exited: true }] } };
-    hello(source, { header: header({ heldNote: '1 held session without a work item' }) });
+    hello(source, { header: header({ heldNote: '1 background session without a work item' }) });
     click('.more-actions');
     click('[data-action="list-later-held"]');
     expect(root.querySelector('.held-sheet')?.textContent).toContain('Loading…');
@@ -513,14 +514,14 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('[data-action="list-held-open"][data-id="owned"]')).toBe(open);
     expect(posts.find((post) => post.url.endsWith('/held-open'))?.body).toMatchObject({ window: 'pk', id: 'owned' });
     click('[data-action="list-held-stop"][data-id="orphan"]');
-    expect(root.querySelector('.held-confirm .sheet-title')?.textContent).toBe('Stop held session orphan?');
+    expect(root.querySelector('.held-confirm .sheet-title')?.textContent).toBe('Stop background session orphan?');
     expect(root.querySelector('.held-confirm .sheet-detail')?.textContent).toBe("Session orphan in D:/scratch/<folder>. Its process ends and anything it is doing stops.");
     expect(document.activeElement?.textContent).toBe('Cancel');
     click('[data-action="list-held-cancel"]');
     await flush();
     expect(posts.some((post) => post.url.endsWith('/held-stop'))).toBe(false);
     click('[data-action="list-held-stop"][data-id="owned"]');
-    expect(root.querySelector('.held-confirm .sheet-title')?.textContent).toBe('Stop the held session of gh 8?');
+    expect(root.querySelector('.held-confirm .sheet-title')?.textContent).toBe('Stop the background session of gh 8?');
     answers['/held-stop'] = { status: 404, body: { error: 'No held session owned.' } };
     click('[data-action="list-held-confirm"]');
     await flush(); await flush();
@@ -531,8 +532,8 @@ describe('the list header (architecture.md § Web page)', () => {
     click('[data-action="list-held-confirm"]');
     await flush(); await flush();
     expect(posts.filter((post) => post.url.endsWith('/held-stop')).map((post) => post.body['id'])).toEqual(['owned', 'orphan']);
-    expect(root.querySelector('.held-sheet')?.textContent).toContain('Stopped held session orphan.');
-    expect(root.querySelector('.held-sheet')?.textContent).toContain('No held sessions. Code Mode sessions appear here while the terminal holder keeps them.');
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('Stopped background session orphan.');
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('No background sessions. Code Mode sessions appear here while they run.');
     click('#list-sheet .sheet-button.primary');
     click('.held-note');
     await flush();
@@ -581,7 +582,7 @@ describe('the list header (architecture.md § Web page)', () => {
     const { page, source } = start();
     const row = { session: 's', item: 'No work item', nativeSessionId: '-', cwd: 'D:/w', state: 'live', idle: '0m', memory: '-', clients: 0, orphan: true, exited: false, terminal: null };
     answers['/held-list'] = { status: 200, body: { held: [row] } };
-    hello(source, { header: header({ heldNote: '1 held session without a work item' }) });
+    hello(source, { header: header({ heldNote: '1 background session without a work item' }) });
     click('.held-note');
     await vi.advanceTimersByTimeAsync(0);
     let release: () => void = () => {};
@@ -591,19 +592,19 @@ describe('the list header (architecture.md § Web page)', () => {
     answers['/held-stop'] = { status: 200, body: { stopped: 's' } };
     click('[data-action="list-held-confirm"]');
     await vi.advanceTimersByTimeAsync(0);
-    expect(root.querySelector('.held-sheet')?.textContent).toContain('Stopped held session s.');
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('Stopped background session s.');
     expect(root.querySelector<HTMLButtonElement>('[data-action="list-held-stop"]')!.disabled).toBe(false);
     answers['/held-list'] = { status: 200, body: { held: [] } };
     release();
     await vi.advanceTimersByTimeAsync(0);
     expect(root.querySelector('.held-row')).toBeNull();
-    expect(root.querySelector('.held-sheet')?.textContent).toContain('No held sessions.');
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('No background sessions.');
     page.close();
   });
 
   it('recovers from a list refusal and ignores a closed sheet while a new one loads', async () => {
     const { page, source } = start();
-    hello(source, { header: header({ heldNote: '1 held session without a work item' }) });
+    hello(source, { header: header({ heldNote: '1 background session without a work item' }) });
     answers['/held-list'] = { status: 500, body: { error: 'The holder did not answer.' } };
     click('.held-note');
     await flush();
@@ -695,7 +696,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(remote.source);
     click('.more-actions');
     // Settings stays on this computer too; the menu ends with Voice on this device, off until tapped.
-    expect(menuRows().slice(-8)).toEqual(['-', 'Refresh sources', 'Reload', 'Show hub log', 'Get the browser extension…', 'Download app shortcut…', '-', 'Voice on this device']);
+    expect(menuRows().slice(-8)).toEqual(['-', 'Check sources now', 'Reload page', 'Show Switchboard log', 'Get the browser extension…', 'Download app shortcut…', '-', 'Voice on this device']);
     expect(root.querySelector('[data-action="list-phone-voice"]')?.getAttribute('aria-checked')).toBe('false');
     expect(root.querySelector('[data-action="list-settings"]')).toBeNull();
     // A paired device's copy reaches the hub through this page, so it is loaded in this browser (PRD R121).
@@ -722,7 +723,44 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(sheet.querySelector('.sheet-title')?.textContent).toBe('Pair a device');
     expect(sheet.querySelector('svg.pair-qr path')?.getAttribute('d')).toMatch(/^M\d+ \d+h1v1h-1z/);
     expect(sheet.querySelector('.pair-code')?.textContent).toBe('ABCD-EFGH');
-    expect(sheet.textContent).toContain('open https://pc.tail.ts.net/ on it and type this code');
+    // The address stands on its own line, apart from the sentence, with Copy beside it.
+    expect(sheet.querySelector('.pair > .sheet-detail')?.textContent).toBe("Scan this with the device's camera, or open this address on it and type the code below:");
+    expect(sheet.querySelector('.pair-address .pair-url')?.textContent).toBe('https://pc.tail.ts.net/');
+    expect(sheet.classList.contains('pair-sheet')).toBe(true);
+    expect(sheet.querySelector('.device-list')?.classList.contains('many')).toBe(false);
+
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'));
+
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const copy = sheet.querySelector<HTMLButtonElement>('.pair-address button')!;
+
+    expect(copy.textContent).toBe('Copy');
+    await act(async () => {
+      copy.click();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenCalledWith('https://pc.tail.ts.net/');
+    await flush();
+    expect(root.querySelector('#list-sheet .pair-address button [aria-live="polite"]')?.textContent).toBe('Copied');
+    await act(async () => {
+      root.querySelector<HTMLButtonElement>('#list-sheet .pair-address button')!.click();
+      await Promise.resolve();
+    });
+    await flush();
+    expect(root.querySelector('#list-sheet .pair .sheet-error')?.textContent).toBe('The browser did not allow the clipboard. Select the address and copy it.');
+    Reflect.deleteProperty(navigator, 'clipboard');
+    // New code forgets the copy; three devices or more scroll in their own area.
+    answers['/page-devices'] = { status: 200, body: { devices: [phone, { ...phone, id: '4567cdef' }, own] } };
+    click('#list-sheet [data-action="list-sheet-go"]');
+    await flush();
+    await flush();
+    expect(root.querySelector('#list-sheet .pair-address button')?.textContent).toBe('Copy');
+    expect(root.querySelector('#list-sheet .pair .sheet-error')).toBeNull();
+    expect(root.querySelector('#list-sheet .device-list')?.classList.contains('many')).toBe(true);
+    answers['/page-devices'] = { status: 200, body: { devices: [phone, own] } };
+    click('#list-sheet [data-action="list-sheet-go"]');
+    await flush();
+    await flush();
     expect(sheet.textContent).toContain('It works once, for 5 more minutes.');
     expect([...sheet.querySelectorAll('.device-name')].map((one) => one.textContent)).toEqual(['Android · Chrome', 'Windows · Edge (this browser)']);
     expect(sheet.querySelector('.device-detail')?.textContent).toMatch(/^pc\.tail\.ts\.net as alex@example\.com · last used /);
@@ -888,7 +926,7 @@ describe('the list header (architecture.md § Web page)', () => {
     // Each provider's mark, as the conversation dropdown draws it.
     expect([...root.querySelectorAll('.provider-option .provider-option-mark svg path')]).toHaveLength(2);
     expect([...root.querySelectorAll('[data-field="model"] option')].map((one) => one.textContent)).toEqual(['Default (sonnet)', 'opus', 'sonnet', 'Other…']);
-    expect(root.querySelector<HTMLTextAreaElement>('[data-field="prompt"]')!.placeholder).toBe('Optional. Leave empty to open an empty session.');
+    expect(root.querySelector<HTMLTextAreaElement>('[data-field="prompt"]')!.placeholder).toBe('Optional. Leave empty to start without a message.');
     // No message, no Run as; no schedules, no More options.
     expect(root.querySelector('.run-as')).toBeNull();
     expect(root.querySelector('.more-options')).toBeNull();
@@ -926,10 +964,10 @@ describe('the list header (architecture.md § Web page)', () => {
     // One provider installed: no switch, and that provider.
     expect(root.querySelector('.provider-switch')).toBeNull();
     change('[data-field="prompt"]', '  Find why the inbox badge counts archived threads.  ');
-    expect([...root.querySelectorAll('.run-as .sheet-choice')].map((one) => one.textContent)).toEqual(['Conversation, start now', 'Task, start when a slot is free', 'Task, wait for Start']);
+    expect([...root.querySelectorAll('.run-as .sheet-choice')].map((one) => one.textContent)).toEqual(['Interactive, start now', 'Task, start when there is room', 'Task, wait for me to start it']);
     expect(root.querySelector<HTMLInputElement>('[data-field="run"][value="now"]')!.checked).toBe(true);
     change('[data-field="run"][value="wait"]', true);
-    expect(go().textContent).toBe('Create');
+    expect(go().textContent).toBe('Add');
     click('[data-action="list-sheet-go"]');
     await flush();
     await flush();
@@ -1024,7 +1062,7 @@ describe('the list header (architecture.md § Web page)', () => {
     click('[data-action="list-folder-browse"]');
     expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Choose a folder');
     expect([...root.querySelectorAll('.folder-browser > li')].map((li) => li.textContent)).toEqual(['Recent', 'D:/git/switchboard', 'Repo roots', 'D:/git/widgets', 'D:/git/support', 'Worktrees', 'D:/git/widgets.worktrees/i19139']);
-    expect(root.querySelector('#list-sheet')?.textContent).toContain('On a paired device: only folders under recent folders, repo roots and worktrees.');
+    expect(root.querySelector('#list-sheet')?.textContent).toContain('On a paired device only recent folders, repo roots and worktrees are listed.');
     expect(root.querySelector<HTMLButtonElement>('[data-action="list-browse-use"]')!.disabled).toBe(true);
 
     answers['/page-folders'] = { status: 200, body: { path: 'D:/git/widgets', parent: null, folders: [{ name: 'apps', path: 'D:/git/widgets/apps' }], more: false } };

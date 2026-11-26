@@ -23,11 +23,11 @@ describe('the message meta line the web page draws', () => {
     expect(voiceMark({ origin: 'voice', interrupted: { said: '' } }, true)).toContain('title="Dictated\nYou interrupted the reply before it played."');
     expect(toneMark('calm', false)).toBe('');
     expect(toneMark(null, true)).toBe('');
-    expect(toneMark('<calm>', true)).toBe('<span class="tone" title="How the reply sounds when spoken: &#60;calm&#62;">&#60;calm&#62;</span>');
+    expect(toneMark('<calm>', true)).toBe('<span class="tone" title="How Switchboard speaks the reply: &#60;calm&#62;">&#60;calm&#62;</span>');
   });
 
   it('marks a reply whose speech failed as Not spoken only with message details on, and no other speech state', () => {
-    expect(spokenMark('failed', true)).toBe('<span class="spoken failed" title="Speaking this reply failed; see the voice log."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>');
+    expect(spokenMark('failed', true)).toBe('<span class="spoken failed" title="Switchboard could not speak this reply; the hub log says why."><span class="codicon codicon-mute" aria-hidden="true"></span><span>Not spoken</span></span>');
     expect(spokenMark('failed', false)).toBe('');
 
     for (const state of ['playing', 'played', 'interrupted', 'skipped', 'stopped-moved', 'queued', 'none']) {

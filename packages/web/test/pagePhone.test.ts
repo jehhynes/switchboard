@@ -522,7 +522,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     await flush();
     expect(root.classList.contains('listing')).toBe(false);
     expect(root.querySelector('#head .opening-title')?.textContent).toBe('Item 1');
-    expect(root.querySelector('#panel .opening-failed h3')?.textContent).toBe("Couldn't open this work item");
+    expect(root.querySelector('#panel .opening-failed h3')?.textContent).toBe("This work item did not open");
     expect(root.querySelector('#panel .opening-why')?.textContent).toBe('That work item is gone.');
     expect(location.hash).toBe('#w=1');
 

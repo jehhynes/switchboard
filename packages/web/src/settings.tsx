@@ -3,10 +3,10 @@
 import type { VNode } from 'preact';
 import { mount } from './island.js';
 import { isPhone } from './layout.js';
-import { QrCode, usedText } from './listHeader.js';
+import { copyAddress, PairAddress, QrCode, usedText } from './listHeader.js';
 import type { Device, Pairing } from './listHeader.js';
-import { applyPlaybookCell, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, nav, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
-import type { Enrollment, Field, FieldOption, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
+import { applyPlaybookCell, configFolderHelp, applyPlaybookField, bar, enrollmentActive, enrollmentRow, parseEnrollment, clone, COMMON_SOURCE_KEYS, EditorState, emptyNewPlaybook, getAt, HOME, nav, navEntry, navPathTo, newPlaybookName, pageSections, pageView, parseConfig, playbookEntry, readField, readPlaybook, samePlaybook, setAt, sourceKind } from './settingsModel.js';
+import type { Enrollment, Field, FieldView, Json, JsonObject, NavEntry, NewNameView, PageButton, PageView, PlaybookFields, PlaybookTable, SectionView } from './settingsModel.js';
 
 type Answer = { status: number; body: Record<string, unknown> };
 
@@ -34,36 +34,41 @@ interface View {
   open: boolean;
   /** On a phone, the navigation list or the page it drilled into. */
   drill: 'nav' | 'page';
+  /** On a phone, the groups drilled into, outermost first; the navigation shows the last one's entries, or the categories when empty. */
+  navPath: string[];
+  /** The navigation's groups the operator opened or closed; one holding the page shown is open unless closed. */
+  expanded: Set<string>;
+  collapsed: Set<string>;
   /** Why settings.json could not be read, or null. */
   error: string | null;
   /** What a read discarded, or null. */
   notice: string | null;
   /** The Advanced sections the operator opened, by page and heading, so a redraw keeps them open. */
   opened: Set<string>;
-  /** The fields whose help is shown, by path. */
-  help: Set<string>;
   /** The fields that had errors at the last draw, so a new error opens its Advanced section once. */
   erred: Set<string>;
   /** The text typed in each field since the page was drawn, so a field shows what was typed, not the value read from it. */
   typing: Map<string, string>;
   ask: Ask | null;
-  /** Voiceprint enrolment as the hub last said, or null before the Voice page asked. */
+  /** Voiceprint enrolment as the hub last said, or null before Dictation asked. */
   enrollment: Enrollment | null;
   /** Why the last enrolment request was refused or failed, or null. */
   enrollError: string | null;
-  /** General's paired devices and Pair a device (architecture.md § Remote access). */
+  /** Devices' paired devices and Pair a device (architecture.md § Remote access). */
   remote: RemoteView;
 }
 
-/** The paired devices as the hub last listed them, or null before General asked; the pairing link shown, or null; and a refusal. */
+/** The paired devices as the hub last listed them, or null before Devices asked; the pairing link shown, or null; and a refusal. */
 interface RemoteView {
   devices: Device[] | null;
   pairing: Pairing | null;
+  /** Whether Copy put the pairing address on the clipboard; null before it was chosen for this link. */
+  copied: boolean | null;
   busy: boolean;
   error: string | null;
 }
 
-const NO_REMOTE = (): RemoteView => ({ devices: null, pairing: null, busy: false, error: null });
+const NO_REMOTE = (): RemoteView => ({ devices: null, pairing: null, copied: null, busy: false, error: null });
 
 export interface Settings {
   /** Opens Settings and reads settings.json. */
@@ -79,7 +84,7 @@ export interface Settings {
 
 /** Settings drawn into `host`: the navigation, the page and the bar, and a phone's list that drills into each page. */
 export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
-  const view: View = { open: false, drill: 'nav', error: null, notice: null, opened: new Set(), help: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE() };
+  const view: View = { open: false, drill: 'nav', navPath: [], expanded: new Set(), collapsed: new Set(), error: null, notice: null, opened: new Set(), erred: new Set(), typing: new Map(), ask: null, enrollment: null, enrollError: null, remote: NO_REMOTE() };
   let state: EditorState | null = null;
   let loads = 0;
   let seq = 0;
@@ -93,12 +98,12 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   let asked = false;
   // Each enrolment request, so an answer that a later request or a close overtook is dropped.
   let enrollSeq = 0;
-  // Whether General listed the devices since Settings opened, and each devices request, so an answer a close overtook is dropped.
+  // Whether Devices listed the devices since Settings opened, and each devices request, so an answer a close overtook is dropped.
   let devicesAsked = false;
   let remoteSeq = 0;
 
   /**
-   * General's paired devices (architecture.md § Remote access): lists them, with `pair` a new pairing link first, with `revoke` after
+   * Devices' paired devices (architecture.md § Remote access): lists them, with `pair` a new pairing link first, with `revoke` after
    * signing one out and with `voice` after allowing or forbidding voice on one, through the page's device commands, which the hub refuses
    * from a paired device.
    */
@@ -139,6 +144,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
     if (action.pair === true) {
       remote.pairing = first?.status === 200 ? (first.body as unknown as Pairing) : null;
+      remote.copied = null;
     }
 
     draw();
@@ -204,14 +210,14 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       return;
     }
 
-    // General lists the paired devices when it first shows.
-    if (state?.page === 'general' && !devicesAsked) {
+    // Devices lists the paired devices when it first shows.
+    if (state?.page === 'devices' && !devicesAsked) {
       devicesAsked = true;
       void devices();
     }
 
-    // The Voice page reads how enrolment stands when it first shows.
-    if (state?.page === 'voice' && !asked) {
+    // Dictation reads how enrolment stands when it first shows.
+    if (state?.page === 'dictation' && !asked) {
       asked = true;
       void enroll('status');
     }
@@ -380,7 +386,8 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       return;
     }
 
-    if (current.page.startsWith('playbook:')) {
+    // A playbook page's persona is a setting, kept under voice.playbookPersonas, not part of the playbook's entry.
+    if (current.page.startsWith('playbook:') && !field.path.startsWith('voice.playbookPersonas.')) {
       if (setPlaybook(current.page.slice('playbook:'.length), (playbook) => applyPlaybookField(playbook, field.path, input, checked))) {
         view.typing.set(field.path, input);
         edited();
@@ -389,7 +396,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       return;
     }
 
-    if (pageSections(current, current.page).length === 0) {
+    if (pageSections(current, current.page).length === 0 && !current.page.startsWith('playbook:')) {
       return;
     }
 
@@ -433,6 +440,12 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     state!.setDraft(next);
     state!.page = page;
     view.drill = 'page';
+    view.collapsed.clear();
+
+    // On a phone Back goes up the new page's own lists, such as Sessions' none after a source is removed.
+    if (isPhone()) {
+      view.navPath = navPathTo(nav(state!), page);
+    }
     view.typing.clear();
     edited();
 
@@ -591,20 +604,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
       }
     }
 
-    change(tidy(current, next), 'voice');
-  };
-
-  /** Gives a playbook a persona on the Voice page; the playbook's row then offers None to remove it. */
-  const assignPersona = (playbook: string, persona: string): void => {
-    const current = state;
-    const value = current?.value ?? null;
-
-    if (current === null || value === null || playbook === '' || !current.personaIds.includes(persona)) {
-      return;
-    }
-
-    current.setDraft(setAt(value, `voice.playbookPersonas.${playbook}`, persona));
-    edited();
+    change(tidy(current, next), 'personas');
   };
 
   /** A page's header button: Create, or the remove of the page's own entry, which only changes the draft. */
@@ -627,11 +627,11 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
         break;
       case 'remove-schedule':
         // Its work items stay, and Discard restores it.
-        change(setAt(value, `schedules.${pressed.argument!}`, undefined), 'general');
+        change(setAt(value, `schedules.${pressed.argument!}`, undefined), HOME);
         break;
       case 'remove-source':
         // Its work items stay, and Discard restores it.
-        change(setAt(value, `sources.${pressed.argument!}`, undefined), 'general');
+        change(setAt(value, `sources.${pressed.argument!}`, undefined), HOME);
         break;
     }
   };
@@ -769,6 +769,14 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
     state.page = page;
     view.drill = 'page';
+    // The group holding the new page opens, even one the operator closed.
+    view.collapsed.clear();
+
+    // On a phone Back goes up the new page's own lists, as if the operator had drilled to it, also from a link on another page.
+    if (isPhone()) {
+      view.navPath = navPathTo(nav(state), page);
+    }
+
     redraw();
     host.querySelector<HTMLElement>('.settings-page')?.scrollTo?.({ top: 0 });
 
@@ -781,9 +789,49 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
   const handlers: Handlers = {
     navigate,
     back: () => {
+      const left = view.drill === 'page' ? null : (view.navPath.pop() ?? null);
+
       view.drill = 'nav';
       draw();
-      host.querySelector<HTMLElement>('.settings-nav-entry.current, .settings-nav-entry')?.focus();
+      // The entry Back came from takes the focus: the group left, else the page shown.
+      (left === null ? undefined : [...host.querySelectorAll<HTMLElement>('.settings-nav-entry')].find((one) => one.dataset['key'] === left))?.focus();
+
+      if (!host.contains(document.activeElement) || document.activeElement === document.body) {
+        host.querySelector<HTMLElement>('.settings-nav-entry.current, .settings-nav-entry')?.focus();
+      }
+    },
+    openGroup: (key) => {
+      const entry = state === null ? null : navEntry(nav(state), key);
+
+      if (entry === null || state === null) {
+        return;
+      }
+
+      // A phone shows one level at a time, so a group drills into its entries.
+      if (isPhone()) {
+        view.navPath.push(key);
+        view.drill = 'nav';
+        draw();
+        host.querySelector<HTMLElement>('.settings-nav-entry')?.focus();
+        return;
+      }
+
+      // A group with a page of its own, such as a namespace's table, opens it; pressed on that page, it opens or closes as another group does.
+      if (entry.page !== undefined && state.page !== entry.page) {
+        view.expanded.add(key);
+        navigate(entry.page);
+        return;
+      }
+
+      if (navOpen(view, entry)) {
+        view.collapsed.add(key);
+        view.expanded.delete(key);
+      } else {
+        view.expanded.add(key);
+        view.collapsed.delete(key);
+      }
+
+      draw();
     },
     close: requestClose,
     edit,
@@ -792,15 +840,6 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
         view.opened.delete(key);
       } else {
         view.opened.add(key);
-      }
-
-      draw();
-    },
-    toggleHelp: (path) => {
-      if (view.help.has(path)) {
-        view.help.delete(path);
-      } else {
-        view.help.add(path);
       }
 
       draw();
@@ -819,11 +858,27 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
     saveStay: () => void save(),
     discard: closeNow,
     editCell,
-    assignPersona,
     enroll: (action) => void enroll(action),
+    voiceSwitch: () => {
+      navigate('spoken-replies');
+      host.querySelector<HTMLElement>('[data-path="voice.enabled"] input')?.focus();
+    },
     pair: () => void devices({ pair: true }),
     signOut: (id) => void devices({ revoke: id }),
     deviceVoice: (id, allow) => void devices({ voice: { id, allow } }),
+    copyAddress: () => {
+      const remote = view.remote;
+      const pairing = remote.pairing;
+
+      if (pairing !== null) {
+        void copyAddress(pairing.host).then((copied) => {
+          if (view.remote === remote && remote.pairing === pairing) {
+            remote.copied = copied;
+            draw();
+          }
+        });
+      }
+    },
     answer: async (choice) => {
       const asked = view.ask;
 
@@ -834,7 +889,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
         if (choice === 'delete' && state !== null && value !== null && state.hasPlaybook(asked.name)) {
           state.setDraft(withPlaybook(value, asked.name, undefined));
-          state.page = 'general';
+          state.page = HOME;
           view.typing.clear();
           edited();
           // The page's title takes the focus from the closed question's button.
@@ -894,6 +949,9 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 
       view.open = true;
       view.drill = 'nav';
+      view.navPath = [];
+      view.expanded.clear();
+      view.collapsed.clear();
       view.notice = null;
       view.error = null;
       redraw();
@@ -922,10 +980,11 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
 interface Handlers {
   navigate(page: string): void;
   back(): void;
+  /** A group's entry: opens or closes it, or on a phone drills into it. */
+  openGroup(key: string): void;
   close(): void;
   edit(field: Field, input: string, checked?: boolean): void;
   toggleSection(key: string): void;
-  toggleHelp(path: string): void;
   button(button: PageButton): void;
   addSource(kind: string): void;
   editName(part: 'name' | 'kind' | 'namespace', text: string): void;
@@ -934,12 +993,15 @@ interface Handlers {
   discard(): void;
   answer(choice: 'save' | 'discard' | 'keep' | 'delete'): void;
   editCell(name: string, path: string, checked: boolean): void;
-  assignPersona(playbook: string, persona: string): void;
+  /** Opens Spoken replies with the focus on the voice's switch. */
+  voiceSwitch(): void;
   enroll(action: string): void;
   pair(): void;
   signOut(id: string): void;
   /** Allows or forbids voice on a paired device. */
   deviceVoice(id: string, allow: boolean): void;
+  /** Copies the pairing address. */
+  copyAddress(): void;
 }
 
 /** Settings: its header, the navigation and the page side by side (on a phone, one of them), and the bar under both. */
@@ -950,7 +1012,7 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
   return (
     // A press on the backdrop, not on the dialog, closes Settings as Close does.
     <div class="settings-backdrop" onClick={(event) => event.target === event.currentTarget && on.close()}>
-      <div class="settings" data-drill={view.drill} role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="settings" data-drill={view.drill} data-depth={view.navPath.length} role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="settings-head">
           <button type="button" class="icon settings-back" aria-label="All settings" title="All settings" onClick={on.back}>
             <span class="codicon codicon-chevron-left" aria-hidden="true"></span>
@@ -964,14 +1026,14 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
         </div>
         <div class="settings-body">
           <nav class="settings-nav" aria-label="Settings pages">
-            {state === null ? <p class="settings-message settings-nav-message">{view.error ?? 'Reading the settings…'}</p> : nav(state).map((entry) => <NavRow entry={entry} on={on} />)}
+            {state === null ? <p class="settings-message settings-nav-message">{view.error ?? 'Reading the settings…'}</p> : <Nav state={state} view={view} on={on} />}
           </nav>
           <div class="settings-page">
             {view.notice === null ? null : <p class="settings-notice">{view.notice}</p>}
             {page === null ? <p class="settings-message">{view.error ?? 'Reading the settings…'}</p> : <Page key={state!.page} state={state!} page={page} view={view} on={on} />}
           </div>
         </div>
-        {state === null ? null : (
+        {state === null || !shown.shown ? null : (
           <div class="settings-bar">
             <div class="settings-bar-text">
               <span class="settings-status">{shown.status}</span>
@@ -983,14 +1045,16 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
                 <span class="settings-error">{error}</span>
               ))}
             </div>
-            <div class="settings-bar-buttons">
-              <button type="button" class="sheet-button secondary" title="Drop every unsaved change and close settings" disabled={!shown.canDiscard} onClick={on.discard}>
-                Discard
-              </button>
-              <button type="button" class="sheet-button primary" title="Save settings and close (Ctrl+S saves and stays open)" disabled={!shown.canSave} onClick={on.save}>
-                Save
-              </button>
-            </div>
+            {shown.buttons ? (
+              <div class="settings-bar-buttons">
+                <button type="button" class="sheet-button secondary" title="Drop every unsaved change and close settings" disabled={!shown.canDiscard} onClick={on.discard}>
+                  Discard
+                </button>
+                <button type="button" class="sheet-button primary" title="Save settings and close (Ctrl+S saves and stays open)" disabled={!shown.canSave} onClick={on.save}>
+                  Save
+                </button>
+              </div>
+            ) : null}
           </div>
         )}
         {view.ask === null ? null : <AskSheet ask={view.ask} on={on} />}
@@ -999,22 +1063,100 @@ export function renderSettings(state: EditorState | null, view: View, on: Handle
   );
 }
 
-function NavRow({ entry, on }: { entry: NavEntry; on: Handlers }) {
-  if (entry.kind === 'heading') {
-    return <h2 class="settings-nav-heading">{entry.label}</h2>;
+/** Whether a group's entries show under it: when the operator opened it, or it holds the page shown, unless the operator closed it. */
+function navOpen(view: View, entry: NavEntry): boolean {
+  return !view.collapsed.has(entry.key) && (view.expanded.has(entry.key) || entry.current);
+}
+
+/**
+ * The navigation: each category's heading over its entries, a group's entries nested under it while it is open. On a phone that drilled into
+ * a group, that group's entries alone, under its name, starting with its own page.
+ */
+function Nav({ state, view, on }: { state: EditorState; view: View; on: Handlers }) {
+  const categories = nav(state);
+  const inside = view.navPath.length === 0 ? null : navEntry(categories, view.navPath[view.navPath.length - 1]!);
+
+  if (inside !== null) {
+    return (
+      <div class="settings-nav-category">
+        <h2 class="settings-nav-heading">{inside.label}</h2>
+        <div class="settings-nav-list">
+          {inside.page === undefined ? null : <NavButton entry={{ ...inside, kind: 'item', key: `${inside.key}/page`, label: inside.pageLabel ?? inside.label, current: state.page === inside.page }} open={false} on={on} />}
+          {(inside.children ?? []).map((entry) => (
+            <NavButton entry={entry} open={false} on={on} />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
-    <button type="button" class={`settings-nav-entry ${entry.kind}${entry.current ? ' current' : ''}`} aria-current={entry.current ? 'page' : undefined} onClick={() => (entry.addSource !== undefined ? on.addSource(entry.addSource) : entry.page !== undefined && on.navigate(entry.page))}>
+    <>
+      {categories.map((category) => (
+        <div class="settings-nav-category">
+          <h2 class="settings-nav-heading">{category.label}</h2>
+          <div class="settings-nav-list">
+            {category.entries.map((entry) => (
+              <NavRow entry={entry} view={view} on={on} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function NavRow({ entry, view, on }: { entry: NavEntry; view: View; on: Handlers }) {
+  if (entry.kind !== 'group') {
+    return <NavButton entry={entry} open={false} on={on} />;
+  }
+
+  const open = navOpen(view, entry);
+
+  return (
+    <>
+      <NavButton entry={entry} open={open} on={on} />
+      {open ? (
+        <div class="settings-nav-children" role="group" aria-label={entry.label}>
+          {(entry.children ?? []).map((child) => (
+            <NavRow entry={child} view={view} on={on} />
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function NavButton({ entry, open, on }: { entry: NavEntry; open: boolean; on: Handlers }) {
+  const isGroup = entry.kind === 'group';
+  // A group is the page shown only when that is its own page; it holds the page shown otherwise.
+  const current = isGroup ? entry.page !== undefined && entry.children !== undefined && entry.current && !entry.children.some((child) => child.current) : entry.current;
+
+  return (
+    <button
+      type="button"
+      class={`settings-nav-entry ${entry.kind}${current ? ' current' : ''}`}
+      data-key={entry.key}
+      data-page={entry.page}
+      aria-current={current ? 'page' : undefined}
+      aria-expanded={isGroup ? open : undefined}
+      onClick={() => (isGroup ? on.openGroup(entry.key) : entry.addSource !== undefined ? on.addSource(entry.addSource) : entry.page !== undefined && on.navigate(entry.page))}
+    >
+      {isGroup ? <span class={`codicon codicon-chevron-${open ? 'down' : 'right'} settings-nav-twisty`} aria-hidden="true"></span> : null}
       <span class="settings-nav-label">{entry.kind === 'add' ? `+ ${entry.label}` : entry.label}</span>
       {entry.note === undefined ? null : <span class="settings-nav-note">{entry.note}</span>}
+      {isGroup && (entry.count ?? 0) > 0 ? (
+        <span class="settings-nav-count" aria-label={`${entry.count} pages`}>
+          {entry.count}
+        </span>
+      ) : null}
       {entry.dirty ? (
-        <span class="settings-dirty" title="Unsaved changes" aria-label="Unsaved changes">
+        <span class={`settings-dirty${isGroup ? ' settings-group-mark' : ''}`} title="Unsaved changes" aria-label="Unsaved changes">
           ●
         </span>
       ) : null}
       {entry.errors ? (
-        <span class="settings-errors" title="Errors" aria-label="Errors">
+        <span class={`settings-errors${isGroup ? ' settings-group-mark' : ''}`} title="Errors" aria-label="Errors">
           ⚠
         </span>
       ) : null}
@@ -1028,12 +1170,12 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
     <>
       <div class="settings-page-head">
         <div class="settings-page-title">
-          <h2 tabIndex={-1}>{page.title}</h2>
-          {page.filePath === null ? null : (
-            <span class="settings-file" title={page.filePath}>
-              {page.filePath}
-            </span>
-          )}
+          <h2 tabIndex={-1}>
+            {page.title}
+            {page.experimental === undefined ? null : <span class="settings-experimental">Experimental</span>}
+          </h2>
+          {page.lede === null ? null : <p class="settings-lede">{page.lede}</p>}
+          {page.experimental === undefined ? null : <p class="settings-lede settings-experimental-note">{page.experimental}</p>}
         </div>
         <div class="settings-buttons">
           {page.buttons.map((button) => (
@@ -1051,27 +1193,43 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
           {error}
         </p>
       ))}
+      {page.voiceOff === true ? <VoiceOff on={on} /> : null}
       {page.message === null ? null : <p class="settings-message">{page.message}</p>}
-      {page.newName === undefined ? null : <NameFields names={page.newName} view={view} on={on} />}
+      {page.newName === undefined ? null : <NameFields names={page.newName} on={on} />}
       {page.table === undefined ? null : <Table table={page.table} on={on} />}
       {page.sections.map((section) => (
-        <SectionBlock state={state} section={section} view={view} on={on} />
+        <SectionBlock state={state} section={section} pageOff={page.voiceOff === true} view={view} on={on} />
       ))}
-      {page.assign === undefined ? null : <AssignRow assign={page.assign} view={view} on={on} />}
-      {state.page === 'voice' && page.message === null ? <EnrollRow view={view} on={on} /> : null}
     </>
   );
 }
 
-function SectionBlock({ state, section, view, on }: { state: EditorState; section: SectionView; view: View; on: Handlers }) {
-  const rows = runs(section.fields).map((run) => (run.length > 1 || run[0]!.field.group !== undefined ? <GroupRow views={run} on={on} /> : <FieldRow field={run[0]!} view={view} on={on} />));
+function SectionBlock({ state, section, pageOff, view, on }: { state: EditorState; section: SectionView; pageOff: boolean; view: View; on: Handlers }) {
+  const rows = runs(section.fields).map((run) => (run.length > 1 || run[0]!.field.group !== undefined ? <GroupRow views={run} heading={section.heading} on={on} /> : <FieldRow field={run[0]!} view={view} on={on} />));
 
   if (!section.advanced) {
     return (
       <section class="settings-section">
         {section.heading === '' ? null : <h3 class="settings-section-heading">{section.heading}</h3>}
-        {rows}
-        {state.page === 'general' && section.heading === 'Remote access' ? <DevicesBlock remote={view.remote} on={on} /> : null}
+        {/* A page the voice needs as a whole says it is off once, above its sections. */}
+        {section.dimmed && !pageOff ? <VoiceOff on={on} /> : null}
+        <div class={`settings-card${section.dimmed ? ' dimmed' : ''}`}>
+          {rows}
+          {section.block === 'enroll' ? <EnrollRow view={view} on={on} /> : null}
+          {section.block === 'devices' ? <DevicesBlock remote={view.remote} on={on} /> : null}
+          {section.block === 'file' ? <FileBlock state={state} /> : null}
+          {section.block === 'used-by' ? <UsedBy playbooks={section.usedBy ?? []} on={on} /> : null}
+          {section.link === undefined ? null : (
+            <div class="settings-row action settings-link-row">
+              <p class="settings-help">{section.link.text}</p>
+              <div class="settings-input">
+                <button type="button" class="link" onClick={() => on.navigate(section.link!.page)}>
+                  {section.link.label}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
     );
   }
@@ -1097,11 +1255,14 @@ function SectionBlock({ state, section, view, on }: { state: EditorState; sectio
 
   return (
     <section class="settings-section advanced">
-      <button type="button" class="settings-section-heading settings-toggle" aria-expanded={open} onClick={() => on.toggleSection(key)}>
-        <span class={`codicon codicon-chevron-${open ? 'down' : 'right'}`} aria-hidden="true"></span>
-        {section.heading}
-      </button>
-      {open ? rows : null}
+      <h3 class="settings-section-heading">
+        <button type="button" class="settings-toggle" aria-expanded={open} onClick={() => on.toggleSection(key)}>
+          <span class={`codicon codicon-chevron-${open ? 'down' : 'right'}`} aria-hidden="true"></span>
+          <span class="settings-toggle-label">{section.heading}</span>
+          {open ? null : <span class="settings-toggle-summary">{section.summary}</span>}
+        </button>
+      </h3>
+      {open ? <div class={`settings-card${section.dimmed ? ' dimmed' : ''}`}>{rows}</div> : null}
     </section>
   );
 }
@@ -1184,50 +1345,8 @@ function Table({ table, on }: { table: PlaybookTable; on: Handlers }) {
   );
 }
 
-/** The Voice page's row that gives a task playbook a persona, or a line saying why it cannot. */
-function AssignRow({ assign, view, on }: { assign: { playbooks: string[]; personas: FieldOption[] }; view: View; on: Handlers }) {
-  if (assign.personas.length === 0 || assign.playbooks.length === 0) {
-    return <p class="settings-assign-note">{assign.personas.length === 0 ? 'Add a persona under Personas to give a playbook its own.' : 'Every task playbook has a persona.'}</p>;
-  }
-
-  const field: Field = { path: 'assign', label: 'Assign', kind: 'select', help: 'The playbook’s sessions take this persona unless one is pinned to the session.' };
-
-  return (
-    <div class="settings-row" data-path="assign">
-      <div class="settings-caption">
-        <label for="settings-assign-playbook">Assign</label>
-        <Info field={field} on={on} />
-      </div>
-      <div class="settings-input settings-assign">
-        <select id="settings-assign-playbook" class="sheet-select settings-select" aria-label="Playbook">
-          {assign.playbooks.map((playbook) => (
-            <option value={playbook}>{playbook}</option>
-          ))}
-        </select>
-        <select id="settings-assign-persona" class="sheet-select settings-select" aria-label="Persona">
-          {assign.personas.map((persona) => (
-            <option value={persona.value}>{persona.label}</option>
-          ))}
-        </select>
-        <button
-          type="button"
-          class="sheet-button secondary"
-          onClick={(event) => {
-            const row = (event.currentTarget as HTMLElement).parentElement!;
-
-            on.assignPersona(row.querySelector<HTMLSelectElement>('#settings-assign-playbook')!.value, row.querySelector<HTMLSelectElement>('#settings-assign-persona')!.value);
-          }}
-        >
-          Assign
-        </button>
-        {view.help.has(field.path) ? <p class="settings-help settings-assign-help">{field.help}</p> : null}
-      </div>
-    </div>
-  );
-}
-
 /**
- * General's paired devices under Remote access (architecture.md § Remote access), as Pair a device in More Actions shows them: each with its
+ * The Devices page's paired devices (architecture.md § Remote access), as Pair a device in More Actions shows them: each with its
  * name, where it signs in from, when it was last used and Sign out; then Pair a device…, which shows a new link's QR code and code.
  */
 function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
@@ -1236,7 +1355,6 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
 
   return (
     <div class="settings-devices" data-key="settings-devices">
-      <h4 class="settings-devices-heading">Paired devices</h4>
       {remote.devices === null ? (
         <p class="settings-help">Loading…</p>
       ) : remote.devices.length === 0 ? (
@@ -1260,14 +1378,14 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
                   {one.voice === true ? 'Forbid voice' : 'Allow voice'}
                 </button>
               )}
-              <button type="button" class="sheet-button secondary" title="Sign this device out of the web page" disabled={remote.busy} onClick={() => on.signOut(one.id)}>
+              <button type="button" class="sheet-button secondary" title="Sign this device out of Switchboard" disabled={remote.busy} onClick={() => on.signOut(one.id)}>
                 Sign out
               </button>
             </li>
           ))}
         </ul>
       )}
-      <button type="button" class="sheet-button secondary" title="Show a one-time link and code to sign in a device to the web page." disabled={remote.busy} onClick={on.pair}>
+      <button type="button" class="sheet-button secondary" title="Show a one-time link and code to sign in a device to Switchboard." disabled={remote.busy} onClick={on.pair}>
         {pairing === null ? 'Pair a device…' : 'New code'}
       </button>
       {remote.error === null ? null : (
@@ -1278,9 +1396,8 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
       {pairing === null ? null : (
         <div class="pair" data-key="pair">
           <QrCode text={pairing.url} />
-          <p class="settings-help">
-            Scan this with the device's camera, or open <strong>https://{pairing.host}/</strong> on it and type this code:
-          </p>
+          <p class="settings-help">Scan this with the device's camera, or open this address on it and type the code below:</p>
+          <PairAddress host={pairing.host} copied={remote.copied} copy={on.copyAddress} />
           <p class="pair-code">{pairing.code}</p>
           <p class="settings-help">{minutes > 0 ? `It works once, for ${minutes === 1 ? '1 more minute' : `${minutes} more minutes`}.` : 'It has expired. Choose New code.'}</p>
         </div>
@@ -1289,25 +1406,85 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
   );
 }
 
-/** The Voice page's enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read. */
+/** Where settings.json and the config folder are, which the hub keeps outside settings.json (architecture.md § Config folder). */
+function FileBlock({ state }: { state: EditorState }) {
+  return (
+    <>
+      <div class="settings-row action" data-key="settings-file">
+        <div class="settings-caption">
+          <span class="settings-label">settings.json</span>
+          <p class="settings-help settings-file">{state.config.settings.path}</p>
+        </div>
+      </div>
+      <div class="settings-row action" data-key="settings-config-folder">
+        <div class="settings-caption">
+          <span class="settings-label">Config folder</span>
+          <p class="settings-help settings-file">{state.config.configDir}</p>
+          <p class="settings-help">{configFolderHelp()}</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Dictation's voice enrolment (architecture.md § Voice check and barge-in): how it stands, its button, and the sentences to read. */
 function EnrollRow({ view, on }: { view: View; on: Handlers }) {
   const row = enrollmentRow(view.enrollment, view.enrollError, Date.now());
 
   return (
-    <section class="settings-section settings-enroll">
-      <h3 class="settings-section-heading">Your voice</h3>
-      <p class="settings-enroll-status">{row.status}</p>
-      <button type="button" class="sheet-button secondary" title="Records a minute of your speech through the voice process; nothing of it reaches a session." onClick={() => on.enroll(row.command)}>
-        {row.button}
-      </button>
-      {row.sentences.length === 0 ? null : (
-        <div class="settings-enroll-sentences">
-          {row.sentences.map((sentence) => (
-            <p>{sentence}</p>
-          ))}
+    <div class="settings-enroll">
+        <div class="settings-row action">
+          <div class="settings-caption">
+            <span class="settings-label">Your voice</span>
+            <p class="settings-help settings-enroll-status">{row.status}</p>
+          </div>
+          <div class="settings-input">
+            <button type="button" class="sheet-button secondary" title="Records a minute of your speech through the voice process; nothing of it reaches a session." onClick={() => on.enroll(row.command)}>
+              {row.button}
+            </button>
+          </div>
+          {row.sentences.length === 0 ? null : (
+            <div class="settings-enroll-sentences">
+              {row.sentences.map((sentence) => (
+                <p>{sentence}</p>
+              ))}
+            </div>
+          )}
         </div>
+    </div>
+  );
+}
+
+/** A persona's playbooks, each a link to its page, or a line saying none takes it. */
+function UsedBy({ playbooks, on }: { playbooks: readonly string[]; on: Handlers }) {
+  return (
+    <div class="settings-row action settings-used-by">
+      {playbooks.length === 0 ? (
+        <p class="settings-help">No playbook takes this persona. Give it one on the Personas page or a playbook's page.</p>
+      ) : (
+        <ul class="settings-links">
+          {playbooks.map((playbook) => (
+            <li>
+              <button type="button" class="link" onClick={() => on.navigate(`playbook:${playbook}`)}>
+                {playbook}
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
-    </section>
+    </div>
+  );
+}
+
+/** Says the voice is off, above settings that need it, with a link to its switch on Spoken replies. */
+function VoiceOff({ on }: { on: Handlers }) {
+  return (
+    <p class="settings-voice-off">
+      Voice is off, so these settings do nothing until you turn it on.{' '}
+      <button type="button" class="link" onClick={on.voiceSwitch}>
+        Turn on voice
+      </button>
+    </p>
   );
 }
 
@@ -1360,15 +1537,6 @@ function runs(fields: readonly FieldView[]): FieldView[][] {
 
 const inputId = (path: string): string => `settings-field-${path.replace(/[^A-Za-z0-9_-]/g, '_')}`;
 
-/** A field's info icon, which shows its help in its tooltip and, tapped, under the field, so a phone can read it too. */
-function Info({ field, on }: { field: Field; on: Handlers }) {
-  return field.help === '' ? null : (
-    <button type="button" class="icon settings-info" title={field.help} aria-label={`About ${field.label}`} onClick={() => on.toggleHelp(field.path)}>
-      <span class="codicon codicon-info" aria-hidden="true"></span>
-    </button>
-  );
-}
-
 function Errors({ errors }: { errors: readonly string[] }) {
   return (
     <>
@@ -1381,31 +1549,47 @@ function Errors({ errors }: { errors: readonly string[] }) {
   );
 }
 
+/** A setting's row: its label and help on the left, its control on the right, and its errors under both. */
 function FieldRow({ field: shown, view, on }: { field: FieldView; view: View; on: Handlers }) {
   const { field } = shown;
   const id = inputId(field.path);
-  const help = view.help.has(field.path) && field.help !== '' ? <p class="settings-help">{field.help}</p> : null;
 
   return (
     <div class={`settings-row ${field.kind}`} data-path={field.path}>
       <div class="settings-caption">
-        <label for={id}>{field.label}</label>
-        <Info field={field} on={on} />
+        <label for={id}>
+          {field.label}
+          {field.required === true ? <span class="settings-required">Required</span> : null}
+        </label>
+        {field.help === '' ? null : (
+          <p class="settings-help" id={`${id}-help`}>
+            {field.help}
+          </p>
+        )}
       </div>
       <div class="settings-input">
         <Input shown={shown} id={id} typed={view.typing.get(field.path)} on={on} />
-        {help}
-        <Errors errors={shown.errors} />
       </div>
+      {shown.errors.length === 0 ? null : (
+        <div class="settings-row-errors">
+          <Errors errors={shown.errors} />
+        </div>
+      )}
     </div>
   );
 }
 
 function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: string | undefined; on: Handlers }) {
   const { field } = shown;
+  const described = field.help === '' ? undefined : `${id}-help`;
 
   if (field.kind === 'boolean') {
-    return <label class="settings-box"><input type="checkbox" id={id} checked={shown.checked} onChange={(event) => on.edit(field, '', (event.currentTarget as HTMLInputElement).checked)} /></label>;
+    return (
+      <label class="settings-box settings-switch">
+        <input type="checkbox" role="switch" id={id} checked={shown.checked} aria-describedby={described} onChange={(event) => on.edit(field, '', (event.currentTarget as HTMLInputElement).checked)} />
+        <span class="settings-switch-track" aria-hidden="true"></span>
+      </label>
+    );
   }
 
   if (field.kind === 'select') {
@@ -1413,10 +1597,10 @@ function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: 
     const chosen = typed ?? shown.selected;
 
     return (
-      <select id={id} class="sheet-select settings-select" onChange={(event) => on.edit(field, (event.currentTarget as HTMLSelectElement).value)}>
+      <select id={id} class="sheet-select settings-select" aria-describedby={described} onChange={(event) => on.edit(field, (event.currentTarget as HTMLSelectElement).value)}>
         {options.some((option) => option.value === chosen) ? null : <option value={chosen} selected hidden></option>}
         {options.map((option) => (
-          <option value={option.value} selected={option.value === chosen}>
+          <option value={option.value} title={option.title} selected={option.value === chosen}>
             {option.label}
           </option>
         ))}
@@ -1430,37 +1614,58 @@ function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: 
     // A multiline box grows with its text up to 20 lines for a prompt and 8 for a list, then scrolls.
     const rows = Math.max(field.kind === 'prompt' ? 4 : 2, Math.min(field.kind === 'prompt' ? 20 : 8, value.split('\n').length + 1));
 
-    return <textarea id={id} class={`settings-text ${field.kind}`} rows={rows} placeholder={field.placeholder} value={value} onInput={(event) => on.edit(field, (event.currentTarget as HTMLTextAreaElement).value)}></textarea>;
+    return <textarea id={id} class={`settings-text ${field.kind}`} aria-describedby={described} rows={rows} placeholder={hintOf(field)} value={value} onInput={(event) => on.edit(field, (event.currentTarget as HTMLTextAreaElement).value)}></textarea>;
   }
 
   const numeric = field.kind === 'integer' || field.kind === 'number';
-
-  return (
+  const box = (
     <input
       type="text"
       id={id}
       class={`settings-text${numeric ? ' numeric' : ''}`}
+      aria-describedby={described}
       inputMode={field.kind === 'integer' ? 'numeric' : field.kind === 'number' ? 'decimal' : undefined}
-      placeholder={field.placeholder}
+      placeholder={hintOf(field)}
+      required={field.required === true}
       value={value}
       spellcheck={false}
       onInput={(event) => on.edit(field, (event.currentTarget as HTMLInputElement).value)}
     />
   );
+
+  // A unit follows its number, out of the label.
+  return field.unit === undefined ? (
+    box
+  ) : (
+    <span class="settings-with-unit">
+      {box}
+      <span class="settings-unit" aria-hidden="true">
+        {field.unit}
+      </span>
+    </span>
+  );
 }
 
-/** A checkbox group's row: one checkbox per field, labelled with its own name and explained by its tooltip. */
-function GroupRow({ views, on }: { views: FieldView[]; on: Handlers }) {
+/** What an empty field shows: its hint, such as an example or where its value comes from, else its default. */
+function hintOf(field: Field): string | undefined {
+  return field.hint ?? (field.placeholder === undefined ? undefined : `Default: ${field.placeholder}`);
+}
+
+/** A checkbox group's row: one checkbox per field, labelled with its own name and explained by its tooltip; the group's name unless its section has it. */
+function GroupRow({ views, heading, on }: { views: FieldView[]; heading: string; on: Handlers }) {
   const first = views[0]!.field;
+  const name = first.group ?? first.label;
 
   return (
     <div class="settings-row group">
-      <div class="settings-caption">
-        <span>{first.group ?? first.label}</span>
-      </div>
+      {name === heading ? null : (
+        <div class="settings-caption">
+          <span>{name}</span>
+        </div>
+      )}
       <div class="settings-input settings-group">
         {views.map((shown) => (
-          <span class="settings-check" title={shown.field.help === '' ? undefined : shown.field.help}>
+          <span class="settings-check" data-path={shown.field.path} title={shown.field.help === '' ? undefined : shown.field.help}>
             <label class="settings-box"><input type="checkbox" id={inputId(shown.field.path)} checked={shown.checked} onChange={(event) => on.edit(shown.field, '', (event.currentTarget as HTMLInputElement).checked)} /></label>
             <label for={inputId(shown.field.path)}>{shown.field.label}</label>
             <Errors errors={shown.errors} />
@@ -1474,7 +1679,7 @@ function GroupRow({ views, on }: { views: FieldView[]; on: Handlers }) {
 const KIND_FIELD: Field = { path: 'new-kind', label: 'Kind', kind: 'select', help: 'The plugin that reads the source. A second source of one kind, such as another GitHub repository, needs a name of its own.' };
 
 /** A New page's name, with a source's kind or a playbook's namespace, and the name's error. */
-function NameFields({ names, view, on }: { names: NewNameView; view: View; on: Handlers }) {
+function NameFields({ names, on }: { names: NewNameView; on: Handlers }) {
   const nameField: Field = { path: 'new-name', label: names.label, kind: 'text', help: names.help };
   const name = (
     <div class="settings-input">
@@ -1492,18 +1697,18 @@ function NameFields({ names, view, on }: { names: NewNameView; view: View; on: H
         )}
         <input type="text" id="settings-new-name" class="settings-text" placeholder={names.placeholder} value={names.name} spellcheck={false} onInput={(event) => on.editName('name', (event.currentTarget as HTMLInputElement).value)} />
       </span>
-      {view.help.has(nameField.path) ? <p class="settings-help">{names.help}</p> : null}
       <Errors errors={names.error === null ? [] : [names.error]} />
     </div>
   );
 
   return (
     <section class="settings-section">
+      <div class="settings-card">
       {names.kinds === undefined ? null : (
-        <div class="settings-row" data-path="new-kind">
+        <div class="settings-row select" data-path="new-kind">
           <div class="settings-caption">
             <label for="settings-new-kind">Kind</label>
-            <Info field={KIND_FIELD} on={on} />
+            <p class="settings-help">{KIND_FIELD.help}</p>
           </div>
           <div class="settings-input">
             <select id="settings-new-kind" class="sheet-select settings-select" onChange={(event) => on.editName('kind', (event.currentTarget as HTMLSelectElement).value)}>
@@ -1513,16 +1718,16 @@ function NameFields({ names, view, on }: { names: NewNameView; view: View; on: H
                 </option>
               ))}
             </select>
-            {view.help.has(KIND_FIELD.path) ? <p class="settings-help">{KIND_FIELD.help}</p> : null}
           </div>
         </div>
       )}
-      <div class="settings-row" data-path="new-name">
+      <div class="settings-row text" data-path="new-name">
         <div class="settings-caption">
           <label for="settings-new-name">{names.label}</label>
-          <Info field={nameField} on={on} />
+          <p class="settings-help">{nameField.help}</p>
         </div>
         {name}
+      </div>
       </div>
     </section>
   );
@@ -1557,7 +1762,7 @@ function AskSheet({ ask, on }: { ask: Ask; on: Handlers }) {
         <h2 id="settings-ask-title" class="sheet-title">
           Save changes to settings?
         </h2>
-        <p class="sheet-detail">Your changes are lost if you don't save them.</p>
+        <p class="sheet-detail">Your changes are lost if you do not save them.</p>
         <div class="sheet-buttons">
           <button type="button" class="sheet-button secondary" onClick={() => on.answer('discard')}>
             Discard

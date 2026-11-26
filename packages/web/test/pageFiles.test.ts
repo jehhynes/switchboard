@@ -357,12 +357,12 @@ describe('the page in use', () => {
     await flush();
     expect(posts).toEqual([]);
     expect(root.querySelector('.sheet-title')!.textContent).toBe('Delete gh 1?');
-    answers['/row-action'] = { status: 409, body: { error: 'The work item no longer offers this.' } };
+    answers['/row-action'] = { status: 409, body: { error: 'This work item can no longer do that.' } };
     click('.sheet [data-action="sheet-go"]');
     await flush();
     expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ label: 'Delete', workItemId: 1 });
     // A refusal shows in the toast, in the warning colours, rather than over the composer.
-    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The work item no longer offers this.');
+    expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('This work item can no longer do that.');
     expect(root.querySelector('.toast')!.getAttribute('role')).toBe('alert');
     expect(root.querySelector('#composer .toast, #composer [role="alert"]')).toBeNull();
     expect(root.querySelector('.sheet')).toBeNull();
@@ -749,7 +749,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click('#panel a.path-link[data-target="src/b.ts"]');
     await flush();
     click('#detail .local-tab [data-action="local-tab"]');
-    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['history', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'changes', 'console']);
+    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['changes', 'history', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'console']);
     expect(shown()).toBe('file:src/a.ts');
 
     // Closing a tab not shown changes nothing else, a file's or an artifact's.
