@@ -721,7 +721,8 @@ describe('Runtime', () => {
       mkdirSync(dir);
       writeFileSync(join(dir, 'other.json'), '{}');
       await vi.waitFor(() => expect(logs).toContain('marker watch stopped: the activity folder was removed or replaced'), { timeout: MARKER_MS / 2 });
-      await new Promise((resolve) => setTimeout(resolve, MARKER_WATCH_RETRY_MS + 200));
+      // The retry, MARKER_WATCH_RETRY_MS later, watches the new folder.
+      await vi.waitFor(() => expect([runtime['markerWatchRetry'], runtime['markerWatcher'] !== null]).toEqual([null, true]), { timeout: MARKER_WATCH_RETRY_MS * 4 });
 
       writeFileSync(join(dir, '00000001-native.json'), JSON.stringify({ sessionId: '00000001-native', event: 'PermissionRequest' }));
       await vi.waitFor(() => expect(store.session('s1')?.state).toBe('waiting'), { timeout: MARKER_MS / 2 });
@@ -750,13 +751,14 @@ describe('Runtime', () => {
 
     // Each marker reads the roster once, so a marker left by a process that is gone reads it once only.
     const reads = () => cli.calls.filter((call) => call[1] === 'agents').length;
-    const idle = () => new Promise((resolve) => setTimeout(resolve, 20));
     const before = reads();
     runtime.readMarkers();
-    await idle();
-    expect(reads()).toBe(before + 1);
+    await vi.waitFor(() => expect(reads()).toBe(before + 1));
+    await runtime.settled();
     runtime.readMarkers();
-    await idle();
+    // Nothing to wait for: a window of 20 ms shows no second read.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await runtime.settled();
     expect(reads()).toBe(before + 1);
     expect(store.session('s1')?.state).toBe('ended');
 

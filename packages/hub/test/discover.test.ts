@@ -64,7 +64,8 @@ describe('findHub', () => {
   });
 
   it('waits for a slow hub as long as the caller allows', async () => {
-    const server = createServer((_request, response) => void setTimeout(() => response.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.1.0', pid: 4321 })), 1500));
+    // Each answer comes 250 ms after its request, longer than the first call allows and well inside the second's 5 s.
+    const server = createServer((_request, response) => void setTimeout(() => response.end(JSON.stringify({ hub: 'switchboard', protocol: 1, version: '0.1.0', pid: 4321 })), 250));
 
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
 
@@ -72,7 +73,7 @@ describe('findHub', () => {
       const record = { protocol: 1, version: '0.1.0', build: 'b1', configDir: 'C:/cfg', execPath: '', port: (server.address() as AddressInfo).port, token: 't', pid: 4321, startedAt: 'now' };
 
       write(record);
-      expect(await findHub(home)).toBeNull();
+      expect(await findHub(home, 100)).toBeNull();
       expect(await findHub(home, 5000)).toEqual(record);
     } finally {
       server.closeAllConnections();

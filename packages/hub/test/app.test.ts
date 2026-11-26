@@ -311,11 +311,12 @@ describe('createHubApp', () => {
 
   /** Makes a new work item start needing the operator: built once, then moved to the operator's turn and built again; resolves its ID. */
   const needingIn = (app: Awaited<ReturnType<typeof start>>) => async (title: string): Promise<number> => {
-    const tick = () => new Promise((done) => setTimeout(done, 50));
+    // The in-thread snapshot builder runs at the setImmediate a change asks for and publishes in the microtasks after it, before this one.
+    const published = () => new Promise((done) => setImmediate(done));
 
     app.runtime.send({ type: 'adhoc', prompt: title, repoRoot: 'D:/scratch', start: false });
     await app.runtime.settled();
-    await tick();
+    await published();
 
     const id = (app.snapshot() as { workItems: { id: number; ticket: { title: string } }[] }).workItems.find((one) => one.ticket.title === title)!.id;
     const writer = Store.open(join(temp.home, '.switchboard', 'switchboard.db'));
@@ -324,7 +325,7 @@ describe('createHubApp', () => {
     writer.close();
     app.runtime.send({ type: 'adhoc', prompt: `${title} (rebuild)`, repoRoot: 'D:/scratch', start: false });
     await app.runtime.settled();
-    await tick();
+    await published();
     return id;
   };
 
@@ -395,11 +396,13 @@ describe('createHubApp', () => {
     await until(() => (asked === 2 ? true : null));
     expect(app.page!.remote!()).toEqual({ hosts: ['pc.tail1.ts.net'], logins: ['a@example.com', 'alex@example.com'] });
 
-    // A change elsewhere in the file reads nothing again.
+    // A change elsewhere in the file reads nothing again; the page's config event shows the reload ran.
     const before = changed;
+    const frames: string[] = [];
 
+    app.conversation!(app.page!.opened(false), (frame) => frames.push(frame));
     writeSettings({ sessions: { installHooks: false, concurrency: 3 }, web: { remoteLogins: ['a@example.com'], tailscale: true } });
-    await new Promise((done) => setTimeout(done, 500));
+    await until(() => (frames.some((frame) => frame.includes('\nevent: config\n')) ? true : null));
     expect(changed).toBe(before);
     expect(asked).toBe(2);
 
@@ -616,13 +619,32 @@ describe('createHubApp', () => {
   });
 
   describe('plugin reloads', () => {
-    /** A plugin module of `kind`; `delayMs` holds its import with a top-level await. */
-    function writePlugin(name: string, kind: string, delayMs = 0): string {
+    /** Import progress of the plugin modules writePlugin writes, which run in this process. */
+    const progress = globalThis as unknown as { pluginGates?: Record<string, Promise<void>>; pluginStages?: Record<string, 'importing' | 'imported'> };
+
+    /** Holds the import of the plugin named `name` at a top-level await until the function it returns is called. */
+    function gate(name: string): () => void {
+      let open = (): void => undefined;
+
+      (progress.pluginGates ??= {})[name] = new Promise<void>((done) => (open = done));
+      return () => open();
+    }
+
+    const stage = (name: string) => progress.pluginStages?.[name] ?? null;
+
+    afterEach(() => {
+      delete progress.pluginGates;
+      delete progress.pluginStages;
+    });
+
+    /** A plugin module of `kind`, whose import waits at a gate() of its name and records its stage. */
+    function writePlugin(name: string, kind: string): string {
       const dir = join(temp.home, 'plugins');
+      const stages = `(globalThis.pluginStages ??= {})[${JSON.stringify(name)}]`;
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         join(dir, `${name}.mjs`),
-        `await new Promise((done) => setTimeout(done, ${delayMs}));\n` +
+        `${stages} = 'importing';\nawait globalThis.pluginGates?.[${JSON.stringify(name)}];\n${stages} = 'imported';\n` +
           `export default { kind: '${kind}', label: '${kind}', optionsError: (options, name) => (typeof options.userId === 'string' ? null : 'sources.' + name + '.userId must be set.'), ` +
           `create: (name) => ({ source: { name, keyOfBranch: () => null, context: async () => ({ context: '' }), poll: async () => ({ tickets: [] }) } }) };`,
       );
@@ -664,32 +686,38 @@ describe('createHubApp', () => {
     });
 
     it('applies the newest file when a later change arrives while an earlier plugin is still importing', async () => {
-      const slow = writePlugin('slow', 'slow', 1500);
+      const slow = writePlugin('slow', 'slow');
       const fast = writePlugin('fast', 'fast');
+      const release = gate('slow');
       writeSettings({ sessions: { installHooks: false } });
       const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
       closers.push(() => app.close());
 
       writeSettings({ plugins: [slow], sessions: { installHooks: false }, sources: { slow: { userId: '1' } } });
-      await new Promise((done) => setTimeout(done, 600));
+      await until(() => (stage('slow') === 'importing' ? true : null));
       writeSettings({ plugins: [fast], sessions: { installHooks: false }, sources: { fast: { userId: '1' } } });
       await until(async () => ((await kinds(app)).includes('fast') ? true : null));
-      await new Promise((done) => setTimeout(done, 1500));
+      release();
+      await until(() => (stage('slow') === 'imported' ? true : null));
+      // The earlier reload resumes once its import ends; a window of a few turns of the event loop shows it applies nothing.
+      await new Promise((done) => setTimeout(done, 50));
 
       expect(await kinds(app)).toEqual(['github', 'zoho', 'fast']);
       expect((app.snapshot() as { sourceStates: { name: string }[] }).sourceStates.map((source) => source.name)).toEqual(['fast']);
     });
 
     it('checks a save against the sources that are on once the draft plugin has imported', async () => {
-      const slow = writePlugin('slow', 'slow', 800);
+      const slow = writePlugin('slow', 'slow');
+      const release = gate('slow');
       writeSettings({ sessions: { installHooks: false }, sources: { zoho: { orgId: '1' } } });
       const app = await createHubApp({ home: temp.home, log: () => {}, deps: { exec: noCli } });
       closers.push(() => app.close());
       const version = ((await app.post['/v1/conversation/page-settings-read']!({})).body as { settings: { version: string } }).settings.version;
 
       const saving = app.post['/v1/conversation/page-settings-save']!({ value: { plugins: [slow], sessions: { installHooks: false }, sources: { zoho: { orgId: '1' } } }, version });
-      await new Promise((done) => setTimeout(done, 200));
+      await until(() => (stage('slow') === 'importing' ? true : null));
       expect(await toggleSource(app, { name: 'zoho', enabled: true })).toEqual({ status: 200, body: { done: true } });
+      release();
 
       expect(await saving).toMatchObject({ status: 409, body: { errors: [expect.stringMatching(/^sources\.zoho\./)] } });
     });
