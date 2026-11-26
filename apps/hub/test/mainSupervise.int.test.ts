@@ -116,8 +116,9 @@ describe('hub entry point', () => {
 
     // The supervisor passes the serving flags on, here those that keep the test's hubs off the fixed ports.
     const checkMs = 100;
-    // A restart delay long enough for a started hub to take the lock. A check that finds no hub while it waits logs so, which starts() counts.
-    const supervisor = start('supervise', '--grace-ms=0', `--check-ms=${checkMs}`, '--restart-delay-ms=2000');
+    // A restart delay long enough for a started hub to take the lock, which takes 6 seconds on a slow runner: a check that finds no hub while
+    // it waits logs so, which starts() counts, and a start after the delay would find the first hub running.
+    const supervisor = start('supervise', '--grace-ms=0', `--check-ms=${checkMs}`, '--restart-delay-ms=15000');
     // What the supervisor did not do shows only after it had the chance: five of its checks.
     const fiveChecks = () => new Promise((done) => setTimeout(done, 5 * checkMs));
     const log = (): string => (existsSync(hubLogPath(home)) ? readFileSync(hubLogPath(home), 'utf8') : '');
