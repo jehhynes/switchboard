@@ -621,3 +621,72 @@ describe('sessionView', () => {
     expect(sessionView(session({ codeMode: true }), true, true).canPin).toBe(false);
   });
 });
+
+describe('the Claude conversation poll (mechanics M165)', () => {
+  /** Six busy Code Mode sessions whose screens answer only when the test lets them, with the most screens asked for at once. */
+  function busy() {
+    const store = Store.open(':memory:');
+    const waiting: Array<{ session: string; answer: () => void }> = [];
+    const asked: string[] = [];
+    let open = 0;
+    let most = 0;
+    const screen = (session: string) => {
+      asked.push(session);
+      most = Math.max(most, ++open);
+
+      return new Promise<{ data: string; cols: number; rows: number; rev: number; keyAt: null }>((resolve) => {
+        waiting.push({ session, answer: () => { open--; resolve({ data: '', cols: 40, rows: 5, rev: 1, keyAt: null }); } });
+      });
+    };
+    const scopes = new WindowScopes({ store, windows: WINDOWS, newKey: () => 'k1' });
+    const service = new ConversationService({ store, windows: scopes, projectsDir: join(dir, 'projects'), claudeConfig: join(dir, '.claude.json'), screen: screen as never, input: new FakeHeld(), hooks: () => true, now: () => NOW, newId: () => '1', log: () => {} });
+    const ticket = store.insertTicket({ source: 'adhoc', sourceKey: 'busy', ref: '#busy', sourceId: null, title: 'Busy', url: '', assigned: true, pool: false, snoozed: false, snoozedUntil: null, sortAt: null, scopeAt: NOW, lastPolledAt: null, repoRoot: 'D:/w12' } as never);
+    const workItem = store.insertWorkItem({ ticketId: ticket.id, playbook: null, status: 'running', createdAt: NOW } as never);
+
+    for (let n = 1; n <= 6; n++) {
+      store.insertSession(session({ id: `b${n}`, workItemId: workItem.id, cwd: 'D:/w12', codeMode: true, nativeSessionId: `n-b${n}`, state: 'running', startedAt: NOW + n }) as StoredSession);
+    }
+
+    return { service, waiting, asked, most: () => most };
+  }
+
+  /** Answers each screen as it is asked for until `poll` ends. */
+  async function drain(poll: Promise<void>, waiting: Array<{ answer: () => void }>): Promise<void> {
+    let done = false;
+    void poll.finally(() => (done = true));
+
+    while (!done) {
+      waiting.shift()?.answer();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    await poll;
+  }
+
+  it('ClaudePoll_SixBusySessions_ReadsAtMostFourScreensAtOnceAndEachOnce', async () => {
+    const { service, waiting, asked, most } = busy();
+    const poll = service.poll();
+
+    await vi.waitFor(() => expect(asked).toHaveLength(4));
+    expect(asked).toEqual(['b1', 'b2', 'b3', 'b4']);
+    waiting.shift()!.answer();
+    await vi.waitFor(() => expect(asked).toHaveLength(5));
+    expect(asked[4]).toBe('b5');
+
+    await drain(poll, waiting);
+    expect(asked.sort()).toEqual(['b1', 'b2', 'b3', 'b4', 'b5', 'b6']);
+    expect(most()).toBe(4);
+  });
+
+  it('ClaudePoll_PollStillReading_NextPollSkipped', async () => {
+    const { service, waiting, asked } = busy();
+    const first = service.poll();
+
+    await vi.waitFor(() => expect(asked).toHaveLength(4));
+    await service.poll();
+    expect(asked).toHaveLength(4);
+
+    await drain(first, waiting);
+    expect(asked).toHaveLength(6);
+  });
+});

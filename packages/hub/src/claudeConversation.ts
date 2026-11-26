@@ -17,6 +17,11 @@ const TURN_END_POLL_MS = 50;
 const TURN_END_TRIES = 40;
 /** How much of a transcript's end the first turn-end check reads. */
 const TURN_TAIL_BYTES = 256 * 1024;
+/**
+ * How many sessions a poll reads at once: the holder takes 15 ms or more for each busy session's screen, so 30 read one after another took
+ * 450 ms or more (mechanics M165).
+ */
+const POLL_READS = 4;
 /** Reads with a clock: when each event was sent, for the latency check of architecture.md § Conversation. */
 interface Reader {
   conversation: SessionConversation;
@@ -76,7 +81,7 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
   }
   async poll(sessions: Session[]): Promise<void> {
     const live = sessions.filter(session => this.supports(session) && session.nativeSessionId !== null && session.state !== 'starting');
-    for (const session of live) await this.#read(session);
+    await eachAtMost(live, POLL_READS, (session) => this.#read(session));
     for (const [id, reader] of this.#readers) {
       if (live.some(s => s.id === id)) continue;
       const ended = this.deps.store.session(id);
@@ -289,6 +294,20 @@ export class ClaudeConversationAdapter implements ConversationAdapter {
     return session === null || session.state === 'ended' ? 'The session ended.' : (session.launchId ?? null) !== launch ? 'The session was relaunched.' : null;
   }
 }
+/** Runs `run` for each item, at most `limit` at once and each item once; once all have settled, throws the first failure. */
+async function eachAtMost<T>(items: readonly T[], limit: number, run: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const failures: unknown[] = [];
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      try { await run(items[next++]!); } catch (error) { failures.push(error); }
+    }
+  }));
+
+  if (failures.length > 0) throw failures[0];
+}
+
 /** The holder's answer, or a failure once it has not answered in `HOLDER_ANSWER_MS`, so a typed message never waits on it for ever. */
 function answered<T>(request: Promise<T>, ms = HOLDER_ANSWER_MS): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
