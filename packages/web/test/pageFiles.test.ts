@@ -66,7 +66,8 @@ describe('the page in use', () => {
 
     const doc = root.querySelector<HTMLElement>('.artifact-doc')!;
 
-    expect(root.querySelector('.artifact-badge')!.textContent).toBe('page');
+    expect(root.querySelector('.artifact-head > .artifact-type.codicon-markdown')!.getAttribute('aria-label')).toBe('Markdown document');
+    expect(root.querySelector('.artifact-badge')).toBeNull();
     expect(doc.querySelector('table td')!.textContent).toBe('1');
     // Another artifact opens in place; another file of the folder in a new tab; a target outside the folder stays text.
     expect(doc.querySelector('a[data-path="chat/p.html"]')!.getAttribute('data-action')).toBe('artifact');
@@ -133,6 +134,13 @@ describe('the page in use', () => {
     expect(html).toContain('/page/page.css');
     expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
     expect(html).not.toContain('data-action="close-artifact"');
+    // Its head: the type's icon, the title and when it changed as the full time, since the window is not redrawn.
+    const windowHead = new DOMParser().parseFromString(html, 'text/html').querySelector('.artifact-head')!;
+    const time = windowHead.querySelector('.artifact-age')!;
+
+    expect([...windowHead.children].map((node) => node.className)).toEqual(['codicon codicon-markdown artifact-type', 'artifact-title', 'artifact-age']);
+    expect(time.textContent).toBe(time.getAttribute('title'));
+    expect(time.textContent).toMatch(/^\d{4}-\d{2}-\d{2} /);
     // Its pictures and links name the hub in full, since a blob: document has no base for the page's paths.
     expect(html).toContain(`src="${location.origin}/v1/conversation/artifact/pk/chat/plan/pic.png"`);
     expect(html).toContain(`href="${location.origin}/v1/conversation/artifact/pk/chat/p.html"`);

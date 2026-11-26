@@ -3,6 +3,7 @@
 import { cloneElement } from 'preact';
 import type { ComponentChildren, VNode } from 'preact';
 import { providerMark } from '@switchboard/conversation/providerIcons';
+import { artifactType } from './artifactIcon.js';
 import { FileIcon } from './fileIcons.js';
 import { selectedEntry, selectedRow, stateIcon } from './model.js';
 import type { PageState } from './model.js';
@@ -385,13 +386,13 @@ export interface ArtifactStrip {
 }
 
 /**
- * An artifact's tab: its kind's icon, its title, and a close mark beside it in one cell, so each takes the keyboard on its own; with the unread
- * dot after its title while this device has not shown its version (`unreadArtifacts`).
+ * An artifact's tab: its file type icon, its title, and a close mark beside it in one cell, so each takes the keyboard on its own; with the unread
+ * dot after its title while this device has not shown its version (`unreadArtifacts`). Its tooltip names its title, its type and when it changed.
  */
-function ArtifactTab({ artifact, selected, unread }: { artifact: ArtifactView; selected: boolean; unread: boolean }) {
+function ArtifactTab({ artifact, selected, unread, now }: { artifact: ArtifactView; selected: boolean; unread: boolean; now: number }) {
   return (
     <span class={`tab artifact-tab${selected ? ' selected' : ''}`} role="presentation" data-action="artifact" data-path={artifact.path}>
-      <button class="tab-open" type="button" role="tab" aria-selected={selected} tabindex={selected ? 0 : -1} title={`${artifact.title} · ${artifact.kind}`} aria-label={unread ? `${artifact.title}, unread` : artifact.title}>
+      <button class="tab-open" type="button" role="tab" aria-selected={selected} tabindex={selected ? 0 : -1} title={`${artifact.title} · ${artifactType(artifact).name} · ${ago(artifact.updatedAt, now)}`} aria-label={unread ? `${artifact.title}, unread` : artifact.title}>
         <FileIcon path={artifact.path} />
         <span class="tab-label">{artifact.title}</span>
         {unread ? <UnreadDot /> : null}
@@ -403,9 +404,9 @@ function ArtifactTab({ artifact, selected, unread }: { artifact: ArtifactView; s
   );
 }
 
-/** A row of the More menu: its icon, its label, with the unread dot while `unread`, and its kind and age in columns. */
-function MenuRow({ attrs, icon, label, kind = '', note = '', unread = false, title }: { attrs: Record<string, string>; icon: ComponentChildren; label: string; kind?: string; note?: string; unread?: boolean; title?: string | undefined }) {
-  const named = [label, ...(unread ? ['unread'] : []), ...(kind === '' ? [] : [kind]), ...(note === '' ? [] : [note])].join(', ');
+/** A row of the More menu: its icon, its label, with the unread dot while `unread`, and its age in a column; `type`, what it opens, names it for screen readers only. */
+function MenuRow({ attrs, icon, label, type = '', note = '', unread = false, title }: { attrs: Record<string, string>; icon: ComponentChildren; label: string; type?: string; note?: string; unread?: boolean; title?: string | undefined }) {
+  const named = [label, ...(unread ? ['unread'] : []), ...(type === '' ? [] : [type]), ...(note === '' ? [] : [note])].join(', ');
 
   return (
     <button class="menu-row" type="button" role="menuitem" {...attrs} title={title} aria-label={named}>
@@ -414,7 +415,6 @@ function MenuRow({ attrs, icon, label, kind = '', note = '', unread = false, tit
         <span class="title-text">{label}</span>
         {unread ? <UnreadDot /> : null}
       </span>
-      <span class="menu-kind">{kind}</span>
       <span class="menu-note">{note}</span>
     </button>
   );
@@ -428,7 +428,7 @@ function MenuRow({ attrs, icon, label, kind = '', note = '', unread = false, tit
 function MoreMenu({ hidden, closed, strip, attr }: { hidden: DocTab[]; closed: ArtifactView[]; strip: ArtifactStrip; attr: 'data-side' | 'data-tab' }) {
   const unread = strip.unread ?? new Set<string>();
   const artifactRow = (artifact: ArtifactView): VNode => (
-    <MenuRow attrs={{ 'data-action': 'artifact', 'data-path': artifact.path }} icon={<FileIcon path={artifact.path} />} label={artifact.title} kind={artifact.kind} note={ago(artifact.updatedAt, strip.now)} unread={unread.has(artifact.path)} title={artifact.file ?? artifact.path} />
+    <MenuRow attrs={{ 'data-action': 'artifact', 'data-path': artifact.path }} icon={<FileIcon path={artifact.path} />} label={artifact.title} type={artifactType(artifact).name} note={ago(artifact.updatedAt, strip.now)} unread={unread.has(artifact.path)} title={artifact.file ?? artifact.path} />
   );
   const row = (tab: DocTab): VNode => {
     switch (tab.kind) {
@@ -438,14 +438,14 @@ function MoreMenu({ hidden, closed, strip, attr }: { hidden: DocTab[]; closed: A
         return <MenuRow attrs={{ [attr]: tab.tab }} icon={<span class={`codicon codicon-${icon}`} />} label={label} unread={tab.unread} />;
       }
       case 'link':
-        return <MenuRow attrs={{ 'data-action': 'iframe-open', 'data-url': tab.link.url }} icon={<LinkIcon link={tab.link} />} label={tab.link.label} kind="link" title={`${tab.link.name} · ${tab.link.url}`} />;
+        return <MenuRow attrs={{ 'data-action': 'iframe-open', 'data-url': tab.link.url }} icon={<LinkIcon link={tab.link} />} label={tab.link.label} type="link" title={`${tab.link.name} · ${tab.link.url}`} />;
       case 'artifact':
         return artifactRow(tab.artifact);
       case 'file': {
         const name = localTabName(tab.file);
         const dir = tab.file.entry.state === 'ok' && tab.file.entry.data.kind === 'dir';
 
-        return <MenuRow attrs={{ 'data-action': 'local-tab', 'data-local': String(tab.file.id) }} icon={dir ? <span class="codicon codicon-folder" /> : <FileIcon path={name} />} label={name} kind={dir ? 'folder' : 'file'} title={tab.id.slice('file:'.length)} />;
+        return <MenuRow attrs={{ 'data-action': 'local-tab', 'data-local': String(tab.file.id) }} icon={dir ? <span class="codicon codicon-folder" /> : <FileIcon path={name} />} label={name} type={dir ? 'folder' : 'file'} title={tab.id.slice('file:'.length)} />;
       }
       case 'changes':
         return <MenuRow attrs={{ 'data-action': 'diff-tab' }} icon={<span class="codicon codicon-diff-multiple" />} label="Changes" />;
@@ -520,7 +520,7 @@ function stripContent(layout: StripLayout, shown: Tab, state: PageState, browser
       case 'link':
         return LinkTab({ link: tab.link, selected: tab.selected });
       case 'artifact':
-        return ArtifactTab({ artifact: tab.artifact, selected: tab.selected, unread: strip.unread?.has(tab.artifact.path) === true });
+        return ArtifactTab({ artifact: tab.artifact, selected: tab.selected, unread: strip.unread?.has(tab.artifact.path) === true, now: strip.now });
       case 'file':
         return LocalTabButton({ tab: tab.file, selected: tab.selected });
       case 'changes':

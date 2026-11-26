@@ -2139,7 +2139,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     head.className = 'artifact-head';
     title.className = 'artifact-title';
     title.textContent = page.title;
-    head.append(...[shown.querySelector('.artifact-badge')?.cloneNode(true)].filter((node): node is Node => node !== undefined), title);
+    // The window is not redrawn, so it shows when the artifact changed as the full time rather than an age that would go stale.
+    const time = shown.querySelector('.artifact-age')?.cloneNode(true) as HTMLElement | undefined;
+
+    if (time !== undefined) {
+      time.textContent = time.title;
+    }
+
+    head.append(...[shown.querySelector('.artifact-head > .artifact-type')?.cloneNode(true)].filter((node): node is Node => node !== undefined), title, ...(time === undefined ? [] : [time]));
     view.append(head, page.importNode(copy, true));
     page.body.append(view);
 
@@ -2778,7 +2785,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         const doc = artifactDocs.get(docKey(artifact.path));
 
-        drawPane(pane, renderArtifactView(state.key, artifact, doc?.updatedAt === artifact.updatedAt ? doc.html : undefined));
+        drawPane(pane, renderArtifactView(state.key, artifact, doc?.updatedAt === artifact.updatedAt ? doc.html : undefined, now));
 
         if (doc?.updatedAt === artifact.updatedAt && doc.html !== undefined && doc.top !== null) {
           const shown = pane.querySelector<HTMLElement>('.artifact-doc');

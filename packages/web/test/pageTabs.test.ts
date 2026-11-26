@@ -175,8 +175,8 @@ describe('the page in use', () => {
     expect(root.querySelector('#detail .tab-more-button .tab-badge > .unread-dot')).not.toBeNull();
     click('#detail [data-action="tab-menu"]');
     expect(dotted()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a4.md']);
-    expect(root.querySelector('#detail .tab-menu [data-path="chat/a4.md"]')!.getAttribute('aria-label')).toBe('Note 4, unread, note, just now');
-    expect(root.querySelector('#detail .tab-menu [data-path="chat/a5.md"]')!.getAttribute('aria-label')).toBe('Note 5, note, just now');
+    expect(root.querySelector('#detail .tab-menu [data-path="chat/a4.md"]')!.getAttribute('aria-label')).toBe('Note 4, unread, Markdown document, just now');
+    expect(root.querySelector('#detail .tab-menu [data-path="chat/a5.md"]')!.getAttribute('aria-label')).toBe('Note 5, Markdown document, just now');
     expect(root.querySelector('#detail .tab-menu [data-path="chat/a4.md"] .unread-dot')!.getAttribute('aria-label')).toBe('Unread');
     // No row says whether its tab is closed.
     expect(root.querySelector('#detail .tab-menu')!.textContent).not.toContain('Closed');

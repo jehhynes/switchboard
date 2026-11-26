@@ -1,6 +1,6 @@
 import { renderMicButton, renderVoiceControls } from '@switchboard/conversation/voiceControls';
 import { fullTime, metaLine, stamped, stampTime, toneMark, voiceMark } from '@switchboard/conversation/messageMeta';
-import { artifactIcon, awaitingReply, selectedEntry, selectedRow, stateIcon, timeline } from './model.js';
+import { awaitingReply, selectedEntry, selectedRow, stateIcon, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, escape, renderInline, renderMarkdown } from './markdown.js';
 import { questionSegments, stripQuestionMarkup } from '@switchboard/conversation/questions';

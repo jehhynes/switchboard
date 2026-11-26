@@ -583,11 +583,15 @@ describe('drawing', () => {
     expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).toContain('This kind of file cannot be shown here.');
     expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).not.toContain('download');
 
-    // The head: the kind as a badge, the title and Open in new window, and no Download; each version's file loads afresh.
+    // The head: the type's icon, named, the title, when it changed and Open in new window, no kind and no Download; each version's file loads afresh.
     const head = document.createElement('div');
 
-    head.innerHTML = html(renderArtifactView('key', { ...artifact('chat/v.mp4', 'video', 'mp4'), kind: 'demo', title: 'Demo' }));
-    expect(head.querySelector('.artifact-badge')!.textContent).toBe('demo');
+    head.innerHTML = html(renderArtifactView('key', { ...artifact('chat/v.mp4', 'video', 'mp4'), kind: 'demo', title: 'Demo' }, undefined, 1500 + 5 * 60_000));
+    expect(head.querySelector('.artifact-head > .artifact-type.codicon-device-camera-video')!.getAttribute('aria-label')).toBe('Video');
+    expect(head.querySelector('.artifact-head > .artifact-age')!.textContent).toBe('5 min ago');
+    expect(head.querySelector('.artifact-head > .artifact-age')!.getAttribute('datetime')).toBe(new Date(1500).toISOString());
+    expect(head.querySelector('.artifact-badge')).toBeNull();
+    expect(head.querySelector('.artifact-head')!.textContent).not.toContain('demo');
     expect(head.querySelector('.artifact-head .artifact-title')!.textContent).toBe('Demo');
     expect(head.querySelector('.artifact-view')!.getAttribute('data-version')).toBe('1500');
     expect(head.querySelector('video')!.getAttribute('src')).toBe('/v1/conversation/artifact/key/chat/v.mp4?v=1500');

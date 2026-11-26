@@ -305,11 +305,6 @@ const SESSION_WORDS: Record<SessionIcon, string> = {
   none: 'No session',
 };
 
-/** An artifact type's codicon. */
-export function artifactIcon(type: ArtifactView['type']): string {
-  return { markdown: 'markdown', html: 'globe', image: 'file-media', audio: 'unmute', video: 'device-camera-video', file: 'file' }[type];
-}
-
 /** The selected conversation's dropdown entry, or null. */
 export function selectedEntry(state: PageState): ConversationEntry | null {
   return state.scope?.conversations.find((entry) => entry.workItemId === state.scope?.workItemId) ?? null;

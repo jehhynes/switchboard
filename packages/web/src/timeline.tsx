@@ -6,10 +6,11 @@ import { hasUnspokenText, replyBody, spokenParts } from '@switchboard/conversati
 import { answerBrief, plain, questionBrief, questionLedger, stripQuestionMarkup, withoutEndingQuestions } from '@switchboard/conversation/questions';
 import type { LedgerItem, LedgerQuestion, QuestionLedger } from '@switchboard/conversation/questions';
 import { isAnswerMessage, renderAnswersBubble, renderQuestionCard } from '@switchboard/conversation/questionCard';
-import { artifactIcon, awaitingReply, inTurn, sessionEnd, timeline } from './model.js';
+import { ArtifactIcon } from './artifactIcon.js';
+import { awaitingReply, inTurn, sessionEnd, timeline } from './model.js';
 import type { PageState } from './model.js';
 import { copyButton, renderCardText, renderInline, renderMarkdown } from './markdown.js';
-import { dayLabel, deliveryMark, replyRender, withoutQuestions } from './render.js';
+import { ago, dayLabel, deliveryMark, replyRender, withoutQuestions } from './render.js';
 import type { CardDraft, View } from './render.js';
 import { trusted } from './trusted.js';
 import { backgroundLabel } from '@switchboard/core/group';
@@ -141,13 +142,14 @@ function detailsPreview(opening: string, passage: string, markdownPart: (text: s
   return parts.map((part, index) => (part.spoken ? '' : `<div class="reply-details">${markdownPart(part.text, index === parts.length - 1)}</div>`)).join('');
 }
 
-function ArtifactRow({ artifact }: { artifact: ArtifactView }) {
+/** An artifact's card in the conversation: its type's icon, its title and when it changed. */
+function ArtifactRow({ artifact, now }: { artifact: ArtifactView; now: number }) {
   return (
     <li class="artifact">
       <button class="artifact-open" type="button" data-action="artifact" data-path={artifact.path} title={artifact.file ?? artifact.path}>
-        <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
+        <ArtifactIcon artifact={artifact} named />
         <span class="artifact-title">{artifact.title}</span>
-        <span class="artifact-kind">{artifact.kind}</span>
+        <span class="artifact-age">{ago(artifact.updatedAt, now)}</span>
       </button>
     </li>
   );
@@ -343,7 +345,7 @@ export function renderTimeline(state: PageState, view: View, now: number = Date.
   const latest = newest?.type === 'reply' ? newest.item.id : null;
   const rows = entries.flatMap((entry) => {
     if (entry.type === 'artifact') {
-      return [<ArtifactRow key={`artifact:${entry.artifact.path}`} artifact={entry.artifact} />];
+      return [<ArtifactRow key={`artifact:${entry.artifact.path}`} artifact={entry.artifact} now={now} />];
     }
 
     // The first item shown, and each turn that starts on a later day than the turns before it, has a divider. The order is the transcript's, not

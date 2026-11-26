@@ -1,12 +1,13 @@
 // The Artifacts tab and an open artifact (architecture.md § Web page), in the tab strip or the column right of the conversation.
 import type { VNode } from 'preact';
-import { artifactIcon } from './model.js';
+import { fullTime } from '@switchboard/conversation/messageMeta';
+import { ArtifactIcon } from './artifactIcon.js';
 import type { PageState } from './model.js';
 import { ago, artifactShow, artifactUrl } from './render.js';
 import { trusted } from './trusted.js';
 import type { ArtifactView } from '@switchboard/protocol';
 
-/** The Artifacts tab: the work item's artifacts newest first; a click opens one in the page. */
+/** The Artifacts tab: the work item's artifacts newest first, each by its type's icon, its title and when it changed; a click opens one in the page. */
 export function renderArtifacts(state: PageState, now: number): VNode {
   if (state.artifacts.length === 0) {
     return <p class="empty">No artifacts yet. They appear here when the session writes one.</p>;
@@ -17,11 +18,9 @@ export function renderArtifacts(state: PageState, now: number): VNode {
       {state.artifacts.map((artifact) => (
         <li key={artifact.path}>
           <button class="artifact-open" type="button" data-action="artifact" data-path={artifact.path} title={artifact.file ?? artifact.path}>
-            <span class={`codicon codicon-${artifactIcon(artifact.type)}`} aria-hidden="true"></span>
+            <ArtifactIcon artifact={artifact} named />
             <span class="artifact-title">{artifact.title}</span>
-            <span class="artifact-kind">
-              {artifact.kind} · {ago(artifact.updatedAt, now)}
-            </span>
+            <span class="artifact-age">{ago(artifact.updatedAt, now)}</span>
           </button>
         </li>
       ))}
@@ -37,11 +36,12 @@ export function renderEmpty(text: string): VNode {
 /**
  * An open artifact (architecture.md § Web page), in place in its pane: a page or an SVG in a sandboxed frame with an opaque origin, pictures,
  * audio and video in the page, Markdown as the page drew it from its text (`doc`: its HTML, null when it could not be read, undefined while it
- * loads), and for anything else a note that it cannot be shown. Its head has the kind as a badge and the title, as claude-collab's viewer, then Open in new window.
+ * loads), and for anything else a note that it cannot be shown. Its head has its type's icon, its title, when it changed, with the full time as its
+ * tooltip, and Open in new window.
  * Each version is drawn afresh, so its files load again (`?v=`), and an unchanged one is left as it is, so a frame or a video is not
  * reloaded.
  */
-export function renderArtifactView(key: string, artifact: ArtifactView, doc?: string | null): VNode {
+export function renderArtifactView(key: string, artifact: ArtifactView, doc?: string | null, now: number = Date.now()): VNode {
   const file = artifactUrl(key, artifact.path);
   const url = `${file}?v=${artifact.updatedAt}`;
   const show = artifactShow(artifact);
@@ -64,8 +64,11 @@ export function renderArtifactView(key: string, artifact: ArtifactView, doc?: st
   return (
     <div class="artifact-view" data-artifact={artifact.path} data-version={String(artifact.updatedAt)} key={`${artifact.path}@${artifact.updatedAt}`}>
       <div class="artifact-head">
-        <span class="artifact-badge">{artifact.kind}</span>
+        <ArtifactIcon artifact={artifact} named />
         <span class="artifact-title" title={artifact.file}>{artifact.title}</span>
+        <time class="artifact-age" dateTime={new Date(artifact.updatedAt).toISOString()} title={fullTime(artifact.updatedAt)}>
+          {ago(artifact.updatedAt, now)}
+        </time>
         {artifact.type === 'markdown' ? (
           <button class="icon" type="button" data-action="artifact-window" title="Open in new window" aria-label="Open in new window">
             <span class="codicon codicon-link-external"></span>

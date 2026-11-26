@@ -5,6 +5,7 @@ import type { TabFit } from '../src/tabs.js';
 import { EMPTY } from '../src/model.js';
 import type { ArtifactView } from '@switchboard/protocol';
 import { html } from './html.js';
+import { frameLink } from '../src/iframeBrowser.js';
 import { changesTab, newChanges } from '../src/changes.js';
 import { PAGE_ASSETS } from '../dist/index.js';
 
@@ -101,19 +102,33 @@ describe('the artifact tabs', () => {
     expect(menu.querySelector('.menu-separator')).toBeNull();
   });
 
-  it("show each artifact's title, kind and age in the menu, and its title and kind in its tab's tooltip", () => {
-    const kinds = [{ ...artifact(1), kind: 'plan', title: 'Rollout plan' }, { ...artifact(2), kind: 'report', title: 'Load test' }, ...eight.slice(3)];
-    const markup = html(renderSideSwitch('history', { ...state, artifacts: kinds }, false, { open: null, fit: room(2), menu: true, now: 1_001 + 3 * 60_000 }));
+  it('ArtifactMenuRowAndTab_KindGiven_ShowTitleTypeAndAgeNotKind', () => {
+    const typed = [{ ...artifact(1), kind: 'plan', title: 'Rollout steps' }, { ...artifact(2), path: 'chat/a2.pdf', ext: 'pdf', type: 'file' as const, kind: 'report', title: 'Load test', updatedAt: 1_001 }, ...eight.slice(3)];
+    const markup = html(renderSideSwitch('history', { ...state, artifacts: typed }, false, { open: null, fit: room(2), menu: true, now: 1_001 + 3 * 60_000 }));
     const menu = parse(markup).querySelector('.tab-menu')!;
     const row = menu.querySelector('[data-path="chat/a1.md"]')!;
+    const pdf = menu.querySelector('[data-path="chat/a2.pdf"]')!;
 
-    expect([...row.children].map((cell) => cell.className)).toEqual(['menu-gutter', 'title', 'menu-kind', 'menu-note']);
-    expect(row.querySelector('.title')!.textContent).toBe('Rollout plan');
-    expect(row.querySelector('.menu-kind')!.textContent).toBe('plan');
+    expect([...row.children].map((cell) => cell.className)).toEqual(['menu-gutter', 'title', 'menu-note']);
+    expect(row.querySelector('.menu-gutter .codicon-markdown')).toBeNull();
+    expect(row.querySelector('.title')!.textContent).toBe('Rollout steps');
     expect(row.querySelector('.menu-note')!.textContent).toBe('3 min ago');
-    expect(row.getAttribute('aria-label')).toBe('Rollout plan, plan, 3 min ago');
-    expect(menu.querySelector('[data-path="chat/a2.md"] .menu-kind')!.textContent).toBe('report');
-    expect(markup).toContain('title="Note 7 · note"');
+    expect(row.getAttribute('aria-label')).toBe('Rollout steps, Markdown document, 3 min ago');
+    expect(pdf.getAttribute('aria-label')).toBe('Load test, PDF, 3 min ago');
+    expect(menu.textContent).not.toMatch(/plan|report/);
+    expect(markup).not.toContain('menu-kind');
+    // The tab: a tooltip naming its title, type and age; its icon is the file type icon of the file tabs (fileIcons.test.tsx).
+    expect(markup).toContain('title="Note 7 · Markdown document · 2 min ago"');
+  });
+
+  it('MoreMenuLinkRow_Drawn_NamesLinkForScreenReadersOnly', () => {
+    const links = [frameLink('https://example.com/spec', 'Spec')];
+    const menu = parse(html(renderSideSwitch('history', state, false, { open: null, fit: room(0), menu: true, now: 2_000, links }))).querySelector('.tab-menu')!;
+    const linkRow = menu.querySelector('[data-action="iframe-open"]')!;
+
+    expect([...linkRow.children].map((cell) => cell.className)).toEqual(['menu-gutter', 'title', 'menu-note']);
+    expect(linkRow.getAttribute('aria-label')).toBe('Spec, link');
+    expect(linkRow.textContent).toBe('Spec');
   });
 
   it("list an external artifact as any other, its menu row's tooltip its real path, and fetch it by its name", () => {
@@ -155,8 +170,8 @@ describe('the artifact tabs', () => {
     // a7 has its tab, so only a0's row in the menu is marked; More holds the six other artifacts and Console.
     expect([...menu.querySelectorAll('.unread-dot')].map((dot) => dot.closest<HTMLElement>('.menu-row')!.dataset['path'])).toEqual(['chat/a0.md']);
     expect([...row.querySelector('.title')!.children].map((cell) => cell.className)).toEqual(['title-text', 'unread-dot']);
-    expect(row.getAttribute('aria-label')).toBe('Note 0, unread, note, 3 min ago');
-    expect(menu.querySelector('[data-path="chat/a1.md"]')!.getAttribute('aria-label')).toBe('Note 1, note, 3 min ago');
+    expect(row.getAttribute('aria-label')).toBe('Note 0, unread, Markdown document, 3 min ago');
+    expect(menu.querySelector('[data-path="chat/a1.md"]')!.getAttribute('aria-label')).toBe('Note 1, Markdown document, 3 min ago');
     const strip = parse(markup);
 
     // On the count's corner, as a notification badge; the button has no caret, its menu named by aria-haspopup and its tooltip.
@@ -230,14 +245,10 @@ describe('the tab strip on a narrow screen', () => {
     expect(css).toContain('.tab:focus-visible { outline: 1px solid var(--vscode-focusBorder);');
   });
 
-  it('lines up the More menu kinds in a column, cutting the title first, and leaves the kind out on a viewport under 520 px', () => {
-    expect(css).toContain('.tab-menu { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto;');
+  it('MoreMenuCss_Drawn_LinesUpTheAgesInAColumnAndHasNoKindColumn', () => {
+    expect(css).toContain('.tab-menu { display: grid; grid-template-columns: auto minmax(0, 1fr) auto;');
     expect(css).toContain('.tab-menu .menu-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;');
-    expect(css).toContain('@media (max-width: 519.98px) { .tab-menu .menu-kind { display: none; } }');
-    // A long front matter kind is cut rather than crowd the title out.
-    expect(css).toContain('.tab-menu .menu-kind { max-width: 14ch; overflow: hidden; text-overflow: ellipsis;');
-    // Wider strips keep the kind: no other rule hides it.
-    expect(css.match(/\.menu-kind[^{]*\{[^}]*display: none/g)).toHaveLength(1);
+    expect(css).not.toContain('menu-kind');
   });
 
   it('names More and the Changes tab with their counts', () => {
