@@ -2091,3 +2091,24 @@ The offline startup limitation below is superseded by M145's verified-origin she
 - **Method:** One run in an empty temporary folder: `claude -p --input-format stream-json --output-format stream-json --verbose --include-hook-events --no-session-persistence --setting-sources "" --strict-mcp-config --tools ""` with stdin `initialize` then `get_usage {skip_behaviors: true}` as `control_request` lines, then end of input. The project folders under `~/.claude/projects` were listed before and after.
 - **Result:** The process answered both requests and exited 0 after 1.2 s. Its stdout held only the two `control_response` lines: no `system/init`, no hook events and no model request. `rate_limits` held `five_hour`, `seven_day` and one `model_scoped` entry. No project folder was added, so no transcript was written. Account fields were not kept.
 - **Limitations:** The request is marked experimental, and its shape may change. `--setting-sources ""` leaves out user, project and local settings and so their hooks and plugins (M3); managed policy settings and the hooks of managed plugins would still apply. A sign-in without plan usage, such as an API key, answers `rate_limits_available: false`. The same channel's `get_context_usage`, the /context category breakdown, can only reach a session started on stream-json, not a held session in a terminal; it was considered and declined.
+
+## M173. Running a Claude session on a second subscription with `CLAUDE_CODE_OAUTH_TOKEN`, 2026-11-27
+
+- **Question:** Can the hub run a Claude session on another subscription by giving it a `claude setup-token` token, while `~/.claude` (settings, hooks, trust and transcripts) stays shared, and what does such a session lose?
+- **Version:** Claude Code 2.1.332 on Windows 11 Pro 10.0.26300. The stored sign-in was a Max account; the token came from `claude setup-token` signed in to a second subscription. User settings `env` sets `ANTHROPIC_BASE_URL` to a local gateway (M64).
+- **Method:** `claude -p` runs with Haiku 5.5 in an empty scratch folder, the process environment's `ANTHROPIC_*` variables removed and `--setting-sources project,local`, so user settings and their hooks did not load. "Direct" runs passed Code Mode's `--settings` (direct API address, blank `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_CUSTOM_HEADERS`); "gateway" runs passed `--settings` with the gateway's `env` entries from user settings. Each case ran with no token, the real token, or a fake `sk-ant-oat01-` token in `CLAUDE_CODE_OAUTH_TOKEN`. Also `claude auth status --text`, `claude mcp list`, a resume across accounts, and M172's `get_usage` request.
+- **Result:**
+
+  | Case | Result |
+  |---|---|
+  | Direct, no token | answered on the stored sign-in |
+  | Direct, fake token | `401 OAuth access token is invalid`: the variable outranks the stored sign-in, and Code Mode's blank credentials do not clear it |
+  | Direct, real token | answered |
+  | Gateway, real or fake token | answered both times: the gateway does not use the client's credentials, so it alone decides the account |
+  | `claude auth status` with a token | only `Auth token: CLAUDE_CODE_OAUTH_TOKEN` and the base URL; no email, organization or plan |
+  | `claude mcp list` with a token | the claude.ai connectors (Claude Docs, Google Drive) are missing; servers from Claude's own configuration still connect |
+  | Session started on the stored sign-in, resumed with `--resume` on the token | the resumed turn recalled a code word from the first, so a transcript continues on another account |
+  | `get_usage` with a token | `subscription_type: null`, `rate_limits_available: false`; on the stored sign-in it returned `max` with `five_hour` and `seven_day` |
+
+- **Pass criteria:** a token-run session uses the token's account in Code Mode's environment, keeps the shared configuration and can resume another account's transcript. **Passed**, with the losses above: no claude.ai connectors, no plan usage, and no account identity to read back.
+- **Not verified:** an interactive held session under the holder (only `claude -p`); the transcript text of a usage limit reached on a token, which `packages/claude/src/limit.ts` reads; a session through the gateway with the gateway set to forward client credentials; Linux.
