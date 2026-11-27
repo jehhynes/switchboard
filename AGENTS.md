@@ -54,7 +54,8 @@ Read the document that covers the decision:
 
 [testing.md](docs/testing.md) is the full contract.
 
-- For executable changes, run only the checks the change affects while working: the pre-commit hook does, through `npm run verify:staged`, so commit without `--no-verify`. Run `npm run verify` (build, typechecks and unit tests) once, before merging a branch into `main`; it runs nothing for a clean tree that already passed. GitHub Actions runs the full suite, integration tests and coverage included, on every push; fix a failed run on `main` before other work. Run the browser checks [testing.md](docs/testing.md#required-checks) requires once too, when the change is finished.
+- For executable changes, run only the checks the change affects while working: the pre-commit hook does, through `npm run verify:staged`, so commit without `--no-verify`. Run `npm run verify` (build, typechecks and unit tests) once, before merging a branch into `main`; it runs nothing for a clean tree that already passed. GitHub Actions runs the full suite, integration tests and coverage included, on every push. Run the browser checks [testing.md](docs/testing.md#required-checks) requires once too, when the change is finished.
+- After each push, watch the pushed commit's run until it ends (`gh run list --commit <sha>`, then `gh run watch <id> --exit-status` in the background). When it fails, read the failed log (`gh run view <id> --log-failed`), fix the cause, push the fix, and watch that run too; on `main`, do this before other work.
 - Verify behavior directly instead of asking the developer to click through it.
 - Package logic and the web page's DOM belong in Vitest.
 - Use recorded, scrubbed fixtures and injected homes. No external network traffic, real Claude sessions, or developer services in tests; test-owned loopback listeners are allowed.
