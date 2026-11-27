@@ -65,7 +65,7 @@ export class HubRestart {
     }
 
     if (this.#handedOver) {
-      return { refused: 'The hub is already restarting.' };
+      return { refused: 'Switchboard is already restarting.' };
     }
 
     this.#asked = true;

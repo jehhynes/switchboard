@@ -126,7 +126,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     // Only Spoken alerts needs the voice on; the line leads to the switch.
     expect([...host.querySelectorAll('.settings-card.dimmed')].map((card) => card.closest('.settings-section')?.querySelector('.settings-section-heading')?.textContent)).toEqual(['Spoken alerts']);
     expect(host.querySelectorAll('.settings-voice-off')).toHaveLength(1);
-    press('Turn on voice');
+    press('Enable voice');
     await vi.advanceTimersByTimeAsync(0);
     expect(document.activeElement).toBe(control('voice.enabled'));
     control<HTMLInputElement>('voice.enabled').click();

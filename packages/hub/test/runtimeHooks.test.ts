@@ -75,7 +75,7 @@ describe('Runtime', () => {
     cli.roster = [];
     now += 1_000;
     await runtime.startup();
-    expect(store.session('s1')).toMatchObject({ state: 'ended', outcome: 'failed', outcomeDetail: 'The hub stopped while the session was starting.' });
+    expect(store.session('s1')).toMatchObject({ state: 'ended', outcome: 'failed', outcomeDetail: 'Switchboard stopped while the session was starting.' });
     expect(Object.keys(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).hooks)).toHaveLength(13);
     expect(runtime.snapshot().errors.hooks).toBeNull();
   });

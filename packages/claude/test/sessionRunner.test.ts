@@ -123,7 +123,7 @@ describe('ClaudeRunner', () => {
 
     expect(await claude.start({ type: 'start-session', sessionId: 's1', workItemId: 1, kind: 'task', provider: 'claude', cwd: 'D:/git/widgets', prompt: 'p', contract: 'c', name: 'n', permissionMode: 'auto', model: null })).toEqual({ error: NOT_HELD });
     expect(await claude.isBackground({ sessionId: 's1', shortId: '1a2b3c4d' })).toBe(false);
-    expect(await claude.reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', failed: 'The hub stopped while the session was starting.' }]);
+    expect(await claude.reconcile([session({ state: 'starting', shortId: null, nativeSessionId: null })])).toEqual([{ sessionId: 's1', failed: 'Switchboard stopped while the session was starting.' }]);
     expect(exec).not.toHaveBeenCalled();
 
     exec.mockResolvedValueOnce(ran({})).mockResolvedValueOnce(ran({ code: 1, stderr: 'No such agent' }));

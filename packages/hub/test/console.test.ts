@@ -184,7 +184,7 @@ describe('the page console stream', () => {
     expect(codex.events).toEqual([['unavailable', { reason: 'This Codex session has no thread yet, so it has no console.' }]]);
     expect(codex.ended()).toBe(1);
     expect(t.views).toEqual([]);
-    expect(noConsole(held({ codeMode: false } as Partial<Session>))).toContain("does not run in Switchboard's terminal holder");
+    expect(noConsole(held({ codeMode: false } as Partial<Session>))).toContain('is not a background session');
     expect(noConsole(held())).toBeNull();
     // An ended registered session resumes in the holder (PRD R81).
     expect(noConsole(held({ codeMode: false, registered: true, state: 'ended', provider: 'claude', nativeSessionId: 'n1' } as Partial<Session>))).toBeNull();

@@ -161,7 +161,7 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 // The bell's notices (architecture.md § Web page, List header): none on the list, one, or three with the dropdown open.
 const minutesAgo = (minutes) => now - minutes * 60000;
-const older = { id: 'holder-older:b', class: 'action', text: 'The terminal holder that runs background sessions is out of date. Restart it to update; its 2 sessions stop and resume.', at: minutesAgo(3), dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart the terminal holder?', detail: 'Its 2 sessions stop and resume in the new holder. A tool call that is running is cut off.', action: 'Restart and resume' } } };
+const older = { id: 'holder-older:b', class: 'action', text: 'Background sessions run on an older build of Switchboard. Restart them to update; its 2 sessions stop and resume.', at: minutesAgo(3), dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart background sessions?', detail: 'Its 2 sessions stop and resume in the new holder. A tool call that is running is cut off.', action: 'Restart and resume' } } };
 const zohoError = { id: 'source:zoho', class: 'action', text: 'zoho: Zoho Desk refused the token (401), so it is not polled.', at: minutesAgo(8), dismissible: false, action: { kind: 'poll', label: 'Check again' } };
 const orphanNotice = { id: 'orphans:x', class: 'action', text: '2 background sessions without a work item.', at: minutesAgo(125), dismissible: true, action: { kind: 'held', label: 'Review' } };
 const notices = view === 'notices-1' || view === 'holder' ? [older] : view === 'notices-3' || view === 'notices-open' ? [zohoError, orphanNotice, older] : [];
@@ -214,7 +214,7 @@ class FakeSource {
     this.listeners = {};
     window.__source = this;
     // The one-time notice the hub sends after a holder restart that went well, shown as a toast.
-    if (view === 'notice-toast') setTimeout(() => this.emit('notice', { notice: { id: 'holder-restarted:1', text: 'The terminal holder restarted and 2 sessions resumed.', at: now } }), 120);
+    if (view === 'notice-toast') setTimeout(() => this.emit('notice', { notice: { id: 'holder-restarted:1', text: 'Background sessions restarted and 2 sessions resumed.', at: now } }), 120);
     setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open && !loading ? [session] : [], items, more: false, state: view === 'history' || view?.startsWith('history-report') ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0, ...(mic ? { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: false, error: null, recognizer: null } } : {}) }), 20);
     // The tabs view's artifacts change after the page first shows them, so each is unread until its tab shows it.
     if (view === 'tabs') setTimeout(() => artifacts.forEach((artifact) => this.emit('artifact', { artifact: { ...artifact, updatedAt: artifact.updatedAt + 60000 } })), 120);
@@ -785,7 +785,7 @@ function noticeFailures(view, size, r) {
       if (r.sideways) out.push('the notices scroll sideways');
     }
   } else if (r.panel !== null) out.push('the notices are open unasked');
-  if (view === 'notice-toast' && r.toast !== 'The terminal holder restarted and 2 sessions resumed.') out.push('the one-time notice shows ' + JSON.stringify(r.toast) + ' in the toast');
+  if (view === 'notice-toast' && r.toast !== 'Background sessions restarted and 2 sessions resumed.') out.push('the one-time notice shows ' + JSON.stringify(r.toast) + ' in the toast');
   return out;
 }
 

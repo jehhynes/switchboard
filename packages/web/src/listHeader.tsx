@@ -415,9 +415,14 @@ function NoticePanel({ notices, local, now }: { notices: PageNotice[]; local: bo
  * A source kind's header icon (PRD R3, R71): its logo, grey while every source of the kind is off, and the hub's tooltip. With one
  * source a click turns it on or off; with several it opens a menu with a check row per source, which stays open so several can change.
  */
+/** A source as the header and More name it: its kind's label, such as GitHub, with the source's own name when the kind has several. */
+function sourceName(group: SourceGroup, name: string): string {
+  return group.sources.length > 1 ? `${group.label ?? group.kind}: ${name}` : (group.label ?? name);
+}
+
 function SourceButton({ group, view }: { group: SourceGroup; view: HeaderView }) {
   const several = group.sources.length > 1;
-  const name = several ? (group.label ?? group.kind) : (group.sources[0]?.name ?? group.kind);
+  const name = several ? (group.label ?? group.kind) : sourceName(group, group.sources[0]?.name ?? group.kind);
   const open = view.menu === `source:${group.kind}`;
   const state = several ? { 'aria-haspopup': 'menu' as const, 'aria-expanded': open } : { 'aria-pressed': group.enabled };
 
@@ -484,7 +489,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView, no
         </div>
         {/* Outside the phone's layout (page.css), as VS Code's pin: pinned, the list is a column; unpinned, a drawer. Left out where it changes nothing (main.ts). */}
         {view.pinned === undefined ? null : (
-          <button type="button" class="icon list-pin" data-action="list-pin" title={view.pinned ? 'Let list hide' : 'Keep list open'} aria-label={view.pinned ? 'Let list hide' : 'Keep list open'} aria-controls="list">
+          <button type="button" class="icon list-pin" data-action="list-pin" title={view.pinned ? 'Unpin list' : 'Pin list'} aria-label={view.pinned ? 'Unpin list' : 'Pin list'} aria-controls="list">
             <span class={`codicon codicon-${view.pinned ? 'pinned' : 'pin'}`} aria-hidden="true"></span>
           </button>
         )}
@@ -551,7 +556,7 @@ export function renderMoreMenu(header: PageHeader | null, local = false, phoneVo
         <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={one.enabled} data-action="list-source-entry" data-source={one.name}>
           <Gutter checked={one.enabled} />
           <SourceLogo kind={group.kind} enabled={one.enabled} icon={group.icon} />
-          <span class="title">{one.name}</span>
+          <span class="title">{sourceName(group, one.name)}</span>
         </button>
       </li>
     )),
@@ -703,12 +708,12 @@ function DevicesSheet({ sheet, now }: { sheet: Extract<HeaderSheet, { kind: 'dev
                 </span>
                 <span class="device-detail">
                   {one.host === null ? 'This computer' : `${one.host} as ${one.login ?? ''}`} · last used {usedText(one.usedAt)}
-                  {one.voice === true ? ' · voice allowed' : ''}
+                  {one.voice === true ? ' · voice enabled' : ''}
                 </span>
               </span>
               {one.host === null ? null : (
-                <button type="button" class="sheet-button secondary" data-action="list-device-voice" data-id={one.id} data-allow={one.voice === true ? '0' : '1'} disabled={sheet.busy} title={one.voice === true ? "Stop this device from using voice; its current voice connection will close." : "Allow this device to use its microphone and speaker for voice."}>
-                  {one.voice === true ? 'Forbid voice' : 'Allow voice'}
+                <button type="button" class="sheet-button secondary" data-action="list-device-voice" data-id={one.id} data-allow={one.voice === true ? '0' : '1'} disabled={sheet.busy} title={one.voice === true ? 'Stop this device from using voice; its current voice connection closes.' : 'Let this device use its microphone and speaker for voice.'}>
+                  {one.voice === true ? 'Disable voice' : 'Enable voice'}
                 </button>
               )}
               <button type="button" class="sheet-button secondary" data-action="list-device-revoke" data-id={one.id} disabled={sheet.busy}>
@@ -752,7 +757,7 @@ function Select({ label, field, items, chosen, after }: { label: string; field: 
 function HeldSheet({ sheet }: { sheet: Extract<HeaderSheet, { kind: 'held' }> }) {
   const stopping = sheet.stopping;
   return <Frame title="Background sessions" wide="held-sheet" close buttons={<button type="button" class="sheet-button secondary" data-action="list-held-refresh" disabled={sheet.busy}>Refresh</button>}>
-    <p class="sheet-detail">Code Mode sessions Switchboard keeps running in the background, with or without a work item. Stop ends a session's process.</p>
+    <p class="sheet-detail">Sessions Switchboard keeps running in the background, with or without a work item. Stop ends a session's process.</p>
     {sheet.error === null ? null : <p class="sheet-error" role="alert">{sheet.error}</p>}
     {sheet.listError === null ? null : <p class="sheet-error" role="alert">{sheet.listError}</p>}
     {sheet.result === null ? null : <p role="status">{sheet.result}</p>}
@@ -761,7 +766,7 @@ function HeldSheet({ sheet }: { sheet: Extract<HeaderSheet, { kind: 'held' }> })
       <p class="sheet-detail">{`Session ${stopping.session} in ${stopping.cwd}. Its process ends and anything it is doing stops.`}</p>
       <div class="sheet-buttons"><button type="button" class="sheet-button secondary" data-action="list-held-cancel" disabled={sheet.busy}>Cancel</button><button type="button" class="sheet-button primary danger" data-action="list-held-confirm" disabled={sheet.busy}>Stop</button></div>
     </div>}
-    {sheet.rows === null ? (sheet.listError === null ? <p class="sheet-detail" role="status">Loading…</p> : null) : sheet.rows.length === 0 ? <p class="sheet-detail">No background sessions. Code Mode sessions appear here while they run.</p> : <div class="held-rows">
+    {sheet.rows === null ? (sheet.listError === null ? <p class="sheet-detail" role="status">Loading…</p> : null) : sheet.rows.length === 0 ? <p class="sheet-detail">No background sessions. They appear here while they run.</p> : <div class="held-rows">
       {sheet.rows.map((row) => <section class="held-row" key={row.session} aria-label={`${row.item}: ${row.session}`}>
         <dl>{[['Work item', row.item], ['Switchboard ID', row.session], ['Claude ID', row.nativeSessionId], ['Folder', row.cwd], ['State', row.state], ['Idle', row.idle], ['Memory', row.memory], ['Terminals', String(row.clients)]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd title={value}>{value}</dd></div>)}</dl>
         <div class="sheet-buttons"><button type="button" class="sheet-button secondary" data-action="list-held-open" data-id={row.session} disabled={sheet.busy || row.terminal === null}>Open in terminal</button><button type="button" class="sheet-button secondary" data-action="list-held-stop" data-id={row.session} disabled={sheet.busy || row.exited}>Stop</button></div>
@@ -808,7 +813,7 @@ function ExtensionSheet({ remote }: { remote: boolean }) {
 
 /**
  * A sheet of the header (architecture.md § Web page), drawn as the page's other sheets: the New session form and its folder browser, Pair a
- * device, Get the browser extension, Restart the terminal holder, the hub log, the held sessions or the app shortcut. `local`: whether the page
+ * device, Get the browser extension, Restart background sessions, the hub log, the held sessions or the app shortcut. `local`: whether the page
  * is this computer's.
  */
 export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader | null, now = Date.now(), read = globalThis.fetch, local = true): VNode | null {
@@ -844,8 +849,8 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
     const confirm = holderRestart(header)?.confirm ?? null;
 
     return confirm === null ? (
-      <Frame title="Restart the terminal holder" close>
-        <p class="sheet-detail">{header?.notices.find((one) => one.id === 'holder-restarting')?.text ?? 'The terminal holder runs the installed build.'}</p>
+      <Frame title="Restart background sessions" close>
+        <p class="sheet-detail">{header?.notices.find((one) => one.id === 'holder-restarting')?.text ?? 'Background sessions run the installed build.'}</p>
         {error}
       </Frame>
     ) : (

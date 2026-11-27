@@ -13,14 +13,14 @@
     {
       "id": "holder-older:bbbbbbbbbbbbbbbb",
       "class": "action",
-      "text": "The terminal holder that runs background sessions is out of date. Restart it to update; its 1 session stops and resumes.",
+      "text": "Switchboard runs background sessions on an older build. Restart to update; the session stops and resumes.",
       "dismiss": "kept",
       "action": {
         "kind": "holder-restart",
         "label": "Restart and resume",
         "confirm": {
-          "question": "Restart the terminal holder?",
-          "detail": "Restarting stops the background session and resumes it in a holder of the installed build. This session is not idle, so the restart interrupts its turn: Issue <15> (gh 115). 1 other background session ends and is not resumed.",
+          "question": "Restart background sessions on the installed build?",
+          "detail": "Restarting stops the background session and resumes it on the installed build. This session is not idle, so the restart interrupts its turn: Issue <15> (gh 115). 1 other background session ends and is not resumed.",
           "action": "Restart and resume"
         }
       }
@@ -28,7 +28,7 @@
     {
       "id": "holder-result:1791028740000",
       "class": "action",
-      "text": "The terminal holder restarted and 1 session resumed. 1 session did not resume: gh 109: Claude Code did not start.",
+      "text": "Background sessions restarted and 1 session resumed. 1 session did not resume: gh 109: Claude Code did not start.",
       "dismiss": "memory"
     }
   ],

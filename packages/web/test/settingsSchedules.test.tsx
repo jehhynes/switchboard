@@ -101,6 +101,7 @@ describe('Settings schedules (architecture.md § Web page)', () => {
     // Only task playbooks run on a schedule.
     expect([...control<HTMLSelectElement>('schedules.weekly.playbook').options].map((one) => one.value)).toEqual(['', 'dev:clean']);
     expect([...control<HTMLSelectElement>('schedules.weekly.day').options].map((one) => one.value)).toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+    expect([...control<HTMLSelectElement>('schedules.weekly.day').options].map((one) => one.text)).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
     expect(control<HTMLSelectElement>('schedules.weekly.day').value).toBe('fri');
 
     pick('schedules.weekly.every', 'month');

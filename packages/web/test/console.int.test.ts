@@ -977,7 +977,7 @@ describe('the Console tab', () => {
   it('says why a session has no console without loading it', () => {
     expect(consoleNote(null)).toBe('No session has started yet.');
     expect(consoleNote(session({ provider: 'codex' }))).toBeNull();
-    expect(consoleNote(session({ conversation: 'none' }))).toContain("does not run in Switchboard's terminal holder");
+    expect(consoleNote(session({ conversation: 'none' }))).toContain('is not a background session');
     expect(consoleNote(session({ provider: 'claude' }))).toBeNull();
   });
 

@@ -620,7 +620,7 @@ export function spokenRepliesFields(state: EditorState): Section[] {
     {
       heading: 'Voice',
       fields: [
-        { path: 'voice.enabled', label: 'Use voice', kind: 'boolean', help: 'Starts the voice process, for spoken replies and dictation. Off, Switchboard neither speaks nor takes dictation, and no session gets a persona.', fallback: false },
+        { path: 'voice.enabled', label: 'Use voice', kind: 'boolean', help: 'Starts the voice process, for spoken replies and dictation. When off, Switchboard neither speaks nor takes dictation, and no session gets a persona.', fallback: false },
         { path: 'voice.outputDevice', label: 'Speaker', kind: 'text', help: 'Part of the playback device’s name, such as Speakers.', hint: 'System default' },
       ],
     },
@@ -852,20 +852,20 @@ export const REPORT_KINDS = ['done', 'approval', 'worktree', 'playbook', 'paste'
 
 /** The reports a task session can send, as checkbox labels and tooltips. */
 export const REPORT_FIELDS: ReadonlyArray<{ kind: string; label: string; help: string }> = [
-  { kind: 'done', label: 'Done', help: 'The session closes the work item. Off, the work item moves to Ready for review when its turn ends.' },
+  { kind: 'done', label: 'Done', help: 'The session closes the work item. When off, the work item moves to Ready for review when its turn ends.' },
   { kind: 'approval', label: 'Approval', help: 'The session can leave a prompt for you to approve, such as one that posts its draft.' },
   { kind: 'worktree', label: 'Worktree', help: 'The session can link a worktree it creates. Branch names link worktrees without it.' },
   { kind: 'playbook', label: 'Playbook', help: 'The session can change its work item\'s playbook to another in the same namespace, and then runs that playbook\'s skill.' },
   { kind: 'paste', label: 'Paste', help: 'The session can name drafted texts, such as a customer reply, that Copy puts on the clipboard on its approval row.' },
 ];
 
-export const AUTO_START_HELP = 'Start the session after triage, unless nothing is newer than the ticket’s earlier work item. Off, the work item waits in Unstarted for you to start it.';
+export const AUTO_START_HELP = 'Start the session after triage, unless nothing is newer than the ticket’s earlier work item. When off, the work item waits in Unstarted for you to start it.';
 export const REQUIRES_WORKTREE_HELP = 'Run the source’s setup prompt first when the ticket has no worktree.';
 export const FOCUS_HELP = 'The page an item window opens for this playbook’s work, at the earliest comment there that asks for it.';
 export const RETURN_OF_HELP = 'One playbook per line, such as dev:review-pr for dev:review-pr-followup. Returned also counts the ticket’s earlier work items with these playbooks.';
-export const APPROVAL_SENDS_HELP = 'Approve posts or pushes the session’s work. Off, you send it yourself, such as by pasting a reply, and Approve finishes up.';
-export const RATES_HELP = 'Triage stores immediacy and severity, which these instructions must define. Off, it stores neither.';
-export const REPO_ROOT_HELP = 'The session always runs in the source’s repo root. Off, it runs in the ticket’s worktree, else the repo root.';
+export const APPROVAL_SENDS_HELP = 'Approve posts or pushes the session’s work. When off, you send it yourself, such as by pasting a reply, and Approve finishes up.';
+export const RATES_HELP = 'Triage stores immediacy and severity, which these instructions must define. When off, it stores neither.';
+export const REPO_ROOT_HELP = 'The session always runs in the source’s repo root. When off, it runs in the ticket’s worktree, else the repo root.';
 
 /** Every field with its value, in one order, for reading one by key and comparing playbooks. */
 export function playbookJson(playbook: PlaybookFields): JsonObject {
@@ -1252,7 +1252,7 @@ function sessionChoices(state: EditorState): { modes: FieldOption[]; codexModes:
   };
 }
 
-const CODEX_SANDBOX_HELP = 'On Windows, Codex’s sandbox cannot read your stored sign-ins; architecture.md § Codex runner says what gh and git need.';
+const CODEX_SANDBOX_HELP = 'On Windows, commands in Codex’s sandbox cannot read your stored sign-ins: gh needs GH_TOKEN passed through Codex’s shell environment, and git needs OpenSSL with gh as its credential helper. Use bypassPermissions for a skill that needs more.';
 
 /** The Sessions page: how playbook and ad-hoc sessions run, by default and for each agent. */
 export function sessionsFields(state: EditorState): Section[] {
@@ -1322,7 +1322,7 @@ export function displayFields(): Section[] {
     {
       heading: 'Conversations',
       fields: [
-        { path: 'web.messageTimes', label: 'Show message times and notes', kind: 'boolean', help: "Every message shows its time and its marks: dictated, a reply's tone, and a reply that was not spoken. Off, only the first message after each day's divider shows its time.", fallback: false },
+        { path: 'web.messageTimes', label: 'Show message times and notes', kind: 'boolean', help: "Every message shows its time and its marks: dictated, a reply's tone, and a reply that was not spoken. When off, only the first message after each day's divider shows its time.", fallback: false },
         { path: 'voice.briefReplies', label: 'Fold reply details', kind: 'boolean', help: "Fold a reply's details under a fade until you open it; the newest reply shows in full.", fallback: false },
       ],
     },
@@ -1404,8 +1404,8 @@ export function advancedFields(): Section[] {
     {
       heading: 'Programs',
       fields: [
-        { path: 'sessions.claudePath', label: 'Claude Code path', kind: 'text', help: 'Its full path, when the hub’s PATH does not include it.', placeholder: 'claude' },
-        { path: 'sessions.codexPath', label: 'Codex path', kind: 'text', help: 'Its full path, when the hub’s PATH does not include it, as for a Codex installed through nvm.', placeholder: 'codex' },
+        { path: 'sessions.claudePath', label: 'Claude Code path', kind: 'text', help: 'Its full path, when Switchboard’s PATH does not include it.', placeholder: 'claude' },
+        { path: 'sessions.codexPath', label: 'Codex path', kind: 'text', help: 'Its full path, when Switchboard’s PATH does not include it, as for a Codex installed through nvm.', placeholder: 'codex' },
         { path: 'sessions.nodePath', label: 'Node.js path', kind: 'text', help: 'The Node.js that hooks and session reports run: its full path, with no spaces, when the agents’ PATH does not include it.', placeholder: 'node' },
         { path: 'sessions.installHooks', label: 'Install hooks', kind: 'boolean', help: 'Add Switchboard’s hooks to your Claude and Codex settings, so the list shows when a session waits for you.', fallback: true },
       ],
@@ -1447,9 +1447,9 @@ const OPTION_FIELDS: Readonly<Record<string, readonly OptionField[]>> = {
   github: [
     { key: 'repo', field: { label: 'Repository', kind: 'text', help: '', hint: 'e.g. owner/name' }, advanced: false },
     { key: 'logins', field: { label: 'Logins', kind: 'list', help: 'One per line. Your GitHub logins: comments and commits by them are yours, and with Require assignee on, an issue assigned to any of them is yours.' }, advanced: false },
-    { key: 'requireAssignee', field: { label: 'Require assignee', kind: 'boolean', help: 'Off, an issue in an assigned status is yours whoever is assigned.', fallback: true }, advanced: false },
-    { key: 'waitForBlockers', field: { label: 'Wait for blockers', kind: 'boolean', help: "On, an issue's work starts only once the issues blocking it close. Leave off to start stacked work from a blocker's branch.", fallback: false }, advanced: false },
-    { key: 'includeClosed', field: { label: 'Include closed issues', kind: 'boolean', help: 'On, a closed issue in an assigned status is still yours, for a team that closes issues before they merge.', fallback: false }, advanced: false },
+    { key: 'requireAssignee', field: { label: 'Require assignee', kind: 'boolean', help: 'An issue in an assigned status is yours only while one of your logins is assigned. When off, its status alone decides, whoever is assigned.', fallback: true }, advanced: false },
+    { key: 'waitForBlockers', field: { label: 'Wait for blockers', kind: 'boolean', help: "An issue's work starts only once the issues blocking it close. Leave it off to start stacked work from a blocker's branch.", fallback: false }, advanced: false },
+    { key: 'includeClosed', field: { label: 'Include closed issues', kind: 'boolean', help: 'A closed issue in an assigned status is still yours, for a team that closes issues before they merge.', fallback: false }, advanced: false },
     { key: 'project.owner', field: { label: 'Project owner', kind: 'text', help: '' }, advanced: false },
     { key: 'project.number', field: { label: 'Project number', kind: 'integer', help: '' }, advanced: false },
     { key: 'project.statusField', field: { label: 'Status field', kind: 'text', help: '', placeholder: 'Status' }, advanced: false },
@@ -1522,7 +1522,7 @@ export function sourceFields(state: EditorState, name: string): Section[] {
   return sections;
 }
 
-const WEEKDAYS: FieldOption[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => ({ value: day, label: day }));
+const WEEKDAYS: FieldOption[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => ({ value: day.slice(0, 3).toLowerCase(), label: day }));
 
 /** A schedule's fields (PRD R82); the day and time show only for the period that uses them. */
 export function scheduleFields(state: EditorState, name: string): Section[] {
@@ -1538,7 +1538,7 @@ export function scheduleFields(state: EditorState, name: string): Section[] {
       path: `${path}.every`,
       label: 'Runs',
       kind: 'select',
-      help: "Off, it runs only when you run it from New session's More options.",
+      help: "Only by hand runs it only when you run it from New session's More options.",
       options: [
         { value: '', label: 'Only by hand' },
         { value: 'day', label: 'Every day' },
@@ -1749,7 +1749,7 @@ function group(state: EditorState, key: string, label: string, children: NavEntr
 /** The navigation, in the order a ticket takes: its source, its playbook, the schedules that start playbooks, then voice, an optional feature. */
 export function nav(state: EditorState): NavCategory[] {
   const sources = state.sourceNames;
-  const sourceEntries: NavEntry[] = sources.map((name) => item(state, `source:${name}`, sourceTitle(state, name), state.config.enabled[name] === true ? undefined : 'off'));
+  const sourceEntries: NavEntry[] = sources.map((name) => item(state, `source:${name}`, sourceTitle(state, name), state.config.enabled[name] === true ? undefined : 'Off'));
 
   for (const kind of state.config.sourceKinds.filter((entry) => !sources.includes(entry))) {
     sourceEntries.push({ kind: 'add', key: `add-source:${kind}`, label: `New ${sourceLabel(kind, state.config)} source`, addSource: kind, current: false, dirty: false, errors: false });

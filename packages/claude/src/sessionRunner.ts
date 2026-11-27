@@ -111,7 +111,7 @@ export class ClaudeRunner implements SessionRunner {
 
   /** No Claude session this runner follows starts, so one a stopped hub left starting failed (PRD R43). */
   reconcile(sessions: Session[]): Promise<Reconciled[]> {
-    return Promise.resolve(sessions.map((session) => ({ sessionId: session.id, failed: 'The hub stopped while the session was starting.' })));
+    return Promise.resolve(sessions.map((session) => ({ sessionId: session.id, failed: 'Switchboard stopped while the session was starting.' })));
   }
 
   async installHooks(): Promise<string | null> {

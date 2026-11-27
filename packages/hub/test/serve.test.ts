@@ -133,7 +133,7 @@ describe('serveHub', () => {
     const refused = await call(hub.record.port, 'POST', '/fast', hub.record.token, 2000, {});
 
     expect(refused?.status).toBe(503);
-    expect(JSON.parse(refused!.body)).toEqual({ error: 'The hub is stopping: a client asked it to stop.' });
+    expect(JSON.parse(refused!.body)).toEqual({ error: 'Switchboard is stopping: a client asked it to stop.' });
     expect(events).toEqual([]);
 
     release!();

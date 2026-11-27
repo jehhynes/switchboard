@@ -411,12 +411,12 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect([...host.querySelectorAll('[data-key="device-89abcdef"] button')].map((one) => one.textContent)).toEqual(['Sign out']);
     answers['page-device-voice'] = { status: 200, body: { voice: true } };
     answers['page-devices'] = { status: 200, body: { devices: [{ ...phone, voice: true }, own] } };
-    buttonIn('[data-key="device-0123abcd"]', 'Allow voice').click();
+    buttonIn('[data-key="device-0123abcd"]', 'Enable voice').click();
     await settle();
     expect(named('page-device-voice').map((one) => one.body)).toEqual([{ id: '0123abcd', allow: true }]);
-    expect(texts('.settings-devices .device-detail')[0]).toMatch(/ · voice allowed$/);
+    expect(texts('.settings-devices .device-detail')[0]).toMatch(/ · voice enabled$/);
     answers['page-device-voice'] = { status: 404, body: { error: 'No paired device has the ID 0123abcd.' } };
-    buttonIn('[data-key="device-0123abcd"]', 'Forbid voice').click();
+    buttonIn('[data-key="device-0123abcd"]', 'Disable voice').click();
     await settle();
     expect(named('page-device-voice').at(-1)!.body).toEqual({ id: '0123abcd', allow: false });
     expect(host.querySelector('.settings-devices .settings-error')?.textContent).toBe('No paired device has the ID 0123abcd.');
@@ -842,7 +842,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
     await settle();
     expect(texts('.settings-nav-children[aria-label="Sources"] .settings-nav-label')).toEqual(['GitHub', 'personal (GitHub)', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
     expect(entry('GitHub').querySelector('.settings-nav-note')).toBeNull();
-    expect(entry('personal (GitHub)').querySelector('.settings-nav-note')?.textContent).toBe('off');
+    expect(entry('personal (GitHub)').querySelector('.settings-nav-note')?.textContent).toBe('Off');
   });
 
   it("draws a source page: its kind's Connection fields, the Work fields, and a collapsed Advanced with Kind first, and the triage playbooks to choose", async () => {
@@ -894,7 +894,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Zoho Desk');
     expect(host.querySelector('[data-path="sources.zoho.orgId"] .settings-field-error')?.textContent).toBe('sources.zoho.orgId is required.');
     expect(entry('Zoho Desk').querySelector('.settings-errors')).not.toBeNull();
-    expect(entry('Zoho Desk').querySelector('.settings-nav-note')?.textContent).toBe('off');
+    expect(entry('Zoho Desk').querySelector('.settings-nav-note')?.textContent).toBe('Off');
     expect(host.querySelector('.settings-page > .settings-error')).toBeNull();
 
     [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')][0]!.click();

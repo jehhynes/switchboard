@@ -891,9 +891,9 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
     ).toEqual([
       { sessionId: 'sb-1', started: { shortId: NATIVE.slice(0, 8), nativeSessionId: NATIVE } },
       { sessionId: 'sb-2', failed: expect.stringMatching(/^Code Mode \(experimental\) isn't available/) as unknown },
-      { sessionId: 'sb-3', failed: 'The hub stopped while the session was starting.' },
+      { sessionId: 'sb-3', failed: 'Switchboard stopped while the session was starting.' },
       { sessionId: 'sb-4', pending: 'The session is still starting.' },
-      { sessionId: 'sb-5', failed: 'The hub stopped while the session was starting.' },
+      { sessionId: 'sb-5', failed: 'Switchboard stopped while the session was starting.' },
       { sessionId: 'sb-6', failed: 'Claude started the session without Code Mode: its output has no "Code Mode (experimental) is on" line.' },
     ]);
     expect(holder.killed).toEqual(['sb-2', 'sb-6']);
@@ -911,7 +911,7 @@ describe('CodeModeRunner stop, resume and reconcile', () => {
 
   it('fails starting sessions when the holder is gone, and waits when it does not answer', async () => {
     lookup = { gone: true };
-    expect(await runner().reconcile([session({ state: 'starting' })])).toEqual([{ sessionId: 'sb-1', failed: 'The hub stopped while the session was starting.' }]);
+    expect(await runner().reconcile([session({ state: 'starting' })])).toEqual([{ sessionId: 'sb-1', failed: 'Switchboard stopped while the session was starting.' }]);
 
     lookup = { error: 'The terminal holder did not answer.' };
     expect(await runner().reconcile([session({ state: 'starting' })])).toEqual([{ sessionId: 'sb-1', pending: 'The terminal holder did not answer.' }]);

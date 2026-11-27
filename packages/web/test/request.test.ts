@@ -52,7 +52,7 @@ describe('requests', () => {
     expect(await one('hang')).toEqual({ status: 0, body: { error: FAILURE_TEXT.timeout }, failure: 'timeout' });
     expect(await one('stall')).toEqual({ status: 0, body: { error: FAILURE_TEXT.timeout }, failure: 'timeout' });
     expect(await one({ status: 502 })).toEqual({ status: 502, body: { error: FAILURE_TEXT.unavailable }, failure: 'unavailable' });
-    expect(await one({ status: 503, body: { error: 'The hub is restarting onto a new build; try again in a few seconds.' } })).toMatchObject({ body: { error: 'Switchboard is restarting. Try again in a moment.' } });
+    expect(await one({ status: 503, body: { error: 'Switchboard is restarting onto a new build; try again in a few seconds.' } })).toMatchObject({ body: { error: 'Switchboard is restarting. Try again in a moment.' } });
     expect(await one({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' } })).toEqual({ status: 403, body: { error: 'This page now shows another work item or session, so that was not done. Check what it shows and try again.' }, failure: 'refused' });
     // The hub's old text for a stale scope generation, which it keeps for older pages, reads in the page's words.
     expect(await one({ status: 409, body: { error: "The window's conversation changed." } })).toEqual({ status: 409, body: { error: 'You switched to another session, so that was not done. Try again.' }, failure: 'refused' });

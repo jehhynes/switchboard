@@ -142,7 +142,7 @@ describe('keptDismissals', () => {
 });
 
 describe('Notices one-time notices', () => {
-  const restarted: InfoNotice = { id: 'holder-restarted:1000', text: 'The terminal holder restarted and 2 sessions resumed.', at: 1000 };
+  const restarted: InfoNotice = { id: 'holder-restarted:1000', text: 'Background sessions restarted and 2 sessions resumed.', at: 1000 };
 
   it('sends a one-time notice once to each open page, and again to none when it is announced again', () => {
     const { notices, pages, sent } = hub();

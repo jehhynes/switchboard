@@ -415,7 +415,7 @@ describe('the list header (architecture.md § Web page)', () => {
     hello(source);
     click('.more-actions');
     expect(root.querySelector('.more-actions')?.getAttribute('aria-expanded')).toBe('true');
-    expect(menuRows()).toEqual(['gh', 'desk', 'help', '-', 'Background sessions', '-', 'Check sources now', 'Reload page', 'Show Switchboard log', 'Get the browser extension…', 'Download app shortcut…', '-', 'Pair a device…', 'Settings…']);
+    expect(menuRows()).toEqual(['gh', 'Zoho Desk: desk', 'Zoho Desk: help', '-', 'Background sessions', '-', 'Check sources now', 'Reload page', 'Show Switchboard log', 'Get the browser extension…', 'Download app shortcut…', '-', 'Pair a device…', 'Settings…']);
     // The source rows are the phone's: page.css hides them outside the phone's layout, where the icons are in the header.
     expect([...root.querySelectorAll('.more-menu .more-source')]).toHaveLength(4);
     expect(root.querySelector('.more-menu [data-source="help"]')?.getAttribute('aria-checked')).toBe('false');
@@ -612,7 +612,7 @@ describe('the list header (architecture.md § Web page)', () => {
     await flush(); await flush();
     expect(posts.filter((post) => post.url.endsWith('/held-stop')).map((post) => post.body['id'])).toEqual(['owned', 'orphan']);
     expect(root.querySelector('.held-sheet')?.textContent).toContain('Stopped background session orphan.');
-    expect(root.querySelector('.held-sheet')?.textContent).toContain('No background sessions. Code Mode sessions appear here while they run.');
+    expect(root.querySelector('.held-sheet')?.textContent).toContain('No background sessions. They appear here while they run.');
     click('#list-sheet .sheet-close');
     review();
     await flush();
@@ -765,7 +765,7 @@ describe('the list header (architecture.md § Web page)', () => {
       expect(root.querySelector('#list-sheet button.primary')?.textContent).toBe('Download shortcut');
       expect(root.querySelector<HTMLInputElement>('#list-sheet input')?.value).toBe('Default');
       expect(document.activeElement?.tagName).toBe('SELECT');
-      expect(root.querySelector('#list-sheet')?.textContent).toContain('No installer or local hub is needed.');
+      expect(root.querySelector('#list-sheet')?.textContent).toContain('No installer is needed.');
       click('#list-sheet [data-action="list-sheet-cancel"]');
       expect(root.querySelector('#list-sheet .sheet')).toBeNull(); page.close();
     }
@@ -847,18 +847,18 @@ describe('the list header (architecture.md § Web page)', () => {
     expect([...sheet.querySelectorAll('.device-name')].map((one) => one.textContent)).toEqual(['Android · Chrome', 'Windows · Edge (this browser)']);
     expect(sheet.querySelector('.device-detail')?.textContent).toMatch(/^pc\.tail\.ts\.net as alex@example\.com · last used /);
     expect([...sheet.querySelectorAll('.device-detail')][1]?.textContent).toMatch(/^This computer · last used /);
-    // This computer's page offers no voice of its own, and only a paired device has Allow voice.
+    // This computer's page offers no voice of its own, and only a paired device has Enable voice.
     expect(root.querySelector('[data-action="list-phone-voice"]')).toBeNull();
-    expect([...sheet.querySelectorAll('[data-action="list-device-voice"]')].map((one) => [(one as HTMLElement).dataset['id'], one.textContent])).toEqual([['0123abcd', 'Allow voice']]);
+    expect([...sheet.querySelectorAll('[data-action="list-device-voice"]')].map((one) => [(one as HTMLElement).dataset['id'], one.textContent])).toEqual([['0123abcd', 'Enable voice']]);
 
-    // Allow voice posts the device's ID and lists the devices again, which then say so.
+    // Enable voice posts the device's ID and lists the devices again, which then say so.
     answers['/page-devices'] = { status: 200, body: { devices: [{ ...phone, voice: true }, own] } };
     click('#list-sheet [data-action="list-device-voice"][data-id="0123abcd"]');
     await flush();
     await flush();
     expect(posts.filter((one) => one.url === '/v1/conversation/page-device-voice').map((one) => [one.body['id'], one.body['allow']])).toEqual([['0123abcd', true]]);
-    expect(root.querySelector('#list-sheet .device-detail')?.textContent).toMatch(/ · voice allowed$/);
-    expect(root.querySelector('#list-sheet [data-action="list-device-voice"]')?.textContent).toBe('Forbid voice');
+    expect(root.querySelector('#list-sheet .device-detail')?.textContent).toMatch(/ · voice enabled$/);
+    expect(root.querySelector('#list-sheet [data-action="list-device-voice"]')?.textContent).toBe('Disable voice');
     click('#list-sheet [data-action="list-device-voice"][data-id="0123abcd"]');
     await flush();
     await flush();
@@ -886,7 +886,7 @@ describe('the list header (architecture.md § Web page)', () => {
 
   it("asks before the holder notice's Restart and resume, posts the detail it showed, and keeps a refusal in the sheet (architecture.md § Restarting the holder)", async () => {
     const { page, source } = start();
-    const confirm = { question: 'Restart the terminal holder?', detail: 'This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).', action: 'Restart and resume' };
+    const confirm = { question: 'Restart background sessions on the installed build?', detail: 'This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).', action: 'Restart and resume' };
     const older = notice('holder-older:b1', { text: 'The terminal holder that runs background sessions is out of date.', dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm } });
     const restart = () => {
       click('.notice-bell');
@@ -895,7 +895,7 @@ describe('the list header (architecture.md § Web page)', () => {
 
     hello(source, { header: header({ notices: [older] }) });
     restart();
-    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Restart the terminal holder?');
+    expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Restart background sessions on the installed build?');
     expect(root.querySelector('#list-sheet .sheet-detail')?.textContent).toBe(confirm.detail);
     expect(document.activeElement?.textContent).toBe('Cancel');
     click('#list-sheet [data-action="list-sheet-cancel"].sheet-button');
@@ -917,7 +917,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('#list-sheet .sheet')).toBeNull();
 
     // While it runs there is nothing to press: a restart begun meanwhile leaves the sheet nothing to confirm.
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notices: [notice('settings'), notice('holder-restarting', { class: 'transient', text: 'Restarting the terminal holder and resuming its sessions…' })] }) });
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notices: [notice('settings'), notice('holder-restarting', { class: 'transient', text: 'Restarting background sessions on the installed build…' })] }) });
     click('.notice-bell');
     expect(root.querySelector('[data-action="list-notice-action"]')).toBeNull();
     page.close();
@@ -925,7 +925,7 @@ describe('the list header (architecture.md § Web page)', () => {
 
   it('lists the holder notice on a paired device without Restart and resume (architecture.md § Remote access)', () => {
     const { page, source } = start(false);
-    const older = notice('holder-older:b1', { text: 'The terminal holder that runs background sessions is out of date.', dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart the terminal holder?', detail: 'No session is interrupted.', action: 'Restart and resume' } } });
+    const older = notice('holder-older:b1', { text: 'The terminal holder that runs background sessions is out of date.', dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart background sessions on the installed build?', detail: 'No session is interrupted.', action: 'Restart and resume' } } });
 
     hello(source, { header: header({ notices: [older] }) });
     click('.notice-bell');
@@ -939,8 +939,8 @@ describe('the list header (architecture.md § Web page)', () => {
     const { page, source } = start();
 
     hello(source);
-    source.emit('notice', { notice: { id: 'holder-restarted:5', text: 'The terminal holder restarted and 2 sessions resumed.', at: 5 } });
-    expect(root.querySelector('.toast.info .toast-text')?.textContent).toBe('The terminal holder restarted and 2 sessions resumed.');
+    source.emit('notice', { notice: { id: 'holder-restarted:5', text: 'Background sessions restarted and 2 sessions resumed.', at: 5 } });
+    expect(root.querySelector('.toast.info .toast-text')?.textContent).toBe('Background sessions restarted and 2 sessions resumed.');
     expect(root.querySelector('.notice-bell')).toBeNull();
     page.close();
   });

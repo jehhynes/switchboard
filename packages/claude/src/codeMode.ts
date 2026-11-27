@@ -924,7 +924,7 @@ export class CodeModeRunner implements SessionRunner {
     return Promise.all(
       sessions.map(async (session): Promise<Reconciled> => {
         if (!('holder' in found)) {
-          return 'error' in found ? { sessionId: session.id, pending: found.error } : { sessionId: session.id, failed: 'The hub stopped while the session was starting.' };
+          return 'error' in found ? { sessionId: session.id, pending: found.error } : { sessionId: session.id, failed: 'Switchboard stopped while the session was starting.' };
         }
 
         const held = await found.holder.list().then((entries) => entries.some((one) => one.session === session.id), () => null);
@@ -934,7 +934,7 @@ export class CodeModeRunner implements SessionRunner {
         }
 
         if (!held || session.nativeSessionId === null || session.launchId == null) {
-          return { sessionId: session.id, failed: 'The hub stopped while the session was starting.' };
+          return { sessionId: session.id, failed: 'Switchboard stopped while the session was starting.' };
         }
 
         // The banner came long before a restarted hub looks, so a marker without the evidence fails at once.

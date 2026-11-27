@@ -378,7 +378,7 @@ describe('voice on this phone (architecture.md § Remote access)', () => {
     expect(tickets).toHaveLength(4);
     timers.filter((one) => one.ms === RECONNECT_RETRY_MS && !one.cleared).forEach((one) => (one.cleared = true, one.run()));
     expect(tickets).toHaveLength(5);
-    held[4]!.resolve({ status: 503, body: { error: 'The hub is restarting onto a new build; try again in a few seconds.' } });
+    held[4]!.resolve({ status: 503, body: { error: 'Switchboard is restarting onto a new build; try again in a few seconds.' } });
     await flush();
     expect([voice.state, voice.error, sockets.length]).toEqual(['connecting', null, 1]);
     timers.filter((one) => one.ms === RECONNECT_RETRY_MS && !one.cleared).forEach((one) => (one.cleared = true, one.run()));

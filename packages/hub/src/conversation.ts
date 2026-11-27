@@ -2182,7 +2182,7 @@ export class ConversationService {
     }
 
     const detail = typeof body['detail'] === 'string' ? body['detail'] : undefined;
-    const why = this.deps.restartHolder === undefined ? 'This hub cannot restart the terminal holder from the page.' : this.deps.restartHolder(detail);
+    const why = this.deps.restartHolder === undefined ? 'Switchboard cannot restart background sessions from this page.' : this.deps.restartHolder(detail);
 
     return why === null ? { status: 200, body: { started: true } } : { status: 409, body: { error: why } };
   }

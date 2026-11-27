@@ -35,6 +35,9 @@ export interface LocalFilesView {
 /** The most file tabs a conversation keeps; opening another closes the oldest. */
 export const LOCAL_TABS_MAX = 12;
 
+/** The file tab's type badge, by the kind the hub read. */
+const KIND_NAMES: Record<LocalFileData['kind'], string> = { text: 'Text', markdown: 'Markdown', image: 'Image', pdf: 'PDF', binary: 'File', dir: 'Folder' };
+
 const baseName = (path: string): string => path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || path;
 
 /** A tab's name: the file's, once read, else the last part of the target. */
@@ -451,7 +454,7 @@ function LocalView({ tab, note, pageKey }: { tab: LocalTab; note: string | null;
   return (
     <div class="artifact-view local-view" data-local={String(tab.id)}>
       <div class="artifact-head">
-        <span class="artifact-badge">{data?.kind === 'dir' ? 'folder' : (data?.kind ?? 'file')}</span>
+        <span class="artifact-badge">{KIND_NAMES[data?.kind ?? 'binary']}</span>
         <span class="artifact-title" title={path}>
           {/* The title cuts its start, right to left; the path itself reads left to right, so `../a` stays `../a`. */}
           <bdi dir="ltr">

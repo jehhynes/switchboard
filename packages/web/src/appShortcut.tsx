@@ -42,7 +42,7 @@ export function AppShortcut({ prepare = shortcutIcon, save = (url: string) => {
     finally { if (active.current) setBusy(false); }
   };
   return <SheetFrame title="Download app shortcut" close buttons={<button type="button" class="sheet-button primary" disabled={!valid || busy} onClick={() => void download()}>{busy ? 'Preparing…' : 'Download shortcut'}</button>}>
-    <p class="sheet-detail">Open Switchboard in its own app window. No installer or local hub is needed.</p>
+    <p class="sheet-detail">Open Switchboard in its own app window. No installer is needed.</p>
     <label class="sheet-field"><span class="sheet-label">System</span><select class="sheet-select" value={system} disabled={busy} onChange={(event) => setSystem(event.currentTarget.value)}><option value="windows">Windows</option><option value="linux">Linux</option></select></label>
     {linux ? null : <label class="sheet-field"><span class="sheet-label">Browser</span><select class="sheet-select" value={browser} disabled={busy} onChange={(event) => setBrowser(event.currentTarget.value)}><option value="chrome">Chrome</option><option value="edge">Edge</option></select></label>}
     <label class="sheet-field"><span class="sheet-label">Profile directory</span><input class="sheet-select" value={profile} disabled={busy} maxLength={80} placeholder="Default or Profile 1" onInput={(event) => setProfile(event.currentTarget.value)} />

@@ -412,7 +412,7 @@ describe('local file tabs', () => {
     link('9 screenshots').click();
     await flush();
     expect([...root.querySelectorAll('.local-entry')].map((one) => one.textContent)).toEqual(['old', 'a.png']);
-    expect(root.querySelector('.local-view .artifact-badge')!.textContent).toBe('folder');
+    expect(root.querySelector('.local-view .artifact-badge')!.textContent).toBe('Folder');
     root.querySelector<HTMLElement>('.local-entry[title="a.png"]')!.click();
     await flush();
     expect(localGets().at(-1)).toBe(localFileUrl('pk', 'D:/w/.wip/shots/a.png'));

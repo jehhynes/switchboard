@@ -1388,12 +1388,12 @@ function DevicesBlock({ remote, on }: { remote: RemoteView; on: Handlers }) {
                 </span>
                 <span class="device-detail">
                   {one.host === null ? 'This computer' : `${one.host} as ${one.login ?? ''}`} · last used {usedText(one.usedAt)}
-                  {one.voice === true ? ' · voice allowed' : ''}
+                  {one.voice === true ? ' · voice enabled' : ''}
                 </span>
               </span>
               {one.host === null ? null : (
-                <button type="button" class="sheet-button secondary" title={one.voice === true ? 'Stop this device from using voice; its current voice connection will close.' : 'Allow this device to use its microphone and speaker for voice.'} disabled={remote.busy} onClick={() => on.deviceVoice(one.id, one.voice !== true)}>
-                  {one.voice === true ? 'Forbid voice' : 'Allow voice'}
+                <button type="button" class="sheet-button secondary" title={one.voice === true ? 'Stop this device from using voice; its current voice connection closes.' : 'Let this device use its microphone and speaker for voice.'} disabled={remote.busy} onClick={() => on.deviceVoice(one.id, one.voice !== true)}>
+                  {one.voice === true ? 'Disable voice' : 'Enable voice'}
                 </button>
               )}
               <button type="button" class="sheet-button secondary" title="Sign this device out of Switchboard" disabled={remote.busy} onClick={() => on.signOut(one.id)}>
@@ -1524,9 +1524,9 @@ function UsedBy({ playbooks, on }: { playbooks: readonly string[]; on: Handlers 
 function VoiceOff({ on }: { on: Handlers }) {
   return (
     <p class="settings-voice-off">
-      Voice is off, so these settings do nothing until you turn it on.{' '}
+      Voice is off, so these settings do nothing until you enable it.{' '}
       <button type="button" class="link" onClick={on.voiceSwitch}>
-        Turn on voice
+        Enable voice
       </button>
     </p>
   );

@@ -365,7 +365,7 @@ export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'work
   const restart = holder.restart;
 
   if (restart?.state === 'running') {
-    notices.push({ id: 'holder-restarting', class: 'transient', text: 'Restarting the terminal holder and resuming its sessions…', dismiss: null });
+    notices.push({ id: 'holder-restarting', class: 'transient', text: 'Restarting background sessions on the installed build…', dismiss: null });
   } else if (holder.older) {
     const live = (snapshot.held ?? []).filter((one) => one.exitedAt === null);
     const sessionOf = (id: string) => snapshot.workItems.flatMap((item) => item.sessions.map((session) => ({ item, session }))).find((entry) => entry.session.id === id);
@@ -378,8 +378,8 @@ export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'work
       return one.key === null ? title : `${title} (${one.key})`;
     };
     const parts = [
-      live.length === 0 ? 'The terminal holder holds no live session.' : '',
-      resumed.length === 0 ? '' : `Restarting stops ${resumed.length === 1 ? 'the background session' : `the ${resumed.length} background sessions`} and resumes ${resumed.length === 1 ? 'it' : 'them'} in a holder of the installed build.`,
+      live.length === 0 ? 'No background session is running.' : '',
+      resumed.length === 0 ? '' : `Restarting stops ${resumed.length === 1 ? 'the background session' : `the ${resumed.length} background sessions`} and resumes ${resumed.length === 1 ? 'it' : 'them'} on the installed build.`,
       busy.length === 0 ? '' : `${busy.length === 1 ? 'This session is' : 'These sessions are'} not idle, so the restart interrupts ${busy.length === 1 ? 'its turn' : 'their turns'}: ${busy.map(name).join(', ')}.`,
       others === 0 ? '' : `${plural(others, resumed.length === 0 ? 'background session' : 'other background session', resumed.length === 0 ? 'background sessions' : 'other background sessions')} ${others === 1 ? 'ends and is' : 'end and are'} not resumed.`,
     ];
@@ -387,9 +387,9 @@ export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'work
     notices.push({
       id: `holder-older:${holder.installed ?? ''}`,
       class: 'action',
-      text: `The terminal holder that runs background sessions is out of date. Restart it to update${resumed.length === 0 ? '' : `; its ${plural(resumed.length, 'session stops and resumes', 'sessions stop and resume')}`}.`,
+      text: `Switchboard runs background sessions on an older build. Restart to update${resumed.length === 0 ? '' : resumed.length === 1 ? '; the session stops and resumes' : `; the ${resumed.length} sessions stop and resume`}.`,
       dismiss: 'kept',
-      action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart the terminal holder?', detail: parts.filter((part) => part !== '').join(' '), action: 'Restart and resume' } },
+      action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart background sessions on the installed build?', detail: parts.filter((part) => part !== '').join(' '), action: 'Restart and resume' } },
     });
   }
 
@@ -398,8 +398,8 @@ export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'work
     const failed = restart.failed.length === 0 ? '' : ` ${plural(restart.failed.length, 'session', 'sessions')} did not resume: ${restart.failed.map((one) => `${one.key ?? one.session}: ${one.error}`).join(' ')}`;
     const text =
       restart.error === null
-        ? `The terminal holder restarted${restart.resumed === 0 ? '' : ` and ${resumed} resumed`}.`
-        : `The terminal holder did not restart: ${restart.error}${restart.resumed === 0 ? '' : ` ${resumed} resumed.`}`;
+        ? `Background sessions restarted${restart.resumed === 0 ? '' : ` and ${resumed} resumed`}.`
+        : `Background sessions did not restart: ${restart.error}${restart.resumed === 0 ? '' : ` ${resumed} resumed.`}`;
 
     if (restart.error === null && restart.failed.length === 0) {
       info.push({ id: `holder-restarted:${restart.at}`, text, at: restart.at });

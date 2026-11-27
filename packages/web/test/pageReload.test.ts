@@ -156,7 +156,7 @@ describe('the page in use', () => {
     hello(source);
     source.emit('message', { message: message('m7', 7, { delivery: 'unconfirmed', error: "The session's record does not show this message.", text: 'lost words' }) });
     await flush();
-    expect(root.querySelector('li[data-id="m7"] .delivery')!.textContent).toBe('not confirmed');
+    expect(root.querySelector('li[data-id="m7"] .delivery')!.textContent).toBe('Not confirmed');
     expect(root.querySelector('li[data-id="m7"] .delivery')!.getAttribute('title')).toBe("The session's record does not show this message.");
     click('li[data-id="m7"] [data-action="resend-message"]');
     await flush();

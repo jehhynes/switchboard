@@ -49,7 +49,7 @@ describe('sessions (PRD R107)', () => {
     expect(runner.markers([]).size).toBe(0);
     expect(await runner.isBackground({ sessionId: 's1', shortId: 'thread-1' })).toBe(false);
     expect(await runner.stop({ sessionId: 's1', shortId: 'thread-1' }, 'operator')).toEqual({ error: EXEC_RETIRED });
-    expect(await runner.reconcile([{ id: 's1' } as never])).toEqual([{ sessionId: 's1', failed: 'The hub stopped while the session was starting.' }]);
+    expect(await runner.reconcile([{ id: 's1' } as never])).toEqual([{ sessionId: 's1', failed: 'Switchboard stopped while the session was starting.' }]);
   });
 });
 

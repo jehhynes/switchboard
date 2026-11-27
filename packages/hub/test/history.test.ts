@@ -374,7 +374,7 @@ describe('History model', () => {
       ],
       [
         event('held-resumed', 'hub', { launchId: 'launch-2' }, [change('session', 'update', { state: ['ended', 'idle'], released: [true, false], endedAt: [5, null] }, { sessionId: 's1' })]),
-        { text: 'Session abc12345 resumed in the terminal holder', lines: [], category: 'session' },
+        { text: 'Session abc12345 resumed as a background session', lines: [], category: 'session' },
       ],
       [event('move-cancelled', 'hub', null, []), { text: 'Session abc12345 stayed in its tab, whose process did not exit', lines: [], category: 'session' }],
       [

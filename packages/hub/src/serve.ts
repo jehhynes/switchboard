@@ -313,7 +313,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
             }
 
             app?.handedOver?.();
-            server.hold('The hub is restarting onto a new build; try again in a few seconds.');
+            server.hold('Switchboard is restarting onto a new build; try again in a few seconds.');
             await stop('restarting onto the installed build', false);
 
             const successor = await waitForHub(home, restartOptions.takeoverWaitMs ?? TAKEOVER_WAIT_MS, (found) => found.token !== record.token);
@@ -346,7 +346,7 @@ export async function serveHub(options: ServeOptions): Promise<ServeResult> {
       process.off('exit', unclaim);
       server.stopViews();
       // A request being answered still uses the app; later ones are refused, and the app closes once those finish or after 5 seconds.
-      server.hold(`The hub is stopping: ${reason}.`);
+      server.hold(`Switchboard is stopping: ${reason}.`);
 
       for (const until = Date.now() + STOP_REQUESTS_MS; server.inFlight() > 0 && Date.now() < until; ) {
         await new Promise((done) => setTimeout(done, 20));

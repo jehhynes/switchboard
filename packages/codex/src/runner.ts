@@ -53,7 +53,7 @@ export class CodexRunner implements SessionRunner {
   }
 
   reconcile(sessions: Session[]): Promise<Reconciled[]> {
-    return Promise.resolve(sessions.map((session) => ({ sessionId: session.id, failed: 'The hub stopped while the session was starting.' })));
+    return Promise.resolve(sessions.map((session) => ({ sessionId: session.id, failed: 'Switchboard stopped while the session was starting.' })));
   }
 
   /** Writes the hook script and Switchboard's entries in hooks.json, then has Codex trust them; the contract hook serves app-server threads. */

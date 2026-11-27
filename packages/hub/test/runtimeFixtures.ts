@@ -268,7 +268,7 @@ export function heldRunner(cli: FakeCli, hooks: () => boolean): SessionRunner {
       sessions.map((session) => {
         const entry = (cli.roster as RosterEntry[]).find((one) => one.sessionId === session.nativeSessionId && one.pid !== undefined);
 
-        return entry === undefined ? { sessionId: session.id, failed: 'The hub stopped while the session was starting.' } : { sessionId: session.id, started: { shortId: entry.id!, nativeSessionId: entry.sessionId } };
+        return entry === undefined ? { sessionId: session.id, failed: 'Switchboard stopped while the session was starting.' } : { sessionId: session.id, started: { shortId: entry.id!, nativeSessionId: entry.sessionId } };
       }),
     installHooks: async () => null,
   };

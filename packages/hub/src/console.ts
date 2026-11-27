@@ -42,7 +42,7 @@ export function noConsole(session: Session): string | null {
     ? 'This Codex session has no thread yet, so it has no console.'
     : session.provider === 'claude'
       ? 'This session runs in your own Claude window, so it has a console here only once it ends there.'
-      : "This session does not run in Switchboard's terminal holder, so it has no console here.";
+      : "This session is not a background session, so it has no console here.";
 }
 
 const isSize = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1000;

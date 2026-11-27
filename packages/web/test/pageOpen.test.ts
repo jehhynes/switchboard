@@ -309,7 +309,7 @@ describe('the page in use', () => {
 
     input.value = 'Ship it';
     input.dispatchEvent(new Event('input'));
-    answers['/send'] = { status: 503, body: { error: 'The hub is restarting onto a new build; try again in a few seconds.' } };
+    answers['/send'] = { status: 503, body: { error: 'Switchboard is restarting onto a new build; try again in a few seconds.' } };
     click('button.send');
     await vi.advanceTimersByTimeAsync(SEND_RETRY_MS);
     expect(sends().length).toBeGreaterThan(2);

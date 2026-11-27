@@ -116,7 +116,7 @@ export function consoleNote(session: PageState['session']): string | null {
     return 'No session has started yet.';
   }
 
-  return session.conversation === 'none' ? "This session does not run in Switchboard's terminal holder, so it has no console here." : null;
+  return session.conversation === 'none' ? "This session is not a background session, so it has no console here." : null;
 }
 
 /**
@@ -345,7 +345,7 @@ export function deliveryMark(item: MessageView, resend = true): string {
   if (item.delivery === 'unconfirmed') {
     const again = resend ? '<button class="resend" type="button" data-action="resend-message">Send again</button>' : '';
 
-    return `<span class="delivery uncertain" title="${escape(item.error ?? '')}">not confirmed</span>${again}`;
+    return `<span class="delivery uncertain" title="${escape(item.error ?? '')}">Not confirmed</span>${again}`;
   }
 
   return item.delivery === 'uncertain' ? `<span class="delivery uncertain" title="${escape(item.error ?? '')}">uncertain</span>` : '';

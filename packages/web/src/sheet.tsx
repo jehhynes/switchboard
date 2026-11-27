@@ -65,7 +65,7 @@ export function renderSheet(sheet: Sheet | null, acting: boolean): VNode | null 
           </label>
         )}
         <GrowingText class={`sheet-input${input.text === null ? '' : ' tall'}`} rows={input.text === null ? 3 : 6} aria-label={input.question} value={sheet.text} />
-        <p class="sheet-note">Ctrl+Enter to {input.action.toLowerCase().replace(/…$/, '')}.</p>
+        <p class="sheet-note keys">Ctrl+Enter to {input.action.toLowerCase().replace(/…$/, '')}.</p>
       </Frame>
     );
   }

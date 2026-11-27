@@ -152,7 +152,7 @@ describe('HubRestart', () => {
 
     expect(hub.calls).toEqual(['successor', 'handOver']);
     expect(hub.lines).toEqual(['hub: restart asked by hub.js restart', 'hub: restart onto build b1 waits: a triage is running', 'hub: restarting from build b1 onto build b1 (asked by hub.js restart)']);
-    expect(restart.request()).toEqual({ refused: 'The hub is already restarting.' });
+    expect(restart.request()).toEqual({ refused: 'Switchboard is already restarting.' });
   });
 
   it('runs one restart at a time', async () => {

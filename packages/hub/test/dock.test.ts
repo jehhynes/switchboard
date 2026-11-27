@@ -644,14 +644,14 @@ describe('dockView holder notice (architecture.md § Restarting the holder)', ()
     expect(holderOf(view)).toEqual({
       id: 'holder-older:bbbbbbbbbbbbbbbb',
       class: 'action',
-      text: 'The terminal holder that runs background sessions is out of date. Restart it to update; its 3 sessions stop and resume.',
+      text: 'Switchboard runs background sessions on an older build. Restart to update; the 3 sessions stop and resume.',
       dismiss: 'kept',
       action: {
         kind: 'holder-restart',
         label: 'Restart and resume',
         confirm: {
-          question: 'Restart the terminal holder?',
-          detail: 'Restarting stops the 3 background sessions and resumes them in a holder of the installed build. These sessions are not idle, so the restart interrupts their turns: Issue <8> (gh 108), Issue <9> (gh 109). 2 other background sessions end and are not resumed.',
+          question: 'Restart background sessions on the installed build?',
+          detail: 'Restarting stops the 3 background sessions and resumes them on the installed build. These sessions are not idle, so the restart interrupts their turns: Issue <8> (gh 108), Issue <9> (gh 109). 2 other background sessions end and are not resumed.',
           action: 'Restart and resume',
         },
       },
@@ -661,13 +661,13 @@ describe('dockView holder notice (architecture.md § Restarting the holder)', ()
 
     const one = dockView(snapshot([items[1]!], { holder: older, held: [held('s2', { key: 'gh 108' })] }), NOW, W);
 
-    expect(holderOf(one)?.text).toBe('The terminal holder that runs background sessions is out of date. Restart it to update; its 1 session stops and resumes.');
-    expect(confirmOf(holderOf(one))?.detail).toBe('Restarting stops the background session and resumes it in a holder of the installed build. This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).');
+    expect(holderOf(one)?.text).toBe('Switchboard runs background sessions on an older build. Restart to update; the session stops and resumes.');
+    expect(confirmOf(holderOf(one))?.detail).toBe('Restarting stops the background session and resumes it on the installed build. This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).');
 
     const none = dockView(snapshot([], { holder: older }), NOW, W);
 
-    expect(holderOf(none)?.text).toBe('The terminal holder that runs background sessions is out of date. Restart it to update.');
-    expect(confirmOf(holderOf(none))?.detail).toBe('The terminal holder holds no live session.');
+    expect(holderOf(none)?.text).toBe('Switchboard runs background sessions on an older build. Restart to update.');
+    expect(confirmOf(holderOf(none))?.detail).toBe('No background session is running.');
     expect(confirmOf(holderOf(dockView(snapshot([], { holder: older, held: [held('o1', { orphan: true, workItemId: null })] }), NOW, W)))?.detail).toBe('1 background session ends and is not resumed.');
     expect(holderOf(dockView(snapshot([], { holder: { ...older, installed: 'cccccccccccccccc' } }), NOW, W))?.id).toBe('holder-older:cccccccccccccccc');
   });
@@ -675,24 +675,24 @@ describe('dockView holder notice (architecture.md § Restarting the holder)', ()
   it('offers no restart while one runs, sends a restart that went well once as a toast, and keeps a failed one until dismissed', () => {
     const running = dockView(snapshot([], { holder: { ...older, restart: { state: 'running', at: NOW } } }), NOW, W);
 
-    expect(running.notices).toEqual([{ id: 'holder-restarting', class: 'transient', text: 'Restarting the terminal holder and resuming its sessions…', dismiss: null }]);
+    expect(running.notices).toEqual([{ id: 'holder-restarting', class: 'transient', text: 'Restarting background sessions on the installed build…', dismiss: null }]);
 
     const done = { state: 'done' as const, at: NOW, resumed: 2, failed: [], error: null };
     const well = dockView(snapshot([], { holder: { ...older, older: false, restart: done } }), NOW, W);
 
-    expect(well.info).toEqual([{ id: `holder-restarted:${NOW}`, text: 'The terminal holder restarted and 2 sessions resumed.', at: NOW }]);
+    expect(well.info).toEqual([{ id: `holder-restarted:${NOW}`, text: 'Background sessions restarted and 2 sessions resumed.', at: NOW }]);
     expect(holderOf(well)).toBeUndefined();
-    expect(dockView(snapshot([], { holder: { ...older, older: false, restart: { ...done, resumed: 0 } } }), NOW, W).info[0]?.text).toBe('The terminal holder restarted.');
+    expect(dockView(snapshot([], { holder: { ...older, older: false, restart: { ...done, resumed: 0 } } }), NOW, W).info[0]?.text).toBe('Background sessions restarted.');
 
     const partly = dockView(snapshot([], { holder: { ...older, older: false, restart: { ...done, resumed: 1, failed: [{ session: 's2', key: 'gh 108', error: 'Claude Code did not start.' }] } } }), NOW, W);
 
     expect(partly.info).toEqual([]);
-    expect(holderOf(partly)).toEqual({ id: `holder-result:${NOW}`, class: 'action', text: 'The terminal holder restarted and 1 session resumed. 1 session did not resume: gh 108: Claude Code did not start.', dismiss: 'memory' });
+    expect(holderOf(partly)).toEqual({ id: `holder-result:${NOW}`, class: 'action', text: 'Background sessions restarted and 1 session resumed. 1 session did not resume: gh 108: Claude Code did not start.', dismiss: 'memory' });
 
     // A failed restart leaves the old holder, so the notice offers it again beside the result.
     const failed = dockView(snapshot([], { holder: { ...older, restart: { ...done, resumed: 1, error: 'The terminal holder (pid 4) did not exit and could not be ended: Access is denied.' } } }), NOW, W);
 
-    expect(failed.notices.find((one) => one.id.startsWith('holder-result:'))?.text).toBe('The terminal holder did not restart: The terminal holder (pid 4) did not exit and could not be ended: Access is denied. 1 session resumed.');
+    expect(failed.notices.find((one) => one.id.startsWith('holder-result:'))?.text).toBe('Background sessions did not restart: The terminal holder (pid 4) did not exit and could not be ended: Access is denied. 1 session resumed.');
     expect(confirmOf(failed.notices.find((one) => one.id.startsWith('holder-older:')))).toBeDefined();
   });
 });

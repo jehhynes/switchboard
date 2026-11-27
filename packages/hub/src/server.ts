@@ -668,9 +668,9 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
       response.setHeader('Cache-Control', 'no-store');
       if (request.method !== 'GET') {
         response.setHeader('Allow', 'GET');
-        json(response, 405, { error: 'The hub log is read only.' });
+        json(response, 405, { error: 'The Switchboard log is read only.' });
       } else if (page.hubLog === undefined) {
-        json(response, 404, { error: 'The hub log is unavailable.' });
+        json(response, 404, { error: 'The Switchboard log is unavailable.' });
       } else {
         const value = url.searchParams.get('lines');
         const lines = value === null ? HUB_LOG_LINES : Number(value);
@@ -1075,7 +1075,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (closing || held !== null) {
-      refuse(503, held ?? 'The hub is stopping.');
+      refuse(503, held ?? 'Switchboard is stopping.');
       return;
     }
 

@@ -175,12 +175,13 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
 .pair-sheet .pair-qr { width: min(220px, 24vh); height: min(220px, 24vh); }
 .pair-code { margin: 0 0 8px; font: 600 24px var(--vscode-editor-font-family, monospace); letter-spacing: 2px; user-select: all; }
 .device-list { list-style: none; margin: 0 0 12px; padding: 0; }
-.device { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--vscode-widget-border, transparent); }
+.device { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--vscode-widget-border, transparent); }
 /* In a sheet the list is a card, its rows between the card's hairlines. */
 .device-list.sheet-card .device { padding: 8px 12px; border-top: none; }
 .device-list.sheet-card > .device + .device { border-top: 1px solid var(--vscode-panel-border); }
-.device-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-.device-detail { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+/* At least 200 px, so a login or host breaks only where it is longer than that; the buttons wrap under it on a phone. */
+.device-text { display: flex; flex-direction: column; flex: 1 1 200px; min-width: 0; }
+.device-detail { color: var(--vscode-descriptionForeground); overflow-wrap: break-word; }
 @media (hover: none), (pointer: coarse) { .sheet-select { min-height: 44px; } .more-menu .menu-row { height: 44px; } }
 /* The bell (architecture.md § Web page, List header): only while an action notice is there, with their count as an amber badge on the icon's
    top-right corner, inside the button's own box, so the button alone takes presses. */
@@ -484,6 +485,8 @@ button.picker > .codicon-chevron-down { order: 2; }
 .row-menu-anchor > .row-menu.flip-y { top: auto; bottom: 0; }
 .sheet-input { box-sizing: border-box; width: 100%; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 4px; padding: 4px 8px; }
 .sheet-note { margin: 4px 0 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
+/* A keyboard shortcut's hint, only where a keyboard is likely. */
+@media (hover: none), (pointer: coarse) { .sheet-note.keys { display: none; } }
 .menu-row[aria-haspopup] > .codicon { margin-left: auto; }
 .menu-separator { height: 1px; margin: 4px 10px; background: var(--vscode-menu-separatorBackground, var(--vscode-widget-border, rgba(127, 127, 127, 0.35))); }
 .menu-message { max-width: 320px; padding: 5px 16px 5px 34px; color: var(--vscode-descriptionForeground); white-space: normal; }
@@ -591,6 +594,7 @@ button.picker > .codicon-chevron-down { order: 2; }
 .message { display: flex; flex-direction: column; align-items: flex-end; }
 .message .bubble { display: flex; flex-direction: column; align-items: flex-end; max-width: 85%; }
 .message .bubble > .meta { align-self: stretch; }
+.message .meta-marks { justify-content: flex-end; }
 .message .box { max-width: 100%; margin: 0; border-radius: 12px 12px 4px 12px; background: var(--sb-message-bubble); padding: 6px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message .box.command { font-family: var(--vscode-editor-font-family); }
 .message.provisional .box { opacity: 0.7; }
