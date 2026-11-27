@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renameSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
+import { mediaOf } from '../src/changes.js';
 import { allowedPath, claudeTempName, LOCAL_DIR_MAX, LOCAL_TEXT_MAX_BYTES, localRoots, localTarget, mainCheckout, openLocalFile, openPageFile, rawMime } from '../src/localFiles.js';
 import type { LocalRoots } from '../src/localFiles.js';
 
@@ -263,12 +264,36 @@ describe('openLocalFile', () => {
 
     await touched!.handle!.close();
     expect(touched!.view.modified).toBe(1_700_000_000_000);
+    // A text file's time is in the view too, which the file viewer's head shows.
     writeFileSync(join(work, 'note.txt'), 'text');
-    expect(await read('note.txt')).toMatchObject({ kind: 'text', modified: null });
+    utimesSync(join(work, 'note.txt'), new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+    expect(await read('note.txt')).toMatchObject({ kind: 'text', modified: 1_700_000_000_000 });
     expect(await read('doc.pdf')).toMatchObject({ kind: 'pdf', size: 8, contents: null });
     expect(rawMime(join(work, 'shot.PNG'))).toBe('image/png');
     expect(rawMime(join(work, 'x.svg'))).toBe('image/svg+xml');
     expect(rawMime(join(work, 'x.html'))).toBeNull();
+    expect(rawMime(join(work, 'a.ts'))).toBeNull();
+    // The Changes routes send them only when their leading bytes agree.
+    expect(mediaOf('a.mp3', Buffer.from('ID3'))).toBe('audio/mpeg');
+    expect(mediaOf('a.mp4', Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]))).toBe('video/mp4');
+    expect(mediaOf('a.webm', Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))).toBe('video/webm');
+    expect(mediaOf('a.mp4', Buffer.from('not a video'))).toBeNull();
+  });
+
+  it('OpenLocalFile_RecordingOrVideo_NamesItsKindAndKeepsItOpenToSend', async () => {
+    writeFileSync(join(work, 'note.mp3'), Buffer.from([0x49, 0x44, 0x33]));
+    writeFileSync(join(work, 'demo.MP4'), Buffer.from([0, 0, 0, 0x18]));
+
+    const audio = await openLocalFile(roots, 'note.mp3');
+    const video = await openLocalFile(roots, 'demo.MP4');
+
+    expect(audio!.view).toMatchObject({ kind: 'audio', size: 3, contents: null });
+    expect(video!.view).toMatchObject({ kind: 'video', size: 4, contents: null });
+    expect((await video!.handle!.readFile()).length).toBe(4);
+    await audio!.handle!.close();
+    await video!.handle!.close();
+    expect(rawMime(join(work, 'note.mp3'))).toBe('audio/mpeg');
+    expect(rawMime(join(work, 'demo.MP4'))).toBe('video/mp4');
     expect(rawMime(join(work, 'a.ts'))).toBeNull();
   });
 

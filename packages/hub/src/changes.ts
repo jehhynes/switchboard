@@ -200,14 +200,21 @@ export function parseNumstat(output: Buffer): Map<string, { additions: number | 
 
 const IMAGES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml' };
 
-/** A picture's or a PDF's media type by its extension, the only files sent as bytes; null for any other. */
+/** Recordings and videos, by extension, sent as bytes beside pictures and PDFs. */
+const MEDIA: Record<string, string> = { mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac', mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', ogv: 'video/ogg' };
+
+/** A picture's, a PDF's, a recording's or a video's media type by its extension, the only files sent as bytes; null for any other. */
 export function rawMime(path: string): string | null {
   const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
   const dot = name.lastIndexOf('.');
   const ext = dot <= 0 ? '' : name.slice(dot + 1).toLowerCase();
 
-  return ext === 'pdf' ? 'application/pdf' : (IMAGES[ext] ?? null);
+  return ext === 'pdf' ? 'application/pdf' : (IMAGES[ext] ?? MEDIA[ext] ?? null);
 }
+
+/** An ISO media file's box at its start, as MP4, M4A and QuickTime files begin. */
+const isoBox = (bytes: Buffer): boolean => ['ftyp', 'moov', 'wide', 'mdat', 'free', 'skip'].includes(bytes.subarray(4, 8).toString('latin1'));
+const ogg = (bytes: Buffer): boolean => bytes.subarray(0, 4).toString('latin1') === 'OggS';
 
 /** The bytes' leading marks each media type must have; an SVG must be text holding an `<svg` element. */
 const MAGIC: Record<string, (bytes: Buffer) => boolean> = {
@@ -220,6 +227,15 @@ const MAGIC: Record<string, (bytes: Buffer) => boolean> = {
   'image/avif': (bytes) => bytes.subarray(4, 12).toString('latin1') === 'ftypavif',
   'image/svg+xml': (bytes) => !looksBinary(bytes) && /<svg[\s>]/i.test(bytes.subarray(0, 64 * 1024).toString('utf8')),
   'application/pdf': (bytes) => bytes.subarray(0, 5).toString('latin1') === '%PDF-',
+  'audio/mpeg': (bytes) => bytes.subarray(0, 3).toString('latin1') === 'ID3' || (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0),
+  'audio/mp4': isoBox,
+  'audio/wav': (bytes) => bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WAVE',
+  'audio/ogg': ogg,
+  'audio/flac': (bytes) => bytes.subarray(0, 4).toString('latin1') === 'fLaC',
+  'video/mp4': isoBox,
+  'video/quicktime': isoBox,
+  'video/webm': (bytes) => bytes.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])),
+  'video/ogg': ogg,
 };
 
 /** The media type of a file whose extension and leading bytes agree, else null, so a file named `.png` that holds text is not sent as a picture. */
@@ -814,7 +830,7 @@ export interface FileView {
   tooLarge: boolean;
   /** The file's size, null when it could not be read. */
   bytes: number | null;
-  /** A picture's or a PDF's media type, when its extension and leading bytes agree (`mediaOf`); `file-raw` sends its bytes. */
+  /** A picture's, a PDF's, a recording's or a video's media type, when its extension and leading bytes agree (`mediaOf`); `file-raw` sends its bytes. */
   media: string | null;
   /** A hash of the bytes read (past the cap, of the leading bytes, size, and the file's identity and time), so the answer's ETag changes with a file whose contents it does not carry. */
   digest: string;
@@ -951,7 +967,7 @@ export async function readDiskFile(root: string, path: string, git: Git = nodeGi
   return read === null ? null : viewOf(path, 'disk', read);
 }
 
-/** A picture's or a PDF's bytes for `file-raw`, read as {@link readFileView} reads the side, up to {@link RAW_MAX_BYTES}; null for any other file. */
+/** A picture's, a PDF's, a recording's or a video's bytes for `file-raw`, read as {@link readFileView} reads the side, up to {@link RAW_MAX_BYTES}; null for any other file. */
 async function readRaw(root: string, at: { path: string; ref: string | null }, git: Git, folders: readonly string[] = []): Promise<{ mime: string; bytes: Buffer } | null> {
   if (at.ref === null && !(await listed(root, at.path, git, folders))) {
     return null;

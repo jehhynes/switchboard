@@ -917,13 +917,13 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
             void found.handle?.close();
 
             if (raw) {
-              json(response, 404, { error: 'Only a picture or a PDF is sent as a file.' });
+              json(response, 404, { error: 'Only a picture, a PDF, a recording or a video is sent as a file.' });
             } else {
               // The page reads an open file tab again while it shows, sending this ETag, so an unchanged file answers 304.
               jsonCompressed(request, response, { status: 200, body: found.view, etag: createHash('sha256').update(JSON.stringify(found.view)).digest('hex').slice(0, 32) });
             }
           } else {
-            // A picture shows in an img and a PDF in a frame of the page; an SVG's scripts get an opaque origin, as an artifact's do. The bytes
+            // A picture shows in an img, a PDF in a frame of the page, a recording or a video in its player; an SVG's scripts get an opaque origin, as an artifact's do. The bytes
             // come from the handle the check was made on.
             response.writeHead(200, { 'Content-Type': mime, 'Content-Length': found.view.size, 'Cache-Control': 'no-store', 'Content-Disposition': 'inline', ...(mime === 'image/svg+xml' ? { 'Content-Security-Policy': ARTIFACT_CSP } : {}) });
             pipeline(found.handle.createReadStream({ start: 0, end: Math.max(0, found.view.size - 1) }), response, () => {});

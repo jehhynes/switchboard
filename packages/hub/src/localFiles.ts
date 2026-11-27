@@ -8,7 +8,7 @@ import { looksBinary, rawMime } from './changes.js';
 
 /** The most bytes of a text, code or Markdown file the page is sent. */
 export const LOCAL_TEXT_MAX_BYTES = 4 * 1024 * 1024;
-/** The most bytes of a picture or PDF the page is sent. */
+/** The most bytes of a picture, PDF, recording or video the page is sent. */
 export const LOCAL_RAW_MAX_BYTES = 32 * 1024 * 1024;
 /** The most entries a folder's listing holds. */
 export const LOCAL_DIR_MAX = 500;
@@ -120,7 +120,7 @@ export async function mainCheckout(worktree: string): Promise<string | null> {
   return owned && realCommon !== null && basename(realCommon).toLowerCase() === '.git' ? dirname(realCommon) : null;
 }
 
-export type LocalKind = 'text' | 'markdown' | 'image' | 'pdf' | 'binary' | 'dir';
+export type LocalKind = 'text' | 'markdown' | 'image' | 'pdf' | 'audio' | 'video' | 'binary' | 'dir';
 
 export interface LocalEntry {
   name: string;
@@ -138,7 +138,7 @@ export interface LocalFileView {
   entries: LocalEntry[] | null;
   /** The folder had more entries than the listing holds. */
   more: boolean;
-  /** A picture's or PDF's modification time in epoch milliseconds, whose bytes the view does not carry, so a change to it changes the view; null otherwise. */
+  /** The file's modification time in epoch milliseconds, which the file viewer's head shows and a picture's address carries, so a change to a file sent as bytes changes the view; null for a folder. */
   modified: number | null;
   /** The work item's artifact this file is, by real path (`openPageFile`), so the page shows that artifact's tab in place of a file tab. */
   artifact?: string;
@@ -263,6 +263,7 @@ const extOf = (path: string): string => {
 
 export { rawMime };
 
+
 /** A local file or folder as read: its view, and for a picture or PDF the open handle its bytes are sent from, which the caller closes. */
 export interface LocalOpened {
   real: string;
@@ -360,8 +361,13 @@ export async function openLocalFile(roots: LocalRoots, target: string, checked?:
   const size = Number(info.size);
   const ext = extOf(real);
 
-  if (rawMime(real) !== null) {
-    return { real, handle, view: { ...base, kind: ext === 'pdf' ? 'pdf' : 'image', size, tooLarge: size > LOCAL_RAW_MAX_BYTES, modified: Number(info.mtimeMs) } };
+  const mime = rawMime(real);
+  const modified = Number(info.mtimeMs);
+
+  if (mime !== null) {
+    const kind = mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : ext === 'pdf' ? 'pdf' : 'image';
+
+    return { real, handle, view: { ...base, kind, size, tooLarge: size > LOCAL_RAW_MAX_BYTES, modified } };
   }
 
   const kind = MARKDOWN.has(ext) ? 'markdown' : 'text';
@@ -373,7 +379,7 @@ export async function openLocalFile(roots: LocalRoots, target: string, checked?:
     return null;
   }
 
-  const view: LocalFileView = bytes === 'large' ? { ...base, kind, size, tooLarge: true } : looksBinary(bytes) ? { ...base, kind: 'binary', size } : { ...base, kind, size, contents: bytes.toString('utf8') };
+  const view: LocalFileView = bytes === 'large' ? { ...base, kind, size, tooLarge: true, modified } : looksBinary(bytes) ? { ...base, kind: 'binary', size, modified } : { ...base, kind, size, contents: bytes.toString('utf8'), modified };
 
   return { real, handle: null, view };
 }
