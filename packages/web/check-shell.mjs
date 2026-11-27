@@ -24,7 +24,8 @@
 // its row, a one-line label and its mark within 1 px.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan, and each top bar sits alone in its box, so its
-// sticky position has no room to move. Chrome has no display-mode emulation, so the page's standalone rules are
+// sticky position has no room to move. A conversation's page scrolled with no text field focused goes back to the top, and stays scrolled while the
+// composer has the focus. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
 // Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install. --report prints the measurements.
 import { spawn } from 'node:child_process';
@@ -1794,6 +1795,28 @@ try {
           const dragged = JSON.parse(await state());
 
           if (dragged.page !== 0 || dragged.header !== before.header || dragged.panel !== scrolled.panel) found.push('a drag on the header moved the page: ' + JSON.stringify(dragged));
+        }
+
+        // iOS can leave the page scrolled after the keyboard, its header off the top (mechanics.md M177): with no text field focused the page
+        // puts itself back at the top, and while the composer has the focus it leaves iOS's scroll alone. A box past the page's end gives the
+        // document a scroll range, as iOS has while the visual viewport is shorter than the page.
+        if (view === 'conversation') {
+          const held = await evaluate(`(async () => {
+            const settle = () => new Promise((done) => setTimeout(done, 500));
+            const read = () => ({ page: Math.round(document.scrollingElement.scrollTop), header: Math.round(document.querySelector('.header').getBoundingClientRect().top) });
+            const header = read().header;
+            const spacer = document.documentElement.appendChild(Object.assign(document.createElement('div'), { style: 'position: absolute; top: 0; width: 1px; height: 3000px' }));
+            const input = document.querySelector('#composer textarea');
+            scrollTo(0, 48); await settle(); const idle = read();
+            input.focus(); scrollTo(0, 300); await settle(); const typing = read();
+            input.blur(); await settle(); const blurred = read();
+            spacer.remove(); await settle();
+            return { header, idle, typing, blurred };
+          })()`);
+
+          if (held.idle.page !== 0 || held.idle.header !== held.header) found.push('the page stayed scrolled with no text field focused: ' + JSON.stringify(held.idle));
+          if (held.typing.page !== 300) found.push('the page undid a scroll while the composer had the focus: ' + JSON.stringify(held.typing));
+          if (held.blurred.page !== 0 || held.blurred.header !== held.header) found.push('the page stayed scrolled after the composer lost the focus: ' + JSON.stringify(held.blurred));
         }
 
         // The toast and the console's foot, which the fake hub never raises, drawn with their own classes so their touch targets are measured.
