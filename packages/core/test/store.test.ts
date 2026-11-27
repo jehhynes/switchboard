@@ -882,6 +882,19 @@ describe('Store', () => {
     store.close();
   });
 
+  it('ExplorerFolders_LearnedTwice_KeptOncePerWorktreeAndSorted', () => {
+    const store = Store.open(':memory:');
+
+    expect(store.explorerFolders('D:\\wt\\a')).toEqual([]);
+    expect(store.addExplorerFolder('D:\\wt\\a', 'out/reports', 10)).toBe(true);
+    expect(store.addExplorerFolder('D:\\wt\\a', 'build/notes', 11)).toBe(true);
+    expect(store.addExplorerFolder('D:\\wt\\a', 'out/reports', 12)).toBe(false);
+    expect(store.addExplorerFolder('D:\\wt\\b', 'tmp', 13)).toBe(true);
+    expect(store.explorerFolders('D:\\wt\\a')).toEqual(['build/notes', 'out/reports']);
+    expect(store.explorerFolders('D:\\wt\\b')).toEqual(['tmp']);
+    store.close();
+  });
+
   it('ViewedFilesMigration_ExistingTicks_KeepsThemForTheChangesToDisk', () => {
     const version = MIGRATIONS.findIndex((migration) => migration.includes('CREATE TABLE viewedFilesScoped'));
     const path = join(dir, 'viewed-scope.db');

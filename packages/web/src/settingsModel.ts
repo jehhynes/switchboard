@@ -1419,7 +1419,7 @@ export const SOURCE_LABELS: Readonly<Record<string, string>> = { github: 'GitHub
 export const sourceLabel = (kind: string, config?: EditorConfig): string => config?.sourceLabels?.[kind] ?? SOURCE_LABELS[kind] ?? kind;
 
 /** The settings every source has; a change of kind keeps only these, because each plugin rejects another's keys. */
-export const COMMON_SOURCE_KEYS = ['kind', 'pollIntervalSeconds', 'repoRoot', 'triagePlaybook', 'setupPrompt', 'namespace'];
+export const COMMON_SOURCE_KEYS = ['kind', 'pollIntervalSeconds', 'repoRoot', 'triagePlaybook', 'setupPrompt', 'namespace', 'explorerFolders'];
 
 /** A source's `kind`, or its name when it sets none (PRD R3). */
 export function sourceKind(settings: Json | undefined | null, name: string): string {
@@ -1485,6 +1485,7 @@ export function sourceFields(state: EditorState, name: string): Section[] {
     },
     { path: `${path}.triagePlaybook`, label: 'Triage playbook', kind: 'select', help: '', options: withCurrent([{ value: '', label: 'None' }, ...triage], getAt(value, `${path}.triagePlaybook`)) },
     { path: `${path}.setupPrompt`, label: 'Setup prompt', kind: 'prompt', help: 'Runs before a playbook that requires a worktree, when the ticket has none.' },
+    { path: `${path}.explorerFolders`, label: 'Explore folders', kind: 'list', help: "One per line, relative to the worktree, such as out/reports: folders git ignores that the Changes tab's Explore still shows, muted. .wip always shows, and so does a folder a session named an artifact in; .git and node_modules never do." },
   ];
 
   // adhoc holds only the ad-hoc repo root, so it has no plugin to choose.

@@ -1,10 +1,13 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
+import { mkdirSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { MAX_TREE_PATHS, PageTree, SEARCH_MAX_FILES, SEARCH_MAX_LINES } from '../src/tree.js';
 import type { PageTreeDeps, SearchView, TreeView } from '../src/tree.js';
 import type { Git } from '../src/changes.js';
-import { nodeGit } from '../src/changes.js';
+import { nodeGit, readDiskFile } from '../src/changes.js';
 import type { WindowScope } from '../src/windows.js';
 import { isolateGit, makeRepo } from './gitFixture.js';
 
@@ -61,6 +64,86 @@ describe('PageTree.tree', gitTimeout, () => {
 
     expect((await tree.tree('other')).status).toBe(403);
     expect(await tree.tree('p')).toMatchObject({ status: 409 });
+  });
+});
+
+/** A repository whose git ignores .wip, out, dist, node_modules and *.log, with something in each. */
+function ignoring() {
+  const made = makeRepo({ 'src/a.ts': 'a\n', '.gitignore': '.wip/\nout/\ndist/\nnode_modules/\n*.log\n' });
+
+  for (const path of ['.wip/notes.md', '.wip/artifacts/w7/plan.md', '.wip/node_modules/x/i.js', 'out/reports/r.md', 'out/other.txt', 'dist/b.js', 'node_modules/m/i.js', 'src/node_modules/n.js', 'secret.log', 'src/debug.log']) {
+    made.write(path, 'ignored\n');
+  }
+
+  // A file git tracks inside node_modules is hidden too, at any depth.
+  made.write('lib/node_modules/kept.js', 'tracked\n');
+  made.git('add', '-f', 'lib/node_modules/kept.js');
+  return made;
+}
+
+describe('PageTree.tree, ignored entries', gitTimeout, () => {
+  const shown = (folders: string[]) => ({ folders: async () => folders });
+
+  it('lists only the ignored entries in or on the way to a shown folder, a folder as itself, and never .git or node_modules', async () => {
+    const made = ignoring();
+    const reply = await page(made.root, shown(['.wip', 'out/reports'])).tree.tree('p');
+    const body = reply.body as TreeView;
+
+    expect(reply.status).toBe(200);
+    expect(body.paths).toEqual(['.gitignore', 'src/a.ts']);
+    expect(body.ignored).toEqual(['.wip/', 'out/']);
+    expect(reply.etag).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it('shows .wip alone without folders from the hub', async () => {
+    const made = ignoring();
+
+    expect(((await page(made.root).tree.tree('p')).body as TreeView).ignored).toEqual(['.wip/']);
+  });
+
+  it("lists a shown ignored folder's entries when asked, only those on the way to or inside a shown folder, without node_modules", async () => {
+    const made = ignoring();
+    const { tree } = page(made.root, shown(['.wip', 'out/reports']));
+
+    expect((await tree.tree('p', '.wip')).body).toMatchObject({ dir: '.wip', paths: [], ignored: ['.wip/artifacts/', '.wip/notes.md'], more: false });
+    expect(((await tree.tree('p', '.wip/artifacts/w7')).body as TreeView).ignored).toEqual(['.wip/artifacts/w7/plan.md']);
+    expect(((await tree.tree('p', 'out')).body as TreeView).ignored).toEqual(['out/reports/']);
+    expect(((await tree.tree('p', 'out/reports')).body as TreeView).ignored).toEqual(['out/reports/r.md']);
+  });
+
+  it('refuses a folder path that is not plain, names .git or node_modules, is hidden, not ignored, gone, or reached through a link', async () => {
+    const made = ignoring();
+    const outside = makeRepo({ 'x.md': 'x\n' });
+
+    mkdirSync(join(made.root, '.wip', 'links'), { recursive: true });
+    symlinkSync(outside.root, join(made.root, '.wip', 'links', 'out'), 'junction');
+
+    const { tree } = page(made.root, shown(['.wip', 'out/reports', 'gone', 'src']));
+    const status = async (dir: string) => (await tree.tree('p', dir)).status;
+
+    expect(await Promise.all(['../x', '/etc', 'C:/Windows', '.', 'a//b', '.git', '.wip/node_modules', 'node_modules', 'a\\b'].map(status))).toEqual([400, 400, 400, 400, 400, 400, 400, 400, 400]);
+    // dist is ignored but not shown, src is shown but not ignored, gone was learned and deleted since, and a link leads out of the worktree.
+    expect(await Promise.all(['dist', 'src', 'gone', 'out/other.txt', '.wip/links/out'].map(status))).toEqual([404, 404, 404, 404, 404]);
+    // A link inside a shown folder is left out of its listing.
+    expect(((await tree.tree('p', '.wip/links')).body as TreeView).ignored).toEqual([]);
+    expect((await tree.tree('other', '.wip')).status).toBe(403);
+  });
+});
+
+describe('readDiskFile, ignored files', gitTimeout, () => {
+  it('reads an ignored file only inside a shown folder, and never a file under .git', async () => {
+    const made = ignoring();
+    const read = (path: string, folders: string[]) => readDiskFile(made.root, path, nodeGit, folders);
+
+    expect((await read('.wip/notes.md', ['.wip']))?.contents).toBe('ignored\n');
+    expect(await read('.wip/notes.md', [])).toBeNull();
+    expect(await read('secret.log', ['.wip'])).toBeNull();
+    expect(await read('dist/b.js', ['.wip'])).toBeNull();
+    expect(await read('.git/config', ['.git', '.wip'])).toBeNull();
+    expect((await read('src/a.ts', []))?.contents).toBe('a\n');
+    // node_modules stays hidden from the file view too, tracked or ignored inside a shown folder.
+    expect(await read('lib/node_modules/kept.js', [])).toBeNull();
+    expect(await read('.wip/node_modules/x/i.js', ['.wip'])).toBeNull();
   });
 });
 

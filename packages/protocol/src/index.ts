@@ -510,10 +510,13 @@ export interface StackData {
   main: { ref: string | null; behind: number | null; fetchedAt: number | null };
 }
 
-/** The `tree` answer: the paths git lists in the worktree, sorted. */
+/** The `tree` answer: the paths git lists in the worktree, sorted, and what it ignores, a folder as `<path>/`; with `dir`, an ignored folder's entries alone. */
 export interface TreeData {
   scopeGen: number;
   paths: string[];
+  /** Absent from a hub older than the page. */
+  ignored?: string[];
+  dir?: string;
   more: boolean;
 }
 

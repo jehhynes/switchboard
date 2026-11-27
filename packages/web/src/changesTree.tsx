@@ -18,6 +18,8 @@ export interface TreeState {
   stack: StackData | null;
   stackError: string | null;
   tree: TreeData | null;
+  /** Each opened ignored folder's entries, read when it is first opened, as `<path>` or `<path>/` for a folder; kept by the folder's path. */
+  ignored: Map<string, string[] | { error: string } | 'loading'>;
   /** The uncommitted changes, HEAD to disk: FILES · Changed, and the status letters of FILES · All. */
   uncommitted: ChangesList | null;
   /** Each expanded commit's own changes, read without making them the list shown, the last {@link PEEKS_KEPT}. */
@@ -43,7 +45,7 @@ export interface TreeState {
 
 export const PEEKS_KEPT = 20;
 
-export const newTree = (): TreeState => ({ stack: null, stackError: null, tree: null, uncommitted: null, peeks: new Map(), open: new Set(), closed: new Set(), files: null, query: '', text: false, matchCase: false, word: false, regex: false, search: null, searchError: null, menu: null, options: false });
+export const newTree = (): TreeState => ({ stack: null, stackError: null, tree: null, ignored: new Map(), uncommitted: null, peeks: new Map(), open: new Set(), closed: new Set(), files: null, query: '', text: false, matchCase: false, word: false, regex: false, search: null, searchError: null, menu: null, options: false });
 
 const short = (sha: string): string => sha.slice(0, 7);
 const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
@@ -81,7 +83,7 @@ export function commitMatches(state: TreeState, sha: string, info: (CommitInfo &
 /** Whether the typed filter is on, so a base with a matching commit opens to show it. */
 const filtering = (state: TreeState): boolean => !state.text && state.query.trim() !== '';
 
-/** The folders and files under a folder, folders first, each sorted by name. */
+/** The folders and files under a folder, folders first, each sorted by name; a path ending in `/` is a folder. */
 export function folderEntries(paths: readonly string[], dir: string): { dirs: string[]; files: string[] } {
   const prefix = dir === '' ? '' : `${dir}/`;
   const dirs = new Set<string>();
@@ -93,6 +95,10 @@ export function folderEntries(paths: readonly string[], dir: string): { dirs: st
     }
 
     const rest = path.slice(prefix.length);
+
+    if (rest === '') {
+      continue;
+    }
     const slash = rest.indexOf('/');
 
     if (slash === -1) {
@@ -102,7 +108,40 @@ export function folderEntries(paths: readonly string[], dir: string): { dirs: st
     }
   }
 
-  return { dirs: [...dirs].sort(), files: files.sort() };
+  return { dirs: [...dirs].sort(), files: [...new Set(files)].sort() };
+}
+
+/** What git ignores, read so far: its files, and its folders, under whose paths everything is ignored. */
+export interface IgnoredSet {
+  files: Set<string>;
+  dirs: Set<string>;
+}
+
+/** The ignored files and folders the tree has read: the worktree's, and those of every ignored folder opened. */
+export function ignoredSet(state: TreeState): IgnoredSet {
+  const files = new Set<string>();
+  const dirs = new Set<string>();
+
+  for (const path of [...(state.tree?.ignored ?? []), ...[...state.ignored.values()].flatMap((one) => (Array.isArray(one) ? one : []))]) {
+    path.endsWith('/') ? dirs.add(path.slice(0, -1)) : files.add(path);
+  }
+
+  return { files, dirs };
+}
+
+/** Whether git ignores a path: an ignored file, an ignored folder, or anything inside one. */
+export function isIgnored(ignored: IgnoredSet, path: string): boolean {
+  if (ignored.files.has(path) || ignored.dirs.has(path)) {
+    return true;
+  }
+
+  for (let at = path.indexOf('/'); at !== -1; at = path.indexOf('/', at + 1)) {
+    if (ignored.dirs.has(path.slice(0, at))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** A tree row: a button for the row's own action, and any links and controls after it as targets of their own. */
@@ -479,7 +518,7 @@ function ChangedFiles({ state }: { state: TreeState }): VNode {
   );
 }
 
-function AllFiles({ state, dir, depth }: { state: TreeState; dir: string; depth: number }): VNode {
+function AllFiles({ state, dir, depth, all, ignored }: { state: TreeState; dir: string; depth: number; all?: readonly string[]; ignored?: IgnoredSet }): VNode {
   const tree = state.tree;
 
   if (tree === null) {
@@ -487,7 +526,7 @@ function AllFiles({ state, dir, depth }: { state: TreeState; dir: string; depth:
   }
 
   const status = new Map((state.uncommitted?.rows ?? []).map((row) => [row.path, row.status]));
-  // Filtering by name shows every matching file flat, as the tree's folders would hide them.
+  // Filtering by name shows every matching file flat, as the tree's folders would hide them; as VS Code's file search does, it leaves out what git ignores.
   const query = state.text ? '' : state.query.trim();
 
   if (query !== '' && dir === '') {
@@ -503,24 +542,43 @@ function AllFiles({ state, dir, depth }: { state: TreeState; dir: string; depth:
     );
   }
 
-  const { dirs, files } = folderEntries(tree.paths, dir);
+  // What git ignores is listed with the rest, drawn muted as VS Code draws it; an ignored folder's entries are read when it is opened.
+  const known = ignored ?? ignoredSet(state);
+  const paths = all ?? [...tree.paths, ...(tree.ignored ?? []), ...[...state.ignored.values()].flatMap((one) => (Array.isArray(one) ? one : []))];
+  const { dirs, files } = folderEntries(paths, dir);
+  const read = state.ignored.get(dir);
+  const muted = (path: string) => (isIgnored(known, path) ? ' ignored' : '');
 
   return (
     <div class="tree-section" role="group" aria-label={dir === '' ? 'Files' : `Files in ${dir}`}>
+      {read === 'loading' ? (
+        <p class="tree-note" style={`--depth: ${depth}`}>
+          Reading the folder…
+        </p>
+      ) : read !== undefined && !Array.isArray(read) ? (
+        <p class="tree-note error" style={`--depth: ${depth}`}>
+          {read.error}
+        </p>
+      ) : null}
       {dirs.map((one) => {
         const open = state.open.has(`dir:${one}`);
 
         return (
           <>
-            <TreeRow depth={depth} action="tree-toggle" data={{ key: `dir:${one}` }} open={open} label={baseName(one)} title={one} className="folder" />
-            {open ? <AllFiles state={state} dir={one} depth={depth + 1} /> : null}
+            <TreeRow depth={depth} action="tree-toggle" data={{ key: `dir:${one}` }} open={open} label={baseName(one)} title={one} className={`folder${muted(one)}`} />
+            {open ? <AllFiles state={state} dir={one} depth={depth + 1} all={paths} ignored={known} /> : null}
           </>
         );
       })}
       {files.map((path) => (
-        <TreeRow depth={depth} action="tree-disk" data={{ path }} label={baseName(path)} status={status.get(path)} title={path} className={`file status-${status.get(path) ?? ''}`} icon={<FileIcon path={path} />} />
+        <TreeRow depth={depth} action="tree-disk" data={{ path }} label={baseName(path)} status={status.get(path)} title={path} className={`file status-${status.get(path) ?? ''}${muted(path)}`} icon={<FileIcon path={path} />} />
       ))}
       {dir === '' && tree.more ? <p class="tree-note">Only the first {tree.paths.length} files are listed.</p> : null}
+      {Array.isArray(read) && read.length === 0 ? (
+        <p class="tree-note" style={`--depth: ${depth}`}>
+          Empty folder.
+        </p>
+      ) : null}
     </div>
   );
 }

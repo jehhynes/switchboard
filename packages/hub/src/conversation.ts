@@ -353,6 +353,8 @@ export interface ConversationServiceDeps {
   questionsSettled?(sessionId: string): void;
   /** The Switchboard home, whose files an artifact tag never makes artifacts, since it holds the hub's keys and sign-ins. */
   switchboardHome?: string;
+  /** Hears each file an artifact tag named, by real path, with its session's folder, so Explore learns its ignored folder (`learnExplorerFolder`). */
+  artifactTagged?(cwd: string, real: string): void;
   log(line: string, level?: LogLevel): void;
 }
 
@@ -1874,6 +1876,10 @@ export class ConversationService {
       }
 
       const real = found.real;
+
+      if (session.cwd) {
+        this.deps.artifactTagged?.(session.cwd, real);
+      }
 
       if (this.deps.store.addExternalArtifact(workItemId, real, tag.title, tag.kind, this.deps.now())) {
         this.deps.log(`work item ${workItemId}: external artifact ${real}`);

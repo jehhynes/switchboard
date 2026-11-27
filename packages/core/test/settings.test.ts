@@ -182,6 +182,18 @@ describe('parseSettings', () => {
     });
   });
 
+  it('ExplorerFolders_PlainRelativeFolders_KeptWithoutTrailingSlashOrRepeats', () => {
+    const parsed = parseSettings('{"sources":{"github":{"explorerFolders":["out/reports/", "tmp", "tmp"]}}}');
+
+    expect('settings' in parsed && parsed.settings.sources['github']).toMatchObject({ explorerFolders: ['out/reports', 'tmp'], options: {} });
+  });
+
+  it('ExplorerFolders_NotPlainOrHidden_Refused', () => {
+    for (const folders of ['"out"', '["../x"]', '["/abs"]', '["C:/x"]', '["a\\\\b"]', '["a//b"]', '[".git"]', '["pkg/node_modules"]', '[""]', '[1]']) {
+      expect(parseSettings(`{"sources":{"github":{"explorerFolders":${folders}}}}`)).toEqual({ errors: [expect.stringMatching(/^sources\.github\.explorerFolders must be a list of folders relative to the worktree/)] });
+    }
+  });
+
   it('rejects invalid JSON and a non-object', () => {
     expect(parseSettings('{')).toEqual({ errors: [expect.stringMatching(/^settings\.json is not valid JSON: /)] });
     expect(parseSettings('[]')).toEqual({ errors: ['settings.json must contain an object.'] });

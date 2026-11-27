@@ -4,6 +4,7 @@ import { open, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { changesPlan, MAX_ROWS } from '@switchboard/core';
 import type { ChangedPath, ChangeKind, DiffRow } from '@switchboard/core';
+import { hiddenPath, insideFolders } from './explorer.js';
 import { outOfScope } from './windows.js';
 import type { WindowScope } from './windows.js';
 
@@ -104,8 +105,8 @@ export interface GitResult {
   tooLarge: boolean;
 }
 
-/** Runs git in a folder; `maxBytes` caps its output. */
-export type Git = (args: string[], cwd: string, options?: { maxBytes?: number; stdin?: string }) => Promise<GitResult>;
+/** Runs git in a folder; `maxBytes` caps its output, and `magic` lets it read pathspec magic, for `check-ignore`, which refuses literal pathspecs. */
+export type Git = (args: string[], cwd: string, options?: { maxBytes?: number; stdin?: string; magic?: true }) => Promise<GitResult>;
 
 const GIT_TIMEOUT_MS = 30_000;
 const GIT_MAX_BYTES = 64 * 1024 * 1024;
@@ -128,7 +129,7 @@ export function gitEnv(): NodeJS.ProcessEnv {
 /** Runs git with {@link gitEnv}, without a shell. */
 export const nodeGit: Git = (args, cwd, options = {}) =>
   new Promise((resolve) => {
-    const env = gitEnv();
+    const env = options.magic ? { ...gitEnv(), GIT_LITERAL_PATHSPECS: '0' } : gitEnv();
 
     const child = execFile(
       'git',
@@ -146,7 +147,7 @@ export const nodeGit: Git = (args, cwd, options = {}) =>
   });
 
 /** The fields of git's `-z` output. */
-function fields(output: Buffer): string[] {
+export function fields(output: Buffer): string[] {
   const parts = output.toString('utf8').split('\0');
 
   if (parts.at(-1) === '') {
@@ -241,9 +242,14 @@ const COUNT_AT_ONCE = 8;
 /**
  * A file under `root` by a path relative to it, resolved by real path, or null when it is not a file inside it: `..`, an absolute path, or a
  * link or junction out of it is refused, as an artifact's file is, and so is any link or junction on the way, even one inside the worktree,
- * since it could lead to a file git ignores or to git's own files.
+ * since it could lead to git's own files or out of the worktree.
  */
-export async function fileInside(root: string, path: string): Promise<string | null> {
+export function fileInside(root: string, path: string): Promise<string | null> {
+  return entryInside(root, path, 'file');
+}
+
+/** A file or folder under `root`, checked as {@link fileInside} checks a file. */
+export async function entryInside(root: string, path: string, kind: 'file' | 'folder'): Promise<string | null> {
   if (!relativePath(path)) {
     return null;
   }
@@ -255,7 +261,7 @@ export async function fileInside(root: string, path: string): Promise<string | n
     const inside = relative(top, real);
     const direct = process.platform === 'win32' ? real.toLowerCase() === lexical.toLowerCase() : real === lexical;
 
-    return direct && inside !== '' && inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside) && (await stat(real)).isFile() ? real : null;
+    return direct && inside !== '' && inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside) && (kind === 'file' ? (await stat(real)).isFile() : (await stat(real)).isDirectory()) ? real : null;
   } catch {
     return null;
   }
@@ -795,6 +801,8 @@ export interface PageChangesDeps {
   viewed?: { list(workItemId: number, scope: string): Map<string, string>; set(workItemId: number, scope: string, path: string, hash: string | null): void };
   /** Tells the other pages showing a work item that a tick changed, as a `viewed` event. */
   viewedChanged?(workItemId: number, from: string, payload: { path: string; hash: string; viewed: boolean; scope: string }): void;
+  /** The ignored folders Explore shows for a scope (`explorerFolders`), whose files the file view reads too; without it, none. */
+  folders?(scope: WindowScope): Promise<string[]>;
 }
 
 /** The hub's `file` answer: a file read whole, on disk or at the base, for the page's file view. */
@@ -878,11 +886,35 @@ function viewOf(path: string, side: 'disk' | 'base', read: { bytes: Buffer | 'la
   return looksBinary(read.bytes) ? { ...facts, contents: null, binary: true, tooLarge: false } : { ...facts, contents: read.bytes.toString('utf8'), binary: false, tooLarge: false };
 }
 
-/** Whether git lists `path` in the worktree at `root`, tracked or untracked and not ignored. */
-async function listed(root: string, path: string, git: Git): Promise<boolean> {
+/** Whether a path has a `.git` folder in it, which no change route reads. */
+export function inGitFolder(path: string): boolean {
+  return path.split('/').some((part) => part.toLowerCase() === '.git');
+}
+
+/**
+ * Whether `path` is a file of the worktree at `root` the file view reads: one git lists, tracked or untracked, or one it ignores inside a folder
+ * Explore shows (`folders`); never one under `.git` or node_modules, which Explore hides.
+ */
+async function listed(root: string, path: string, git: Git, folders: readonly string[]): Promise<boolean> {
+  if (inGitFolder(path) || hiddenPath(path)) {
+    return false;
+  }
+
   const found = await git(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', path], root);
 
-  return found.code === 0 && fields(found.stdout).includes(path);
+  if (found.code === 0 && fields(found.stdout).includes(path)) {
+    return true;
+  }
+
+  return insideFolders(folders, path) && ignoredByGit(root, path, git);
+}
+
+/**
+ * Whether git ignores a plain relative path (a folder as `<path>/`). `check-ignore` refuses literal pathspecs, so it reads magic, and a path
+ * that starts with `:`, which would be magic, is never ignored.
+ */
+export async function ignoredByGit(root: string, path: string, git: Git = nodeGit): Promise<boolean> {
+  return !path.startsWith(':') && (await git(['check-ignore', '-q', '--', path], root, { magic: true })).code === 0;
 }
 
 /** Where a file view's side is read: the row's commit, or for a disk side to disk, a commit or null. */
@@ -895,15 +927,16 @@ function sideOf(changes: WorktreeChanges, path: string, side: 'disk' | 'base'): 
 }
 
 /**
- * A file of the worktree for the file view (`side` disk): one git tracks or would track, never an ignored one or one under `.git`, read by real
+ * A file of the worktree for the file view (`side` disk): one git tracks or would track, or ignores inside a folder Explore shows (`folders`),
+ * never one under `.git`, read by real
  * path inside the worktree; or (`side` base) a change row's file at the range's start, read as `<from>:<path>` for the row's own path there only;
  * for a range to a commit, `disk` is a change row's file in that commit. Null for any other path.
  */
-export async function readFileView(changes: WorktreeChanges, path: string, side: 'disk' | 'base', git: Git = nodeGit): Promise<FileView | null> {
+export async function readFileView(changes: WorktreeChanges, path: string, side: 'disk' | 'base', git: Git = nodeGit, folders: readonly string[] = []): Promise<FileView | null> {
   const at = sideOf(changes, path, side);
 
   if (at === 'disk') {
-    return readDiskFile(changes.root, path, git);
+    return readDiskFile(changes.root, path, git, folders);
   }
 
   const read = at === null ? null : await readAt(changes.root, at.path, at.ref, git, SIDE_MAX_BYTES);
@@ -912,15 +945,15 @@ export async function readFileView(changes: WorktreeChanges, path: string, side:
 }
 
 /** A file on disk for the file view, checked as {@link readFileView} checks one, without reading the change list. */
-export async function readDiskFile(root: string, path: string, git: Git = nodeGit): Promise<FileView | null> {
-  const read = (await listed(root, path, git)) ? await readAt(root, path, null, git, SIDE_MAX_BYTES) : null;
+export async function readDiskFile(root: string, path: string, git: Git = nodeGit, folders: readonly string[] = []): Promise<FileView | null> {
+  const read = (await listed(root, path, git, folders)) ? await readAt(root, path, null, git, SIDE_MAX_BYTES) : null;
 
   return read === null ? null : viewOf(path, 'disk', read);
 }
 
 /** A picture's or a PDF's bytes for `file-raw`, read as {@link readFileView} reads the side, up to {@link RAW_MAX_BYTES}; null for any other file. */
-async function readRaw(root: string, at: { path: string; ref: string | null }, git: Git): Promise<{ mime: string; bytes: Buffer } | null> {
-  if (at.ref === null && !(await listed(root, at.path, git))) {
+async function readRaw(root: string, at: { path: string; ref: string | null }, git: Git, folders: readonly string[] = []): Promise<{ mime: string; bytes: Buffer } | null> {
+  if (at.ref === null && !(await listed(root, at.path, git, folders))) {
     return null;
   }
 
@@ -1041,6 +1074,10 @@ async function stillHolds(read: WorktreeChanges, paths: string[], git: Git): Pro
 /** The page's change routes, scoped by the window scope rule to the page's selected conversation's folder (architecture.md § Web page). */
 export class PageChanges {
   constructor(private readonly deps: PageChangesDeps) {}
+
+  async #folders(scope: WindowScope): Promise<string[]> {
+    return (await this.deps.folders?.(scope)) ?? [];
+  }
 
   /**
    * Each page's last read of its changes, by page key, with the scope and range it was read for: the list the page shows, which its diff and
@@ -1208,7 +1245,7 @@ export class PageChanges {
     // A file on disk is read without the change list, so reading it again while it shows costs one listing and one read.
     if (side === 'disk' && range.to === 'worktree') {
       const root = await topOf(scope.cwd!, this.deps.git ?? nodeGit);
-      const view = 'error' in root ? null : await readDiskFile(root.root, path, this.deps.git);
+      const view = 'error' in root ? null : await readDiskFile(root.root, path, this.deps.git, await this.#folders(scope));
 
       if (!same(this.deps, key, scope)) {
         return { status: 409, body: { error: CONVERSATION_MOVED } };
@@ -1226,7 +1263,7 @@ export class PageChanges {
       key,
       scope,
       range,
-      (changes) => readFileView(changes, path, side, this.deps.git),
+      async (changes) => readFileView(changes, path, side, this.deps.git, await this.#folders(scope)),
       (changes) => {
         const row = side === 'base' ? [...changes.sides.values()].find((one) => one.original?.path === path) : undefined;
 
@@ -1272,7 +1309,7 @@ export class PageChanges {
     if (side === 'disk' && range.to === 'worktree') {
       const root = await topOf(scope.cwd!, git);
 
-      raw = 'error' in root ? null : await readRaw(root.root, { path, ref: null }, git);
+      raw = 'error' in root ? null : await readRaw(root.root, { path, ref: null }, git, await this.#folders(scope));
     } else {
       const { read, value } = await this.#fromRead(key, scope, range, async (changes) => {
         const at = sideOf(changes, path, side);

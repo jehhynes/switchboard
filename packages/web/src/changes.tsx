@@ -11,7 +11,7 @@ import { readVersion } from './readVersion.js';
 import { keepWrap, storedWrap } from './wrapPref.js';
 import { CodeDraw, FileBody, sayIn } from './fileView.js';
 import { worktreeMarkdown } from './changesMarkdown.js';
-import { ChangesTreeView, newTree, PEEKS_KEPT } from './changesTree.js';
+import { ChangesTreeView, ignoredSet, isIgnored, newTree, PEEKS_KEPT } from './changesTree.js';
 import type { TreeState } from './changesTree.js';
 import type { LineRange } from './diff/types.js';
 import type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, CommitInfo, DiffData, FileData, SearchData, StackData, TreeData } from '@switchboard/protocol';
@@ -788,6 +788,8 @@ export class ChangesController {
   readonly tree: TreeState = newTree();
   /** Bumped when the page leaves the conversation, so a tree read for the one it left is dropped. */
   #treeGen = 0;
+  /** The latest read of each ignored folder, by its path, so an older answer is dropped. */
+  readonly #ignoredReads = new Map<string, number>();
   /** Bumped by each tree read, so an older read answering after a newer one is dropped. */
   #treeReads = 0;
   #stackRetry: ReturnType<typeof setTimeout> | null = null;
@@ -981,6 +983,15 @@ export class ChangesController {
 
     if (tree !== null && 'body' in tree && Array.isArray(tree.body.paths)) {
       this.tree.tree = tree.body;
+
+      // The ignored folders read so far are read again, as the worktree's files were; a closed one is read when it opens.
+      for (const dir of [...this.tree.ignored.keys()]) {
+        this.tree.ignored.delete(dir);
+
+        if (this.tree.open.has(`dir:${dir}`)) {
+          void this.#readIgnored(dir);
+        }
+      }
     }
 
     if (uncommitted !== null && 'body' in uncommitted && Array.isArray(uncommitted.body.rows)) {
@@ -990,6 +1001,38 @@ export class ChangesController {
     }
 
     this.deps.draw();
+  }
+
+  /** Reads an ignored folder's entries when it is opened in the tree, as VS Code's Explorer reads a folder only when it is opened. */
+  async #readIgnored(dir: string): Promise<void> {
+    const key = this.deps.key();
+    const gen = this.#treeGen;
+
+    if (key === null) {
+      return;
+    }
+
+    // Only the newest read of a folder is kept, so an older answer arriving after Refresh's read does not replace it.
+    const read = (this.#ignoredReads.get(dir) ?? 0) + 1;
+
+    this.#ignoredReads.set(dir, read);
+    this.tree.ignored.set(dir, 'loading');
+
+    let answer: string[] | { error: string };
+
+    try {
+      const response = await this.deps.fetch(`/v1/conversation/tree?window=${encodeURIComponent(key)}&dir=${encodeURIComponent(dir)}`, { credentials: 'same-origin' });
+      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+      answer = response.ok && Array.isArray(body['ignored']) ? (body['ignored'] as string[]) : { error: String(body['error'] ?? `Switchboard could not load this (status ${response.status}). Try again.`) };
+    } catch (failure) {
+      answer = { error: `Switchboard did not answer: ${String(failure)}` };
+    }
+
+    if (gen === this.#treeGen && this.#ignoredReads.get(dir) === read && this.tree.ignored.get(dir) === 'loading') {
+      this.tree.ignored.set(dir, answer);
+      this.deps.draw();
+    }
   }
 
   /** Reads an expanded commit's own changes, for its files in the tree, without making them the list the diffs show. */
@@ -1131,6 +1174,11 @@ export class ChangesController {
         }
 
         const sha = data['sha'];
+        const dir = key.startsWith('dir:') ? key.slice('dir:'.length) : null;
+
+        if (!open && dir !== null && !this.tree.ignored.has(dir) && isIgnored(ignoredSet(this.tree), dir)) {
+          void this.#readIgnored(dir);
+        }
 
         if (!open && sha !== undefined && !this.tree.peeks.has(sha)) {
           const parent = this.#treeCommits().find((one) => one.sha === sha)?.parent ?? 'base';

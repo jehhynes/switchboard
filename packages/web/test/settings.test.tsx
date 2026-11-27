@@ -863,7 +863,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
 
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('GitHub');
     expect(headings()).toEqual(['Connection', 'Work', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption :is(label, .settings-switch-label)')).toEqual(['Repository', 'Logins', 'Require assignee', 'Wait for blockers', 'Include closed issues', 'Project owner', 'Project number', 'Status field', 'Assigned statuses', 'Repo root', 'Namespace', 'Triage playbook', 'Setup prompt', 'Poll every']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption :is(label, .settings-switch-label)')).toEqual(['Repository', 'Logins', 'Require assignee', 'Wait for blockers', 'Include closed issues', 'Project owner', 'Project number', 'Status field', 'Assigned statuses', 'Repo root', 'Namespace', 'Triage playbook', 'Setup prompt', 'Explore folders', 'Poll every']);
     expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Kind, Roles file, Branch pattern, gh path, Page limit');
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
     await settle();

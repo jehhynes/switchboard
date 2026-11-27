@@ -1,8 +1,8 @@
 /* The Changes tab (architecture.md § Web page): its tab first in the strip after Chat, its bar above the diffs, and its Files menu under the bar, as
    wide as a path needs up to the pane's width. Status letters and counts take 2026 Dark's and 2026 Light's git decoration colours; renamed, which
    they leave unset, takes untracked's. */
-:root { --sb-git-added: #73c991; --sb-git-modified: #e5ba7d; --sb-git-deleted: #f48771; --sb-git-untracked: #73c991; --sb-git-renamed: #73c991; --sb-git-conflict: #f48771; }
-@media (prefers-color-scheme: light) { :root { --sb-git-added: #587c0c; --sb-git-modified: #667309; --sb-git-deleted: #ad0707; --sb-git-untracked: #587c0c; --sb-git-renamed: #587c0c; --sb-git-conflict: #ad0707; } }
+:root { --sb-git-added: #73c991; --sb-git-modified: #e5ba7d; --sb-git-deleted: #f48771; --sb-git-untracked: #73c991; --sb-git-renamed: #73c991; --sb-git-conflict: #f48771; --sb-git-ignored: #8c8c8c; }
+@media (prefers-color-scheme: light) { :root { --sb-git-added: #587c0c; --sb-git-modified: #667309; --sb-git-deleted: #ad0707; --sb-git-untracked: #587c0c; --sb-git-renamed: #587c0c; --sb-git-conflict: #ad0707; --sb-git-ignored: #8e8e90; } }
 /* The bar above the diffs, on the pane's surface: Files, the note, then the toggles. */
 /* A size container, for its Files label; a stacking context too, raised so its menu lies over the diffs. */
 .changes-bar { position: relative; z-index: 3; container-type: inline-size; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; box-sizing: border-box; min-height: 32px; padding: 2px 6px; border-bottom: 1px solid var(--vscode-panel-border); color: var(--vscode-descriptionForeground); font-size: 13px; }
@@ -167,6 +167,8 @@
 .tree-item.status-U .tree-label, .tree-status.status-U { color: var(--sb-git-untracked); }
 .tree-item.status-C .tree-label, .tree-status.status-C { color: var(--sb-git-conflict); }
 .tree-item.viewed .tree-label { opacity: 0.6; }
+/* What git ignores, in VS Code's gitDecoration.ignoredResourceForeground. */
+.tree-item.ignored .tree-label { color: var(--sb-git-ignored); }
 .tree-item.section .tree-label { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; }
 .tree-section-head { margin-top: 4px; border-top: 1px solid var(--vscode-panel-border); }
 /* Each level is indented by its depth alone, so a nested chevron always sits further in than its parent's. */

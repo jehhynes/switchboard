@@ -65,6 +65,8 @@ export interface SourceSettings {
   setupPrompt: string;
   /** Limits triage to this namespace's task playbooks; empty offers them all. */
   namespace: string;
+  /** Folders git ignores that the Changes tree's Explore still shows in this source's worktrees, as plain paths relative to the worktree. */
+  explorerFolders?: string[];
   options: Record<string, unknown>;
 }
 
@@ -274,6 +276,11 @@ export const DEFAULT_SETTINGS: Settings = {
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 const SOURCE_DEFAULTS = { kind: '', pollIntervalSeconds: 300, repoRoot: '', triagePlaybook: '', setupPrompt: '', namespace: '' };
+
+/** Whether a folder path is plain and relative, with forward slashes, and names no `.git` or node_modules, which Explore never shows. */
+export function invalidExplorerFolder(folder: string): boolean {
+  return folder === '' || folder.length > 400 || /[\\\0:]/.test(folder) || folder.split('/').some((part) => part === '' || part === '.' || part === '..' || ['.git', 'node_modules'].includes(part.toLowerCase()));
+}
 
 /** A valid file's settings, with a warning for each retired setting it still holds; or why the file is rejected. */
 export type SettingsResult = { settings: Settings; warnings: string[] } | { errors: string[] };
@@ -543,7 +550,7 @@ export function parseSettings(text: string): SettingsResult {
   for (const name of Object.keys(sourcesIn)) {
     const path = `sources.${name}`;
     const sourceIn = read.section(sourcesIn, name, path);
-    const { enabled, kind, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace, ...options } = sourceIn;
+    const { enabled, kind, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace, explorerFolders, ...options } = sourceIn;
     const common = { kind, pollIntervalSeconds, repoRoot, triagePlaybook, setupPrompt, namespace };
 
     if (!NAME.test(name)) {
@@ -572,6 +579,7 @@ export function parseSettings(text: string): SettingsResult {
       triagePlaybook: read.string(common, 'triagePlaybook', path, SOURCE_DEFAULTS.triagePlaybook),
       setupPrompt: read.string(common, 'setupPrompt', path, SOURCE_DEFAULTS.setupPrompt),
       namespace: read.string(common, 'namespace', path, SOURCE_DEFAULTS.namespace),
+      ...((folders) => (folders.length > 0 ? { explorerFolders: folders } : {}))(parseExplorerFolders(read, explorerFolders, path)),
       options,
     };
   }
@@ -659,6 +667,22 @@ export function parseSettings(text: string): SettingsResult {
   };
 
   return read.errors.length > 0 ? { errors: read.errors } : { settings: { plugins, sessions, triage, sources, schedules, alerts, voice, web }, warnings: settingsWarnings(root) };
+}
+
+/** A source's `explorerFolders`: distinct plain relative folder paths; a trailing slash is dropped. */
+function parseExplorerFolders(read: Reader, value: unknown, path: string): string[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  const folders = Array.isArray(value) ? value.map((one) => (typeof one === 'string' ? one.trim().replace(/\/+$/, '') : '')) : null;
+
+  if (folders === null || folders.some(invalidExplorerFolder)) {
+    read.errors.push(`${path}.explorerFolders must be a list of folders relative to the worktree, such as out/reports, with forward slashes and no .., .git or node_modules.`);
+    return [];
+  }
+
+  return [...new Set(folders)];
 }
 
 /** `plugins`: distinct module paths, each absolute or starting with `~`. */

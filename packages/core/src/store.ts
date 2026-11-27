@@ -599,6 +599,9 @@ export const MIGRATIONS = [
   ALTER TABLE sessions ADD COLUMN turnAt INTEGER;`,
   // A persona can no longer be pinned to a session (operator decision 2026-11-26); a pinned session keeps the persona it had.
   `ALTER TABLE sessions DROP COLUMN personaPinned;`,
+  // Folders git ignores that the Changes tree's Explore shows because a session's artifact tag named a file in them (architecture.md § Web page,
+  // Changes), by the worktree's real path and the folder's path in it; kept apart from work items, so deleting one keeps what was learned.
+  `CREATE TABLE explorerFolders (root TEXT NOT NULL, path TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (root, path));`,
 ];
 
 /**
@@ -1961,6 +1964,16 @@ export class Store {
       .prepare('INSERT INTO externalArtifacts (workItemId, path, title, kind, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (workItemId, path) DO UPDATE SET title = excluded.title, kind = excluded.kind')
       .run(workItemId, path, title, kind, at);
     return true;
+  }
+
+  /** The folders git ignores that Explore shows in the worktree at `root`, a real path, because an artifact tag named a file in them. */
+  explorerFolders(root: string): string[] {
+    return (this.#db.prepare('SELECT path FROM explorerFolders WHERE root = ? ORDER BY path').all(root) as { path: string }[]).map((row) => row.path);
+  }
+
+  /** Keeps a folder of the worktree at `root` for Explore to show; whether it was new. */
+  addExplorerFolder(root: string, path: string, at: number): boolean {
+    return this.#db.prepare('INSERT INTO explorerFolders (root, path, at) VALUES (?, ?, ?) ON CONFLICT (root, path) DO NOTHING').run(root, path, at).changes > 0;
   }
 
   /** A work item's tabs on the web page, or null before any was chosen (architecture.md § Web page). */

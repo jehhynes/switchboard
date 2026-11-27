@@ -36,6 +36,7 @@ describe('ConversationService artifacts', () => {
     const scopes = new WindowScopes({ store, windows: WINDOWS, newKey: () => `k${++keys}` });
     const held = new FakeHeld();
     const logged: string[] = [];
+    const tagged: Array<[string, string]> = [];
     let changed: ConversationChanged | null = null;
     const service = new ConversationService({
       adapters: (one) => {
@@ -52,6 +53,7 @@ describe('ConversationService artifacts', () => {
       now: () => NOW,
       newId: () => 'id',
       switchboardHome: join(dir, 'home'),
+      artifactTagged: (cwd, real) => tagged.push([cwd, real]),
       log: (line) => logged.push(line),
     });
 
@@ -86,11 +88,11 @@ describe('ConversationService artifacts', () => {
       return path;
     };
 
-    return { w12, w3, view, service, open, put, scopes, store, openPage, tag, logged };
+    return { w12, w3, view, service, open, put, scopes, store, openPage, tag, logged, tagged };
   }
 
   it("lists the files a reply's artifact tags name on its work item's pages only, follows their changes, and serves only them and the files under their folders", async () => {
-    const { service, store, openPage, tag, logged } = setup();
+    const { service, store, openPage, tag, logged, tagged, w12 } = setup();
     const real = realpathSync.native(dir);
     const report = join(real, 'research', 'report', 'summary.md');
     const page = join(real, 'w12', 'plans', 'page.html');
@@ -110,6 +112,11 @@ describe('ConversationService artifacts', () => {
     tag('s2', [{ path: report.replaceAll('\\', '/') }, { path: 'plans/page.html', title: 'The page', kind: 'demo' }, { path: 'plans/missing.md' }, { path: '.git/config' }, { path: join(real, 'home', 'hub.json') }, { path: '.wip/artifacts/w2/chat/copy.md' }, { path: 'plans' }]);
 
     expect(store.externalArtifacts(2).map((one) => one.path)).toEqual([report, page]);
+    // Each file a tag named is offered to Explore with its session's folder, which learns its folder when git ignores it; refused tags are not.
+    expect(tagged).toEqual([
+      [w12, report],
+      [w12, page],
+    ]);
     expect(logged).toEqual(expect.arrayContaining([
       'session s2: artifact tag "plans/missing.md" ignored: no such file',
       'session s2: artifact tag ".git/config" ignored: in a .git folder',

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { patchLines, quoteText, treePinned } from '../src/changes.js';
 import type { ChangesList } from '../src/changes.js';
-import { filesShown, folderEntries, linkInfo, newTree } from '../src/changesTree.js';
+import { filesShown, folderEntries, ignoredSet, isIgnored, linkInfo, newTree } from '../src/changesTree.js';
 import type { DiffModule } from '../src/diff/types.js';
 import { startPage } from '../src/main.js';
 import type { StackData, StackLink } from '@switchboard/protocol';
@@ -79,6 +79,22 @@ describe('tree helpers', () => {
     expect(folderEntries(['src/a.ts', 'src/z/y.ts'], 'src')).toEqual({ dirs: ['src/z'], files: ['src/a.ts'] });
   });
 
+  it('reads a path ending in / as a folder, never as an entry of itself', () => {
+    expect(folderEntries(['out/', 'out/reports/', 'out/reports/r.md', 'a.log'], '')).toEqual({ dirs: ['out'], files: ['a.log'] });
+    expect(folderEntries(['out/', 'out/reports/', 'out/reports/r.md'], 'out')).toEqual({ dirs: ['out/reports'], files: [] });
+  });
+
+  it('marks an ignored file, an ignored folder and everything under one as ignored, and nothing else', () => {
+    const state = { ...newTree(), tree: { scopeGen: 1, paths: ['src/a.ts'], ignored: ['out/', 'src/a.log'], more: false } };
+
+    state.ignored.set('out', ['out/deep/']);
+
+    const known = ignoredSet(state);
+
+    expect(['out', 'out/deep', 'out/deep/x.md', 'src/a.log'].every((path) => isIgnored(known, path))).toBe(true);
+    expect(['src', 'src/a.ts', 'outer/x', 'src/a.logs'].some((path) => isIgnored(known, path))).toBe(false);
+  });
+
   it("says a base's commits, behind count, pull request and why it is not measured", () => {
     expect(linkInfo(link({ pr: { number: 200, state: 'merged', url: '' }, upstreamMissing: true }))).toBe('1 commit · behind 3 · #200 merged · upstream missing · from local history');
     expect(linkInfo(link({ relation: 'above', lacks: 2, source: 'github-stack', notInClone: true }))).toBe("lacks 2 of this branch's commits · not in this clone");
@@ -114,6 +130,11 @@ describe('tree helpers', () => {
 describe('the Changes tree', () => {
   let root: HTMLElement;
   let gets: string[];
+  /** What the tree route says git ignores at the top, and each ignored folder's answer, by its path. */
+  let ignoredTop: string[];
+  let folderAnswers: Map<string, { status: number; body: unknown }>;
+  /** Each ignored folder's reads wait on these, in turn, after taking the answer set when they were asked. */
+  let folderGates: Map<string, Array<Promise<void>>>;
   let posts: Array<Record<string, unknown>>;
   let stackAnswers: StackData[];
   let pages: Array<{ close(): void }>;
@@ -140,6 +161,9 @@ describe('the Changes tree', () => {
     document.body.replaceChildren(root);
     localStorage.clear();
     gets = [];
+    ignoredTop = [];
+    folderAnswers = new Map();
+    folderGates = new Map();
     posts = [];
     stackAnswers = [];
     stackGates = [];
@@ -166,7 +190,15 @@ describe('the Changes tree', () => {
       }
 
       if (url.startsWith('/v1/conversation/tree')) {
-        return json({ scopeGen: 3, paths: ['README.md', 'src/match/hnsw.ts', 'src/match/pool.ts', 'src/match/pool.bench.ts'], more: false });
+        const dir = new URLSearchParams(url.slice(url.indexOf('?'))).get('dir');
+        const folder = dir === null ? undefined : folderAnswers.get(dir);
+
+        if (dir !== null) {
+          await folderGates.get(dir)?.shift();
+          return json(folder?.body ?? { error: 'not shown' }, folder?.status ?? 404);
+        }
+
+        return json({ scopeGen: 3, paths: ['README.md', 'src/match/hnsw.ts', 'src/match/pool.ts', 'src/match/pool.bench.ts'], ignored: ignoredTop, more: false });
       }
 
       if (url.startsWith('/v1/conversation/search')) {
@@ -723,6 +755,86 @@ describe('the Changes tree', () => {
     root.querySelector<HTMLElement>('[data-action="changes-more"]')!.click();
     expect(root.querySelector('.diff-view')!.classList.contains('tree-pinned')).toBe(true);
     expect(layouts.at(-1)).toBe('stacked');
+  });
+
+  it('shows the ignored entries the hub lists muted, reads an ignored folder only when it opens, and says why one cannot be read', async () => {
+    ignoredTop = ['.wip/', 'out/', 'src/match/pool.log'];
+    folderAnswers.set('.wip', { status: 200, body: { scopeGen: 3, dir: '.wip', paths: [], ignored: ['.wip/artifacts/', '.wip/notes.md'], more: false } });
+    folderAnswers.set('.wip/artifacts', { status: 200, body: { scopeGen: 3, dir: '.wip/artifacts', paths: [], ignored: [], more: false } });
+    folderAnswers.set('out', { status: 404, body: { error: 'out is not an ignored folder Explore shows in this worktree.' } });
+    start();
+    await openTab();
+    tree().querySelector<HTMLElement>('[data-action="tree-files"][data-mode="all"]')!.click();
+
+    const folderReads = () => gets.filter((url) => url.includes('&dir='));
+    const muted = () => [...tree().querySelectorAll<HTMLElement>('.tree-item.ignored')].map((one) => one.querySelector('.tree-label')!.textContent);
+
+    expect(rows().slice(1, 5).map(([label]) => label)).toEqual(['.wip', 'out', 'src', 'README.md']);
+    expect(muted()).toEqual(['.wip', 'out']);
+    expect(row('src').classList.contains('ignored')).toBe(false);
+    expect(folderReads()).toEqual([]);
+
+    row('.wip').querySelector<HTMLElement>('.tree-row')!.click();
+    await flush();
+    await flush();
+    expect(folderReads()).toEqual(['/v1/conversation/tree?window=pk&dir=.wip']);
+    expect(muted()).toEqual(['.wip', 'artifacts', 'notes.md', 'out']);
+    expect(row('notes.md').querySelector('.tree-row')!.getAttribute('data-action')).toBe('tree-disk');
+
+    // Closing and opening again reads nothing more; an empty folder says so.
+    row('.wip').querySelector<HTMLElement>('.tree-row')!.click();
+    row('.wip').querySelector<HTMLElement>('.tree-row')!.click();
+    row('artifacts').querySelector<HTMLElement>('.tree-row')!.click();
+    await flush();
+    await flush();
+    expect(folderReads()).toEqual(['/v1/conversation/tree?window=pk&dir=.wip', '/v1/conversation/tree?window=pk&dir=.wip%2Fartifacts']);
+    expect(tree().textContent).toContain('Empty folder.');
+
+    row('out').querySelector<HTMLElement>('.tree-row')!.click();
+    await flush();
+    await flush();
+    expect(tree().querySelector('.tree-note.error')!.textContent).toBe('out is not an ignored folder Explore shows in this worktree.');
+
+    // An ignored file in a listed folder is muted too; the name filter leaves out what git ignores, as VS Code's file search does.
+    row('src').querySelector<HTMLElement>('.tree-row')!.click();
+    row('match').querySelector<HTMLElement>('.tree-row')!.click();
+    expect(row('pool.log').classList.contains('ignored')).toBe(true);
+    expect(row('pool.ts').classList.contains('ignored')).toBe(false);
+
+    const box = tree().querySelector<HTMLInputElement>('input[data-tree-search]')!;
+
+    box.value = 'pool';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(rows().slice(1, 4).map(([label]) => label)).toEqual(['pool.ts', 'pool.bench.ts', 'COMMITS']);
+  });
+
+  it("keeps Refresh's read of an open ignored folder when an older read of it answers first", async () => {
+    const releases: Array<() => void> = [];
+    const gate = () => new Promise<void>((done) => releases.push(done));
+
+    ignoredTop = ['.wip/'];
+    folderAnswers.set('.wip', { status: 200, body: { scopeGen: 3, dir: '.wip', paths: [], ignored: ['.wip/old.md'], more: false } });
+    folderGates.set('.wip', [gate(), gate()]);
+    start();
+    await openTab();
+    tree().querySelector<HTMLElement>('[data-action="tree-files"][data-mode="all"]')!.click();
+    row('.wip').querySelector<HTMLElement>('.tree-row')!.click();
+    await flush();
+
+    folderAnswers.set('.wip', { status: 200, body: { scopeGen: 3, dir: '.wip', paths: [], ignored: ['.wip/new.md'], more: false } });
+    root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
+    for (let i = 0; i < 6; i++) await flush();
+    expect(gets.filter((url) => url.includes('&dir=.wip'))).toHaveLength(2);
+
+    // The first read answers first and is dropped; the folder waits for Refresh's.
+    releases[0]!();
+    for (let i = 0; i < 4; i++) await flush();
+    expect(row('old.md')).toBeUndefined();
+
+    releases[1]!();
+    for (let i = 0; i < 4; i++) await flush();
+    expect(row('new.md')).toBeDefined();
+    expect(row('old.md')).toBeUndefined();
   });
 
   it('indents each nested row past its parent, with a branch row’s chevron before its icon', async () => {

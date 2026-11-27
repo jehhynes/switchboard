@@ -73,7 +73,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-filters', 'changes', 'changes-options', 'changes-explore', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
   // A common 1920 px desktop, for the column's strip and its maximize button, in the tabs view also with the column narrowed a pixel at a time.
   { device: 'desktop', label: '1920', orientation: 'landscape', width: 1920, height: 1080, screen: [1920, 1080], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
 ];
@@ -84,7 +84,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one)), 'row-done'];
+const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'changes-explore', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one)), 'row-done'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -276,7 +276,9 @@ const newSide = 'export function renew() {\\n  register();\\n  schedule();\\n}\\
 const diffOf = (path) => ({ path, status: 'M', patch: 'diff --git a/' + path + ' b/' + path + '\\n--- a/' + path + '\\n+++ b/' + path + '\\n@@ -1,3 +1,4 @@\\n export function renew() {\\n   register();\\n+  schedule();\\n }\\n', old: oldSide, new: newSide, binary: false, tooLarge: null });
 const planText = '# Plan\\n\\n' + Array.from({ length: 40 }, (_, i) => 'Step ' + (i + 1) + ': renew the registration 30 s before it lapses, and check the inbound route again.').join('\\n\\n');
 const stackData = { scopeGen: 3, repo: 'switchboard', root: 'D:/w', branch: 'fix/dialer-registration', head: 'c1', commitIds: ['c1'], more: false, incomplete: false, github: { state: 'none', observedAt: null }, links: [], main: { ref: 'origin/main', behind: 0, fetchedAt: now } };
-const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? { scopeGen: 3, paths: changesList.rows.map((row) => row.path), more: false } : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
+const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? treeOf(new URL(url, location.href).searchParams.get('dir')) : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
+// The worktree's files with what git ignores that Explore shows (.wip, out on the way to a shown out/reports, and a log beside the code), and .wip's entries.
+const treeOf = (dir) => (dir === '.wip' ? { scopeGen: 3, dir, paths: [], ignored: ['.wip/artifacts/', '.wip/notes.md', '.wip/registration-trace.txt'], more: false } : dir !== null ? { scopeGen: 3, dir, paths: [], ignored: [], more: false } : { scopeGen: 3, paths: [...changesList.rows.map((row) => row.path), 'README.md', 'package.json'], ignored: ['.wip/', 'out/', 'src/dialer/registration.log'], more: false });
 // Background sessions: one of a work item and one without.
 const heldRows = [{ session: 'h1', item: 'gh 1', nativeSessionId: '2f1c0a7e-1d2b-4c3d-9e8f-0a1b2c3d4e5f', cwd: 'D:/git/switchboard.worktrees/some-long-branch-name', state: 'idle', idle: '4m', memory: '182 MB', clients: 1, orphan: false, exited: false, terminal: {} }, { session: 'h2', item: '(no work item)', nativeSessionId: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', cwd: 'D:/git/r', state: 'running', idle: '0s', memory: '240 MB', clients: 0, orphan: true, exited: false, terminal: null }];
 // The selects and controls posted, and in the IN_PLACE views a select's work item soon after its answer, as the hub sends it.
@@ -828,6 +830,8 @@ const OPEN = {
   changes: ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search'],
   // Its search's options menu open, Regular expression chosen, which keeps the menu open.
   'changes-options': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-options]', '.tree-options-menu [data-option=regex]'],
+  // Explore with what git ignores muted: .wip opened, read when it opens, and src/dialer opened beside its ignored log.
+  'changes-explore': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-files][data-mode=all]', '.tree-row[data-key="dir:.wip"]', '.tree-row[data-key="dir:src"]', '.tree-row[data-key="dir:src/dialer"]'],
   // History's chips shown, one turned off, as a phone shows them behind Filters; a wider pane shows them without it.
   'history-filters': ['[data-side=history], [data-tab=history]', '[data-action=history-chips]', '.hist-chip[data-category="you"]'],
   'history-report': ['[data-side=history], [data-tab=history]', '.hist-now [data-action=history-report]'],
@@ -912,10 +916,19 @@ const HOURGLASS = `(async () => {
   return { out, overlap, places };
 })()`;
 
+/** Explore's ignored rows' labels and their colours, and the colours of the file and folder rows git does not ignore. */
+const EXPLORE_MUTED = `(() => {
+  const rows = [...document.querySelectorAll('.changes-tree .tree-item.file, .changes-tree .tree-item.folder')].filter((row) => row.getBoundingClientRect().height > 0);
+  const label = (row) => row.querySelector('.tree-label');
+  const ignored = rows.filter((row) => row.classList.contains('ignored'));
+  return { ignored: ignored.map((row) => label(row).textContent), colours: ignored.map((row) => getComputedStyle(label(row)).color), plain: rows.filter((row) => !row.classList.contains('ignored') && !/status-[A-Z]/.test(row.className)).map((row) => getComputedStyle(label(row)).color) };
+})()`;
+
 /** The search views: the field, and the bar whose controls must not cover it. */
 const SEARCHES = {
   changes: { field: '.tree-search input', bar: '.changes-tree-inner' },
   'changes-options': { field: '.tree-search input', bar: '.changes-tree-inner' },
+  'changes-explore': { field: '.tree-search input', bar: '.changes-tree-inner' },
   history: { field: '.hist-filter', bar: '.hist-toolbar' },
   'history-filters': { field: '.hist-filter', bar: '.hist-toolbar' },
 };
@@ -1583,6 +1596,17 @@ try {
 
           if (report) console.log(name + ' placeholder: ' + JSON.stringify(shown) + ' conversation: ' + JSON.stringify(columns.get(scheme + size.device + size.orientation)));
           found.push(...openingFailures(columns.get(scheme + size.device + size.orientation), shown));
+        }
+
+        // Explore draws what git ignores in VS Code's ignored colour, .wip's entries read when it opened, and nothing else muted.
+        if (view === 'changes-explore' && missing.length === 0) {
+          const muted = await evaluate(EXPLORE_MUTED);
+          const want = scheme === 'dark' ? 'rgb(140, 140, 140)' : 'rgb(142, 142, 144)';
+
+          if (report) console.log(name + ' explore: ' + JSON.stringify(muted));
+          if (muted.ignored.join() !== '.wip,artifacts,notes.md,registration-trace.txt,out,registration.log') found.push('Explore marks ' + muted.ignored.join(', ') + ' ignored, not .wip and its entries, out and registration.log');
+          muted.colours.filter((one) => one !== want).forEach((one) => found.push('an ignored row is ' + one + ', not ' + want));
+          if (muted.plain.includes(want)) found.push('a row git does not ignore is drawn in the ignored colour');
         }
 
         // The context meter's menu shows its details whole inside the viewport, each row on one line with its value beside its name.

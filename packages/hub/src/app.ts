@@ -44,6 +44,8 @@ import { pageAsset } from './pageAssets.js';
 import { PageChanges, VIEWED_REFUSED } from './changes.js';
 import { githubGhPath, PageStack, pullLinkOf } from './stack.js';
 import { PageTree } from './tree.js';
+import { explorerFolders, learnExplorerFolder } from './explorer.js';
+import type { ExplorerDeps } from './explorer.js';
 import { spawnGh } from '@switchboard/github';
 import { needsMessage, needsReason, newlyNeeding, rowFor } from './needs.js';
 import { keptDismissals, Notices } from './notices.js';
@@ -620,9 +622,12 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     return null;
   };
   // The web page's Changes list and diffs, read with git in the page's selected conversation's folder (architecture.md § Web page).
+  // The ignored folders the Changes tree's Explore shows, and the file view reads (architecture.md § Web page, Changes).
+  const explorer: ExplorerDeps = { store, settings: () => config.settings, now: deps.now };
   const pageChanges = new PageChanges({
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
+    folders: (scope) => explorerFolders(explorer, scope),
     viewed: { list: (workItemId, scope) => store.viewedFiles(workItemId, scope), set: (workItemId, scope, path, hash) => store.setViewedFile(workItemId, path, hash, deps.now(), scope) },
     viewedChanged: (workItemId, from, payload) => {
       for (const key of conversation.pages()) {
@@ -640,7 +645,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     pullLink: (workItemId) => pullLinkOf(store, workItemId),
     workItemAt: (path) => store.workItemAtWorktree(path),
   });
-  const pageTree = new PageTree({ isPage: (key) => scopes.isPage(key), scope: (key) => scopes.scope(key) });
+  const pageTree = new PageTree({ isPage: (key) => scopes.isPage(key), scope: (key) => scopes.scope(key), folders: (scope) => explorerFolders(explorer, scope) });
   const pageConsole = new PageConsole({
     isPage: (key) => scopes.isPage(key),
     scope: (key) => scopes.scope(key),
@@ -656,6 +661,12 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     store,
     windows: scopes,
     switchboardHome: home,
+    artifactTagged: (cwd, real) => {
+      void learnExplorerFolder(explorer, cwd, real).then(
+        (learned) => learned && deps.log(`explorer: learned the ignored folder of ${real}`),
+        (error: unknown) => deps.log(`explorer: could not learn the folder of ${real}: ${String(error)}`, 'debug'),
+      );
+    },
     voice: {
       shown: (key) => voice.shown(key),
       settings: () => viewSettings(),
@@ -1311,7 +1322,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
               : route === 'stack'
                 ? pageStack.stack(key, query.get('refresh'))
                 : route === 'tree'
-                  ? pageTree.tree(key)
+                  ? pageTree.tree(key, query.get('dir'))
                   : route === 'search'
                     ? pageTree.search(key, query)
                     : Promise.resolve({ status: 404, body: { error: 'not found' } }),
