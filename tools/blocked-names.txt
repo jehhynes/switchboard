@@ -1,0 +1,3 @@
+# Names npm run verify and the pre-commit hook refuse in tracked files, one per line, matched as whole words in any case.
+ownerrez
+orez

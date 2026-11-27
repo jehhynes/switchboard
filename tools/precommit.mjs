@@ -7,8 +7,10 @@
 // tests run built bundles. It waits for a machine-wide check slot first
 // (tools/check-lock.mjs). A staged file outside every workspace runs `npm run
 // verify`. Markdown and text files need no checks. Integration tests and
-// coverage run in GitHub Actions, not here.
+// coverage run in GitHub Actions, not here. Every staged file, these included,
+// fails on a name tools/blocked-names.txt lists.
 import { execFileSync, spawnSync } from 'node:child_process';
+import { blockedNames, LIST, STAGED_ONLY } from './blocked-names.mjs';
 import { takeSlot } from './check-lock.mjs';
 import { lowPriority } from './low-priority.mjs';
 import { checkPlan, loadWorkspaces, touchedWorkspaces, unchecked } from './check-plan.mjs';
@@ -31,7 +33,7 @@ const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--no-ren
 // HEAD, branch or index, anyway.
 function run(args) {
   console.log(`pre-commit: npm ${args.join(' ')}`);
-  const result = spawnSync('npm', args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env: cleanGitEnv() });
+  const result = spawnSync('npm', args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env: { ...cleanGitEnv(), [STAGED_ONLY]: '1' } });
   const changed = guard.check();
   if (changed) {
     console.error('');
@@ -43,6 +45,13 @@ function run(args) {
     console.error(`pre-commit: npm ${args.join(' ')} failed. Fix it, or use --no-verify only for a WIP commit.`);
     process.exit(1);
   }
+}
+
+// Every staged file, documentation included, against the blocked names.
+const blocked = blockedNames(root, { staged: true });
+if (blocked.length > 0) {
+  console.error(`pre-commit: staged files hold names ${LIST} blocks; use the examples in AGENTS.md § Example data:\n${blocked.join('\n')}`);
+  process.exit(1);
 }
 
 const full = process.env.SWITCHBOARD_VERIFY === 'full';

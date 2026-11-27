@@ -8,8 +8,11 @@
 // every workspace's tests, integration tests included, with coverage thresholds.
 //
 // Checks run without the caller's GIT_* variables and fail if they changed the
-// repository's shared git config (tools/git-guard.mjs). See docs/testing.md.
+// repository's shared git config (tools/git-guard.mjs). It first fails on a name
+// tools/blocked-names.txt lists in a tracked file, unless the pre-commit hook
+// started it and searched the staged files itself. See docs/testing.md.
 import { spawnSync } from 'node:child_process';
+import { blockedNames, LIST, STAGED_ONLY } from './blocked-names.mjs';
 import { takeSlot } from './check-lock.mjs';
 import { lowPriority } from './low-priority.mjs';
 import { checkPlan, loadWorkspaces, touchedWorkspaces, unchecked } from './check-plan.mjs';
@@ -26,6 +29,13 @@ const verified = verifiedFile(root);
 if (tree !== null && !force && passed(verified, tree)) {
   console.log(`verify: tree ${tree.slice(0, 12)} already passed; nothing to run. Use --force to run it again.`);
   process.exit(0);
+}
+
+const blocked = process.env[STAGED_ONLY] ? [] : blockedNames(root);
+
+if (blocked.length > 0) {
+  console.error(`verify: tracked files hold names ${LIST} blocks; use the examples in AGENTS.md § Example data:\n${blocked.join('\n')}`);
+  process.exit(1);
 }
 
 const guard = guardRepo(root);

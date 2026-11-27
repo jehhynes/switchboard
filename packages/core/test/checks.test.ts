@@ -6,6 +6,7 @@ import { HELD, takeSlot } from '../../../tools/check-lock.mjs';
 import { fileURLToPath } from 'node:url';
 import { checkPlan, loadWorkspaces, touchedWorkspaces, unchecked } from '../../../tools/check-plan.mjs';
 import { unitTests } from '../../../tools/run-tests.mjs';
+import { findBlocked, LIST, parseBatch, parseIndex, parseNames } from '../../../tools/blocked-names.mjs';
 
 // The workspace graph in package.json order, cut down: hub takes web, the app takes hub and chrome.
 const WORKSPACES = [
@@ -145,5 +146,54 @@ describe('unitTests', () => {
     expect(unitTests({ projects: ['@switchboard/hub-app'] }).args).toEqual(['vitest', 'run', '--coverage.enabled=false', '--passWithNoTests', '--exclude', '**/*.int.test.ts', '--exclude', '**/node_modules/**', '--project', '@switchboard/hub-app']);
     expect(unitTests().args).not.toContain('--passWithNoTests');
     expect(unitTests({ projects: ['@switchboard/web'], files: ['packages/web/test/page.test.ts'] }).args).not.toContain('--passWithNoTests');
+  });
+});
+
+describe('findBlocked', () => {
+  it('FindBlocked_NameInAnyCase_ReportsEachFileLineAndMatch', () => {
+    const files = [['docs/a.md', 'Intro\nSee example.com/Acme/app and ACME.\n'], ['src/b.ts', "const project = 'acme';\r\n"]];
+
+    expect(findBlocked(files, ['acme'])).toEqual(['docs/a.md:2: Acme', 'docs/a.md:2: ACME', 'src/b.ts:1: acme']);
+  });
+
+  it('FindBlocked_NameInsideALongerWord_IgnoresIt', () => {
+    expect(findBlocked([['a.ts', 'myacme acmes acme_app\n']], ['acme'])).toEqual([]);
+  });
+
+  it('FindBlocked_BinaryFileOrTheList_SkipsThem', () => {
+    expect(findBlocked([['a.png', 'acme\0'], [LIST, 'acme\n'], ['b.ts', 'acme']], ['acme'])).toEqual(['b.ts:1: acme']);
+  });
+
+  it('FindBlocked_NameWithRegexCharacters_MatchesItLiterally', () => {
+    expect(findBlocked([['a.ts', 'example.com examplexcom']], ['example.com'])).toEqual(['a.ts:1: example.com']);
+  });
+
+  it('ParseNames_CommentsAndBlankLines_SkipsThem', () => {
+    expect(parseNames('# names\r\n\n acme \r\nexample\n')).toEqual(['acme', 'example']);
+  });
+
+  it('ParseNames_ThisRepositorysList_NamesAtLeastTwo', () => {
+    expect(parseNames(readFileSync(fileURLToPath(new URL(`../../../${LIST}`, import.meta.url)), 'utf8')).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('parseIndex', () => {
+  it('ParseIndex_PathsWithSpacesAndNewlines_KeepsThemWholeAndDropsSubmodules', () => {
+    const text = '100644 aaa 0\tdocs/a b.md\0' + '120000 bbb 0\tlink\nname\0' + '160000 ccc 0\tvendor/shared lib\0';
+
+    expect(parseIndex(text)).toEqual([{ mode: '100644', sha: 'aaa', path: 'docs/a b.md' }, { mode: '120000', sha: 'bbb', path: 'link\nname' }]);
+  });
+});
+
+describe('parseBatch', () => {
+  it('ParseBatch_BlobsWithNewlinesAndMultibyteText_SplitsThemByByteSize', () => {
+    const one = Buffer.from('ä\nb'), two = Buffer.from('');
+    const data = Buffer.concat([Buffer.from(`aaa blob ${one.length}\n`), one, Buffer.from('\n'), Buffer.from('bbb blob 0\n'), two, Buffer.from('\n')]);
+
+    expect(parseBatch(data).map((blob) => blob.toString('utf8'))).toEqual(['ä\nb', '']);
+  });
+
+  it('ParseBatch_MissingObject_Throws', () => {
+    expect(() => parseBatch(Buffer.from('aaa missing\n'))).toThrow('git cat-file: aaa is missing');
   });
 });
