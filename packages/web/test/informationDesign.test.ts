@@ -100,12 +100,19 @@ describe("an earlier session's artifacts", () => {
 });
 
 describe('the marks and buttons that compete', () => {
-  it('GroupCount_Drawn_UsesTheNeutralBadgeNotTheUnreadColour', () => {
+  it('GroupCount_Drawn_UsesANeutralChipNotTheUnreadColour', () => {
     const rule = /^\.group-count \{[^}]*\}/m.exec(css)![0];
 
-    expect(rule).toContain('background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);');
+    expect(rule).toContain('background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); color: var(--vscode-foreground);');
+    expect(rule).not.toContain('badge');
     expect(rule).not.toContain('focusBorder');
     expect(rule).not.toContain('activityBarBadge');
+  });
+
+  it('GroupCount_BlockedOnYou_UsesTheWarningColour', () => {
+    const rules = css.match(/^[^\n{]*\.group-count[^\n{]*\{[^}]*\}/gm)!;
+
+    expect(rules.filter((rule) => rule.includes('editorWarning'))).toEqual(['.group[data-group="blocked"] .group-count { background: var(--vscode-editorWarning-foreground); color: var(--vscode-editor-background); }']);
   });
 
   it('ReplyDot_Unread_StaysTheMutedBullet', () => {

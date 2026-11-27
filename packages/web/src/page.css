@@ -224,8 +224,11 @@ button.held-note:hover { background: var(--vscode-list-hoverBackground); }
 .work-list .row, .work-list .row-menu { scroll-margin-top: var(--group-head-height); }
 .group-head .group-icon { font-size: 16px; }
 .group-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.group-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center; font-size: 11px; font-weight: 600; line-height: 18px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+/* A group's count: a neutral grey chip, muted at zero; only Blocked on you's stands out, in the warning text colour, whose 4.5:1 against the
+   editor background holds both ways. The accent badge is kept for unread (architecture.md § Web page, Groups). */
+.group-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 9px; text-align: center; font-size: 11px; font-weight: 600; line-height: 18px; background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); color: var(--vscode-foreground); }
 .group-count.zero { background: color-mix(in srgb, var(--vscode-descriptionForeground) 18%, transparent); color: var(--vscode-descriptionForeground); }
+.group[data-group="blocked"] .group-count { background: var(--vscode-editorWarning-foreground); color: var(--vscode-editor-background); }
 /* Done's date bands: a muted label with its count and a rule, no tint or stripe, which opens or closes its rows. */
 .band-head { display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; margin-top: 6px; padding: 3px 8px; border: none; background: transparent; color: var(--vscode-descriptionForeground); font-size: 12px; text-align: left; cursor: pointer; }
 .band-head:hover { background: var(--vscode-list-hoverBackground); }

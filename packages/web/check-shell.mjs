@@ -11,6 +11,7 @@
 // its text kept for screen readers; the key never drops out; a link pill is whole, its icon alone or left out whole, never cut, the last
 // first; a pill left out is no keyboard stop, and a pill shown is one only in the list's Tab stop row; the pills change with the list's width alone, without a redraw; and line 2 paints the same while
 // the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them.
+// Only Blocked on you's group count is in the warning text colour and none is in the accent badge's, each one not zero at 4.5:1 contrast.
 // A usage-limited session's hourglass, in its list row and, also on a desktop, the header, draws from the extra icons' face as its SVG does, not as tofu. Every control shown is a touch target of at least 44 px each way,
 // but for the Changes tree's rows and their controls, History's run rows, links, Details, group headings and chips and the Settings playbooks table and, outside a phone,
 // its navigation, 32 px each way, the latter at least 4 px from any other target, and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
@@ -146,7 +147,15 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 // The list's notes, which a phone folds into one line.
 const header = { notes: view === 'list' || view?.startsWith('narrow') ? ['settings.json: sources.zoho.orgId is missing, so Zoho Desk is not polled.', 'Voice: the voice process stopped.'] : [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [], ...(view === 'holder' ? { holderNotice: { text: 'The terminal holder runs an older build.', detail: 'Restart it to run this build.', confirm: { question: 'Restart the terminal holder?', detail: 'Its 2 sessions stop and resume in the new holder. A tool call that is running is cut off.', action: 'Restart and resume' } } } : {}) };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, view === 'snooze' ? 'Call Center dialer stops receiving incoming calls when its registration lapses after the carrier rotates its SIP proxy and the softphone keeps the stale binding' : 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, snooze, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu, ...modalActions }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { mark: { kind: 'limited', glyph: '\u{f700}', title: 'Usage limit' }, host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
+// The other groups, in the list and conversation views only, so each group's count shows (architecture.md § Web page, Groups): Ready for
+// review and Unstarted empty, Blocked on you with a row, and Snoozed and Done, which start closed, with one each.
+const everyGroup = view === 'list' || view === 'conversation';
+const ready = { key: 'review', title: 'Ready for review', glyph: '\u{ea70}', empty: 'Nothing to review. Finished work appears here for you to check.', rows: [] };
+const blocked = { key: 'blocked', title: 'Blocked on you', glyph: '\u{eaa2}', empty: null, rows: [row(8, 'Blocked on a decision', { stripe: 'warning' })] };
+const unstarted = { key: 'unstarted', title: 'Unstarted', glyph: '\u{eb09}', empty: 'Nothing to start. New work items wait here until their session starts.', rows: [] };
+const snoozed = { key: 'snoozed', title: 'Snoozed', glyph: '\u{ec75}', empty: null, rows: [row(9, 'Snoozed until Monday')] };
+const done = { key: 'done', title: 'Done', glyph: '\u{eba4}', empty: null, rows: [row(10, 'Finished', { band: 'Today' })] };
+const groups = [...(everyGroup ? [ready, blocked] : []), { key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, view === 'snooze' ? 'Call Center dialer stops receiving incoming calls when its registration lapses after the carrier rotates its SIP proxy and the softphone keeps the stale binding' : 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, snooze, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu, ...modalActions }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { mark: { kind: 'limited', glyph: '\u{f700}', title: 'Usage limit' }, host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }, ...(everyGroup ? [unstarted, snoozed, done] : [])];
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
@@ -360,6 +369,18 @@ const measure = `(() => {
     // Line 2 of each shown row: a pill is whole inside its line and its box, its text shown whole; its icon alone, its text hidden from view
     // but kept for screen readers; or wholly outside them, left out.
     line2: window.__line2 ? { samples: window.__line2.length, ways: new Set(window.__line2).size } : null,
+    // Each group's count (architecture.md § Web page, Groups): its group, whether it is zero, whether its fill is the warning text colour or
+    // the accent badge's, and its text's contrast over its fill laid on the heading's.
+    counts: (() => {
+      const resolved = (value) => { const probe = document.createElement('span'); probe.style.background = value; document.body.append(probe); const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour; };
+      const warning = resolved('var(--vscode-editorWarning-foreground)');
+      const accent = resolved('var(--vscode-badge-background)');
+      return [...document.querySelectorAll('#list .group-head .group-count')].filter(shown).map((count) => {
+        const style = getComputedStyle(count);
+        const fill = over(style.backgroundColor, getComputedStyle(count.closest('.group-head')).backgroundColor);
+        return { group: count.closest('.group').dataset.group, zero: count.classList.contains('zero'), warning: style.backgroundColor === warning, accent: style.backgroundColor === accent, contrast: ratio(over(style.color, fill), fill) };
+      });
+    })(),
     // Line 1's waiting questions: whole inside line 1 and the row, after the title, which is cut before them where it does not fit; their icon
     // alone, whole inside them, visible in the warning text colour with a loaded codicon face and a glyph to draw, and no visible text.
     questions: [...document.querySelectorAll('#list .row-head .questions')].filter(shown).map((badge) => {
@@ -1049,9 +1070,19 @@ function failures(view, size, m) {
   if (m.line2 !== null) {
     if (m.line2.samples < 3) out.push('line 2 was sampled in ' + m.line2.samples + ' frames, too few to check');
     if (m.line2.ways > 1) out.push('line 2 painted ' + m.line2.ways + ' different ways while the same list was sent again');
-    const keys = view.startsWith('narrow') ? 4 : 7;
+    const keys = view.startsWith('narrow') ? 4 : view === 'list' ? 8 : 7;
 
     if (m.pills.filter((pill) => pill.ticket).length !== keys) out.push('line 2 shows ' + m.pills.filter((pill) => pill.ticket).length + ' ticket keys, not ' + keys);
+  }
+  // Only Blocked on you's count stands out, in the warning text colour; the others are neutral, none in the accent badge's colour, which
+  // means unread; a count that is not zero keeps 4.5:1 for its text.
+  if (view === 'list') {
+    if (!m.counts.some((one) => one.group === 'blocked')) out.push('no Blocked on you count shows');
+    for (const one of m.counts) {
+      if (one.warning !== (one.group === 'blocked')) out.push('the ' + one.group + ' count is ' + (one.warning ? '' : 'not ') + 'in the warning colour');
+      if (one.accent) out.push('the ' + one.group + ' count is in the accent badge colour, which means unread');
+      if (!one.zero && one.contrast < 4.5) out.push('the ' + one.group + ' count\'s text has ' + one.contrast + ':1 contrast, under 4.5:1');
+    }
   }
   // Line 1's waiting questions show on both rows that have them, whole, after the title, as their icon alone; the long title gives way.
   if (m.line2 !== null) {
@@ -1628,9 +1659,9 @@ try {
         }
 
         results.push({ name, ...m });
-        // History's screenshots show its top too: the head, the pinned state and the filter.
-        if (shots !== null && view.startsWith('history')) {
-          await evaluate('document.querySelectorAll(".hist-body").forEach((body) => { body.scrollTop = 0; })');
+        // History's screenshots show its top too: the head, the pinned state and the filter; the list's, its first groups.
+        if (shots !== null && (view.startsWith('history') || view === 'list')) {
+          await evaluate('document.querySelectorAll(".hist-body, #list, #list *").forEach((body) => { body.scrollTop = 0; })');
           await wait(150);
           mkdirSync(shots, { recursive: true });
           writeFileSync(join(shots, name.replaceAll(' ', '-') + '-top.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
