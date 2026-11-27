@@ -862,7 +862,9 @@ describe('Settings sources (architecture.md § Web page)', () => {
     expect(control<HTMLTextAreaElement>('sources.github.logins').value).toBe('me');
     expect(control<HTMLInputElement>('sources.github.requireAssignee').checked).toBe(false);
     expect(control<HTMLInputElement>('sources.github.waitForBlockers').checked).toBe(false);
-    expect([...host.querySelectorAll('.settings-buttons button')].map((one) => one.textContent)).toEqual(['Remove source']);
+    expect([...host.querySelectorAll('.settings-buttons button')]).toEqual([]);
+    // A removal comes at the page's end, in the danger style.
+    expect([...host.querySelectorAll('.settings-page-end button.danger')].map((one) => one.textContent)).toEqual(['Remove source']);
   });
 
   it("drops the old plugin's keys when the kind changes and draws the new kind's fields", async () => {
@@ -897,7 +899,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
     expect(entry('Zoho Desk').querySelector('.settings-nav-note')?.textContent).toBe('Off');
     expect(host.querySelector('.settings-page > .settings-error')).toBeNull();
 
-    [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')][0]!.click();
+    host.querySelector<HTMLButtonElement>('.settings-page-end button')!.click();
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
     expect(texts('.settings-nav-entry .settings-nav-label')).toContain('+ New Zoho Desk source');
@@ -905,7 +907,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
 
     entry('GitHub').click();
     await settle();
-    [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')][0]!.click();
+    host.querySelector<HTMLButtonElement>('.settings-page-end button')!.click();
     await settle();
     expect(texts('.settings-nav-children[aria-label="Sources"] .settings-nav-label')).toEqual(['personal (GitHub)', '+ New GitHub source', '+ New Zoho Desk source', '+ New Forum source', '+ New source']);
     // Sources, closed, carries the unsaved mark of the source removed from it.

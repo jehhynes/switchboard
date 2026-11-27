@@ -36,6 +36,10 @@
 .settings-experimental { margin-left: 8px; padding: 1px 6px; border: 1px solid var(--vscode-editorWarning-foreground); border-radius: 3px; color: var(--vscode-editorWarning-foreground); font-size: 11px; font-weight: 600; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; }
 .settings-help.settings-file { overflow-wrap: anywhere; }
 .settings-buttons { flex: none; display: flex; gap: 6px; }
+/* A page's removal: one verb, Remove, in the error colour, after the settings it removes. */
+.settings-page-end { display: flex; gap: 6px; margin-top: 24px; }
+.sheet-button.secondary.danger { border-color: currentColor; background: transparent; color: var(--vscode-errorForeground); }
+.sheet-button.secondary.danger:hover { background: color-mix(in srgb, var(--vscode-errorForeground) 12%, transparent); }
 .settings-note { margin: 4px 0; color: var(--vscode-editorWarning-foreground); }
 .settings-error, .settings-field-error { margin: 4px 0; color: var(--vscode-errorForeground); }
 .settings-field-error { display: block; margin: 0; }
@@ -61,7 +65,8 @@
 /* An on/off setting's switch: a checkbox drawn as a track and a knob, in a label as large as a touch target needs. */
 .settings-switch { position: relative; flex: none; }
 .settings-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
-.settings-switch-track { position: relative; box-sizing: border-box; width: 34px; height: 18px; border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, var(--vscode-panel-border))); border-radius: 9px; background: var(--vscode-input-background); pointer-events: none; transition: background-color 0.12s; }
+/* Off, the track's edge is 60% of the text colour, 3:1 or more on the row in both themes, so an off switch reads as one. */
+.settings-switch-track { position: relative; box-sizing: border-box; width: 34px; height: 18px; border: 1px solid color-mix(in srgb, var(--vscode-foreground) 60%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); pointer-events: none; transition: background-color 0.12s; }
 .settings-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--vscode-descriptionForeground); transition: transform 0.12s; }
 .settings-switch input:checked + .settings-switch-track { border-color: var(--vscode-button-background); background: var(--vscode-button-background); }
 .settings-switch input:checked + .settings-switch-track::after { transform: translateX(16px); background: var(--vscode-button-foreground); }

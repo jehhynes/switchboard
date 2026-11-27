@@ -907,7 +907,7 @@ export function settings(host: HTMLElement, deps: SettingsDeps): Settings {
           host.querySelector<HTMLElement>('.settings-page-title h2')?.focus();
         } else {
           draw();
-          [...host.querySelectorAll<HTMLButtonElement>('.settings-buttons button')].find((one) => one.textContent === 'Delete')?.focus();
+          host.querySelector<HTMLButtonElement>('.settings-page-end button')?.focus();
         }
 
         return;
@@ -1195,7 +1195,7 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
           {page.experimental === undefined ? null : <p class="settings-lede settings-experimental-note">{page.experimental}</p>}
         </div>
         <div class="settings-buttons">
-          {page.buttons.map((button) => (
+          {page.buttons.filter((button) => button.danger !== true).map((button) => (
             <button type="button" class={`sheet-button ${button.primary === true ? 'primary' : 'secondary'}`} title={button.tip} onClick={() => on.button(button)}>
               {button.label}
             </button>
@@ -1217,6 +1217,15 @@ function Page({ state, page, view, on }: { state: EditorState; page: PageView; v
       {page.sections.map((section) => (
         <SectionBlock state={state} section={section} pageOff={page.voiceOff === true} view={view} on={on} />
       ))}
+      {page.buttons.some((button) => button.danger === true) ? (
+        <div class="settings-page-end">
+          {page.buttons.filter((button) => button.danger === true).map((button) => (
+            <button type="button" class="sheet-button secondary danger" title={button.tip} onClick={() => on.button(button)}>
+              {button.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -1782,7 +1791,7 @@ function AskSheet({ ask, on }: { ask: Ask; on: Handlers }) {
   if (ask.kind === 'delete') {
     return (
       <ModalFrame
-        title={`Delete playbook ${ask.name}?`}
+        title={`Remove playbook ${ask.name}?`}
         titleId="settings-ask-title"
         dismiss={() => on.answer('keep')}
         backdrop="settings-ask"
@@ -1793,7 +1802,7 @@ function AskSheet({ ask, on }: { ask: Ask; on: Handlers }) {
               Cancel
             </button>
             <button type="button" class="sheet-button primary danger" onClick={() => on.answer('delete')}>
-              Delete
+              Remove
             </button>
           </>
         }

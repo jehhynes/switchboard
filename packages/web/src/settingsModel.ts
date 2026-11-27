@@ -1173,9 +1173,10 @@ export function playbookFields(state: EditorState, playbook: PlaybookFields): Fi
   }
 
   if (playbook.kind === 'task') {
-    fields.push({ path: 'autoStart', label: 'Automatically', kind: 'boolean', help: AUTO_START_HELP, group: 'Start' });
-    fields.push({ path: 'requiresWorktree', label: 'Needs a worktree', kind: 'boolean', help: REQUIRES_WORKTREE_HELP, group: 'Start' });
-    fields.push(...REPORT_FIELDS.map((report): Field => ({ path: `reports.${report.kind}`, label: report.label, kind: 'boolean', help: report.help, group: 'Reports' })));
+    // Each on/off setting is a switch row with its description, as on every other page.
+    fields.push({ path: 'autoStart', label: 'Start automatically', kind: 'boolean', help: AUTO_START_HELP });
+    fields.push({ path: 'requiresWorktree', label: 'Needs a worktree', kind: 'boolean', help: REQUIRES_WORKTREE_HELP });
+    fields.push(...REPORT_FIELDS.map((report): Field => ({ path: `reports.${report.kind}`, label: report.label, kind: 'boolean', help: report.help })));
 
     if (playbook.reports.includes('approval')) {
       fields.push({ path: 'approvalSends', label: 'Approve sends the work', kind: 'boolean', help: APPROVAL_SENDS_HELP });
@@ -1892,6 +1893,8 @@ export interface PageButton {
   command: string;
   label: string;
   primary?: boolean;
+  /** A removal, drawn in the danger colour at the page's end. */
+  danger?: boolean;
   argument?: string;
   tip?: string;
 }
@@ -1944,7 +1947,7 @@ export function pageView(state: EditorState): PageView {
     const kind = sourceKind(state.value, name);
     const notes = state.config.sourceKinds.includes(kind) ? [] : [`Switchboard has no source kind ${kind}.`];
 
-    return settingsPage(state, sourceTitle(state, name), sourceFields(state, name), [{ command: 'remove-source', label: 'Remove source', argument: name }], notes);
+    return settingsPage(state, sourceTitle(state, name), sourceFields(state, name), [{ command: 'remove-source', label: 'Remove source', argument: name, danger: true }], notes);
   }
 
   if (page === 'new-source') {
@@ -1978,7 +1981,7 @@ export function pageView(state: EditorState): PageView {
     const name = page.slice('schedule:'.length);
 
     return state.scheduleNames.includes(name)
-      ? settingsPage(state, name, scheduleFields(state, name), [{ command: 'remove-schedule', label: 'Remove schedule', argument: name }], [])
+      ? settingsPage(state, name, scheduleFields(state, name), [{ command: 'remove-schedule', label: 'Remove schedule', argument: name, danger: true }], [])
       : { title: name, lede: null, buttons: [], notes: [], errors: [], message: 'This schedule no longer exists.', sections: [] };
   }
 
@@ -2048,7 +2051,7 @@ export function pageView(state: EditorState): PageView {
       return { title: name, lede: null, buttons: [], errors: [], message: 'This playbook no longer exists.', ...blank };
     }
 
-    const buttons: PageButton[] = [{ command: 'delete', label: 'Delete' }];
+    const buttons: PageButton[] = [{ command: 'delete', label: 'Remove playbook', danger: true }];
     const errors = state.playbookErrors(name);
     const read = readPlaybook(state.playbookEntry(name));
 
@@ -2082,6 +2085,7 @@ function personaPage(state: EditorState, at: string): PageView {
   const remove: PageButton = {
     command: 'remove-persona',
     label: 'Remove persona',
+    danger: true,
     argument: at,
     tip: 'Removes the persona and its playbook assignments from the draft. Sessions that have it keep its ID, and their spoken replies use the Spoken replies settings.',
   };

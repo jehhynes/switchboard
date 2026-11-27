@@ -137,11 +137,13 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     await settle();
 
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev:build');
-    // Start and Reports are each a section whose checkboxes need no label of their own; Kind, Return of and Focus page wait under Advanced.
+    // Start and Reports are sections of switch rows, each with its description; Kind, Return of and Focus page wait under Advanced.
     expect([...host.querySelectorAll('.settings-section-heading')].map((node) => (node.querySelector('.settings-toggle-label') ?? node).textContent)).toEqual(['About', 'Start', 'Reports', 'Run as', 'Prompt', 'Advanced']);
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Approve sends the work', 'Agent', 'Permission mode', 'Model', 'Working directory', 'Prompt']);
+    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Start automatically', 'Needs a worktree', 'Done', 'Approval', 'Worktree', 'Playbook', 'Paste', 'Approve sends the work', 'Agent', 'Permission mode', 'Model', 'Working directory', 'Prompt']);
     expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Kind, Return of, Focus page');
-    expect(texts('.settings-check label:not(.settings-box)')).toEqual(['Automatically', 'Needs a worktree', 'Done', 'Approval', 'Worktree', 'Playbook', 'Paste']);
+    expect(host.querySelector('.settings-check')).toBeNull();
+    expect([...host.querySelectorAll('input[role="switch"]')].map((one) => one.id)).toEqual(['settings-field-autoStart', 'settings-field-requiresWorktree', 'settings-field-reports_done', 'settings-field-reports_approval', 'settings-field-reports_worktree', 'settings-field-reports_playbook', 'settings-field-reports_paste', 'settings-field-approvalSends']);
+    expect(host.querySelector('[data-path="reports.paste"] .settings-help')?.textContent).toBe('The session can name drafted texts, such as a customer reply, that Copy puts on the clipboard on its approval row.');
     expect([...control<HTMLSelectElement>('permissionMode').options].map((one) => one.textContent)).toEqual(['From Sessions: auto', 'default', 'auto', 'plan', 'bypassPermissions']);
     expect(control<HTMLInputElement>('model').placeholder).toBe('From Sessions: Claude’s default');
     expect(host.querySelector('[data-path="template"] .settings-help')?.textContent).toBe('Variables: {{ticket.title}}. Switchboard adds the commands for the checked reports, with stage and link.');
@@ -260,17 +262,17 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
 
     entry('build').click();
     await settle();
-    press('Delete');
+    press('Remove playbook');
     await settle();
-    expect(host.querySelector('.settings-ask .sheet-title')?.textContent).toBe('Delete playbook dev:build?');
+    expect(host.querySelector('.settings-ask .sheet-title')?.textContent).toBe('Remove playbook dev:build?');
     expect(host.querySelector('.settings-ask .sheet-detail')?.textContent).toBe('2 open work items use it. Save removes it from settings.json.');
     press('Cancel');
     await settle();
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev:build');
-    expect(document.activeElement?.textContent).toBe('Delete');
-    press('Delete');
+    expect(document.activeElement?.textContent).toBe('Remove playbook');
+    press('Remove playbook');
     await settle();
-    [...host.querySelectorAll<HTMLButtonElement>('.settings-ask button')].find((one) => one.textContent === 'Delete')!.click();
+    [...host.querySelectorAll<HTMLButtonElement>('.settings-ask button')].find((one) => one.textContent === 'Remove')!.click();
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
     expect(document.activeElement).toBe(host.querySelector('.settings-page-title h2'));
