@@ -5616,7 +5616,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && (changesClosed = changes.escape()) !== null) {
       draw();
-      root.querySelector<HTMLElement>(changesClosed === 'options' ? '.tree-options-button' : changesClosed === 'more' ? '.changes-more' : '.changes-files')?.focus();
+      root.querySelector<HTMLElement>(changesClosed === 'options' ? '.tree-options-button' : changesClosed === 'more' ? '.changes-more' : '.changes-goto')?.focus();
       event.stopImmediatePropagation();
     } else if (event.key === 'Escape' && view.drawer !== null) {
       closeDrawer();

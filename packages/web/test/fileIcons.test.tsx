@@ -213,7 +213,7 @@ describe('the page', () => {
 
     root.querySelector<HTMLElement>('.changes-tab')!.click();
     await flush();
-    root.querySelector<HTMLElement>('.changes-files')!.click();
+    root.querySelector<HTMLElement>('.changes-goto')!.click();
     await flush();
     expect([...root.querySelectorAll('.change-row > span:first-child')].map((icon) => icon.className)).toEqual(['file-icon seti-5', 'file-icon seti-6']);
     expect(fetch.mock.calls.filter(([url]) => url === '/page/file-icons.json')).toHaveLength(1);

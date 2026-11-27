@@ -260,13 +260,13 @@ describe('the Changes list', () => {
     return { page, source };
   };
   const button = () => root.querySelector<HTMLElement>('.changes-tab')!;
-  const filesButton = () => root.querySelector<HTMLElement>('.changes-files')!;
+  const goToButton = () => root.querySelector<HTMLElement>('.changes-goto')!;
   const listGets = () => gets.filter((one) => one.startsWith('/v1/conversation/changes'));
-  /** Opens the Changes tab and its Files menu. */
+  /** Opens the Changes tab and its Go to menu. */
   const openList = async () => {
     button().click();
     await flush();
-    filesButton().click();
+    goToButton().click();
     await flush();
   };
 
@@ -837,7 +837,7 @@ describe('the Changes list', () => {
   it('ChangesMenu_Buttons_HideViewedCollapseAndExpandEveryFile', async () => {
     start();
     await openRow(0);
-    filesButton().click();
+    goToButton().click();
     await flush();
     root.querySelector<HTMLElement>('[data-action="changes-hide-viewed"]')!.click();
     expect(changesMounts[0]!.rows).toEqual(['docs/a.md', 'logo.png']);
@@ -898,7 +898,7 @@ describe('the Changes list', () => {
 
     await openList();
     await pick('Second change');
-    filesButton().click();
+    goToButton().click();
 
     const boxes = () => [...root.querySelectorAll<HTMLInputElement>('.change-viewed input')].map((box) => box.checked);
 

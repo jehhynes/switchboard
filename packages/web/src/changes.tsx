@@ -1,6 +1,6 @@
 // The Changes tab (PRD R118, architecture.md § Web page): the open conversation's worktree changes from its merge base to disk,
 // every changed file's diff in one scrolling tab at the end of the tab strips, drawn by the diff viewer the page
-// loads on first use, which reads only the files near the view, under a bar with the list's counts, its toggles, a Files menu to go to a file
+// loads on first use, which reads only the files near the view, under a bar with the list's counts, its toggles, a Go to menu to go to a file
 // and a scope menu that picks what the list compares: every change since the base, the uncommitted changes, one commit, or two points.
 import type { ComponentChildren, VNode } from 'preact';
 import { DIFF_BUDGET, evictions, largeReason, MAX_IN_FLIGHT, rowKey, wantedIndexes } from './changesWindow.js';
@@ -19,7 +19,7 @@ import type { ChangesMount, DiffModule, DiffMount, RowContent } from './diff/typ
 
 export type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, CommitInfo } from '@switchboard/protocol';
 
-/** What the page keeps of the Changes tab: the list as last read, a read on its way or why one failed, whether its Files menu is open, and the tab. */
+/** What the page keeps of the Changes tab: the list as last read, a read on its way or why one failed, whether its Go to menu is open, and the tab. */
 export interface ChangesView {
   list: ChangesList | null;
   loading: boolean;
@@ -296,7 +296,7 @@ export function listBase(list: ChangesList): string {
   return scopeTitle(rangeOf(list), list.commits, list.base);
 }
 
-/** What the Files menu and the Changes tab say when the list has no rows. */
+/** What the Go to menu and the Changes tab say when the list has no rows. */
 export function emptyNote(list: ChangesList): string {
   const kind = scopeKind(rangeOf(list), list.commits, list.base);
 
@@ -331,8 +331,8 @@ function HeadButton({ action, icon, label, pressed, disabled }: { action: string
   );
 }
 
-/** The Files menu's rows, or why there are none. */
-function FilesMenu({ changes }: { changes: ChangesView }): VNode {
+/** The Go to menu's rows, or why there are none. */
+function GoToMenu({ changes }: { changes: ChangesView }): VNode {
   const list = changes.list;
   let body: ComponentChildren;
 
@@ -344,7 +344,7 @@ function FilesMenu({ changes }: { changes: ChangesView }): VNode {
     body = <p class="changes-empty">{emptyNote(list)}</p>;
   } else {
     body = (
-      <ul class="changes-rows" aria-label="Files">
+      <ul class="changes-rows" aria-label="Changed files">
         {list.rows.map((row) => (
           <Row row={row} />
         ))}
@@ -489,11 +489,11 @@ export function renderChangesBar(changes: ChangesView, wrapped: boolean, now = D
         <span class="codicon codicon-arrow-left" aria-hidden="true"></span>
       </button>
     ) : null,
-    <button class={`changes-files${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} title="Go to a file" aria-label="Files">
-      <span class="changes-files-label">Files</span>
+    <button class={`changes-goto${changes.menu ? ' open' : ''}`} type="button" data-action="changes-menu" aria-expanded={changes.menu} title="Go to a changed file" aria-label="Go to">
+      <span class="changes-goto-label">Go to</span>
       <span class="codicon codicon-chevron-down" aria-hidden="true"></span>
     </button>,
-    changes.menu ? <FilesMenu changes={changes} /> : null,
+    changes.menu ? <GoToMenu changes={changes} /> : null,
     changes.compare !== null && tree.compare !== null ? <CompareMenu query={changes.compare.query} label={tree.compare.label} points={tree.compare.points} /> : null,
     // What the diffs compare, which the tree chooses.
     <span class="changes-scope" title={`Comparing: ${title}`}>
@@ -775,7 +775,7 @@ export function sharedTrees(): Record<TreeMode, TreeState> {
   return { changes, files };
 }
 
-/** The page's side of the Changes tab: reads the list and the diffs from the hub, and answers the clicks and presses on the tab, its bar and its Files menu. */
+/** The page's side of the Changes tab: reads the list and the diffs from the hub, and answers the clicks and presses on the tab, its bar and its Go to menu. */
 export class ChangesController {
   readonly view: ChangesView = newChanges();
   #reading = 0;
@@ -1680,7 +1680,7 @@ export class ChangesController {
     }
   }
 
-  /** Handles a click on the Changes tab, its bar, its Files menu or its diffs; false for any other click. */
+  /** Handles a click on the Changes tab, its bar, its Go to menu or its diffs; false for any other click. */
   click(target: HTMLElement): boolean {
     const action = target.closest<HTMLElement>('[data-action]')?.dataset['action'];
 
@@ -3080,7 +3080,7 @@ export class ChangesController {
     return false;
   }
 
-  /** Closes the Files menu, the `⋯` menu, the Compare picker, a row's menu, the search's options menu or the tree's flyout on a press outside it and its button; true when one closed. */
+  /** Closes the Go to menu, the `⋯` menu, the Compare picker, a row's menu, the search's options menu or the tree's flyout on a press outside it and its button; true when one closed. */
   pointerDown(target: EventTarget | null): boolean {
     const inside = (selector: string) => target instanceof Element && target.closest(selector) !== null;
     let closed = false;
@@ -3106,7 +3106,7 @@ export class ChangesController {
       closed = true;
     }
 
-    if ((!this.view.menu && !this.view.more) || inside('.changes-menu, .changes-files, .changes-more')) {
+    if ((!this.view.menu && !this.view.more) || inside('.changes-menu, .changes-goto, .changes-more')) {
       return closed;
     }
 
@@ -3115,7 +3115,7 @@ export class ChangesController {
     return true;
   }
 
-  /** Closes the search's options menu, the Compare picker, the Files menu, the `⋯` menu or a row's menu on Escape: which button takes the focus back, or null. */
+  /** Closes the search's options menu, the Compare picker, the Go to menu, the `⋯` menu or a row's menu on Escape: which button takes the focus back, or null. */
   escape(): 'files' | 'more' | 'options' | null {
     if (this.tree.options) {
       this.tree.options = false;

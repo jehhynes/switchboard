@@ -261,24 +261,24 @@ describe('the Changes list', () => {
     return { page, source };
   };
   const button = () => root.querySelector<HTMLElement>('.changes-tab')!;
-  const filesButton = () => root.querySelector<HTMLElement>('.changes-files')!;
+  const goToButton = () => root.querySelector<HTMLElement>('.changes-goto')!;
   const listGets = () => gets.filter((one) => one.startsWith('/v1/conversation/changes'));
-  /** Opens the Changes tab and its Files menu. */
+  /** Opens the Changes tab and its Go to menu. */
   const openList = async () => {
     button().click();
     await flush();
-    filesButton().click();
+    goToButton().click();
     await flush();
   };
 
-  it('ChangesTab_Chosen_ReadsTheListAndItsFilesMenuDrawsEachRowWithItsNameFolderCountsAndStatus', async () => {
+  it('ChangesTab_Chosen_ReadsTheListAndItsGoToMenuDrawsEachRowWithItsNameFolderCountsAndStatus', async () => {
     start();
     expect(root.querySelectorAll('.changes-tab')).toHaveLength(1);
     expect(button().querySelector('.unread-dot')).toBeNull();
     expect(gets).toEqual([]);
 
     button().click();
-    filesButton().click();
+    goToButton().click();
     expect(root.querySelector('.changes-menu')!.textContent).toContain('Reading the changes');
     await flush();
 
@@ -304,7 +304,7 @@ describe('the Changes list', () => {
     expect(button().getAttribute('aria-label')).toBe('Changes, 1 of 3 files viewed');
   });
 
-  it('reads it again on Refresh, and its Files menu closes on Escape or a press outside it', async () => {
+  it('reads it again on Refresh, and its Go to menu closes on Escape or a press outside it', async () => {
     start();
     await openList();
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
@@ -313,9 +313,9 @@ describe('the Changes list', () => {
 
     root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(root.querySelector('.changes-menu')).toBeNull();
-    expect(document.activeElement).toBe(filesButton());
+    expect(document.activeElement).toBe(goToButton());
 
-    filesButton().click();
+    goToButton().click();
     await flush();
     expect(root.querySelector('.changes-menu')).not.toBeNull();
     root.querySelector<HTMLElement>('.change-row')!.dispatchEvent(new Event('pointerdown', { bubbles: true }));
@@ -369,7 +369,7 @@ describe('the Changes list', () => {
     expect(listGets().at(-1)).toBe('/v1/conversation/changes?window=pk&from=HEAD&to=worktree');
     expect(scopeButton().textContent).toBe('Uncommitted');
     expect(scopeButton().querySelector('.codicon-diff-modified')).not.toBeNull();
-    filesButton().click();
+    goToButton().click();
     expect(root.querySelectorAll('.change-row')).toHaveLength(2);
     expect(root.querySelector<HTMLElement>('.changes-note')!.title).toBe('Uncommitted changes, against the last commit');
     expect(button().getAttribute('aria-label')).toBe('Changes, 1 of 2 uncommitted files viewed');
@@ -412,7 +412,7 @@ describe('the Changes list', () => {
 
     root.querySelector<HTMLElement>('[data-action="changes-refresh"]')!.click();
     await flush();
-    filesButton().click();
+    goToButton().click();
     expect(root.querySelector('.changes-empty')!.textContent).toBe('This commit changes no files. Choose another range in the tree.');
   });
 
@@ -425,7 +425,7 @@ describe('the Changes list', () => {
 
     expect(listGets().slice(-2)).toEqual([`/v1/conversation/changes?window=pk&from=${BASE}&to=${FIRST}`, '/v1/conversation/changes?window=pk']);
     expect(scopeButton().textContent).toBe('All changes');
-    filesButton().click();
+    goToButton().click();
     expect(root.querySelectorAll('.change-row')).toHaveLength(3);
   });
 
