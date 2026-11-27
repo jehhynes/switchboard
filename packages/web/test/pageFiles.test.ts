@@ -298,7 +298,8 @@ describe('the page in use', () => {
 
     hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', actions })])] });
     snooze();
-    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze Fix it');
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze');
+    expect(root.querySelector('.sheet-subtitle')!.textContent).toBe('Fix it');
     expect(document.activeElement).toBe(root.querySelector('.sheet input[name="snooze"]'));
     expect(root.querySelector('#head')!.closest('[inert]')).not.toBeNull();
     expect(root.querySelector('.side')!.closest('[inert]')).not.toBeNull();
@@ -379,7 +380,8 @@ describe('the page in use', () => {
     posts = [];
     click('button.actions');
     click('.actions-menu [data-label="Snooze…"]');
-    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze Fix it');
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze');
+    expect(root.querySelector('.sheet-subtitle')!.textContent).toBe('Fix it');
     const second = root.querySelectorAll<HTMLInputElement>('.sheet input[name="snooze"]')[1]!;
     const note = root.querySelector<HTMLTextAreaElement>('.snooze-comment')!;
 
@@ -982,7 +984,8 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     row().click();
     click('#list .row-menu [data-label="Snooze…"]');
-    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze Pool ticket');
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze');
+    expect(root.querySelector('.sheet-subtitle')!.textContent).toBe('Pool ticket');
     answers['/pool-action'] = { status: 200, body: { done: true } };
     posts = [];
     click('.sheet [data-action="sheet-go"]');

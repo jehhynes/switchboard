@@ -28,6 +28,23 @@ export function renderArtifacts(state: PageState, now: number): VNode {
   );
 }
 
+/**
+ * The conversation pane with no work item open: centred, saying so, and offering the first work item waiting on you in Blocked on you, as F8
+ * would open it; while the page connects, that it connects.
+ */
+export function renderNoWorkItem(connected: boolean, next: { workItemId: number; title: string } | null): VNode {
+  return (
+    <div class="empty-pane">
+      <p class="empty">{connected ? 'No work item open. Choose one in the list to see its conversation.' : 'Connecting to Switchboard…'}</p>
+      {connected && next !== null ? (
+        <button type="button" class="sheet-button primary empty-pane-next" data-action="select" data-work-item={String(next.workItemId)} title={next.title}>
+          <span class="empty-pane-label">Open {next.title}</span>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 /** A pane's one line when it has nothing else to show. */
 export function renderEmpty(text: string): VNode {
   return <p class="empty">{text}</p>;

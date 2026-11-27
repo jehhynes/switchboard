@@ -63,7 +63,8 @@ describe('the sheets over the page (architecture.md § Web page, Sheets)', () =>
     const sheet: Sheet = { kind: 'snooze', row: 'item:1', label: 'Snooze…', title: 'Fix it', choices, picked: '0', date: '', comment: '' };
 
     draw(renderSheet(sheet, false));
-    expect(host.querySelector('.sheet-title')?.textContent).toBe('Snooze Fix it');
+    expect(host.querySelector('.sheet-title')?.textContent).toBe('Snooze');
+    expect(host.querySelector('.sheet-subtitle')?.textContent).toBe('Fix it');
     expect(host.querySelector('legend')?.textContent).toBe('Wake on');
     expect(texts('.sheet-card > .sheet-choice .sheet-choice-label')).toEqual(['Tomorrow', 'In 2 days', 'In 3 days', 'Next week', 'In 2 weeks', 'In 4 weeks', 'On', 'Never']);
     expect(texts('.sheet-card > .sheet-choice')).toContain('NeverUntil you unsnooze it');

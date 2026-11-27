@@ -85,10 +85,14 @@ describe('stripTabs', () => {
   });
 
   it('StripTabs_UnreadStatus_MarksStatusAlone', () => {
-    const tabs = stripTabs({ ...full, stateUnread: true }, 'narrow');
+    const tabs = stripTabs({ ...full, shown: 'conversation', stateUnread: true }, 'narrow');
 
     expect(tabs.filter((tab) => tab.kind === 'fixed' && tab.unread).map((tab) => tab.id)).toEqual(['history']);
     expect(stripTabs(full, 'narrow').some((tab) => tab.kind === 'fixed' && tab.unread)).toBe(false);
+  });
+
+  it('StripTabs_HistoryShown_DropsItsUnreadDot', () => {
+    expect(stripTabs({ ...full, shown: 'history', stateUnread: true }, 'narrow').some((tab) => tab.kind === 'fixed' && tab.unread)).toBe(false);
   });
 });
 

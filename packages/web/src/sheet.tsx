@@ -10,9 +10,9 @@ import { ModalFrame } from './sheetFrame.js';
 const DESTRUCTIVE: ReadonlySet<string> = new Set(['delete', 'stop']);
 
 /** Every row sheet's frame; its backdrop and X send `sheet-cancel`. */
-function Frame({ title, children, buttons, close }: { title: string; children: ComponentChildren; buttons: ComponentChildren; close?: boolean | undefined }) {
+function Frame({ title, subtitle, children, buttons, close }: { title: string; subtitle?: string | undefined; children: ComponentChildren; buttons: ComponentChildren; close?: boolean | undefined }) {
   return (
-    <ModalFrame title={title} titleId="sheet-title" dismiss="sheet-cancel" buttons={buttons} close={close}>
+    <ModalFrame title={title} subtitle={subtitle} titleId="sheet-title" dismiss="sheet-cancel" buttons={buttons} close={close}>
       {children}
     </ModalFrame>
   );
@@ -100,7 +100,7 @@ export function renderSheet(sheet: Sheet | null, acting: boolean): VNode | null 
   );
 
   return (
-    <Frame title={`Snooze ${sheet.title}`} buttons={go('Snooze', acting)}>
+    <Frame title="Snooze" subtitle={sheet.title} buttons={go('Snooze', acting)}>
       <fieldset class="sheet-field">
         <legend class="sheet-label">Wake on</legend>
         <div class="sheet-card">

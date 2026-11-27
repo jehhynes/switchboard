@@ -97,7 +97,8 @@ it('RowMenuControl_PhoneList_ActsInPlaceWithTheListShown', async () => {
   expect(selects()).toEqual([2]);
   source.emit('scope', { scope: scope(2) });
   await flush();
-  expect(el('.sheet-title').textContent).toBe('Snooze Item 2');
+  expect(el('.sheet-title').textContent).toBe('Snooze');
+  expect(el('.sheet-subtitle').textContent).toBe('Item 2');
   expect(listing()).toBe(true);
   el('.sheet-foot [data-action="sheet-cancel"]').click();
   expect(root.querySelector('.sheet')).toBeNull();
@@ -128,7 +129,8 @@ it('RowMenuControl_PhoneList_ActsInPlaceWithTheListShown', async () => {
 
   // On the row whose work item is already selected behind the list, a control runs at once and the list stays.
   choose(2, 'Snooze…');
-  expect(el('.sheet-title').textContent).toBe('Snooze Item 2');
+  expect(el('.sheet-title').textContent).toBe('Snooze');
+  expect(el('.sheet-subtitle').textContent).toBe('Item 2');
   expect(listing()).toBe(true);
   el('.sheet-foot [data-action="sheet-cancel"]').click();
 

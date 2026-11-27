@@ -53,7 +53,7 @@ export const filePath = (tab: LocalTab): string => (tab.entry.state === 'ok' ? t
  */
 export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
   const { shown } = state;
-  const fixed = (tab: 'conversation' | 'history' | 'browser' | 'console'): DocTab => ({ id: tab, kind: 'fixed', tab, selected: shown === tab, unread: tab === 'history' && state.stateUnread });
+  const fixed = (tab: 'conversation' | 'history' | 'browser' | 'console'): DocTab => ({ id: tab, kind: 'fixed', tab, selected: shown === tab, unread: tab === 'history' && state.stateUnread && shown !== tab });
   const artifacts = [...state.artifacts]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .filter((artifact) => !state.closed.has(artifact.path) || (shown === 'artifacts' && artifact.path === state.open));

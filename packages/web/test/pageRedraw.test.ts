@@ -412,6 +412,20 @@ describe('the page', () => {
     expect(source.closed).toBe(true);
   });
 
+  it('offers the first work item waiting on you in Blocked on you while none is open, and opens it', async () => {
+    history.replaceState(null, '', '#');
+
+    const { source } = start();
+
+    source.emit('hello', { key: 'pk', groups: [listGroup('blocked', [listRow(3, { title: 'Not on you', stripe: null }), listRow(4, { title: 'Answer me', stripe: 'turn' })]), listGroup('progress', [listRow(1)])], scope: null, sessions: [], items: [], more: false, state: null, artifacts: [] });
+    const next = root.querySelector<HTMLElement>('#panel .empty-pane-next');
+
+    expect(next?.textContent).toBe('Open Answer me');
+    next!.click();
+    await flush();
+    expect(posts.find((post) => post.url.endsWith('/select'))?.body['workItemId']).toBe(4);
+  });
+
   it('shows the list as its own view on a narrow screen until a row is opened, and Back returns to it on the selected row', async () => {
     history.replaceState(null, '', '#');
 
@@ -421,6 +435,8 @@ describe('the page', () => {
     expect(root.classList.contains('listing')).toBe(true);
     // With no work item open, the pane says so in words that hold on a phone, where the list is its own view.
     expect(root.querySelector('#panel .empty')?.textContent).toBe('No work item open. Choose one in the list to see its conversation.');
+    // Nothing waits on you, so it offers no work item.
+    expect(root.querySelector('#panel .empty-pane-next')).toBeNull();
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     await flush();
     expect(root.classList.contains('listing')).toBe(false);

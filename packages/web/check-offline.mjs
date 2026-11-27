@@ -1,6 +1,6 @@
 // Checks the page's offline and error handling against a fake hub in a real headless Chrome or Edge (testing.md § Required checks): a stopped
-// hub behind `tailscale serve` (502), one that hangs, a dropped stream for 1 s and for 10 s, a half-open stream, a failed and a slow open, a
-// send whose answer is lost, a restart onto the same and another build, a failed page.js, the route, scroll and draft after a reload, and
+// hub behind `tailscale serve` (502), one that hangs, a dropped stream for 1 s and for 10 s, the latter also on a desktop, where the list dims too, a half-open stream, a failed and a slow open, a
+// send whose answer is lost, a restart onto the same and another build, with Update ready clear of the conversation's last item, a failed page.js, the route, scroll and draft after a reload, and
 // opening a work item on a wide page, a narrower one and a phone with no column moving.
 // Each scenario prints ok or FAIL with why; --shots <dir> saves a screenshot of each; --assets <dist/index.js> runs against another build of the
 // page, as the one before a change. Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install.
@@ -376,6 +376,35 @@ try {
       await shot('stream-back');
       return found;
     },
+    // A 10 s drop on a desktop, where the list is a column beside the conversation: offline dims the list as well as the conversation, so
+    // neither looks live.
+    'lost-wide': async () => {
+      const found = [];
+
+      await send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 900, deviceScaleFactor: 1, mobile: false });
+      await send('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 1 });
+
+      try {
+        await open(1);
+        setMode({ down: 502 });
+        await drop();
+        if (!(await until('document.querySelector(".conn-banner")', 8_000))) found.push('no offline banner after 4 s');
+        for (const selector of ['#list', '#panel']) {
+          const opacity = await evaluate(`Number(getComputedStyle(document.querySelector(${JSON.stringify(selector)})).opacity)`);
+
+          if (!(opacity < 1)) found.push(selector + ' is not dimmed while offline: opacity ' + opacity);
+        }
+        await shot('stream-lost-wide');
+        setMode({ down: null });
+        if (!(await until('document.querySelector(".conn-banner") === null', 20_000))) found.push('the banner stayed after the hub came back');
+      } finally {
+        setMode({ down: null });
+        await send('Emulation.setDeviceMetricsOverride', PHONE);
+        await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+      }
+
+      return found;
+    },
     // A failed open on a phone: the error for that work item, never the conversation shown before.
     'open-fails': async () => {
       const found = [];
@@ -450,6 +479,15 @@ try {
       if (!(await until('document.querySelector(".conn-update")', 10_000))) found.push('no Update ready for another build');
       await wait(2_000);
       if (!(await marked())) found.push('another build reloaded the page by itself');
+      // Update ready leaves room at the conversation's end: its last item lies above the card.
+      const clear = () => evaluate('(() => { const p = document.querySelector("#panel"); p.scrollTop = p.scrollHeight; return document.querySelector("#panel .timeline > li:last-child").getBoundingClientRect().bottom <= document.querySelector(".conn-update").getBoundingClientRect().top; })()');
+
+      if (!(await clear())) found.push('Update ready covers the conversation\'s last item');
+      // A narrower screen wraps the card onto more lines: the room follows.
+      await send('Emulation.setDeviceMetricsOverride', { ...PHONE, width: 320 });
+      await wait(300);
+      if (!(await clear())) found.push('Update ready covers the conversation\'s last item after a resize');
+      await send('Emulation.setDeviceMetricsOverride', PHONE);
       await shot('update-ready');
       // Update ready lies over every dialog, so Reload still takes a press while Settings is open.
       for (const [name, dialog, steps] of [['Settings', '.settings[role=dialog]', ['[data-action=list-more]', '[data-action=list-settings]']]]) {

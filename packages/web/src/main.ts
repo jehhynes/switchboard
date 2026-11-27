@@ -21,7 +21,7 @@ import { fitFade } from './replyFade.js';
 import { cardSteps, currentStep, draftAnswers, moveStep, pickLetter, picked, sendLabel, setComment } from '@switchboard/conversation/questions';
 import type { CardDraft as SharedDraft, LedgerCard } from '@switchboard/conversation/questions';
 import { cardKeyAction, isAnswerMessage, questionsWaiting } from '@switchboard/conversation/questionCard';
-import { renderArtifacts, renderArtifactView, renderEmpty } from './side.js';
+import { renderArtifacts, renderArtifactView, renderEmpty, renderNoWorkItem } from './side.js';
 import { renderSheet } from './sheet.js';
 import { toast } from './toast.js';
 import { composerOptionId, renderComposer, renderComposerMenu, renderDraftNote, renderEndedNote, renderFrame, renderShared } from './composer.js';
@@ -2424,7 +2424,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   resized?.observe(panel);
   // The maximized column ends this far above the page's bottom while the mic is on, so the composer shows below it (page.css).
-  const composerSized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => root.style.setProperty('--sb-composer-height', `${composerHost.offsetHeight}px`)) : null;
+  // Update ready's room (fitUpdateSpace) follows the composer's height too, since the pane ends at the composer.
+  const composerSized = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { root.style.setProperty('--sb-composer-height', `${composerHost.offsetHeight}px`); fitUpdateSpace(); }) : null;
 
   composerSized?.observe(composerHost);
   listening.signal.addEventListener('abort', () => {
@@ -2696,6 +2697,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   list.addEventListener('scroll', fitSliver, { passive: true, signal: listening.signal });
   window.addEventListener('resize', fitSliver, { signal: listening.signal });
+  window.addEventListener('resize', fitUpdateSpace, { signal: listening.signal });
   // The columns follow the width as it changes; a draw moves each pane to its place only when they change.
   window.addEventListener('resize', () => relayout() && draw(), { signal: listening.signal });
 
@@ -2830,7 +2832,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       modals.sync();
       mount(head, pending === null ? null : [renderOpeningHead(pending, view.connection), side ? null : renderOpeningTabs(false)]);
       plainPane(panel);
-      drawPane(panel, pending === null ? renderEmpty(state.connected ? 'No work item open. Choose one in the list to see its conversation.' : 'Connecting to Switchboard…') : renderOpening(pending));
+      drawPane(panel, pending === null ? renderNoWorkItem(state.connected, firstBlocked()) : renderOpening(pending));
 
       if (side && pending !== null) {
         mount(detailHead, renderOpeningTabs(true));
@@ -3168,6 +3170,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     }
 
     mount(connectionHost, [screen, renderUpdate(shown)]);
+    fitUpdateSpace();
     root.classList.toggle('stale', shown.state === 'offline' && shown.lastLiveAt !== null);
     root.classList.toggle('unreachable', screen !== null);
 
@@ -4055,6 +4058,26 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    * else the one shown, also when the hub itself shows another, as New session does.
    */
   const listSelected = (): number | null => opening?.workItemId ?? hostPending ?? state.scope?.workItemId ?? null;
+  /** Room at the panes' ends for the Update ready card (--sb-update-space): how far it reaches above the conversation pane's bottom, plus a gap. */
+  function fitUpdateSpace(): void {
+    const card = connectionHost.querySelector<HTMLElement>('.conn-update');
+    const covered = card === null ? 0 : panel.getBoundingClientRect().bottom - card.getBoundingClientRect().top;
+
+    const space = `${covered <= 0 ? 0 : Math.ceil(covered) + 8}px`;
+
+    if (root.style.getPropertyValue('--sb-update-space') === space) return;
+    // A pane read at its end stays there, so the card's room shows its last item clear of it.
+    const atEnd = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 2;
+
+    root.style.setProperty('--sb-update-space', space);
+    if (atEnd) panel.scrollTop = panel.scrollHeight;
+  }
+  /** The first row waiting on you in Blocked on you, which the empty conversation pane offers. */
+  function firstBlocked(): { workItemId: number; title: string } | null {
+    const row = state.groups.find((group) => group.key === 'blocked')?.rows.find((one) => one.workItemId !== null && one.stripe !== null);
+
+    return row === undefined ? null : { workItemId: row.workItemId!, title: row.title };
+  }
   const rowTitle = (workItemId: number): string => state.groups.flatMap((group) => group.rows).find((row) => row.workItemId === workItemId)?.title ?? 'Work item';
   /** Try again: the open is asked once more. */
   const retryOpening = (): void => {

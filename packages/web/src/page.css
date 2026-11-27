@@ -94,6 +94,11 @@ button:focus-visible, a:focus-visible, .tab:focus-visible { outline: 1px solid v
 .row:focus-visible, .pill:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .row { box-sizing: border-box; }
 .empty, .notice { margin: 8px 0; color: var(--vscode-descriptionForeground); }
+/* The conversation pane with no work item open: its line and the next work item waiting on you, centred in the pane. */
+.empty-pane { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 100%; padding: 24px; text-align: center; }
+.empty-pane > .empty { margin: 0; font-size: 14px; }
+.empty-pane-next { max-width: min(420px, 100%); }
+.empty-pane-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 /* The list of work items, in its groups and rows (architecture.md § Web page). */
@@ -383,6 +388,8 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
    area that takes presses beyond what it shows, kept as a deliberate exception (operator decision 2026-11-27; architecture.md § Web page). */
 .sliver { touch-action: pan-y; }
 @media (pointer: coarse) { .sliver::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 16px; } }
+/* With no pointer to rest on it, the stripes would be unexplained coloured lines at a touch screen's edge; the header's button shows the drawer. */
+@media (hover: none), (pointer: coarse) { .sliver > i { display: none; } }
 :where(html:not(.phone)) #root.drawers:not(.listing) > .side { box-sizing: border-box; position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--sb-z-drawer); padding-top: var(--sb-top); padding-left: env(safe-area-inset-left); visibility: hidden; transform: translateX(-100%); }
 :where(html:not(.phone)) #root.drawers:not(.listing) > .side-sash { display: none; }
 :where(html:not(.phone)) #root.drawers.drawer-open:not(.listing) > .side { visibility: visible; transform: none; transition: transform 0.15s ease-out; box-shadow: 0 0 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)); }
@@ -556,7 +563,8 @@ button.picker > .codicon-chevron-down { order: 2; }
 .tab-menu .title { display: flex; align-items: center; gap: 6px; padding-block: 0; }
 .tab-menu .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tab-menu .menu-gutter { margin-right: 6px; }
-.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 20px calc(16px + var(--sb-end)); touch-action: pan-y pinch-zoom; }
+/* --sb-update-space: room for the Update ready card (main.ts), so it covers nothing at a pane's end. */
+.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 20px calc(16px + var(--sb-end) + var(--sb-update-space, 0px)); touch-action: pan-y pinch-zoom; }
 /* Chrome and Edge move a touch that starts near a box with a :hover or :active style, such as a tab strip, onto that box (touch adjustment),
    so a drag starting just under a tab strip panned the strip, which does not scroll, rather than the pane under the finger. A :hover rule on
    everything in a scrolling pane makes each of its boxes such a box too, and the touch stays on the one under it. */
@@ -897,7 +905,7 @@ body.artifact-window > .artifact-view { height: 100%; }
 }
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer. */
 @media (max-width: 600px) {
-  .scroll { padding: 12px 12px calc(12px + var(--sb-end)); }
+  .scroll { padding: 12px 12px calc(12px + var(--sb-end) + var(--sb-update-space, 0px)); }
   /* On a phone the composer is as wide as the screen and sits on its bottom edge, and the notes above it share its edges. Rather than keep a
      strip as tall as the home indicator's inset below it, its footer's end buttons keep in from the screen's rounded corners by that inset,
      less the side's own inset (0 in portrait), and its buttons sit 14 px up, just clear of the home indicator (5 px tall, 8 px above the edge),
@@ -959,11 +967,16 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
    side bar's title bar and footer, and a body that alone scrolls, so the title and the buttons stay in view. A group of choices is one of
    Settings' cards, rows between hairlines. */
 .sheet-backdrop { position: fixed; inset: 0; z-index: var(--sb-z-sheet); display: flex; align-items: center; justify-content: center; padding: max(16px, var(--sb-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: rgba(0, 0, 0, 0.45); }
+/* Two sheet widths: 480 px for a question or a form, and --sb-sheet-wide for a list, a log or Settings. */
+:root { --sb-sheet-wide: 960px; }
 .sheet { box-sizing: border-box; display: flex; flex-direction: column; width: min(480px, 100%); max-height: 100%; overflow: hidden; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 8px; box-shadow: 0 8px 32px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5)); background: var(--vscode-editor-background); color: var(--vscode-foreground); }
 .sheet-head { flex: none; display: flex; align-items: center; gap: 8px; box-sizing: border-box; min-height: 44px; padding: 0 8px 0 20px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--vscode-sideBar-background); }
 /* A long title, such as Snooze's work item, takes two lines at most, so the body and the footer keep their room on a short screen. */
 /* The clamped box has no padding, where a third line would show, and is two lines high at most; its margin spaces it in the bar. */
 .sheet-title { flex: 1; min-width: 0; margin: 10px 0; padding: 0; font-size: 14px; font-weight: 600; line-height: 1.4; max-height: 2.8em; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.sheet-titles { flex: 1; min-width: 0; margin: 8px 0; }
+.sheet-titles > .sheet-title { margin: 0; }
+.sheet-subtitle { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .sheet-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 4px; background: transparent; color: var(--vscode-icon-foreground, var(--vscode-foreground)); cursor: pointer; }
 .sheet-close:hover { background: var(--vscode-toolbar-hoverBackground); }
 .sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 20px; }
@@ -1006,7 +1019,7 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 :where(html.phone) .sheet.hub-log-sheet { height: 100%; }
 @media (hover: none), (pointer: coarse) { .sheet-close { width: 44px; height: 44px; } .sheet-card > .sheet-choice { min-height: 44px; } .more-options-toggle { min-height: 44px; } }
 /* The log fills its sheet: its body lays out the log, whose text scrolls in its own box. */
-.sheet.hub-log-sheet { width: min(1100px, 100%); height: min(800px, 100%); }
+.sheet.hub-log-sheet { width: min(var(--sb-sheet-wide), 100%); height: min(800px, 100%); }
 .hub-log-sheet .sheet-body { display: flex; flex-direction: column; }
 .hub-log { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 10px; }
 .hub-log > .sheet-detail, .hub-log-note { margin: 0; color: var(--vscode-descriptionForeground); }
@@ -1032,7 +1045,7 @@ button.actions:hover { background: var(--vscode-toolbar-hoverBackground); }
 .hub-log-earlier { padding-bottom: 8px; font-family: var(--vscode-font-family, sans-serif); white-space: normal; }
 @media (hover: none), (pointer: coarse) { .hub-log-tools .sheet-input, .hub-log-tools label, .hub-log .sheet-button, .hub-log-chip { min-height: 44px; } }
 @media (max-width: 600px) { .hub-log-tools.hub-log-levels { flex-wrap: nowrap; overflow-x: auto; } .hub-log-chip { flex: none; } .hub-log-tools .hub-log-area { flex: 0 0 140px; } .hub-log-errors { flex: none; } }
-.held-sheet { width: min(1000px, 100%); }
+.held-sheet { width: min(var(--sb-sheet-wide), 100%); }
 /* Each background session, and the question before one stops, is one of Settings' cards. */
 .held-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; }
 .held-row, .held-confirm { min-width: 0; padding: 12px 14px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 6px; background: var(--vscode-editorWidget-background, transparent); }
@@ -1156,6 +1169,12 @@ a.sheet-button { display: inline-flex; align-items: center; text-decoration: non
 .console-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; }
 .console-foot[hidden] { display: none; }
 .console-note { flex: 1; min-width: 0; margin: 0; color: var(--vscode-errorForeground); }
+/* Ended, why and Reconnect are a card centred on the screen, which stays dimmed behind it with what the console drew. */
+.console.ended > .console-screen { opacity: 0.4; }
+.console.ended > .console-foot { position: absolute; top: 50%; left: 50%; z-index: 60; transform: translate(-50%, -50%); box-sizing: border-box; flex-direction: column; gap: 12px; width: max-content; max-width: min(360px, calc(100% - 32px)); padding: 16px 20px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 8px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); box-shadow: 0 6px 20px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.45)); font-size: 13px; text-align: center; }
+.console.ended .console-note { flex: none; }
+.console.ended .console-reconnect { min-height: 32px; padding: 4px 16px; border-radius: 4px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+@media (hover: none), (pointer: coarse) { .console.ended .console-reconnect { min-height: 44px; } }
 /* The keys a phone's keyboard lacks (console.ts `CONSOLE_KEYS`), on a bar under the screen, only on a touch screen while the console types. A phone
    keeps the page's layout when its keyboard opens, so console.ts sets --sb-keys-lift, how far the keyboard covers the bar, and the console pads its
    bottom by it, raising the bar over the keyboard and shrinking the screen above it; where the browser lays its keyboard over the page instead
@@ -1345,11 +1364,11 @@ ol.hist-timeline > :last-child::before { bottom: auto; height: 14px; }
 /* A question card on a phone (design § 6): the full width of the timeline at 14 px. */
 :where(html.phone) .question-card.qc { max-width: none; font-size: 14px; }
 
-/* The toast (toast.tsx): one message at a time near the page's top, below the conversation's header and tabs, in
+/* The toast (toast.tsx): one message at a time near the page's bottom, above the composer and Update ready, clear of the first messages and the tabs, in
    neutral colours, or in the warning colours for a refusal or failure; above every sheet and Settings, so a failure shows whatever is open.
    Its icon, size, coloured left edge and shadow make it stand out on a wide desktop page; it fades in without moving, since the website frame's
    holes follow its box. */
-#toast { position: fixed; top: calc(var(--sb-top) + 88px); left: 50%; z-index: var(--sb-z-toast); width: max-content; max-width: min(560px, calc(100vw - 24px)); transform: translateX(-50%); }
+#toast { position: fixed; bottom: calc(max(var(--sb-composer-height, 0px), env(safe-area-inset-bottom)) + 12px + var(--sb-update-space, 0px)); left: 50%; z-index: var(--sb-z-toast); width: max-content; max-width: min(560px, calc(100vw - 24px)); transform: translateX(-50%); }
 #toast:empty { display: none; }
 .toast { box-sizing: border-box; display: flex; align-items: flex-start; gap: 10px; min-width: min(300px, calc(100vw - 24px)); padding: 8px 6px 8px 12px; border: 1px solid var(--vscode-focusBorder, var(--vscode-widget-border)); border-left-width: 4px; border-radius: 8px; background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background)); color: var(--vscode-foreground); font-size: 14px; line-height: 1.45; box-shadow: 0 6px 20px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.45)); animation: sb-toast-in 0.15s ease-out; }
 .toast.warning { border-color: var(--vscode-editorWarning-foreground); background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 14%, var(--vscode-editorWidget-background, var(--vscode-sideBar-background))); }

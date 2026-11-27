@@ -361,6 +361,7 @@ export function mountConsole(host: HTMLElement, createTerm: (options: TermOption
 
   const drawState = (): void => {
     host.classList.toggle('typing', typing && !ended);
+    host.classList.toggle('ended', ended);
     note.hidden = error === null;
     note.textContent = error ?? '';
     reconnect.hidden = !ended;

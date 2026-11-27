@@ -4,6 +4,8 @@ import type { ComponentChildren } from 'preact';
 
 export interface ModalFrameProps {
   title: ComponentChildren;
+  /** A line under the title naming what the sheet acts on, cut to one line, such as Snooze's work item. */
+  subtitle?: string | undefined;
   /** The title's id, which names the dialog. */
   titleId: string;
   /** What dismisses the sheet: the `data-action` its page's click handler reads, or a handler. */
@@ -21,16 +23,27 @@ export interface ModalFrameProps {
 }
 
 /** A sheet's frame: the title bar with its X where asked, the body, the footer, and a backdrop a press on which dismisses it. */
-export function ModalFrame({ title, titleId, dismiss, buttons, close = false, wide, backdrop, role = 'dialog', children }: ModalFrameProps) {
+export function ModalFrame({ title, subtitle, titleId, dismiss, buttons, close = false, wide, backdrop, role = 'dialog', children }: ModalFrameProps) {
   const action = typeof dismiss === 'string' ? { 'data-action': dismiss } : {};
 
   return (
     <div class={`sheet-backdrop${backdrop === undefined ? '' : ` ${backdrop}`}`} {...action} onClick={typeof dismiss === 'string' ? undefined : (event) => event.target === event.currentTarget && dismiss()}>
       <div class={`sheet${wide === undefined ? '' : ` ${wide}`}`} role={role} aria-modal="true" aria-labelledby={titleId}>
         <div class="sheet-head">
-          <h2 id={titleId} class="sheet-title" title={typeof title === 'string' ? title : undefined}>
-            {title}
-          </h2>
+          {subtitle === undefined ? (
+            <h2 id={titleId} class="sheet-title" title={typeof title === 'string' ? title : undefined}>
+              {title}
+            </h2>
+          ) : (
+            <div class="sheet-titles">
+              <h2 id={titleId} class="sheet-title">
+                {title}
+              </h2>
+              <p class="sheet-subtitle" title={subtitle}>
+                {subtitle}
+              </p>
+            </div>
+          )}
           {close ? (
             <button type="button" class="icon sheet-close" {...action} onClick={typeof dismiss === 'string' ? undefined : dismiss} data-dismiss title="Close" aria-label="Close">
               <span class="codicon codicon-close" aria-hidden="true"></span>
@@ -45,9 +58,9 @@ export function ModalFrame({ title, titleId, dismiss, buttons, close = false, wi
 }
 
 /** A sheet of the list's header; its X and backdrop send `list-sheet-cancel`. */
-export function SheetFrame({ title, children, buttons, wide, close }: { title: string; children: ComponentChildren; buttons?: ComponentChildren; wide?: 'hub-log-sheet' | 'held-sheet' | 'pair-sheet' | undefined; close?: boolean | undefined }) {
+export function SheetFrame({ title, subtitle, children, buttons, wide, close }: { title: string; subtitle?: string | undefined; children: ComponentChildren; buttons?: ComponentChildren; wide?: 'hub-log-sheet' | 'held-sheet' | 'pair-sheet' | undefined; close?: boolean | undefined }) {
   return (
-    <ModalFrame title={title} titleId="list-sheet-title" dismiss="list-sheet-cancel" buttons={buttons} close={close} wide={wide}>
+    <ModalFrame title={title} subtitle={subtitle} titleId="list-sheet-title" dismiss="list-sheet-cancel" buttons={buttons} close={close} wide={wide}>
       {children}
     </ModalFrame>
   );

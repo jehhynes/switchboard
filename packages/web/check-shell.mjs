@@ -161,7 +161,7 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 // The bell's notices (architecture.md § Web page, List header): none on the list, one, or three with the dropdown open.
 const minutesAgo = (minutes) => now - minutes * 60000;
-const older = { id: 'holder-older:b', class: 'action', text: 'Background sessions run on an older build of Switchboard. Restart them to update; its 2 sessions stop and resume.', at: minutesAgo(3), dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart background sessions?', detail: 'Its 2 sessions stop and resume in the new holder. A tool call that is running is cut off.', action: 'Restart and resume' } } };
+const older = { id: 'holder-older:b', class: 'action', text: 'Switchboard runs background sessions on an older build. Restart to update; the 2 sessions stop and resume.', at: minutesAgo(3), dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart background sessions on the installed build?', detail: 'Its 2 sessions stop and resume in the new holder. A tool call that is running is cut off.', action: 'Restart and resume' } } };
 const zohoError = { id: 'source:zoho', class: 'action', text: 'zoho: Zoho Desk refused the token (401), so it is not polled.', at: minutesAgo(8), dismissible: false, action: { kind: 'poll', label: 'Check again' } };
 const orphanNotice = { id: 'orphans:x', class: 'action', text: '2 background sessions without a work item.', at: minutesAgo(125), dismissible: true, action: { kind: 'held', label: 'Review' } };
 const notices = view === 'notices-1' || view === 'holder' ? [older] : view === 'notices-3' || view === 'notices-open' ? [zohoError, orphanNotice, older] : [];
@@ -1105,6 +1105,7 @@ const IN_PLACE_STATE = `(() => {
     selects: window.__posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body.workItemId),
     actions: window.__posts.filter((post) => post.url.endsWith('/row-action')).map((post) => post.body.workItemId + ' ' + post.body.label),
     sheet: document.querySelector('.sheet-title')?.textContent ?? null,
+    subtitle: document.querySelector('.sheet-subtitle')?.textContent ?? null,
   };
 })()`;
 
@@ -1115,7 +1116,7 @@ function inPlaceFailures(view, size, s) {
   if (!s.list) out.push('the list is not shown');
   if (s.selects.join() !== '1') out.push('the control selected ' + JSON.stringify(s.selects) + ', not work item 1 once');
   if (view === 'row-done' && s.actions.join() !== '1 Mark done') out.push('Mark done posted ' + JSON.stringify(s.actions));
-  if (view === 'row-snooze' && s.sheet !== 'Snooze Fix it') out.push('the sheet is ' + JSON.stringify(s.sheet) + ', not Snooze Fix it');
+  if (view === 'row-snooze' && (s.sheet !== 'Snooze' || s.subtitle !== 'Fix it')) out.push('the sheet is ' + JSON.stringify([s.sheet, s.subtitle]) + ', not Snooze over Fix it');
   if (view === 'row-comment' && s.sheet === null) out.push('no Add comment sheet');
   return out;
 }

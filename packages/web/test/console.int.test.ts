@@ -448,6 +448,8 @@ describe('the console', () => {
     reconnect.click();
     source().emit('error', {});
     expect(host.querySelector('.console-note')!.textContent).toBe('The console lost its connection to Switchboard.');
+    // Ended, its reason and Reconnect are centred over the dimmed screen (page.css).
+    expect(host.classList.contains('ended')).toBe(true);
     expect(FakeSource.all).toHaveLength(3);
     reconnect.click();
     source().emit('closed', { error: 'The terminal holder closed the connection.' });

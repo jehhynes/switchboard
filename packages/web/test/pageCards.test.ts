@@ -553,7 +553,8 @@ describe('the page in use', () => {
     click('button.actions');
     click('.actions-menu [data-label="Snooze…"]');
     blur();
-    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze Fix it');
+    expect(root.querySelector('.sheet-title')!.textContent).toBe('Snooze');
+    expect(root.querySelector('.sheet-subtitle')!.textContent).toBe('Fix it');
     page.close();
   });
 
