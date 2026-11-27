@@ -140,16 +140,21 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
 /* Without the bar, the page and the navigation run to the bottom edge and end their content above the home indicator's inset. */
 :where(html.phone) .settings:not(:has(> .settings-bar)) :is(.settings-page, .settings-nav) { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 :where(html.phone) .settings-bar { min-height: calc(52px + env(safe-area-inset-bottom)); padding: 3px 12px calc(3px + env(safe-area-inset-bottom)); }
+/* A touch screen's targets are 44 px, but for the playbooks table and, outside a phone, the navigation, which are 32 px (operator decision
+   2026-11-26), so a namespace's playbooks and the whole navigation stay in view: the box each shows is its whole target, and at least 4 px lies
+   between two targets. On a phone the navigation's rows stay 44 px. */
 @media (hover: none), (pointer: coarse) {
-  .settings-nav-entry { min-height: 44px; }
+  :where(html:not(.phone)) .settings-nav-entry { min-height: 32px; margin-bottom: 4px; }
   .settings-head button.icon { min-width: 44px; min-height: 44px; }
   .settings-text, .settings-select { min-height: 44px; }
   .settings-check input[type="checkbox"] { width: 20px; height: 20px; }
   .settings-check { min-height: 44px; }
   .settings-toggle { min-height: 44px; }
-  .settings-table button.link { min-width: 44px; min-height: 44px; text-align: left; }
+  .settings-table button.link { min-width: 32px; min-height: 32px; text-align: left; }
   .settings-voice-off button.link, .settings-link-row button.link, .settings-links button.link { min-height: 44px; }
   .settings-table input[type="checkbox"] { width: 20px; height: 20px; margin: 0; }
   /* A checkbox's 20 px mark sits in a 44 px label, which takes the press. */
   .settings-box { min-width: 44px; min-height: 44px; }
+  .settings-table .settings-box { min-width: 32px; min-height: 32px; }
+  .settings-table td { padding-top: 3px; padding-bottom: 3px; }
 }

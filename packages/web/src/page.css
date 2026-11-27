@@ -1302,12 +1302,17 @@ ol.hist-timeline > :last-child::before { bottom: auto; height: 14px; }
   .hist-now-headline, .hist-now-body { padding-left: 12px; }
   .hist-day { padding-left: calc(var(--hist-rail) + 13px); }
 }
-/* Every control is a 44 px target on a touch screen: chips, the filter, the icon buttons, links, group headings, runs and Details. */
+/* On a touch screen the filter and the icon buttons are 44 px targets. The chips, links, Details, group headings and runs are 32 px each way
+   (operator decision 2026-11-26), so the timeline keeps its density: the box each shows is its whole target, and at least 4 px lies between
+   two targets. */
 @media (hover: none), (pointer: coarse) {
   .hist-toolbar button.icon { min-width: 44px; min-height: 44px; }
   .hist-tl-title { flex-basis: 100%; }
-  .history-view button.hist-chip, .history-view button.hist-chips-toggle, .history-view button.hist-link, .history-view button.hist-group-toggle, .hist-run > details > summary, .hist-more > summary { min-width: 44px; }
-  .history-view button.hist-chip, .history-view button.hist-chips-toggle, .history-view button.hist-link, .history-view button.hist-group-toggle, .hist-filter-box, .hist-run > details > summary, .hist-more > summary { min-height: 44px; }
+  .hist-filter-box { min-height: 44px; }
+  .history-view button.hist-chip, .history-view button.hist-chips-toggle, .history-view button.hist-link, .hist-more > summary, .history-view button.hist-group-toggle, .hist-run > details > summary { box-sizing: border-box; min-width: 32px; min-height: 32px; }
+  .hist-head-links { row-gap: 4px; }
+  /* Two runs in a row keep 4 px between their summaries. */
+  .hist-run > details > summary { margin: 2px 0; }
 }
 
 /* A question card on a phone (design § 6): the full width of the timeline at 14 px. */
