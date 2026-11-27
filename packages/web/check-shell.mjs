@@ -16,7 +16,8 @@
 // its navigation, 32 px each way, the latter at least 4 px from any other target, and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
 // task list, whose read-only boxes are not controls; on the desktop a question card's step dots are at least 24 px tall.
 // The questions waiting chip floats centred over the composer, clear of its box, at the conversation's end and halfway up. The card's topic is
-// 4.5:1 on the card, and its first question's disabled Back has no border.
+// 4.5:1 on the card, and its first question's disabled Back has no border. On a touch screen each of the card's options centres its text in
+// its row, a one-line label and its mark within 1 px.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
@@ -847,6 +848,28 @@ const CARD_LOOK = `(async () => {
 })()`;
 
 /**
+ * Each option of the open card, at the conversation's top: how far its text block's centre is from the option's, and for an option whose
+ * label is one line alone, how far the label's and the mark's centres are from it.
+ */
+const CARD_OPTIONS = `(async () => {
+  const panel = document.getElementById('panel');
+  panel.scrollTop = 0;
+  await new Promise((done) => setTimeout(done, 150));
+  const mid = (box) => (box.top + box.bottom) / 2;
+  return [...document.querySelectorAll('#panel .question-card.qc .qc-option')].map((option) => {
+    const box = option.getBoundingClientRect();
+    const body = option.querySelector('.qc-option-body');
+    const label = option.querySelector('.qc-label');
+    const range = document.createRange();
+    range.selectNodeContents(label);
+    const lines = new Set([...range.getClientRects()].filter((one) => one.height > 0).map((one) => Math.round(one.top))).size;
+    const alone = lines === 1 && body.children.length === 1;
+    const off = (inner) => Math.round(Math.abs(mid(inner.getBoundingClientRect()) - mid(box)) * 10) / 10;
+    return { text: label.textContent, height: Math.round(box.height * 10) / 10, body: off(body), label: alone ? off(label) : null, mark: alone ? off(option.querySelector('.qc-mark')) : null };
+  });
+})()`;
+
+/**
  * The open menu as it shows, then scrolled to its end: whether it scrolls, where its box lies, the scroll marks (`more-above`, `more-below`) and
  * whether its fade shows, and at its end whether its last row is the element under the row's centre. Scrolled back to its top after.
  */
@@ -1383,6 +1406,18 @@ try {
           else {
             if (look.contrast < 4.5) found.push("the card's topic is " + look.contrast + ':1 on the card');
             if (!look.disabled || look.borderAlpha > 0) found.push("the first question's Back is " + (look.disabled ? 'disabled with the border ' + look.border : 'enabled'));
+          }
+          // On a touch screen each option's text sits centred in its 56 px row as a block, and a one-line label and its mark each within 1 px.
+          if (size.mouse !== true) {
+            const options = await evaluate(CARD_OPTIONS);
+
+            if (report) console.log(name + ' card options: ' + JSON.stringify(options));
+            if (options.length === 0) found.push('the question card showed no options');
+            for (const one of options) {
+              if (one.body > 1) found.push('the option ' + JSON.stringify(one.text) + "'s text is " + one.body + ' px off its centre');
+              if (one.label !== null && one.label > 1) found.push('the option ' + JSON.stringify(one.text) + "'s label is " + one.label + ' px off its centre');
+              if (one.mark !== null && one.mark > 1) found.push('the option ' + JSON.stringify(one.text) + "'s mark is " + one.mark + ' px off its centre');
+            }
           }
           await evaluate('(() => { const panel = document.getElementById("panel"); panel.scrollTop = panel.scrollHeight; })()');
         }

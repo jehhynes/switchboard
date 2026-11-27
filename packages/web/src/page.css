@@ -861,8 +861,9 @@ body.artifact-window > .artifact-view { height: 100%; }
   /* A step dot keeps its 22 px bar inside a 44 px target. */
   .qc-dot { width: 44px; height: 44px; }
   .question-waiting { border-radius: 22px; font-size: 13px; }
-  /* A card's options are 56 px rows on touch (design § 6, Phone). */
-  .qc-option { min-height: 56px; }
+  /* A card's options are 56 px rows on touch (design § 6, Phone), their mark and text centred in the row as one block: wrapping makes
+     align-content apply, and the text's zero flex basis keeps it on the mark's line, its first line still beside the mark. */
+  .qc-option { min-height: 56px; flex-wrap: wrap; align-content: center; }
   .composer-tool, .send, .voice-controls .ghost.icon, .toast .dismiss, .conn-update button.conn-reload { min-width: 44px; }
   .voice-controls .ghost.talk-here { line-height: 44px; }
   .attachments { gap: 12px 8px; }
