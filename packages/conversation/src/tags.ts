@@ -356,10 +356,14 @@ function spannedLines(lines: string[], fenced: boolean[]): Set<number> {
   return spanned;
 }
 
+/** Whether a tag's path names a folder: it ends in a slash, or its last part has no extension, as `.wip` or `docs`. */
+export const folderTag = (path: string): boolean => !((path.split(/[\\/]/).pop() ?? '').lastIndexOf('.') > 0);
+
 /**
  * The artifact tags of a text (architecture.md § Artifacts), in order, and the text without their lines. Only a tag alone on its line outside
- * code counts, so a reply that quotes the tag inline or in a code block, as when it explains the rule, keeps it as text. The rest of the text is
- * kept as written, but for a blank line a removed tag would leave doubled.
+ * code counts, so a reply that quotes the tag inline or in a code block, as when it explains the rule, keeps it as text. A tag that names a
+ * folder (`folderTag`) is no artifact: it stays in the text as a link to the folder, which the page opens in the Changes tab's explorer. The
+ * rest of the text is kept as written, but for a blank line a removed tag would leave doubled.
  */
 export function splitArtifacts(text: string): { artifacts: ArtifactTag[]; text: string } {
   if (!/\[artifact:/i.test(text)) {
@@ -388,12 +392,17 @@ export function splitArtifacts(text: string): { artifacts: ArtifactTag[]; text: 
   const kept: string[] = [];
   const artifacts: ArtifactTag[] = [];
   let removed = false;
+  let folders = 0;
 
   lines.forEach((line, index) => {
     const tag = fenced[index] || spanned.has(index) ? null : ARTIFACT_LINE.exec(line);
     const parsed = tag === null ? null : artifactTag(tag[1]!);
 
-    if (parsed !== null) {
+    if (parsed !== null && folderTag(parsed.path)) {
+      kept.push(`[${(parsed.title ?? parsed.path).replace(/[[\]\\]/g, '\\$&')}](<${parsed.path.replace(/[<>]/g, encodeURIComponent)}>)`);
+      removed = false;
+      folders++;
+    } else if (parsed !== null) {
       artifacts.push(parsed);
       removed = true;
     } else if (!(removed && line.trim() === '' && (kept.length === 0 || kept.at(-1)!.trim() === ''))) {
@@ -402,7 +411,7 @@ export function splitArtifacts(text: string): { artifacts: ArtifactTag[]; text: 
     }
   });
 
-  return artifacts.length === 0 ? { artifacts, text } : { artifacts, text: kept.join('\n').trim() };
+  return artifacts.length === 0 && folders === 0 ? { artifacts, text } : { artifacts, text: kept.join('\n').trim() };
 }
 
 /** A heard tag, `<!--heard:X=Y-->`: the recogniser heard X where the operator meant the term Y. */

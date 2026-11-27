@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { drawnKeysOf, drawnLinks, endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, speechPart, splitArtifacts, splitHeard, splitPrimary, splitRewrite, splitSpeak, splitState, splitTone, stateParts, spokenText, stripAside, stripMessageTags, tableRecords } from '../src/tags.js';
+import { drawnKeysOf, drawnLinks, endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, speechPart, folderTag, splitArtifacts, splitHeard, splitPrimary, splitRewrite, splitSpeak, splitState, splitTone, stateParts, spokenText, stripAside, stripMessageTags, tableRecords } from '../src/tags.js';
 import { screenBlocks } from '../src/screenReader.js';
 import { typedText } from '../src/transcript.js';
 
@@ -321,5 +321,16 @@ describe('artifact tags', () => {
 
   it('reads a tag after a closed code block', () => {
     expect(splitArtifacts('```\ncode\n```\n[artifact: ./out/report.md]\nDone.')).toEqual({ artifacts: [{ path: './out/report.md', title: null, kind: null }], text: '```\ncode\n```\nDone.' });
+  });
+
+  it('SplitArtifacts_TagNamingAFolder_StaysALinkToTheFolder', () => {
+    const text = 'Done.\n[artifact: D:/git/research/topic/]\n[artifact: docs | title: The docs]\n[artifact: D:/w/.wip]\n[artifact: D:/r/report.md]\nNext.';
+
+    expect(splitArtifacts(text)).toEqual({ artifacts: [{ path: 'D:/r/report.md', title: null, kind: null }], text: 'Done.\n[D:/git/research/topic/](<D:/git/research/topic/>)\n[The docs](<docs>)\n[D:/w/.wip](<D:/w/.wip>)\nNext.' });
+    expect(splitArtifacts('[artifact: <my docs>]').text).toBe('[my docs](<my docs>)');
+    expect(splitArtifacts('[artifact: C:\\work\\out]').text).toBe('[C:\\\\work\\\\out](<C:\\work\\out>)');
+    expect(folderTag('notes.md')).toBe(false);
+    expect(folderTag('.wip')).toBe(true);
+    expect(folderTag('src/')).toBe(true);
   });
 });
