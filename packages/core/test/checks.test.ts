@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { HELD, takeSlot } from '../../../tools/check-lock.mjs';
-import { checkPlan } from '../../../tools/check-plan.mjs';
+import { fileURLToPath } from 'node:url';
+import { checkPlan, loadWorkspaces, touchedWorkspaces, unchecked } from '../../../tools/check-plan.mjs';
 import { unitTests } from '../../../tools/run-tests.mjs';
 
 // The workspace graph in package.json order, cut down: hub takes web, the app takes hub and chrome.
@@ -33,6 +34,31 @@ describe('checkPlan', () => {
     expect([...checkPlan(WORKSPACES, ['web', 'hub'], NARROW).affected].sort()).toEqual(['app', 'hub', 'web']);
     expect([...checkPlan(WORKSPACES, ['chrome', 'web'], NARROW).partial]).toEqual([['hub', ['test/page.test.ts']], ['app', ['test/install.test.ts']]]);
     expect([...checkPlan(WORKSPACES, ['web']).affected].sort()).toEqual(['app', 'hub', 'web']);
+  });
+
+  it('CheckPlan_WebChangedInThisRepository_TestsTheExtensionWhoseTestReadsItsTheme', () => {
+    const affected = checkPlan(loadWorkspaces(fileURLToPath(new URL('../../..', import.meta.url))), ['@switchboard/web']).affected;
+
+    expect(affected.has('@switchboard/chrome')).toBe(true);
+    expect(affected.has('@switchboard/hub-app')).toBe(true);
+    expect(affected.has('@switchboard/core')).toBe(false);
+  });
+});
+
+describe('touchedWorkspaces', () => {
+  it('TouchedWorkspaces_Files_NamesTheirWorkspacesAndListsTheRest', () => {
+    const workspaces = [{ dir: 'packages/core', name: 'core' }, { dir: 'packages/web', name: 'web' }];
+    const { touched, outside } = touchedWorkspaces(workspaces, ['packages/web/src/a.ts', 'packages/core/b.ts', 'packages/web/c.ts', 'packages/webx/d.ts', 'tools/verify.mjs']);
+
+    expect([...touched]).toEqual(['web', 'core']);
+    expect(outside).toEqual(['packages/webx/d.ts', 'tools/verify.mjs']);
+  });
+
+  it('Unchecked_DocumentationAndTextOutsideEveryWorkspace_OnlyThem', () => {
+    const workspaces = [{ dir: 'packages/core' }];
+
+    expect(['docs/a.md', 'AGENTS.MD', 'notes.txt', 'packages/corex/a.md'].every((f) => unchecked(f, workspaces))).toBe(true);
+    expect(['a.mdx', 'md.ts', 'packages/core/src/a.ts', 'packages/core/test/fixtures/a.txt', 'packages/core/README.md'].some((f) => unchecked(f, workspaces))).toBe(false);
   });
 });
 

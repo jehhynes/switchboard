@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Dependencies the manifests do not declare: apps/hub's standalone build carries
-// the browser extension's build (apps/hub/carried.cjs).
-const UNDECLARED = { '@switchboard/hub-app': ['@switchboard/chrome'] };
+// the browser extension's build (apps/hub/carried.cjs), and the extension's
+// iframeHostStyle test reads the web page's theme.css.
+const UNDECLARED = { '@switchboard/hub-app': ['@switchboard/chrome'], '@switchboard/chrome': ['@switchboard/web'] };
 
 /** The workspaces under `root` as `{ dir, name, deps, scripts }`, in package.json order, which is dependency order. */
 export function loadWorkspaces(root) {
@@ -19,6 +20,24 @@ export function loadWorkspaces(root) {
 
   for (const w of workspaces) w.deps = w.deps.filter((d) => names.has(d));
   return workspaces;
+}
+
+/** Documentation and text files outside every workspace, which no check covers; tests read some inside a workspace as fixtures. */
+export const unchecked = (file, workspaces) => /\.(md|txt)$/i.test(file) && !workspaces.some((w) => file.startsWith(w.dir + '/'));
+
+/** The names of the workspaces `files` are in, and the files outside every workspace. */
+export function touchedWorkspaces(workspaces, files) {
+  const touched = new Set();
+  const outside = [];
+
+  for (const file of files) {
+    const w = workspaces.find((ws) => file.startsWith(ws.dir + '/'));
+
+    if (w) touched.add(w.name);
+    else outside.push(file);
+  }
+
+  return { touched, outside };
 }
 
 /**

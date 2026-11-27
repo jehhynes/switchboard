@@ -11,7 +11,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { takeSlot } from './check-lock.mjs';
 import { lowPriority } from './low-priority.mjs';
-import { checkPlan, loadWorkspaces } from './check-plan.mjs';
+import { checkPlan, loadWorkspaces, touchedWorkspaces, unchecked } from './check-plan.mjs';
 import { runAll, unitTests, workspaceJobs } from './run-tests.mjs';
 import { cleanGitEnv, guardRepo } from './git-guard.mjs';
 
@@ -21,7 +21,7 @@ const workspaces = loadWorkspaces(root);
 
 // Files no workspace's checks cover: documentation, and the hook itself, which
 // a commit that changes it exercises.
-const exempt = (file) => /\.(md|txt)$/i.test(file) || file.startsWith('.githooks/') || file === 'tools/precommit.mjs';
+const exempt = (file) => unchecked(file, workspaces) || file.startsWith('.githooks/') || file === 'tools/precommit.mjs';
 
 const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--no-renames', '--diff-filter=ACMRDTU', '-z'], { encoding: 'utf8' })
   .split('\0').filter(Boolean).filter((f) => !exempt(f));
@@ -48,13 +48,7 @@ function run(args) {
 const full = process.env.SWITCHBOARD_VERIFY === 'full';
 if (staged.length === 0 && !full) process.exit(0);
 
-const touched = new Set();
-const outside = [];
-for (const file of staged) {
-  const w = workspaces.find((ws) => file.startsWith(ws.dir + '/'));
-  if (w) touched.add(w.name);
-  else outside.push(file);
-}
+const { touched, outside } = touchedWorkspaces(workspaces, staged);
 
 if (full || outside.length > 0) {
   if (outside.length > 0) console.log(`pre-commit: ${outside.slice(0, 5).join(', ')}${outside.length > 5 ? ', ...' : ''} outside every workspace; running the full verify.`);

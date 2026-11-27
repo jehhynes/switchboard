@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cleanTree, passed, recordPass, verifiedFile } from '../../../tools/verified.mjs';
+import { cleanTree, passed, passedAncestor, recordPass, verifiedFile } from '../../../tools/verified.mjs';
 
 describe('verified trees', () => {
   /** A scratch repository with one commit, isolated as docs/testing.md requires. */
@@ -53,5 +53,37 @@ describe('verified trees', () => {
     // The oldest pass falls off once 200 newer trees passed.
     expect(passed(file, tree)).toBe(false);
     expect(readFileSync(file, 'utf8').split('\n').filter(Boolean)).toHaveLength(200);
+  });
+
+  it('PassedAncestor_PassedOlderCommits_IsTheNewestWithTheFilesChangedSince', () => {
+    const dir = repo();
+    const git = (...args: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8', env: { ...process.env, GIT_CEILING_DIRECTORIES: tmpdir() } }).trim();
+    const commit = (name: string) => {
+      mkdirSync(join(dir, 'packages', name), { recursive: true });
+      writeFileSync(join(dir, 'packages', name, 'x.ts'), name);
+      git('add', '.');
+      git('commit', '-qm', name);
+      return git('rev-parse', 'HEAD');
+    };
+    const file = verifiedFile(dir);
+
+    expect(passedAncestor(dir, file)).toBeNull();
+    recordPass(file, cleanTree(dir)!);
+    const second = commit('core');
+
+    recordPass(file, cleanTree(dir)!);
+    commit('web');
+    commit('hub');
+    expect(passedAncestor(dir, file)).toEqual({ commit: second, changed: ['packages/hub/x.ts', 'packages/web/x.ts'] });
+
+    // HEAD's own pass does not count, and a pass with other packages installed does not either.
+    recordPass(file, cleanTree(dir)!);
+    expect(passedAncestor(dir, file)?.commit).toBe(second);
+    writeFileSync(join(dir, '.gitignore'), 'node_modules/\n');
+    git('add', '.gitignore');
+    git('commit', '-qm', 'ignore');
+    mkdirSync(join(dir, 'node_modules'));
+    writeFileSync(join(dir, 'node_modules', '.package-lock.json'), '{}');
+    expect(passedAncestor(dir, file)).toBeNull();
   });
 });
