@@ -564,7 +564,8 @@ button.picker > .codicon-chevron-down { order: 2; }
 .tab-menu .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tab-menu .menu-gutter { margin-right: 6px; }
 /* --sb-update-space: room for the Update ready card (main.ts), so it covers nothing at a pane's end. */
-.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 20px calc(16px + var(--sb-end) + var(--sb-update-space, 0px)); touch-action: pan-y pinch-zoom; }
+/* --sb-scroll-pad: the scroller's side padding, which question cards reach across where the composer is as wide as the screen. */
+.scroll { --sb-scroll-pad: 20px; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px var(--sb-scroll-pad) calc(16px + var(--sb-end) + var(--sb-update-space, 0px)); touch-action: pan-y pinch-zoom; }
 /* Chrome and Edge move a touch that starts near a box with a :hover or :active style, such as a tab strip, onto that box (touch adjustment),
    so a drag starting just under a tab strip panned the strip, which does not scroll, rather than the pane under the finger. A :hover rule on
    everything in a scrolling pane makes each of its boxes such a box too, and the touch stays on the one under it. */
@@ -606,7 +607,8 @@ button.picker > .codicon-chevron-down { order: 2; }
 .message .box { max-width: 100%; margin: 0; border-radius: 12px 12px 4px 12px; background: var(--sb-message-bubble); padding: 6px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message .box.command { font-family: var(--vscode-editor-font-family); }
 .message.provisional .box { opacity: 0.7; }
-.reply { padding-left: 30px; }
+/* --sb-indent: a reply's text and the Still open section's cards start this far in from the timeline's left edge. */
+.reply { --sb-indent: 30px; padding-left: var(--sb-indent); }
 .reply .dot { position: absolute; left: 9px; top: calc(var(--pad-top) + 7px + var(--dot-shift, 0px)); width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-descriptionForeground); }
 .reply.aside { color: var(--vscode-descriptionForeground); font-size: 0.92em; }
 .note { text-align: center; color: var(--vscode-descriptionForeground); font-size: 0.92em; }
@@ -634,7 +636,7 @@ button.picker > .codicon-chevron-down { order: 2; }
 .fold .was { color: var(--vscode-descriptionForeground); }
 .earlier-items { display: block; margin: 0 auto 8px; border: 1px solid var(--vscode-button-border); border-radius: 10px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); padding: 1px 10px; cursor: pointer; }
 /* Questions carried past retention, at the top of the conversation with no reply above them, set off from the timeline under them (PRD R103). */
-.still-open { box-sizing: border-box; max-width: calc(var(--chat-width, 940px) - 40px); margin: 0 auto 12px; padding: 0 0 12px 30px; border-bottom: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); }
+.still-open { --sb-indent: 30px; box-sizing: border-box; max-width: calc(var(--chat-width, 940px) - 40px); margin: 0 auto 12px; padding: 0 0 12px var(--sb-indent); border-bottom: 1px solid var(--vscode-widget-border, rgba(127, 127, 127, 0.35)); }
 .still-open-title { margin: 0; font-size: 0.9em; font-weight: 600; }
 .still-open-note { margin: 2px 0 0; color: var(--vscode-descriptionForeground); font-size: 0.85em; }
 .working { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -762,6 +764,12 @@ body.artifact-window > .artifact-view { height: 100%; }
 .media { display: block; max-width: 100%; margin: 16px auto; }
 
 /* Question cards. */
+/* A card under a reply or in Still open spans the composer's box rather than its column (the operator's decision, 2026-11-27): as wide as the
+   box, centred in the conversation as the box is. Its column is centred there too but for its --sb-indent on the left, since the scroller keeps
+   a gutter on both sides (below), so its scrollbar shifts nothing. 100cqw is the conversation's width. Where the composer is as wide as the
+   screen, the card stops at the scroller's gutters (100% plus the scroller's padding and the indent), so the conversation never pans sideways. */
+:is(.reply, .still-open) .question-card.qc { --sb-card-width: min(min(100cqw, var(--chat-width, 940px)) - 2 * var(--sb-composer-pad), 100% + 2 * var(--sb-scroll-pad) + var(--sb-indent)); width: var(--sb-card-width); max-width: none; margin-left: calc((100% - var(--sb-card-width) - var(--sb-indent)) / 2); }
+.scroll:has(> .timeline, > .opening > .timeline, > .still-open) { scrollbar-gutter: stable both-edges; }
 .question-card { display: flex; flex-direction: column; gap: 16px; margin: 8px 0 4px; padding: 8px; border: 1px solid var(--vscode-input-border); border-radius: 8px; background: var(--vscode-input-background); }
 .question-block { display: flex; flex-direction: column; gap: 8px; }
 .question-text { font-weight: 500; }
@@ -817,7 +825,9 @@ body.artifact-window > .artifact-view { height: 100%; }
 
 /* The composer, as Claude Code's input: at most 680 px wide and centred, an 8 px radius and a ring in the focus colour. */
 /* The composer's edges line up with the timeline's: the same 900 px at most inside the same 20 px of padding as the conversation's scroller. */
-#composer { box-sizing: border-box; width: 100%; max-width: var(--chat-width, 940px); margin: 0 auto; padding: 0 20px 16px; }
+/* --sb-composer-pad: the composer's side padding, which question cards keep to as well. */
+.main { --sb-composer-pad: 20px; }
+#composer { box-sizing: border-box; width: 100%; max-width: var(--chat-width, 940px); margin: 0 auto; padding: 0 var(--sb-composer-pad) 16px; }
 #composer[hidden] { display: none; }
 .composer { position: relative; }
 .composer textarea { position: relative; display: block; width: 100%; box-sizing: border-box; min-height: calc(1.5em + 20px); max-height: 200px; resize: none; border: none; outline: none; background: transparent; color: inherit; font: inherit; line-height: 1.5; padding: 10px 14px; scrollbar-gutter: stable; overflow-wrap: break-word; }
@@ -902,11 +912,12 @@ body.artifact-window > .artifact-view { height: 100%; }
 }
 /* A narrow screen gives the conversation its width: less padding round the timeline and the composer. */
 @media (max-width: 600px) {
-  .scroll { padding: 12px 12px calc(12px + var(--sb-end) + var(--sb-update-space, 0px)); }
+  .scroll { --sb-scroll-pad: 12px; padding: 12px var(--sb-scroll-pad) calc(12px + var(--sb-end) + var(--sb-update-space, 0px)); }
   /* On a phone the composer is as wide as the screen and sits on its bottom edge, and the notes above it share its edges. Rather than keep a
      strip as tall as the home indicator's inset below it, its footer's end buttons keep in from the screen's rounded corners by that inset,
      less the side's own inset (0 in portrait), and its buttons sit 14 px up, just clear of the home indicator (5 px tall, 8 px above the edge),
      which lies under the footer's middle. */
+  .main { --sb-composer-pad: 0px; }
   #composer, #note { padding: 0; }
   #composer .composer { border-width: 1px 0 0; border-radius: 0; box-shadow: none; }
   #composer .composer-footer { padding-left: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-left))); padding-right: max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-right))); padding-bottom: max(5px, min(14px, env(safe-area-inset-bottom))); }
@@ -926,6 +937,7 @@ body.artifact-window > .artifact-view { height: 100%; }
   :where(html.phone) #head > :not(.tabs) { flex: 1 1 0; min-width: 0; }
   /* The strip is a size container, so it has no width of its own to start from; it gets half the bar. */
   :where(html.phone) #head > .tabs { flex: 1 1 0; min-width: 0; }
+  :where(html.phone) .main { --sb-composer-pad: 0px; }
   :where(html.phone) #composer, :where(html.phone) #note { padding: 0; }
   :where(html.phone) #composer .composer { flex-flow: row wrap; align-items: flex-end; column-gap: 6px; padding: 5px max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-right))) max(5px, min(14px, env(safe-area-inset-bottom))) max(5px, calc(env(safe-area-inset-bottom) - env(safe-area-inset-left))); border-width: 1px 0 0; border-radius: 0; box-shadow: none; }
   :where(html.phone) #composer .composer-footer { display: contents; }
@@ -940,10 +952,11 @@ body.artifact-window > .artifact-view { height: 100%; }
    replies' dots, a shallower list indent, and our messages' bubbles that stop 24 px short of the left side. A wider one keeps the room messaging
    apps leave. */
 @container conversation (max-width: 600px) {
-  .scroll:has(> .timeline, > .opening > .timeline) { padding-left: 8px; padding-right: 8px; }
+  .scroll:has(> .timeline, > .opening > .timeline) { --sb-scroll-pad: 8px; padding-left: var(--sb-scroll-pad); padding-right: var(--sb-scroll-pad); }
   .timeline { max-width: calc(var(--chat-width, 940px) - 16px); }
-  .reply, .timeline > li.artifact { padding-left: 20px; }
-  .still-open { max-width: calc(var(--chat-width, 940px) - 16px); padding-left: 20px; }
+  .reply, .still-open { --sb-indent: 20px; }
+  .timeline > li.artifact { padding-left: 20px; }
+  .still-open { max-width: calc(var(--chat-width, 940px) - 16px); }
   .reply .dot { left: 4px; }
   .body ul, .body ol { padding-inline-start: 1.5em; }
   .message .bubble { max-width: calc(100% - 24px); }

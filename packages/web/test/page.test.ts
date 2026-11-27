@@ -1199,7 +1199,8 @@ describe("the list's CSS", () => {
     expect(note).toContain('max-width: var(--chat-width, 940px)');
     expect(composer).toContain('max-width: var(--chat-width, 940px)');
     expect(note).toContain('padding: 0 20px');
-    expect(composer).toContain('padding: 0 20px 16px');
+    expect(composer).toContain('padding: 0 var(--sb-composer-pad) 16px');
+    expect(css).toContain('.main { --sb-composer-pad: 20px; }');
     expect(declarationsOf((selector) => selector === '.session-note').join(' ')).toMatch(/margin: 0 0 8px;.*border-radius: 8px;/);
     // The composer's own corners come from packages/conversation's composer.css.
     expect(readFileSync(createRequire(import.meta.url).resolve('@switchboard/conversation/composer.css'), 'utf8')).toMatch(/\n\.composer \{[^}]*border-radius: 8px;/);

@@ -37,8 +37,8 @@ describe('the page on a phone', () => {
     expect(css).not.toMatch(/\.side, \.main, \.detail \{ padding-bottom/);
     expect(css).toContain(':root { --sb-end: env(safe-area-inset-bottom); }\n.main:has(#composer:not([hidden])) { --sb-end: 0px; }');
     expect(css).toMatch(/#list \{[^}]*padding-bottom: calc\(12px \+ var\(--sb-end\)\);/);
-    expect(css).toMatch(/(^|\n)\.scroll \{[^}]*padding: 20px 20px calc\(16px \+ var\(--sb-end\) \+ var\(--sb-update-space, 0px\)\);/);
-    expect(phone).toContain('.scroll { padding: 12px 12px calc(12px + var(--sb-end) + var(--sb-update-space, 0px)); }');
+    expect(css).toMatch(/(^|\n)\.scroll \{ --sb-scroll-pad: 20px;[^}]*padding: 20px var\(--sb-scroll-pad\) calc\(16px \+ var\(--sb-end\) \+ var\(--sb-update-space, 0px\)\);/);
+    expect(phone).toContain('.scroll { --sb-scroll-pad: 12px; padding: 12px var(--sb-scroll-pad) calc(12px + var(--sb-end) + var(--sb-update-space, 0px)); }');
     expect(css).toMatch(/\.artifact-doc \{[^}]*padding: 8px 20px calc\(60px \+ var\(--sb-end\)\);/);
     expect(css).toMatch(/\.hist-body \{[^}]*padding: 22px 28px calc\(48px \+ var\(--sb-end\)\);/);
     expect(css).toMatch(/\.hist-body \{[^}]*padding: 16px 14px calc\(48px \+ var\(--sb-end\)\);/);
@@ -61,10 +61,11 @@ describe('the page on a phone', () => {
 
     // The conversation's pane is the container, so a narrow column on a wide screen narrows too, and a phone's width alone does not.
     expect(css).toMatch(/(^|\n)\.main \{[^}]*container: conversation \/ inline-size;/);
-    expect(narrow).toContain('.scroll:has(> .timeline, > .opening > .timeline) { padding-left: 8px; padding-right: 8px; }');
+    expect(narrow).toContain('.scroll:has(> .timeline, > .opening > .timeline) { --sb-scroll-pad: 8px; padding-left: var(--sb-scroll-pad); padding-right: var(--sb-scroll-pad); }');
     // A conversation narrowed on its sash keeps its timeline as wide as the pane less that padding.
     expect(narrow).toContain('.timeline { max-width: calc(var(--chat-width, 940px) - 16px); }');
-    expect(narrow).toContain('.reply, .timeline > li.artifact { padding-left: 20px; }');
+    expect(narrow).toContain('.reply, .still-open { --sb-indent: 20px; }');
+    expect(narrow).toContain('.timeline > li.artifact { padding-left: 20px; }');
     expect(narrow).toContain('.reply .dot { left: 4px; }');
     expect(narrow).toContain('.body ul, .body ol { padding-inline-start: 1.5em; }');
     expect(narrow).toContain('.message .bubble { max-width: calc(100% - 24px); }');
@@ -72,7 +73,7 @@ describe('the page on a phone', () => {
     // Wider, our messages' bubbles keep their room and the replies their gutter; a reply has no bubble.
     expect(css).toMatch(/(^|\n)\.message \.bubble \{[^}]*max-width: 85%;/);
     expect(css).not.toContain('speech-bubble');
-    expect(css).toMatch(/(^|\n)\.reply \{ padding-left: 30px; \}/);
+    expect(css).toMatch(/(^|\n)\.reply \{ --sb-indent: 30px; padding-left: var\(--sb-indent\); \}/);
     expect(css).toMatch(/(^|\n)\.body ul, \.body ol \{ margin: 1em 0; padding-inline-start: 2em; \}/);
   });
 

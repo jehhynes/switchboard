@@ -20,7 +20,7 @@
 // The list header's bell shows only with an action notice, counting them, at least 44 px by its own box on a touch screen, its dropdown inside the
 // viewport, the list right under the header with or without it, and a one-time notice in the toast.
 // The questions waiting chip floats centred over the composer, clear of its box, at the conversation's end and halfway up. The card's topic is
-// 4.5:1 on the card, and its first question's disabled Back has no border. On a touch screen each of the card's options centres its text in
+// 4.5:1 on the card, its first question's disabled Back has no border, and each card spans the composer's box within 1 px. On a touch screen each of the card's options centres its text in
 // its row, a one-line label and its mark within 1 px.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
 // a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
@@ -981,6 +981,29 @@ const CARD_LOOK = `(async () => {
 })()`;
 
 /**
+ * Each question card's left and right edges against the composer's box, at the conversation's top: how far each edge is from the box's, the
+ * open card and the Still open section's cards alike, or how far the conversation scrolls sideways where it does. Where the composer is as wide
+ * as the screen, the box is taken inside the scroller's scrollbar gutters, one on each side, which a real phone's overlay scrollbar does not take.
+ */
+const CARD_EDGES = `(async () => {
+  const panel = document.getElementById('panel');
+  panel.scrollTop = 0;
+  await new Promise((done) => setTimeout(done, 150));
+  const composer = document.querySelector('#composer .composer')?.getBoundingClientRect();
+  if (!composer) return null;
+  return [...document.querySelectorAll('#panel .question-card.qc')].map((card) => {
+    // A card that reaches past the scroller's sides would let the conversation pan sideways.
+    if (panel.scrollWidth > panel.clientWidth) return { card: card.dataset.card, wide: panel.scrollWidth - panel.clientWidth };
+    const box = card.getBoundingClientRect();
+    const pane = panel.getBoundingClientRect();
+    const gutter = (panel.offsetWidth - panel.clientWidth) / 2;
+    const left = Math.max(composer.left, pane.left + gutter);
+    const right = Math.min(composer.right, pane.right - gutter);
+    return { card: card.dataset.card, left: Math.round((box.left - left) * 10) / 10, right: Math.round((box.right - right) * 10) / 10 };
+  });
+})()`;
+
+/**
  * Each option of the open card, at the conversation's top: how far its text block's centre is from the option's, and for an option whose
  * label is one line alone, how far the label's and the mark's centres are from it.
  */
@@ -1600,6 +1623,16 @@ try {
             if (look.contrast < 4.5) found.push("the card's topic is " + look.contrast + ':1 on the card');
             if (!look.disabled || look.borderAlpha > 0) found.push("the first question's Back is " + (look.disabled ? 'disabled with the border ' + look.border : 'enabled'));
           }
+          // Each card spans the composer's box, its left and right edges within 1 px of the box's.
+          const edges = await evaluate(CARD_EDGES);
+
+          if (report) console.log(name + ' card edges: ' + JSON.stringify(edges));
+          if (edges === null) found.push('no composer box to line the question cards up with');
+          else if (edges.length === 0) found.push('the conversation showed no question card to line up with the composer');
+          for (const one of edges ?? []) {
+            if (one.wide !== undefined) found.push('the question card ' + one.card + ' makes the conversation ' + one.wide + ' px wider than its scroller');
+            else if (Math.abs(one.left) > 1 || Math.abs(one.right) > 1) found.push('the question card ' + one.card + "'s edges are " + one.left + ' and ' + one.right + " px off the composer's box");
+          }
           // On a touch screen each option's text sits centred in its 56 px row as a block, and a one-line label and its mark each within 1 px.
           if (size.mouse !== true) {
             const options = await evaluate(CARD_OPTIONS);
@@ -1864,12 +1897,13 @@ try {
           if (passes.out.length > 0) found.push('the column narrowed to ' + passes.out.slice(0, 3).join('; ') + ' passes its strip or the screen');
         }
         results.push({ name, ...m });
-        // History's screenshots show its top too: the head, the pinned state and the filter; the list's, its first groups.
-        if (shots !== null && (view.startsWith('history') || view === 'list')) {
-          await evaluate('document.querySelectorAll(".hist-body, #list, #list *").forEach((body) => { body.scrollTop = 0; })');
+        // History's screenshots show its top too: the head, the pinned state and the filter; the list's, its first groups; the questions views', the card.
+        if (shots !== null && (view.startsWith('history') || view === 'list' || view.startsWith('questions'))) {
+          await evaluate('document.querySelectorAll(".hist-body, #list, #list *, #panel").forEach((body) => { body.scrollTop = 0; })');
           await wait(150);
           mkdirSync(shots, { recursive: true });
           writeFileSync(join(shots, name.replaceAll(' ', '-') + '-top.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+          if (view.startsWith('questions')) await evaluate('(() => { const panel = document.getElementById("panel"); panel.scrollTop = panel.scrollHeight; })()');
         }
         if (shots !== null) {
           mkdirSync(shots, { recursive: true });
