@@ -240,6 +240,26 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it('puts each top bar alone in its own box, with the tabs and the search box outside it, so its sticky position has no room to move (mechanics.md M176)', () => {
+    window.innerWidth = 390;
+    history.replaceState(null, '', '#w=1');
+
+    const { page, source } = start();
+
+    hello(source);
+    (root.querySelector('.list-header .search-toggle') as HTMLElement).click();
+    const bars = [...root.querySelectorAll('.bar-frame')];
+
+    expect(bars.map((one) => [one.parentElement!.id || one.parentElement!.className, [...one.children].map((child) => child.classList[0])])).toEqual([
+      ['side-head', ['list-header']],
+      ['head', ['header']],
+    ]);
+    expect(root.querySelector('#head > .tabs')).not.toBeNull();
+    expect(root.querySelector('.side-head .search-row')).not.toBeNull();
+    expect(root.querySelector('.side-head .search-row')!.closest('.bar-frame')).toBeNull();
+    page.close();
+  });
+
   it('keeps the pinned list a column at every width outside the phone, folding the column into tabs, and brings a column back only past its need', () => {
     window.innerWidth = 1440;
 

@@ -10,6 +10,7 @@ import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
 import type { ArtifactView, InfoNotice, ItemView, PageRow, ReplyView, ScreenPrompt } from '@switchboard/protocol';
 import { mount, unmount } from './island.js';
+import { h } from 'preact';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane, sourceIcons } from './list.js';
 import { rowDrag } from './reorder.js';
@@ -2837,7 +2838,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       followHistory(false);
       mount(reportHost, null);
       modals.sync();
-      mount(head, pending === null ? null : [renderOpeningHead(pending, view.connection), side ? null : renderOpeningTabs(false)]);
+      mount(head, pending === null ? null : [barFrame(renderOpeningHead(pending, view.connection)), side ? null : renderOpeningTabs(false)]);
       plainPane(panel);
       drawPane(panel, pending === null ? renderNoWorkItem(state.connected, firstBlocked()) : renderOpening(pending));
 
@@ -2868,7 +2869,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     followHistory(historyShows);
     mount(reportHost, historyShows && offersHistory() ? renderReportSheet(shownHistory, state.state, deps.now(), historyHead()) : null);
     modals.sync();
-    mount(head, [renderHeader(state, view, deps.now()), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, showConsole())]);
+    mount(head, [barFrame(renderHeader(state, view, deps.now())), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, showConsole())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
     const now = deps.now();
@@ -6623,6 +6624,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 }
 
 /** Whether a history entry's state marks a phone's conversation (`CONVERSATION_ENTRY`). */
+/** A view's top bar alone in its box, so its sticky position has no room to move (page.css, mechanics.md M176). */
+function barFrame(bar: VNode): ComponentChild {
+  return h('div', { class: 'bar-frame' }, bar);
+}
+
 /** Whether enough of an element shows in its scrolling area to be seen: all of it, or 40 px of a taller one. */
 function inView(element: HTMLElement, area: HTMLElement): boolean {
   const box = element.getBoundingClientRect();

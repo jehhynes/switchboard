@@ -445,42 +445,45 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView, no
 
   return (
     <>
-      <div class="list-header">
-        {/* Shown only in the phone's layout (page.css), where the list is its own view and no window title names the app. */}
-        <span class="list-title">
-          <img class="list-title-icon" src="icon-192.png" alt="" width="16" height="16" />
-          <span class="list-title-text">Switchboard</span>
-          <ConnectionDot dot={view.connection} />
-        </span>
-        {sources.length === 0 ? null : (
-          <>
-            <div class="header-sources">
-              {sources.map((group) => (
-                <SourceButton key={group.kind} group={group} view={view} />
-              ))}
-            </div>
-            <span class="header-separator" aria-hidden="true"></span>
-          </>
-        )}
-        <NoticeBell header={header} view={view} now={now} />
-        <button type="button" class="icon search-toggle" data-action="list-search" aria-pressed={search.open} title="Search" aria-label="Search">
-          <span class="codicon codicon-search" aria-hidden="true"></span>
-        </button>
-        <button type="button" class="icon" data-action="list-new-session" title="New session" aria-label="New session">
-          <span class="codicon codicon-add" aria-hidden="true"></span>
-        </button>
-        <div class="menu-anchor" data-key="more">
-          <button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded={view.menu === 'more'} title="More actions" aria-label="More actions">
-            <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
+      {/* The bar alone in its box, so its sticky position has no room to move (page.css, mechanics.md M176). */}
+      <div class="bar-frame">
+        <div class="list-header">
+          {/* Shown only in the phone's layout (page.css), where the list is its own view and no window title names the app. */}
+          <span class="list-title">
+            <img class="list-title-icon" src="icon-192.png" alt="" width="16" height="16" />
+            <span class="list-title-text">Switchboard</span>
+            <ConnectionDot dot={view.connection} />
+          </span>
+          {sources.length === 0 ? null : (
+            <>
+              <div class="header-sources">
+                {sources.map((group) => (
+                  <SourceButton key={group.kind} group={group} view={view} />
+                ))}
+              </div>
+              <span class="header-separator" aria-hidden="true"></span>
+            </>
+          )}
+          <NoticeBell header={header} view={view} now={now} />
+          <button type="button" class="icon search-toggle" data-action="list-search" aria-pressed={search.open} title="Search" aria-label="Search">
+            <span class="codicon codicon-search" aria-hidden="true"></span>
           </button>
-          {view.menu === 'more' ? renderMoreMenu(header, view.local === true, view.phoneVoice ?? null) : null}
+          <button type="button" class="icon" data-action="list-new-session" title="New session" aria-label="New session">
+            <span class="codicon codicon-add" aria-hidden="true"></span>
+          </button>
+          <div class="menu-anchor" data-key="more">
+            <button type="button" class="icon more-actions" data-action="list-more" aria-haspopup="menu" aria-expanded={view.menu === 'more'} title="More actions" aria-label="More actions">
+              <span class="codicon codicon-ellipsis" aria-hidden="true"></span>
+            </button>
+            {view.menu === 'more' ? renderMoreMenu(header, view.local === true, view.phoneVoice ?? null) : null}
+          </div>
+          {/* Outside the phone's layout (page.css), as VS Code's pin: pinned, the list is a column; unpinned, a drawer. Left out where it changes nothing (main.ts). */}
+          {view.pinned === undefined ? null : (
+            <button type="button" class="icon list-pin" data-action="list-pin" title={view.pinned ? 'Unpin list' : 'Pin list'} aria-label={view.pinned ? 'Unpin list' : 'Pin list'} aria-controls="list">
+              <span class={`codicon codicon-${view.pinned ? 'pinned' : 'pin'}`} aria-hidden="true"></span>
+            </button>
+          )}
         </div>
-        {/* Outside the phone's layout (page.css), as VS Code's pin: pinned, the list is a column; unpinned, a drawer. Left out where it changes nothing (main.ts). */}
-        {view.pinned === undefined ? null : (
-          <button type="button" class="icon list-pin" data-action="list-pin" title={view.pinned ? 'Unpin list' : 'Pin list'} aria-label={view.pinned ? 'Unpin list' : 'Pin list'} aria-controls="list">
-            <span class={`codicon codicon-${view.pinned ? 'pinned' : 'pin'}`} aria-hidden="true"></span>
-          </button>
-        )}
       </div>
       {/* The box and the searched range under the title row while the search is open. */}
       {search.open ? (

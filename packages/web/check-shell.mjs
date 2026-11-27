@@ -23,7 +23,8 @@
 // 4.5:1 on the card, its first question's disabled Back has no border, and each card spans the composer's box within 1 px. On a touch screen each of the card's options centres its text in
 // its row, a one-line label and its mark within 1 px.
 // Nothing outside the scrollers can move: the document is exactly the viewport, nothing reaches past it outside a scroller, every scroller keeps
-// a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan. Chrome has no display-mode emulation, so the page's standalone rules are
+// a drag to itself or hands it to the pane around it, and the page outside the scrollers takes no pan, and each top bar sits alone in its box, so its
+// sticky position has no room to move. Chrome has no display-mode emulation, so the page's standalone rules are
 // applied to every width here, and safe-area insets come from the DevTools protocol.
 // Run `npm run build` first; the browser is SWITCHBOARD_CHROME, else Chrome or Edge where they install. --report prints the measurements.
 import { spawn } from 'node:child_process';
@@ -398,6 +399,9 @@ const measure = `(() => {
     })(),
     histEnd: (() => { const body = document.querySelector('.hist-body'); return body === null ? null : parseFloat(getComputedStyle(body).paddingBottom); })(),
     band: document.getElementById('safe-top').getBoundingClientRect().height,
+    // The list's and the conversation's top bars' room to move: how much taller the box each sits in is than the bar (mechanics.md M176).
+    // Settings' and the persona dialog's bars share their dialog's box and are not checked: no tap there was reported astray.
+    room: [...document.querySelectorAll('.header, .list-header')].filter(shown).map((bar) => ({ bar: name(bar), room: Math.round(bar.parentElement.getBoundingClientRect().height - bar.getBoundingClientRect().height) })),
     // Line 2 of each shown row: a pill is whole inside its line and its box, its text shown whole; its icon alone, its text hidden from view
     // but kept for screen readers; or wholly outside them, left out.
     line2: window.__line2 ? { samples: window.__line2.length, ways: new Set(window.__line2).size } : null,
@@ -1265,6 +1269,10 @@ function failures(view, size, m) {
     if (!one.kept) out.push(one.name + ' hands a drag on to the page (overscroll-behavior ' + one.overscroll + ', and no scroller around it keeps it)');
   }
   if (m.touchAction !== 'pinch-zoom') out.push('the page outside the scrollers takes a pan or no pinch (body touch-action ' + m.touchAction + ')');
+  // Each top bar sits alone in its box, so its sticky position cannot move it from where taps reach it (mechanics.md M176).
+  for (const one of m.room) {
+    if (one.room !== 0) out.push('the top bar ' + one.bar + ' has ' + one.room + ' px to move in the box it sits in');
+  }
   // No band above the bars: under the opaque status bar the top inset is 0, and each view's top bar starts at the page's top edge.
   if (m.band !== 0) out.push('a ' + m.band + ' px band above the bars');
   // A redraw with the same rows paints line 2 the same.

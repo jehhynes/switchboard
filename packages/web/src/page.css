@@ -34,6 +34,10 @@ body { color: var(--vscode-foreground); background: var(--vscode-editor-backgrou
    at least 90% of the width and reads the colour of one over 10 px tall), paints the status bar in its colour and drops the blur it draws over
    the page's top otherwise. Sticky makes each a stacking context, at --sb-z-bar (below). */
 .header, .list-header, .settings-head { position: sticky; top: 0; z-index: var(--sb-z-bar); }
+/* The list's and the conversation's top bars each sit alone in a .bar-frame, as tall as the bar, so their sticky position has no room to move.
+   Taps on an iPhone reached the content a line or two below a bar while a notice, the search box or the tabs shared its box, the suspected
+   cause (mechanics.md M176): the page cannot scroll, but iOS can pan its visual viewport inside the layout viewport. */
+.bar-frame { flex: none; }
 /*
  * The page's layers, lowest first; a layer's own parts (a list's pinned group headings, a menu inside its bar) stack inside it.
  * - bar: the top bars, the tab strips' menus and the composer's menu, over the conversation, the list and the tabs (3).
@@ -138,7 +142,7 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
 .search-end { padding: 0 8px 8px 11px; }
 .search-none, .search-note { margin: 0 0 4px; color: var(--vscode-descriptionForeground); }
 .search-links { display: flex; flex-wrap: wrap; gap: 12px; }
-@media (hover: none), (pointer: coarse) { .search-box { height: 44px; } .search-range, .search-end button.link { min-height: 44px; } }
+@media (hover: none), (pointer: coarse) { .search-box { height: 44px; } .search-field button.icon { min-width: 44px; min-height: 44px; } .search-range, .search-end button.link { min-height: 44px; } }
 .menu-row .source-logo { flex: none; margin-right: 2px; }
 /* On a phone the source icons leave the title row for the top of More Actions, as check rows; outside the phone's layout they are in the row. */
 :where(html.phone) .list-header .header-sources, :where(html.phone) .list-header .header-separator { display: none; }
@@ -1405,6 +1409,7 @@ button.toast-open:hover { color: var(--vscode-textLink-activeForeground); text-d
 .conn-banner-text { flex: 1; min-width: 0; }
 .conn-banner button, .conn-update button, .conn-primary { font: inherit; border: 0; border-radius: 2px; padding: 3px 10px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; text-decoration: none; }
 .conn-banner button:hover, .conn-update button:hover, .conn-primary:hover { background: var(--vscode-button-hoverBackground); }
+@media (hover: none), (pointer: coarse) { .conn-banner button { min-height: 44px; } }
 /* Outside the phone's layout the conversation's banner says it for both, since the list and the conversation show side by side. */
 :where(html:not(.phone)) .side > .conn-banner-host { display: none; }
 #root.stale #list, #root.stale #panel, #root.stale .detail-body { opacity: 0.6; }
