@@ -280,7 +280,7 @@ describe('VoiceControl', () => {
     connections[0]!.receive({ type: 'active', gen: 5, sessionId: 's2', reason: 'talk-here' });
     expect(target()).toHaveLength(1);
     advance(TARGET_LOG_MS);
-    expect(target().at(-1)).toBe('voice: now for session s2 (Talk here), after 3 changes in 10 s');
+    expect(target().at(-1)).toBe('voice: now for session s2 (chosen on a page), after 3 changes in 10 s');
     advance(TARGET_LOG_MS);
     // The same session again is no change.
     connections[0]!.receive({ type: 'active', gen: 6, sessionId: 's2', reason: 'focus' });
@@ -564,7 +564,7 @@ describe('VoiceControl', () => {
     await settle();
     connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'focus' });
     expect(control.stopSpeaking('k0')).toBe('This page shows no session to use voice with.');
-    expect(control.stopSpeaking('k2')).toBe("Voice is not on this page's session. Select Talk here to use it.");
+    expect(control.stopSpeaking('k2')).toBe("Voice is not on this page's session. Select the mic to use it here.");
     reply('r1');
     control.close();
     expect(control.replay('k1', 'r1')).toBe('The voice process is not running, so the reply was not read again.');
@@ -585,10 +585,10 @@ describe('VoiceControl', () => {
     expect(control.talkHere('k1')).toBeNull();
     expect(connections[0]!.sent.at(-1)).toEqual({ type: 'talk-here', sessionId: 's1' });
 
-    expect(control.stopSpeaking('k1')).toBe("Voice is not on this page's session. Select Talk here to use it.");
+    expect(control.stopSpeaking('k1')).toBe("Voice is not on this page's session. Select the mic to use it here.");
     expect(control.replay('k1', 'r1')).toBe('That reply is not in the session this page shows, so it was not read again.');
     reply('r1');
-    expect(control.replay('k1', 'r1')).toBe("Voice is not on this page's session. Select Talk here to use it.");
+    expect(control.replay('k1', 'r1')).toBe("Voice is not on this page's session. Select the mic to use it here.");
     connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's1', reason: 'talk-here' });
     expect(control.stopSpeaking('k1')).toBeNull();
     expect(connections[0]!.sent.at(-1)).toEqual({ type: 'stop' });

@@ -45,6 +45,7 @@ function setup() {
     ['pc', scope('pc', 1, 's1')],
     ['phone', scope('phone', 2, 's2')],
     ['tablet', scope('tablet', 2, 's2')],
+    ['pc2', scope('pc2', 2, 's2')],
   ]);
   const focusedPages = new Set<string>();
   let focused: string | null = 'pc';
@@ -515,6 +516,25 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     expect(control.systemMaySound()).toBe(false);
   });
 
+  it("shows the voice here only on the device that holds it, so a page on the other device showing the same session offers its mic to take it", async () => {
+    const { control, connections } = setup();
+
+    control.update();
+    await settle();
+    // Both pages show s2; the phone takes the voice and listens.
+    control.phoneOpened('phone');
+    connections[0]!.receive({ type: 'active', gen: 1, sessionId: 's2', reason: 'talk-here' });
+    expect(control.mic('phone', true)).toBeNull();
+    connections[0]!.receive({ type: 'audio', mic: 'listening', engine: 'phone', device: 'phone', recognizer: 'gpu', error: null });
+    expect(control.view('phone')).toMatchObject({ here: true, mic: 'listening' });
+    expect(control.view('pc2')).toMatchObject({ here: false, mic: 'off' });
+    // This computer's tap is Mic on, which takes the voice back here; the phone's page then shows its mic off.
+    expect(control.mic('pc2', true)).toBeNull();
+    expect(control.device).toBe('computer');
+    expect(control.view('pc2')).toMatchObject({ here: true });
+    expect(control.view('phone')).toMatchObject({ here: false, mic: 'off' });
+  });
+
   it('shows the voice off only on this computer after the phone left, and lets no message typed on a paired page take it back', async () => {
     const { control, connections, sentOf } = setup();
 
@@ -525,8 +545,9 @@ describe('VoiceControl with the voice on a phone (PRD R119)', () => {
     expect(control.view('phone').deviceOff).toBeUndefined();
     control.phoneClosed('closed by the page');
 
-    // The phone's page is told nothing of this computer's voice; a message typed there leaves the voice off.
-    expect(control.view('phone')).toMatchObject({ here: true });
+    // The phone's page is told nothing of this computer's voice: it no longer holds the voice, so its mic shows off, and a message typed there
+    // leaves the voice off.
+    expect(control.view('phone')).toMatchObject({ here: false, mic: 'off' });
     expect(control.view('phone').deviceOff).toBeUndefined();
     expect(control.spokenFor('s2', false, 'phone').spoken).toBe(true);
     expect(control.device).toBe('none');

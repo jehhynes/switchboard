@@ -35,7 +35,7 @@ export interface VoiceView {
   roomHold?: true;
   /**
    * Only in a window or page on this computer while the voice is here and no device has it, after the phone left: nothing plays or listens
-   * until Talk here, the mic or a typed message takes it back (PRD R119).
+   * until the mic or a typed message takes it back (PRD R119).
    */
   deviceOff?: true;
   /** Only while the voice is here and its capture cancels no echo but listens anyway: why, such as "echo check: no echo detected"; talking over a reply then stops it. */
@@ -46,7 +46,7 @@ export interface VoiceView {
 /** Voice target changes within this time of the line that named one merge into one line at its end. */
 export const TARGET_LOG_MS = 10_000;
 /** Why the voice target changed, as the hub log says it. */
-const TARGET_REASON: Record<string, string> = { focus: 'focused window', 'talk-here': 'Talk here', gone: 'its session is gone or away' };
+const TARGET_REASON: Record<string, string> = { focus: 'focused window', 'talk-here': 'chosen on a page', gone: 'its session is gone or away' };
 const ALERT_CAUSE: Record<AlertCause, string> = { 'turn-finished': 'its turn finished', question: 'it asks a question', permission: 'it asks for permission' };
 const ALERT_OUTCOME: Record<AlertOutcome, string> = { announced: 'read out', unanswered: 'no spoken answer to', declined: 'you declined', cancelled: 'cancelled' };
 type TargetLogged = { sessionId: string | null; at: number; changes: number; latest: { sessionId: string | null; reason: string } | null };
@@ -299,7 +299,7 @@ export const PHONE_PCM_FRAME = 1;
 export const PHONE_MIC_FRAME = 2;
 /** Why a paired device's page cannot turn on this computer's microphone. */
 /** Why a voice command for the page's session is refused while the voice is on another session or on none. */
-export const VOICE_NOT_HERE = "Voice is not on this page's session. Select Talk here to use it.";
+export const VOICE_NOT_HERE = "Voice is not on this page's session. Select the mic to use it here.";
 /** Why a voice command is refused while voice is off in Settings. */
 export const VOICE_IS_OFF = 'Voice is off. Turn it on in Settings on the computer that runs Switchboard.';
 /** Why a voice command is refused for a page that shows no session. */
@@ -853,7 +853,7 @@ export class VoiceControl {
 
   /**
    * Whether a message typed to this session now asks for a spoken reply, and an expressive one; never for a slash command. One typed in a window
-   * or page on this computer (`key`) to the voice target's session after the phone left takes the voice back here, as Talk here does, so its
+   * or page on this computer (`key`) to the voice target's session after the phone left takes the voice back here, as the mic does, so its
    * reply is heard (PRD R119).
    */
   spokenFor(sessionId: string, command: boolean, key: string | null = null): { spoken: boolean; expressive: boolean } {
@@ -872,7 +872,10 @@ export class VoiceControl {
   view(key: string): VoiceView {
     const settings = this.deps.settings();
     const session = this.deps.windows.scope(key)?.sessionId ?? null;
-    const here = settings.enabled && session !== null && this.#target.sessionId === session;
+    // The voice is here only on the device that holds it: this computer's pages while no phone has it, or the phone's own page while it does, so a
+    // page on the other device shows its mic off, and its tap takes the voice there.
+    const device = this.deps.remotePage?.(key) === true ? this.#device === 'phone' && key === this.#phoneKey : this.#device !== 'phone';
+    const here = settings.enabled && session !== null && this.#target.sessionId === session && device;
 
     // A playback or speech error is the voice's, not this window's, so only the list's notes show it; a reply it failed shows so in its window. Capture
     // that cannot run is this window's mic's.
@@ -1626,7 +1629,7 @@ export class VoiceControl {
     }
   }
 
-  /** Talk here from a window: the voice moves to its selected conversation's session; why not, or null. */
+  /** A window or page takes the voice, as by its mic or by selecting a conversation: the voice moves to its selected conversation's session; why not, or null. */
   talkHere(key: string): string | null {
     const session = this.deps.windows.scope(key)?.sessionId ?? null;
 
@@ -1635,7 +1638,7 @@ export class VoiceControl {
       return this.#device === 'phone' ? 'Voice is on another device.' : 'Select Voice on this device to start voice here.';
     }
 
-    // Talk here on this computer takes the voice back from the phone, or after the phone left (PRD R119).
+    // A page on this computer taking the voice, as by its mic, takes it back from the phone, or after the phone left (PRD R119).
     if (session !== null && this.deps.settings().enabled && this.#client !== null && this.deps.full(session)) {
       this.#takeBack(key);
     }
@@ -1650,7 +1653,7 @@ export class VoiceControl {
     return refused;
   }
 
-  /** The window selected another conversation: while it has the focus, Talk here for it, without the focus debounce (voice-design § 2.3). */
+  /** The window selected another conversation: while it has the focus, the voice moves to it, without the focus debounce (voice-design § 2.3). */
   selected(key: string): void {
     if (this.#device === 'phone' && key !== this.#phoneKey) {
       return;
@@ -2024,7 +2027,7 @@ export class VoiceControl {
       case 'device':
         // A hub that started again begins on this computer, while the voice process kept the device it had: the phone that had the voice left
         // with the hub that stopped, so the voice stays off until the operator takes it back (PRD R119, decision 1). Once this hub chose the
-        // device itself, as Talk here before the greeting came, its own device wins.
+        // device itself, as by the mic before the greeting came, its own device wins.
         if (message.device !== this.#device) {
           const had = message.device === 'phone' ? 'the phone' : message.device === 'none' ? 'no device' : 'this computer';
 

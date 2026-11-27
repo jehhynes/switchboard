@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, writeFileSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LOCAL_PAGE_COMMANDS, listenHub } from '../src/server.js';
+import { LOCAL_PAGE_COMMANDS, PAGE_COMMANDS, listenHub } from '../src/server.js';
 import { zip } from '../src/browserExtension.js';
 import { unzip } from './zip.js';
 import type { HubServer, PageRoutes } from '../src/server.js';
@@ -1415,6 +1415,8 @@ describe('the web page routes', () => {
     }
 
     expect([...LOCAL_PAGE_COMMANDS]).toEqual(['held-open', 'page-pair', 'page-devices', 'page-device-revoke', 'page-device-voice', 'row-open', 'row-command', 'page-holder-restart', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']);
+    // The mic takes the voice to its page, so there is no separate Talk here command (operator decision 2026-11-27).
+    expect(PAGE_COMMANDS.has('talk-here')).toBe(false);
 
     const devices = JSON.parse((await post('page-devices', { Cookie: localCookie, Origin: here })).body) as { devices: Array<{ id: string; label: string; host: string | null; login: string | null; current: boolean }> };
 

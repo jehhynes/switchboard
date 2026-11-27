@@ -828,11 +828,11 @@ describe('drawing', () => {
     expect(root.querySelector('button.picker .picker-session')).toBeNull();
   });
 
-  it("shows only the page's own voice state, with Talk here when the voice is elsewhere", () => {
+  it("shows only the page's own voice state, with only the mic, off, when the voice is elsewhere", () => {
     expect(renderVoice(null)).toBe('');
-    expect(renderVoice({ enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null })).toContain('data-voice="talk-here"');
+    expect(renderVoice({ enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null })).toBe('');
     expect(renderVoice({ enabled: true, here: true, mic: 'idle-off', speaking: 'r1', speakReplies: false, error: null, recognizer: null })).toContain('data-voice="stop"');
-    expect(renderVoice({ enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null, recognizer: null })).toContain('Click to use voice for this session.');
+    expect(renderMicButton({ enabled: true, here: false, mic: 'listening', speaking: 'r1', speakReplies: true, error: null, recognizer: null })).toContain('class="mic off" type="button" data-voice="mic" data-on="true" title="Mic off. Click to use voice for this session and turn the mic on."');
     // One renderer from packages/conversation: every mic state is drawn by its own button.
     expect(renderMicButton).toBe(viewMicButton);
     expect(renderMicButton({ enabled: true, here: true, mic: 'paused-by-voice', speaking: null, speakReplies: true, error: null })).toContain('data-on="true"');

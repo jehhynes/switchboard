@@ -853,13 +853,11 @@ body.artifact-window > .artifact-view { height: 100%; }
 .menu-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
 .menu-description { font-size: 0.85em; color: var(--vscode-descriptionForeground); white-space: normal; }
 .menu-empty { padding: 8px; text-align: center; color: var(--vscode-descriptionForeground); }
-/* The voice's cluster beside the mic and Send: Spoken replies as an icon, or Talk here alone while the voice is elsewhere, whose label is cut short
-   rather than pushing Send off a narrow footer. */
+/* The voice's cluster beside the mic and Send: Spoken replies as an icon while the voice is here. */
 .voice-controls { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .voice-controls .ghost { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 6px; border: none; border-radius: 4px; background: none; color: var(--vscode-descriptionForeground); font-size: 0.85em; cursor: pointer; }
 .voice-controls .ghost.icon { flex: none; width: 26px; padding: 0; }
 .voice-controls .ghost .codicon { font-size: 16px; }
-.voice-controls .ghost.talk-here { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; line-height: 26px; }
 .voice-controls .ghost:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
 
 /* Phones first (architecture.md § Web page): on a touch screen every target is at least 44 px and nothing shows only on hover, so a code
@@ -882,7 +880,6 @@ body.artifact-window > .artifact-view { height: 100%; }
      align-content apply, and the text's zero flex basis keeps it on the mark's line, its first line still beside the mark. */
   .qc-option { min-height: 56px; flex-wrap: wrap; align-content: center; }
   .composer-tool, .send, .voice-controls .ghost.icon, .toast .dismiss, .conn-update button.conn-reload { min-width: 44px; }
-  .voice-controls .ghost.talk-here { line-height: 44px; }
   .attachments { gap: 12px 8px; }
   .meta .resend { min-width: 44px; min-height: 44px; }
   /* An attached file's remove button is 32 px each way, the box it shows being its whole target, as History's compact rows are

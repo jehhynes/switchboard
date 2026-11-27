@@ -368,7 +368,6 @@ export interface ConversationVoice {
   /** `key`: the window or page a typed message comes from, which can take the voice back to this computer; null for any other message. */
   spokenFor(sessionId: string, command: boolean, key?: string | null): { spoken: boolean; expressive: boolean };
   replyChanged(reply: ConversationReply): void;
-  talkHere(key: string): string | null;
   stopSpeaking(key: string): string | null;
   setSpeakReplies(on: boolean): void;
   replay(key: string, replyId: string): string | null;
@@ -2992,11 +2991,10 @@ export class ConversationService {
   }
 
   /**
-   * The voice commands (architecture.md § Voice): `talk-here` moves the voice to the window's selected conversation's session, `stop-speaking`
-   * and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Spoken replies on or off for the whole hub, at any scope. Refused
+   * The voice commands (architecture.md § Voice): `stop-speaking` and `replay {replyId}` work only while the voice is here, `speak-replies {on}` turns Spoken replies on or off for the whole hub, at any scope. Refused
    * with 403 outside the window's scope, 409 for a stale `scopeGen` and with the voice's refusal, and 404 while voice is not part of this hub.
    */
-  voiceCommand(name: 'talk-here' | 'stop-speaking' | 'speak-replies' | 'replay' | 'mic' | 'mic-timing' | 'composer', body: Record<string, unknown>): { status: number; body: unknown } {
+  voiceCommand(name: 'stop-speaking' | 'speak-replies' | 'replay' | 'mic' | 'mic-timing' | 'composer', body: Record<string, unknown>): { status: number; body: unknown } {
     const { window, scopeGen, opId, on, replyId, focused, draft, listen, steps, outcome, seq, heard } = body;
 
     // A page's Mic on tap timed, for the hub log (architecture.md § Dictation): any window or page key the hub knows, at any scope.
@@ -3061,7 +3059,7 @@ export class ConversationService {
       return why === null ? { status: 200, body: { on } } : { status: 409, body: { error: why } };
     }
 
-    const why = name === 'talk-here' ? voice.talkHere(window) : name === 'stop-speaking' ? voice.stopSpeaking(window) : voice.replay(window, replyId as string);
+    const why = name === 'stop-speaking' ? voice.stopSpeaking(window) : voice.replay(window, replyId as string);
 
     return why === null ? { status: 200, body: { done: true } } : { status: why === REPLY_NOT_SHOWN ? 403 : 409, body: { error: why } };
   }

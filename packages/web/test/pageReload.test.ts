@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { timeline } from '../src/model.js';
 import { renderMicButton } from '../src/render.js';
 import { html } from './html.js';
-import { REPLAY_TIP, SPEAKING_TIP } from '@switchboard/conversation/voiceControls';
+import { ELSEWHERE_TIP, REPLAY_TIP, SPEAKING_TIP } from '@switchboard/conversation/voiceControls';
 import { SEND_RETRY_MS } from '../src/main.js';
 import { loadMermaid, startPage } from '../src/main.js';
 import { BACKOFF_MS, GRACE_MS, JITTER } from '../src/connection.js';
@@ -71,9 +71,10 @@ describe('the page in use', () => {
     source.emit('message', { message: message('m8', 8, { delivery: 'not-sent', error: 'x', text: 'not mine' }) });
     expect(root.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe('lost words');
     expect(root.querySelector('.toast.warning .toast-text')!.textContent).toBe('The holder did not answer.');
-    // While the voice is elsewhere, one Talk here takes the cluster's place; here, Spoken replies, with no Stop beside it while a reply plays.
-    expect(root.querySelector('[data-voice="speak-replies"]')).toBeNull();
-    click('[data-voice="talk-here"]');
+    // While the voice is elsewhere the cluster is empty and the mic shows off, its tap the way to take the voice here; here, Spoken replies, with
+    // no Stop beside it while a reply plays.
+    expect(root.querySelector('.voice-controls [data-voice]')).toBeNull();
+    expect(root.querySelector('.composer-mic .mic.off')?.getAttribute('title')).toBe(ELSEWHERE_TIP);
     source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: true, error: null } });
     // The cluster sits with the mic and Send, never among the message tools beside the context meter.
     expect(root.querySelector('.composer-footer > .composer-end > .voice-controls ~ .send')).not.toBeNull();
@@ -84,7 +85,7 @@ describe('the page in use', () => {
     // The speaker turns Spoken replies off, which stops the reply playing.
     click('[data-voice="speak-replies"]');
     await flush();
-    expect(posts.filter((post) => /talk-here|speak-replies/.test(post.url)).map((post) => post.body['on'] ?? 'talk')).toEqual(['talk', false]);
+    expect(posts.filter((post) => /talk-here|speak-replies/.test(post.url)).map((post) => post.body['on'])).toEqual([false]);
     expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(false);
     // Off, a reply plays only as a Replay, which the speaker stops.
     source.emit('voice', { voice: { enabled: true, here: true, speaking: 'r1', speakReplies: false, error: null } });
@@ -150,6 +151,42 @@ describe('the page in use', () => {
     page.close();
   });
 
+  it("takes the voice to this computer's page and turns the mic on in one tap, shows a refusal, and shows why the mic is unavailable", async () => {
+    const { page, source } = start();
+
+    hello(source, { voice: { enabled: true, here: false, mic: 'listening', speaking: null, speakReplies: false, error: null } });
+    // The voice listens on another session: here the mic is off, and its tap asks for Mic on, which the hub answers by moving the voice here.
+    expect(root.querySelector('.composer-mic .mic.off')?.getAttribute('title')).toBe(ELSEWHERE_TIP);
+    expect(root.querySelector('.composer-mic .mic')?.getAttribute('aria-label')).toBe(ELSEWHERE_TIP);
+    click('.composer-mic [data-voice="mic"]');
+    expect(root.querySelector('.composer-mic .mic.starting')?.getAttribute('aria-label')).toMatch(/^Starting\. /);
+    await flush();
+    expect(posts.filter((post) => /\/(mic|talk-here)$/.test(post.url)).map((post) => [post.url.split('/').at(-1), post.body['on']])).toEqual([['mic', true]]);
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: false, error: null } });
+    expect(root.querySelector('.composer-mic .mic.listening')?.getAttribute('aria-label')).toMatch(/^Listening\. Mic on: /);
+
+    // The voice moves away again; a refused tap says why and leaves the mic off.
+    source.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: false, error: null } });
+    answers['/mic'] = { status: 409, body: { error: 'Voice is on another device.' } };
+    click('.composer-mic [data-voice="mic"]');
+    await flush();
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Voice is on another device.');
+    expect(root.querySelector('.composer-mic .mic.unavailable')?.getAttribute('aria-label')).toBe('Mic failed. The mic did not start: Voice is on another device. Click to try again.');
+    root.querySelector<HTMLElement>('.toast.warning .dismiss')!.click();
+    delete answers['/mic'];
+
+    // A mic on but unavailable says why in the toast, once each time the reason changes, as a touch screen shows no tooltip.
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'unavailable', speaking: null, speakReplies: false, error: 'No microphone found.' } });
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Mic unavailable: No microphone found.');
+    expect(root.querySelector('.composer-mic .mic.unavailable')?.getAttribute('aria-label')).toMatch(/^Mic unavailable\. /);
+    root.querySelector<HTMLElement>('.toast.warning .dismiss')!.click();
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'unavailable', speaking: null, speakReplies: false, error: 'No microphone found.' } });
+    expect(root.querySelector('.toast.warning .toast-text')).toBeNull();
+    source.emit('voice', { voice: { enabled: true, here: true, mic: 'unavailable', speaking: null, speakReplies: false, error: 'Microphone in use.' } });
+    expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('Mic unavailable: Microphone in use.');
+    page.close();
+  });
+
   it('offers Send again on an unconfirmed message, which puts its text in the composer and sends nothing', async () => {
     const { page, source } = start();
 
@@ -181,12 +218,13 @@ describe('the page in use', () => {
     expect(worklets()).toBe(1);
     page.close();
 
-    // This computer's page shows Talk here instead.
+    // This computer's page shows the same mic, off, with no Talk here beside it, and fetches no audio worklet, since its microphone is the computer's.
     const local = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, local: true });
 
     hello(FakeSource.last!);
     FakeSource.last!.emit('voice', { voice: { enabled: true, here: false, mic: 'off', speaking: null, speakReplies: true, error: null } });
-    expect(root.querySelector('.composer-mic [data-voice="mic"]')).toBeNull();
+    expect(root.querySelector('.composer-mic [data-voice="mic"]')?.getAttribute('data-on')).toBe('true');
+    expect(root.querySelector('[data-voice="talk-here"]')).toBeNull();
     expect(worklets()).toBe(1);
     local.close();
   });

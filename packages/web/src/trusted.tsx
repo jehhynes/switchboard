@@ -28,7 +28,7 @@ function node(from: Node): ComponentChild {
     }
   }
 
-  // Keyed by `data-key`, `data-id` or `id`, so a control keyed apart, such as Stop and Talk here, is never one turned into the other.
+  // Keyed by `data-key`, `data-id` or `id`, so a control keyed apart, such as Stop and Spoken replies, is never one turned into the other.
   const key = element.getAttribute('data-key') ?? element.getAttribute('data-id') ?? (element.id === '' ? null : element.id);
 
   if (key !== null) {

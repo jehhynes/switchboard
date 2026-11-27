@@ -62,7 +62,7 @@ import { browserExtensionZip } from './browserExtension.js';
 
 const RELOAD_DEBOUNCE_MS = 300;
 /** The page's neutral note while no device has the voice because the phone was lost (`VoiceControl.phoneLost`). */
-export const PHONE_LOST_NOTE = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or Talk here on this computer.';
+export const PHONE_LOST_NOTE = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or the mic on this computer.';
 
 /** Operator events a page's row controls may post (PRD R27). */
 const OPERATOR_EVENTS = new Set(['adhoc', 'run-schedule', 'start', 'approve', 'mark-done', 'reopen', 'retry', 'stop', 'delete', 'pick', 'retriage-pool', 'snooze', 'restore', 'comment', 'move', 'reset-position']);
@@ -661,7 +661,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       settings: () => viewSettings(),
       spokenFor: (sessionId, command, key) => voice.spokenFor(sessionId, command, key ?? null),
       replyChanged: (reply) => voice.replyChanged(reply),
-      talkHere: (key) => voice.talkHere(key),
       stopSpeaking: (key) => voice.stopSpeaking(key),
       setSpeakReplies: (on) => voice.setSpeakReplies(on),
       replay: (key, replyId) => voice.replay(key, replyId),
@@ -1184,7 +1183,6 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       '/v1/conversation/states': async (body) => (isRecord(body) ? conversation.states(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId, before, limit?}.' } }),
       '/v1/conversation/context-details': async (body) => (isRecord(body) ? conversation.contextDetails(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
       '/v1/conversation/commands': async (body) => (isRecord(body) ? conversation.commands(body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, sessionId}.' } }),
-      '/v1/conversation/talk-here': async (body) => (isRecord(body) ? conversation.voiceCommand('talk-here', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/stop-speaking': async (body) => (isRecord(body) ? conversation.voiceCommand('stop-speaking', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } }),
       '/v1/conversation/speak-replies': async (body) => (isRecord(body) ? conversation.voiceCommand('speak-replies', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, on}.' } }),
       '/v1/conversation/replay': async (body) => (isRecord(body) ? conversation.voiceCommand('replay', body) : { status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } }),

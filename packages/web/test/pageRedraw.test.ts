@@ -349,7 +349,7 @@ describe('the page', () => {
     page.close();
   });
 
-  it('keeps each voice control its own button, so a focused speaker never turns into Talk here', () => {
+  it('drops a focused speaker once the voice is elsewhere, leaving the mic, off, as the only voice control', () => {
     const { page, source } = start();
     const voice = { enabled: true, here: true, mic: 'off', speaking: 'r1', speakReplies: true, error: null, recognizer: null };
 
@@ -360,7 +360,8 @@ describe('the page', () => {
     speaker.focus();
     source.emit('voice', { voice: { ...voice, here: false, speaking: null } });
     expect(speaker.isConnected).toBe(false);
-    expect(root.querySelector('[data-voice="talk-here"]')).not.toBe(speaker);
+    expect(root.querySelector('.voice-controls [data-voice]')).toBeNull();
+    expect(root.querySelector('.composer-mic [data-voice="mic"]')?.getAttribute('data-on')).toBe('true');
     page.close();
   });
 
@@ -483,6 +484,16 @@ describe('the page', () => {
     expect(mics()).toEqual([false]);
     // Speech goes on: no Stop is sent.
     expect(posts.some((post) => post.url.endsWith('/stop-speaking'))).toBe(false);
+
+    // A tap still starting while the voice is on another session counts as on: Back sends Mic off after it, so dictation never runs unseen.
+    await open();
+    source.emit('voice', { voice: { enabled: true, here: false, mic: 'listening', speaking: null, speakReplies: true, error: null } });
+    root.querySelector<HTMLElement>('.composer-mic [data-voice="mic"]')!.click();
+    root.querySelector<HTMLElement>('.header > button.back-toggle')!.click();
+    await flush();
+    expect(mics()).toEqual([false, true, false]);
+    posts.length = 0;
+    posts.push({ url: '/mic', body: { on: false } });
 
     // With the mic already off, Back sends nothing.
     await open();

@@ -409,8 +409,8 @@ export function markdownBody(text: string): string {
 }
 
 /** The composer footer's voice controls and mic, drawn by the renderer in packages/conversation, for the page (architecture.md § Web page). */
-export function renderVoice(voice: VoiceView | null, live = true): string {
-  return renderVoiceControls(voice, live, 'page');
+export function renderVoice(voice: VoiceView | null): string {
+  return renderVoiceControls(voice);
 }
 
 export { renderMicButton };

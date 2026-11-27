@@ -316,18 +316,16 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     await settled(() => expect(store.message((typed.body as { message: { id: string } }).message.id)?.delivery).toBe('sent'));
   });
 
-  it('runs the voice commands for the window only: Talk here, Stop speaking, Spoken replies and Replay, with their refusals', () => {
+  it('runs the voice commands for the window only: Stop speaking, Spoken replies, Replay and the mic, with their refusals', () => {
     const { voice, calls } = fakeVoice();
     const { service, open, view } = setupSend(new FakeHeld(), undefined, voice);
     const mine = open(2);
     const theirs = open(3);
     const command = (name: Parameters<typeof service.voiceCommand>[0], patch: Record<string, unknown> = {}, window = mine.key) => service.voiceCommand(name, { window, scopeGen: 1, opId: 'o', ...patch });
 
-    expect(command('talk-here')).toEqual({ status: 200, body: { done: true } });
-    expect(command('talk-here', {}, theirs.key)).toEqual({ status: 409, body: { error: 'Voice is off (voice.enabled).' } });
-    expect(command('talk-here', {}, 'forged')).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
-    expect(command('talk-here', { scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
-    expect(command('stop-speaking')).toEqual({ status: 409, body: { error: "Voice is not on this page's session. Select Talk here to use it." } });
+    expect(command('stop-speaking', {}, 'forged')).toEqual({ status: 403, body: { error: "This page's connection to Switchboard ended, so that was not done. Try again once it reconnects, or reload the page." } });
+    expect(command('stop-speaking', { scopeGen: 0 })).toEqual({ status: 409, body: { error: "The window's conversation changed." } });
+    expect(command('stop-speaking')).toEqual({ status: 409, body: { error: "Voice is not on this page's session. Select the mic to use it here." } });
     expect(command('speak-replies', { on: false })).toEqual({ status: 200, body: { on: false } });
     // Spoken replies are the hub's: Settings turns them on at any scope, but not from a page the hub does not know.
     expect(command('speak-replies', { on: true, scopeGen: -1 })).toEqual({ status: 200, body: { on: true } });
@@ -355,7 +353,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     }
     expect(command('replay', { replyId: 'r-x' })).toEqual({ status: 403, body: { error: 'That reply is not in the session this page shows, so it was not read again.' } });
     expect(command('replay')).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId, replyId}.' } });
-    expect(service.voiceCommand('talk-here', { window: mine.key, scopeGen: 1 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } });
+    expect(service.voiceCommand('stop-speaking', { window: mine.key, scopeGen: 1 })).toEqual({ status: 400, body: { error: 'Expected {window, scopeGen, opId}.' } });
     expect(calls).toContain('speak-replies false');
     // Selecting a conversation tells the voice, which moves at once when the window has the focus.
     expect(service.select({ window: mine.key, scopeGen: 1, opId: 'sel', workItemId: 2 }).status).toBe(200);
@@ -365,7 +363,7 @@ describe('ConversationService send', { timeout: 20_000 }, () => {
     const plain = setupSend();
     const key = plain.open(2).key;
 
-    expect(plain.service.voiceCommand('talk-here', { window: key, scopeGen: plain.scopes.scope(key)!.scopeGen, opId: 'o' })).toEqual({ status: 404, body: { error: 'This hub has no voice.' } });
+    expect(plain.service.voiceCommand('stop-speaking', { window: key, scopeGen: plain.scopes.scope(key)!.scopeGen, opId: 'o' })).toEqual({ status: 404, body: { error: 'This hub has no voice.' } });
   });
 
   it('tells the voice of each reply, sends a reply again when its speech changed, and sends voice events to one window', async () => {

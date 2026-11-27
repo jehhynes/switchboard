@@ -814,6 +814,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   // The mic button shows starting from a Mic on tap until the voice view confirms it, and the tap's error if it failed.
   const micStart = new MicStart(() => draw());
   let micScope: number | null | undefined;
+  // Why the mic is unavailable, last shown in the toast: a touch screen shows no tooltip, so the reason shows once each time it changes.
+  let micUnavailable: string | null = null;
   // While the mic is on for the session shown, the composer shows on every tab, so the operator sees that dictation is on (architecture.md
   // § Web page). It stays DICTATION_GRACE_MS after the mic goes off other than by a tap on its button here, so a moment's change of the voice's
   // state does not hide it and show it again; another work item drops it at once, and a Mic on tap still starting counts only in its own.
@@ -1664,8 +1666,6 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       void command('speak-replies', { on: button!.getAttribute('aria-pressed') !== 'true' });
     } else if (which === 'stop') {
       void command('stop-speaking');
-    } else if (which === 'talk-here') {
-      void command('talk-here').then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? 'The voice did not move here.')));
     }
   });
 
@@ -2001,10 +2001,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           ? 'Resume the session to send a message.'
         : (state.session?.reason ?? (state.connected ? 'No session has started yet.' : connection.state === 'offline' ? 'Messages cannot be sent while offline.' : connection.state === 'signedOut' ? 'Signed out.' : 'Connecting to Switchboard…'));
     // The voice controls from packages/conversation, acting on this computer's voice process (architecture.md § Web page).
-    mount(voiceControls, renderShared(renderVoice(state.voice, live)));
+    mount(voiceControls, renderShared(renderVoice(state.voice)));
     syncHint();
-    // On a paired device the mic shows while the voice is elsewhere too, off: its tap takes the voice to this phone (PRD R119).
-    const micView = phoneVoice !== null && state.voice?.enabled === true && !state.voice.here ? { ...state.voice, here: true, mic: 'off' as const, error: null } : state.voice;
+    // The mic shows while the voice is elsewhere too, off: its tap takes the voice to this page's session, or on a paired device to this phone (PRD R119).
+    const micView = state.voice;
 
     // While voice is on, a paired device keeps the audio worklet in its cache, so a Mic on tap does not wait to fetch it.
     if (state.voice?.enabled === true) {
@@ -2028,6 +2028,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       micTimed(micStart.pending === null ? (micView?.mic ?? 'off') : `failed: ${micStart.pending.error}`);
     }
 
+    const unavailable = live && micView?.here === true && micView.mic === 'unavailable' ? (micView.error ?? 'unknown error') : null;
+
+    if (unavailable !== null && unavailable !== micUnavailable) {
+      showError(`Mic unavailable: ${unavailable}`);
+    }
+
+    micUnavailable = unavailable;
     mount(micSlot, live ? renderShared(renderMicButton(micView, micStart.pending)) : null);
     // The hub's mic turned off while the voice is here, as by Mic off in another of this phone's views: the phone's microphone is released too.
     if (state.voice?.here === true) {
@@ -2716,7 +2723,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     // Leaving the conversation for the list in the phone's layout (Back, a swipe right or the browser's back, all through back(), or a refused
     // open) leaves the work item, so a mic on for it turns off and a phone's microphone is released; what plays goes on (PRD R119).
-    const leftConversation = listing && !wasListing && isPhone() && ((state.voice?.here === true && state.voice.mic !== 'off') || micOpening);
+    const leftConversation = listing && !wasListing && isPhone() && ((state.voice?.here === true && state.voice.mic !== 'off') || micOpening || micStart.pending === 'starting');
 
     wasListing = listing;
 

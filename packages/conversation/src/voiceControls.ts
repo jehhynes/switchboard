@@ -1,6 +1,6 @@
 /**
  * The composer's voice controls, drawn by the web page (architecture.md § Voice, § Dictation): the mic
- * button with its states, Spoken replies and Talk here. They control the computer's one voice process through the hub. Imports nothing, for
+ * button with its states and Spoken replies. They control the computer's one voice process through the hub. Imports nothing, for
  * browser bundles.
  */
 
@@ -20,13 +20,12 @@ export interface VoiceControlsView {
   deviceOff?: boolean;
 }
 
-/** Where the controls are drawn, which their Talk here tooltip names. */
-export type VoicePlace = 'window' | 'page';
-
 /** The mic's tooltip while the operator paused it by voice. */
 export const PAUSED_BY_VOICE_TIP = 'Paused: you said "stop listening". Say "start listening", or click to resume dictation.';
-/** Talk here's tooltip while the voice is here but no device has it. */
-export const DEVICE_OFF_TIP = 'Voice is off. Click to use it on this computer.';
+/** The mic's tooltip while the voice is here but no device has it, after the phone left: a click takes the voice back with the mic on. */
+export const DEVICE_OFF_TIP = 'Voice is off. Click to use it on this computer and turn the mic on.';
+/** The mic's tooltip while the voice is on another session or device: a click moves the voice to this session with the mic on. */
+export const ELSEWHERE_TIP = 'Mic off. Click to use voice for this session and turn the mic on.';
 /** Spoken replies's tooltip while it is on and this window's session speaks: its click stops the reply too. */
 export const SPEAKING_TIP = 'Spoken replies (experimental): on. Click to stop this reply and turn them off (Escape stops only this reply).';
 /** The speaker's tooltip while Spoken replies is off and a Replay plays: its click stops the Replay and leaves Spoken replies off. */
@@ -41,12 +40,10 @@ function escape(text: string): string {
 /**
  * The composer footer's voice controls (architecture.md § Voice), ghost icon buttons as in Claude Code's footer, in one cluster with the mic
  * beside Send: Spoken replies as a speaker toggle while the voice is here, which also stops the reply playing, so the composer has no separate Stop
- * (Escape stops speaking from the keyboard); one Talk here in its place while it is elsewhere, only for a session it can speak for (`live`). Nothing while voice is off. `place` names where it is drawn, for
- * the Talk here tooltip; the web page passes `page`. Every page controls the same voice process on this computer. While the voice is here but no device has it, after the phone
- * left, "Voice is off — Talk here" stands before Spoken replies, so a reply is not skipped unnoticed.
+ * (Escape stops speaking from the keyboard). Nothing while voice is off or elsewhere, where the mic alone takes the voice here.
  */
-export function renderVoiceControls(voice: VoiceControlsView | null, live = true, place: VoicePlace = 'window'): string {
-  if (voice === null || !voice.enabled) {
+export function renderVoiceControls(voice: VoiceControlsView | null): string {
+  if (voice === null || !voice.enabled || !voice.here) {
     return '';
   }
 
@@ -55,23 +52,13 @@ export function renderVoiceControls(voice: VoiceControlsView | null, live = true
   // While this window's session speaks, a click stops the reply: turning Spoken replies off stops it with everything offered (the hub sends `stop`
   // first), and while it is off, a reply still plays only as a Replay or an alert's answer, which the click stops, leaving Spoken replies off.
   // Spoken replies are experimental and off until turned on in Settings, so while off and silent the composer shows no speaker at all.
-  const speaking = voice.here && voice.speaking !== null;
-  const speakReplies = voice.speakReplies
+  const speaking = voice.speaking !== null;
+
+  return voice.speakReplies
     ? icon('unmute', speaking ? SPEAKING_TIP : 'Spoken replies (experimental): on. Click to turn them off.', 'speak-replies', ' aria-pressed="true"')
     : speaking
       ? icon('mute', REPLAY_TIP, 'stop')
       : '';
-  const talkHere =
-    !voice.here && live
-      ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="Click to use voice for this session.">Talk here</button>`
-      : '';
-
-  const deviceOff =
-    voice.here && voice.deviceOff === true
-      ? `<button class="ghost talk-here" type="button" data-key="voice-talk-here" data-voice="talk-here" title="${escape(DEVICE_OFF_TIP)}">Talk here</button>`
-      : '';
-
-  return voice.here ? `${deviceOff}${speakReplies}` : talkHere;
 }
 
 /** A mic glyph: slashed while off, outlined, or filled; with a badge while paused, or while half-duplex capture holds it for a reply playing; ringed while it starts. */
@@ -184,32 +171,31 @@ export class MicStart {
 
 /**
  * The composer's one mic button (architecture.md § Dictation), whose glyph and tooltip carry the mic's state, each drawn apart: a slashed mic while
- * off, unavailable or in a window the voice is not in, whose click talks here and turns the mic on; an outlined mic after the idle timeout; a
+ * off, unavailable, or while the voice is on another session or device or on none, whose click takes the voice to this session and turns the mic
+ * on in one tap; an outlined mic after the idle timeout; a
  * filled mic in the accent colour that pulses while it listens, faster while it hears, and ringed by a turning arc while it starts, from the
  * tap until the voice process listens (`pending`, from MicStart), or a slashed mic in the warning colour when the tap failed; a pause badge while the composer
- * has the focus or another app records; and a speaker badge while half-duplex capture holds it for a reply playing. While the mic is on, in any
- * state, a click turns it off. Empty with voice off.
+ * has the focus or another app records; and a speaker badge while half-duplex capture holds it for a reply playing. The state's name, such as
+ * Listening or Mic unavailable, leads the accessible name. While the mic is on, in any state, a click turns it off. Empty with voice off.
  */
-export function renderMicButton(voice: VoiceControlsView | null, pending: MicPending = null): string {
-  if (voice === null || !voice.enabled) {
+export function renderMicButton(shown: VoiceControlsView | null, pending: MicPending = null): string {
+  if (shown === null || !shown.enabled) {
     return '';
   }
 
-  const button = (glyph: string, title: string, on: boolean, kind: string, extra = ''): string =>
-    `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(title)}" aria-pressed="${!on}"${extra}>${glyph}</button>`;
-
-  // While the voice is elsewhere, Talk here takes the cluster's place (renderVoiceControls).
-  if (!voice.here) {
-    return '';
-  }
+  // While the voice is elsewhere the mic here is off, and its tap brings the voice here (the hub's `mic`).
+  const voice: VoiceControlsView = shown.here ? shown : { ...shown, here: true, mic: 'off', speaking: null, error: null, roomHold: false };
+  // `state` leads the accessible name where the tooltip does not start with it.
+  const button = (glyph: string, title: string, on: boolean, kind: string, extra = '', state: string | null = null): string =>
+    `<button class="mic ${kind}" type="button" data-voice="mic" data-on="${on}" title="${escape(title)}" aria-label="${escape(state === null ? title : `${state}. ${title}`)}" aria-pressed="${!on}"${extra}>${glyph}</button>`;
 
   // The tap's own failure until the next tap, and from the tap until the voice process listens (MicStart).
   if (pending !== null && pending !== 'starting' && UNCONFIRMED.has(voice.mic)) {
-    return button(micGlyph('off'), `The mic did not start: ${pending.error} Click to try again.`, true, 'unavailable');
+    return button(micGlyph('off'), `The mic did not start: ${pending.error} Click to try again.`, true, 'unavailable', '', 'Mic failed');
   }
 
   if (voice.mic === 'starting' || (pending === 'starting' && UNCONFIRMED.has(voice.mic))) {
-    return button(micGlyph('filled', 'ring'), MIC_STARTING_TIP, false, 'starting', ' aria-busy="true"');
+    return button(micGlyph('filled', 'ring'), MIC_STARTING_TIP, false, 'starting', ' aria-busy="true"', 'Starting');
   }
 
   // Where recognition runs, once the recogniser loaded; half-duplex capture does not listen while the voice speaks, and full duplex with no echo
@@ -221,27 +207,27 @@ export function renderMicButton(voice: VoiceControlsView | null, pending: MicPen
 
   // Half-duplex capture holding the mic while this window's reply plays.
   if (voice.halfDuplex !== undefined && voice.speaking !== null && (voice.mic === 'listening' || voice.mic === 'hearing')) {
-    return button(micGlyph('filled', 'held'), `Mic on, dictation paused while Switchboard speaks the reply (${voice.halfDuplex}): it resumes when the reply ends.${where} Click to turn the mic off.`, false, 'held');
+    return button(micGlyph('filled', 'held'), `Mic on, dictation paused while Switchboard speaks the reply (${voice.halfDuplex}): it resumes when the reply ends.${where} Click to turn the mic off.`, false, 'held', '', 'Paused');
   }
 
   switch (voice.mic) {
     case 'listening':
-      return button(micGlyph('filled'), `Mic on: Switchboard is ready for your dictation. ${held === '' ? 'It sends when you pause.' : ROOM_HOLD_TIP}${where}${halfDuplex} Click to turn the mic off.`, false, 'listening');
+      return button(micGlyph('filled'), `Mic on: Switchboard is ready for your dictation. ${held === '' ? 'It sends when you pause.' : ROOM_HOLD_TIP}${where}${halfDuplex} Click to turn the mic off.`, false, 'listening', '', 'Listening');
     case 'hearing':
-      return button(micGlyph('filled'), `Mic on: Switchboard is taking dictation.${held}${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing');
+      return button(micGlyph('filled'), `Mic on: Switchboard is taking dictation.${held}${where}${halfDuplex} Click to turn the mic off.`, false, 'hearing', '', 'Hearing');
     case 'typing':
-      return button(micGlyph('outline', 'pause'), `Mic paused while you type: dictation goes on when you send or leave the box.${where} Click to turn the mic off.`, false, 'paused');
+      return button(micGlyph('outline', 'pause'), `Mic paused while you type: dictation goes on when you send or leave the box.${where} Click to turn the mic off.`, false, 'paused', '', 'Paused');
     case 'paused-other-app':
-      return button(micGlyph('outline', 'pause'), `Mic paused: another app is using the microphone.${where} Click to turn the mic off.`, false, 'paused');
+      return button(micGlyph('outline', 'pause'), `Mic paused: another app is using the microphone.${where} Click to turn the mic off.`, false, 'paused', '', 'Paused');
     case 'paused-by-voice':
       // Only "start listening" is heard: a click listens again rather than turning the mic off.
-      return button(micGlyph('outline', 'pause'), `Mic ${PAUSED_BY_VOICE_TIP.charAt(0).toLowerCase()}${PAUSED_BY_VOICE_TIP.slice(1)}`, true, 'paused');
+      return button(micGlyph('outline', 'pause'), `Mic ${PAUSED_BY_VOICE_TIP.charAt(0).toLowerCase()}${PAUSED_BY_VOICE_TIP.slice(1)}`, true, 'paused', '', 'Paused');
     case 'unavailable':
       // The mic is on but cannot run: a click turns it off, and turning it on again tries again.
-      return button(micGlyph('off'), `Mic on but unavailable: ${voice.error ?? 'unknown error'} Click to turn the mic off.`, false, 'unavailable');
+      return button(micGlyph('off'), `Mic on but unavailable: ${voice.error ?? 'unknown error'} Click to turn the mic off.`, false, 'unavailable', '', 'Mic unavailable');
     case 'idle-off':
-      return button(micGlyph('outline'), 'Mic turned off after inactivity. Click to turn it on (Ctrl+Alt+M).', true, 'idle');
+      return button(micGlyph('outline'), 'Mic turned off after inactivity. Click to turn it on.', true, 'idle');
     default:
-      return button(micGlyph('off'), 'Mic off. Click to turn it on (Ctrl+Alt+M).', true, 'off');
+      return button(micGlyph('off'), !shown.here ? ELSEWHERE_TIP : voice.deviceOff === true ? DEVICE_OFF_TIP : 'Mic off. Click to turn it on.', true, 'off');
   }
 }

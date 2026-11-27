@@ -197,8 +197,7 @@ export function fakeVoice(spoken = { spoken: true, expressive: false }) {
       return command ? { spoken: false, expressive: false } : spoken;
     },
     replyChanged: (reply) => void calls.push(`reply ${reply.opening}`),
-    talkHere: (key) => (key === 'k1' ? null : 'Voice is off (voice.enabled).'),
-    stopSpeaking: () => "Voice is not on this page's session. Select Talk here to use it.",
+    stopSpeaking: () => "Voice is not on this page's session. Select the mic to use it here.",
     setSpeakReplies: (on) => void calls.push(`speak-replies ${on}`),
     replay: (_key, replyId) => (replyId === 'r-x' ? 'That reply is not in the session this page shows, so it was not read again.' : null),
     update: () => void calls.push('update'),
