@@ -12,7 +12,7 @@
 // first; a pill left out is no keyboard stop, and a pill shown is one only in the list's Tab stop row; the pills change with the list's width alone, without a redraw; and line 2 paints the same while
 // the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them.
 // A usage-limited session's hourglass, in its list row and, also on a desktop, the header, draws from the extra icons' face as its SVG does, not as tofu. Every control shown is a touch target of at least 44 px each way,
-// and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
+// but for the Changes tree's rows and their controls, 32 px each way, and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
 // task list, whose read-only boxes are not controls; on the desktop a question card's step dots are at least 24 px tall.
 // The questions waiting chip floats centred over the composer, clear of its box, at the conversation's end and halfway up. The card's topic is
 // 4.5:1 on the card, and its first question's disabled Back has no border.
@@ -618,6 +618,12 @@ const TOUCH = `(() => {
       const height = bottom - top;
       const tab = node.parentElement?.matches('.tab') ? node.parentElement : null;
       boxes.push({ node: target, layer: layer(target), left, top, right, bottom });
+      // The Changes tree's rows are 32 px on a touch screen (operator decision 2026-11-26, changes.css): a row's own button and each control
+      // in it are held to 32 px each way by the box it shows, which is its whole target, with no pseudo-element taking presses beyond it.
+      if (target.closest('.changes-tree .tree-item:not(.section)') !== null) {
+        const beyond = ['::before', '::after'].some((part) => { const style = getComputedStyle(target, part); return style.content !== 'none' && style.position === 'absolute' && style.pointerEvents !== 'none'; });
+        return width >= 31.5 && height >= 31.5 && !beyond ? [] : [name(node) + ' ' + Math.round(width) + 'x' + Math.round(height) + (beyond ? ', a hit area beyond its box' : ', under 32 px')];
+      }
       const tall = tab === null ? height >= 43.5 : tab.getBoundingClientRect().height >= 43.5 && height >= tab.clientHeight - 0.5;
       return width >= 43.5 && tall ? [] : [name(node) + ' ' + Math.round(width) + 'x' + Math.round(height)];
     });

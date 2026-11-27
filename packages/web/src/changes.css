@@ -217,11 +217,15 @@
 .file-page > .artifact-doc, .file-page > .artifact-frame { flex: 1 1 auto; min-height: 0; }
 .file-page > .media { flex: 1 1 auto; min-height: 0; object-fit: contain; }
 .body a.path-link.denied, .artifact-doc a.path-link.denied { color: var(--vscode-descriptionForeground); text-decoration: none; cursor: not-allowed; }
-/* A touch screen's rows and targets are 44 px, each control a target of its own. */
+/* A touch screen's targets are 44 px, each control a target of its own. The tree's rows are the exception (operator decision 2026-11-26):
+   32 px, so more of the tree shows, and a control in a row is 32 px each way, the box it shows being its whole target. The FILES and
+   COMMITS heads, with the Files shown toggle, stay 44 px, as the tree's other header controls do. */
 @media (hover: none), (pointer: coarse) {
-  .tree-item, .tree-row, .tree-menu button { min-height: 44px; }
-  .tree-link, .tree-options-button, .tree-pin, .changes-tree-button, .tree-toggle button, .file-toggle button { min-width: 44px; min-height: 44px; }
-  .tree-viewed { min-width: 44px; min-height: 44px; justify-content: center; }
+  .tree-menu button, .tree-item.section, .tree-item.section > .tree-row { min-height: 44px; }
+  .tree-item:not(.section) { height: 32px; }
+  .tree-row { min-height: 32px; }
+  .tree-options-button, .tree-pin, .changes-tree-button, .tree-toggle button, .file-toggle button, .tree-item.section .tree-link { min-width: 44px; min-height: 44px; }
+  .tree-item:not(.section) :is(.tree-link, .tree-viewed) { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 32px; height: 32px; }
   .tree-viewed input { width: 20px; height: 20px; }
   /* The search field itself is 44 px tall, as the list's is. */
   .tree-search { padding-top: 0; padding-bottom: 0; }
