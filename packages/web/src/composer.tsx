@@ -34,6 +34,7 @@ export function renderFrame(side: { min: number; max: number }, chat: { min: num
       </aside>
       <div id="list-sheet"></div>
       <div id="sheet"></div>
+      <div id="report-sheet"></div>
       <div id="connection"></div>
       <div class="live" aria-live="polite"></div>
     </>

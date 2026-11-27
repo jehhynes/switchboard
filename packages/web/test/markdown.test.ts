@@ -50,10 +50,10 @@ describe('GitHub-flavoured Markdown', () => {
     // The pinned state's body adds only its place in the box and no outer margins, and is dimmed once old.
     expect(css.match(/^[^\n{]*\.hist-now-body[^\n{]*\{[^}]*\}/gm)).toEqual([
       '.hist-now-body { padding-left: 16px; }',
-      '.hist-now-body.md-doc > :first-child, .hist-state-body.md-doc > :first-child { margin-top: 0; }',
-      '.hist-now-body.md-doc > :last-child, .hist-state-body.md-doc > :last-child { margin-bottom: 0; }',
+      '.hist-now-body.md-doc > :first-child, .hist-report-body.md-doc > :first-child { margin-top: 0; }',
+      '.hist-now-body.md-doc > :last-child, .hist-report-body.md-doc > :last-child { margin-bottom: 0; }',
       '.hist-now.stale .hist-now-headline, .hist-now.stale .hist-now-body { color: var(--vscode-descriptionForeground); }',
-      '  .hist-now-headline, .hist-now-body { padding-left: 12px; }',
+      '  .hist-now-headline, .hist-now-body, .hist-now-foot { padding-left: 12px; }',
     ]);
   });
 

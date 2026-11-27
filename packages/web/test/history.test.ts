@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startPage } from '../src/main.js';
-import { EMPTY_HISTORY_UI, entryShown, expandable, historyAction, historyUrl, needsYou, renderHistory, RUN_LIMIT } from '../src/history.js';
+import { earlierLabel, EMPTY_HISTORY_UI, entryShown, expandable, historyAction, historyReports, historyUrl, needsYou, renderHistory, renderReportSheet, reportIndex, reportOption, reportStep, RUN_LIMIT } from '../src/history.js';
 import type { HistoryHead, HistoryOpen } from '../src/history.js';
 import { html } from './html.js';
 import type { HistoryCategory, HistoryEntry, HistoryView, PageGroup, PageRow, StateView } from '@switchboard/protocol';
@@ -166,7 +166,7 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(root.querySelector('.hist-now-sub')?.textContent).toBe('State from 4 min ago');
   });
 
-  it('draws one timeline newest first: day headings, state entries with the newest bodies open and older ones behind Details, groups and their facts', () => {
+  it('draws one timeline newest first: day headings, state entries as headlines that open the State reports sheet, with no Details, groups and their facts', () => {
     const states = [
       entry('s1', T0 + MINUTE, { category: 'state', icon: 'pulse', text: 'Oldest', stateId: 'r1', body: 'Body one' }),
       entry('s2', T0 + 2 * MINUTE, { category: 'state', icon: 'pulse', text: 'Second', stateId: 'r2', body: 'Body two' }),
@@ -180,10 +180,15 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(texts(root, '[data-section="w1"] .hist-entry .hist-words')).toEqual(['Entry c', 'Planning', 'Fourth', 'Third', 'Second', 'Session started', 'Oldest', 'Entry a']);
     expect(texts(root, '[data-section="w1"] .hist-day')).toEqual(['Today', 'Yesterday']);
     expect(root.querySelector('[data-entry="g"] .hist-tag')?.textContent).toBe('stage report');
-    expect(['s4', 's3', 's2', 's1'].map((key) => root.querySelector<HTMLDetailsElement>(`[data-entry="${key}"] details.hist-more`)?.open)).toEqual([true, true, true, false]);
-    expect(root.querySelector('[data-entry="s4"] details.hist-more .hist-state-body')?.textContent?.trim()).toBe('Body four');
-    expect(root.querySelector('[data-entry="s1"] details.hist-more')?.getAttribute('data-body')).toBe('s1');
-    expect(root.querySelector('[data-entry="s1"] details.hist-more summary')?.textContent).toBe('Details');
+    // A state entry shows its headline and time only: the headline is a button opening the sheet at it in its group, and its body is not drawn.
+    expect(root.querySelectorAll('.hist-entry details, .hist-entry .md-doc')).toHaveLength(0);
+    expect(root.textContent).not.toContain('Body four');
+    const link = root.querySelector<HTMLElement>('[data-entry="s1"] button.hist-words')!;
+
+    expect([link.textContent, link.dataset['action'], link.dataset['section'], link.dataset['state'], link.getAttribute('aria-haspopup')]).toEqual(['Oldest', 'history-report', 'w1', 'r1', 'dialog']);
+    expect(root.querySelector('[data-entry="g"] button.hist-words')?.getAttribute('data-state')).toBe('stage-s1-5');
+    // Entries other than states keep plain text.
+    expect(root.querySelector('[data-entry="a"] .hist-words')?.tagName).toBe('SPAN');
     expect(root.querySelector('[data-entry="s1"] time')?.textContent).toBe('09:01');
     // The open work item's group carries no status pill, since the head says it; another shows its own and, closed, its last state and size.
     expect(root.querySelector('[data-section="w1"] .hist-pill')).toBeNull();
@@ -245,11 +250,9 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(root.querySelector('.hist-run summary')?.textContent).toBe(`${RUN_LIMIT + 1} session state changes, 09:00 to 09:05`);
     expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.dataset['run']).toBe('s5');
     expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(false);
-    expect(expandable(long, EMPTY_HISTORY_UI, HEAD, null, T0)).toMatchObject({ sections: { w1: true }, runs: ['s5'], bodies: {} });
-    // A body the filter hides now is opened too, so clearing the filter shows it as Expand all left it.
-    const bodied = view({ sections: [{ ...view().sections[0]!, entries: [entry('h', T0, { category: 'state', text: 'Hidden', body: 'Kept' }), entry('v', T0 + MINUTE, { category: 'state', text: 'Shown', body: 'Seen' })] }] });
-
-    expect(expandable(bodied, { ...EMPTY_HISTORY_UI, query: 'shown' }, HEAD, null, T0).bodies).toEqual({ h: true, v: true });
+    expect(expandable(long, EMPTY_HISTORY_UI, HEAD, null, T0)).toMatchObject({ sections: { w1: true }, runs: ['s5'] });
+    // A run the filter hides now is opened too, so clearing the filter shows it as Expand all left it.
+    expect(expandable(long, { ...EMPTY_HISTORY_UI, query: 'nothing like this' }, HEAD, null, T0).runs).toEqual(['s5']);
     root = draw(open({ view: long, ui: { ...EMPTY_HISTORY_UI, runs: ['s5'] } }));
     expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(true);
     root = draw(open({ view: { ...long, sections: [{ ...long.sections[0]!, entries: states.slice(0, RUN_LIMIT) }] } }));
@@ -443,7 +446,7 @@ describe("the page's History tab in use", () => {
     page.close();
   });
 
-  it('reads History again soon after a new pinned state, not after the same state changes, and keeps a state body the operator opened', async () => {
+  it('reads History again soon after a new pinned state, not after the same state changes', async () => {
     vi.useFakeTimers();
     const older = Array.from({ length: 4 }, (_, index) => entry(`r${index}`, T0 + index * MINUTE, { category: 'state', icon: 'pulse', text: `State ${index}`, stateId: `r${index}`, body: `Body ${index}` }));
 
@@ -463,18 +466,81 @@ describe("the page's History tab in use", () => {
     expect(histories()).toEqual([77, 77]);
     expect(root.querySelector('.hist-now-headline')?.textContent).toBe('2/5 fixing tests');
 
-    // The oldest state's body is behind Details; opened, it stays open through a read, and Collapse all closes it.
-    const more = () => root.querySelector<HTMLDetailsElement>('[data-entry="r0"] details.hist-more')!;
+    page.close();
+  });
 
-    more().open = true;
-    more().dispatchEvent(new Event('toggle'));
+  it('pages through the work item\'s state reports in a sheet from Earlier reports or a timeline headline, by buttons, picker and keys', async () => {
+    vi.useFakeTimers();
+    const older = Array.from({ length: 3 }, (_, index) => entry(`r${index}`, T0 + index * MINUTE, { category: 'state', icon: 'pulse', text: `State ${index}`, stateId: `r${index}`, body: `Body ${index}`, shortId: index === 0 ? '7c21' : 'abc12345' }));
+
+    answers['/page-history'] = { status: 200, body: { view: view({ sections: [{ ...view().sections[0]!, entries: older }] }), categories: CATEGORIES } };
+    const { page, source } = start();
+
+    hello(source);
+    openTab();
+    await flush();
+    // The pinned state is newer than the read, so the sheet adds it as the latest.
+    source.emit('state', { state: pinned({ id: 'st-9', at: T0 + 10 * MINUTE }) });
+    const sheet = () => root.querySelector<HTMLElement>('.hist-report-sheet');
+    const shown = () => [sheet()?.querySelector('.hist-report-headline')?.textContent, sheet()?.querySelector('.hist-report-count')?.textContent];
+    const earlier = root.querySelector<HTMLElement>('.hist-now [data-action="history-report"]')!;
+
+    expect(earlier.textContent).toBe('Earlier reports · 3');
+    earlier.click();
+    expect(sheet()?.getAttribute('role')).toBe('dialog');
+    expect(sheet()?.getAttribute('aria-labelledby')).toBe('hist-report-title');
+    expect(shown()).toEqual(['2/5 fixing tests', '4 of 4 · latest']);
+    expect(document.activeElement?.className).toContain('hist-report-pick');
+    // It is a layer over the page, drawn outside History's pane, which is inert under it.
+    expect(sheet()?.closest('.history-pane')).toBeNull();
+    expect(root.querySelector('.history-pane')?.closest('[inert]')).not.toBeNull();
+    root.querySelector<HTMLElement>('[data-action="history-report-step"][data-step="-1"]')!.click();
+    expect(shown()).toEqual(['State 2', '3 of 4']);
+    expect(sheet()?.querySelector('.hist-report-body')?.textContent?.trim()).toBe('Body 2');
+    // Left from the sheet's buttons steps older; at the oldest it stays.
+    const older1 = root.querySelector<HTMLElement>('[data-action="history-report-step"][data-step="-1"]')!;
+
+    older1.focus();
+    for (let press = 0; press < 4; press++) older1.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+    expect(shown()).toEqual(['State 0', '1 of 4']);
+    expect(root.querySelector<HTMLButtonElement>('[data-action="history-report-step"][data-step="-1"]')!.disabled).toBe(true);
+    // The disabled button gives the focus to the picker.
+    expect(document.activeElement?.className).toContain('hist-report-pick');
+    // The picker jumps to any report; Back to latest returns.
+    const pick = root.querySelector<HTMLSelectElement>('.hist-report-pick')!;
+
+    pick.value = 'r1';
+    pick.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(shown()).toEqual(['State 1', '2 of 4']);
+    // A read keeps the sheet where it was.
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(histories()).toEqual([77, 77, 77]);
-    expect(more().open).toBe(true);
-    root.querySelector<HTMLElement>('[data-action="history-all"][data-all="close"]')!.click();
-    root.querySelector<HTMLElement>('[data-action="history-section"][data-section="w1"]')!.click();
-    expect(more().open).toBe(false);
-    expect(root.querySelector<HTMLDetailsElement>('[data-entry="r3"] details.hist-more')!.open).toBe(false);
+    expect(shown()).toEqual(['State 1', '2 of 4']);
+    root.querySelector<HTMLElement>('[data-action="history-report-latest"]')!.click();
+    expect(shown()).toEqual(['2/5 fixing tests', '4 of 4 · latest']);
+    expect(root.querySelector('[data-action="history-report-latest"]')).toBeNull();
+    // Escape closes it and gives the focus back to Earlier reports.
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(sheet()).toBeNull();
+    expect(document.activeElement?.className).toBe('hist-now-earlier');
+
+    // A timeline headline opens it at that report; a press inside the sheet keeps it, one on its backdrop or X closes it.
+    root.querySelector<HTMLElement>('[data-entry="r0"] [data-action="history-report"]')!.click();
+    expect(shown()).toEqual(['State 0', '1 of 4']);
+    sheet()!.querySelector<HTMLElement>('.hist-report-headline')!.click();
+    expect(sheet()).not.toBeNull();
+    root.querySelector<HTMLElement>('.sheet-backdrop')!.click();
+    expect(sheet()).toBeNull();
+    expect(document.activeElement?.closest('[data-entry]')?.getAttribute('data-entry')).toBe('r0');
+    root.querySelector<HTMLElement>('[data-entry="r2"] [data-action="history-report"]')!.click();
+    root.querySelector<HTMLElement>('.sheet-close')!.click();
+    expect(sheet()).toBeNull();
+    expect(root.querySelector('.history-pane')?.closest('[inert]')).toBeNull();
+    // Another tab hides the sheet with History; History shown again shows it where it was.
+    root.querySelector<HTMLElement>('[data-entry="r2"] [data-action="history-report"]')!.click();
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
+    expect(sheet()).toBeNull();
+    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
+    expect(shown()).toEqual(['State 2', '3 of 4']);
     page.close();
   });
 
@@ -688,5 +754,125 @@ describe("the page's History tab in use", () => {
     await flush();
     expect(root.querySelector('#panel.history-pane .history-view h1')?.textContent).toBe('Inbox <badge>');
     page.close();
+  });
+});
+
+describe("History's State reports (operator decision 2026-11-27)", () => {
+  const report = (key: string, minutes: number, patch: Partial<HistoryEntry> = {}) => entry(key, T0 + minutes * MINUTE, { category: 'state', icon: 'pulse', text: `State ${key}`, stateId: key, body: `Body ${key}`, shortId: 'abc12345', ...patch });
+  const drawSheet = (o: HistoryOpen, state: StateView | null, now: number): HTMLElement => {
+    const root = document.createElement('div');
+
+    root.innerHTML = html(renderReportSheet(o, state, now, HEAD)!);
+    return root;
+  };
+  const withStates = (entries: HistoryEntry[], other: HistoryEntry[] = []) =>
+    view({ sections: [{ ...view().sections[0]!, entries: [...view().sections[0]!.entries, ...entries].sort((a, b) => a.at - b.at) }, { ...view().sections[0]!, key: 'w2', workItemId: 2, entries: other }] });
+
+  it('lists a group\'s reports oldest first, one per state, the pinned state added and current, and none for a group it does not know', () => {
+    const states = withStates([report('a', 1, { shortId: '7c21' }), report('b', 2, { stage: true, body: null }), report('b', 3, { text: 'State b again' }), report('c', 4)], [report('x', 1)]);
+
+    expect(historyReports(states, 'w1', null, HEAD).map((one) => [one.id, one.headline, one.body, one.shortId, one.stage])).toEqual([
+      ['a', 'State a', 'Body a', '7c21', false],
+      // A state logged twice, as a stage entry and a reply, is one report at its first time, keeping its body and stage mark.
+      ['b', 'State b again', 'Body b', 'abc12345', true],
+      ['c', 'State c', 'Body c', 'abc12345', false],
+    ]);
+    // The pinned state the read does not hold yet is the newest; one it holds takes the current headline and body.
+    expect(historyReports(states, 'w1', pinned({ id: 'n', at: T0 + 9 * MINUTE }), HEAD).map((one) => one.id)).toEqual(['a', 'b', 'c', 'n']);
+    expect(historyReports(states, 'w1', pinned({ id: 'c', at: T0 + 4 * MINUTE, headline: 'Now', body: 'Grown' }), HEAD).at(-1)).toMatchObject({ id: 'c', headline: 'Now', body: 'Grown' });
+    // Another work item's group pages through its own reports, without the pinned state.
+    expect(historyReports(states, 'w2', pinned({ id: 'n' }), HEAD).map((one) => one.id)).toEqual(['x']);
+    expect(historyReports(states, 'gone', pinned(), HEAD)).toEqual([]);
+    expect(historyReports(view(), 'w1', null, HEAD)).toEqual([]);
+  });
+
+  it('steps older and newer within the reports, held at both ends, and falls back to the newest for a report no longer there', () => {
+    const reports = historyReports(withStates([report('a', 1), report('b', 2), report('c', 3)]), 'w1', null, HEAD);
+
+    expect(reportIndex(reports, 'a')).toBe(0);
+    expect(reportIndex(reports, 'gone')).toBe(2);
+    expect(reportIndex([], 'a')).toBe(-1);
+    expect(reportStep(reports, 'b', -1)).toBe('a');
+    expect(reportStep(reports, 'a', -1)).toBe('a');
+    expect(reportStep(reports, 'b', 1)).toBe('c');
+    expect(reportStep(reports, 'c', 1)).toBe('c');
+    expect(reportStep(reports, 'a', Infinity)).toBe('c');
+    expect(reportStep([], 'a', 1)).toBeNull();
+  });
+
+  it('offers Earlier reports on the pinned state only with an earlier report, counting them', () => {
+    // No reports, and the pinned state alone: no control.
+    expect(draw(open(), pinned()).querySelector('.hist-now-earlier')).toBeNull();
+    expect(draw(open({ view: withStates([report('st-1', -4)]) }), pinned()).querySelector('.hist-now-earlier')).toBeNull();
+    // No state and no view yet: none either.
+    expect(draw(open({ view: withStates([report('a', 1)]) }), null).querySelector('.hist-now-earlier')).toBeNull();
+    expect(draw(open({ view: null }), pinned()).querySelector('.hist-now-earlier')).toBeNull();
+    const button = draw(open({ view: withStates([report('a', -9), report('b', -8)]) }), pinned()).querySelector<HTMLElement>('.hist-now [data-action="history-report"]')!;
+
+    expect([button.textContent, button.dataset['section'], button.dataset['state'], button.getAttribute('aria-haspopup')]).toEqual(['Earlier reports · 2', 'w1', 'st-1', 'dialog']);
+    expect(button.querySelector('.codicon-history')).not.toBeNull();
+    // A pinned state older than another session's reports counts those as newer, not earlier.
+    const reports = historyReports(withStates([report('a', -9), report('b', 5), report('c', 6)]), 'w1', pinned(), HEAD);
+
+    expect(earlierLabel(reports, 'a')).toBe('Newer reports · 3');
+    expect(earlierLabel(reports, 'st-1')).toBe('Earlier reports · 1');
+    expect(earlierLabel(reports, 'c')).toBe('Earlier reports · 3');
+    expect(earlierLabel(historyReports(withStates([report('b', 5), report('c', 6)]), 'w1', pinned(), HEAD), 'st-1')).toBe('Newer reports · 2');
+  });
+
+  it('draws the sheet with one report, where it stands, Older and Newer disabled at the ends, a picker newest first, and Back to latest once paged back', () => {
+    const states = withStates([report('a', -9, { shortId: '7c21' }), report('b', -8, { stage: true, body: null })]);
+    const sheet = (id: string, now = T0) => drawSheet(open({ view: states, ui: { ...EMPTY_HISTORY_UI, report: { section: 'w1', id } } }), pinned(), now).querySelector<HTMLElement>('.sheet')!;
+    const disabled = (root: HTMLElement) => [...root.querySelectorAll<HTMLButtonElement>('.hist-report-step')].map((one) => [one.getAttribute('aria-label'), one.disabled]);
+    let root = sheet('st-1');
+
+    expect(root.classList.contains('hist-report-sheet')).toBe(true);
+    expect(root.querySelector('#hist-report-title')?.textContent).toBe('State reports');
+    expect(root.querySelector('.sheet-close')?.getAttribute('aria-label')).toBe('Close');
+    expect(root.closest('.sheet-backdrop')?.getAttribute('data-action')).toBe('history-report-close');
+    expect(root.querySelector('.hist-report-count')?.textContent).toBe('3 of 3 · latest');
+    expect(root.querySelector('.hist-report-headline')?.textContent).toBe('2/5 fixing tests');
+    expect(root.querySelector('.hist-report-body strong')?.textContent).toBe('left');
+    expect(texts(root, '.hist-report-meta > *')).toEqual(['Today 08:56', 'Session abc12345']);
+    expect(root.querySelector('[data-action="history-report-latest"]')).toBeNull();
+    expect(disabled(root)).toEqual([['Older report', false], ['Newer report', true]]);
+    // The picker lists every report newest first, naming the session since two wrote them.
+    const pick = root.querySelector<HTMLSelectElement>('select.hist-report-pick')!;
+
+    expect(pick.getAttribute('aria-label')).toBe('Choose a state report');
+    expect([...pick.options].map((one) => [one.value, one.textContent, one.selected])).toEqual([
+      ['st-1', '08:56 · 2/5 fixing tests · session abc12345', true],
+      ['b', '08:52 · State b · session abc12345', false],
+      ['a', '08:51 · State a · session 7c21', false],
+    ]);
+    // Paged back: both steps, Back to latest, and a stage report with no body says so.
+    root = sheet('b');
+    expect(root.querySelector('.hist-report-count')?.textContent).toBe('2 of 3');
+    expect(disabled(root)).toEqual([['Older report', false], ['Newer report', false]]);
+    expect(root.querySelector('[data-action="history-report-latest"]')?.textContent).toBe('Back to latest');
+    expect(root.querySelector('.hist-report-meta .hist-tag')?.textContent).toBe('stage report');
+    expect(root.querySelector('.hist-report-none')?.textContent).toBe('No detail: a stage report sets a headline alone.');
+    // A reply state with no body says only that.
+    expect(drawSheet(open({ view: withStates([report('h', -9, { body: null }), report('i', -8)]), ui: { ...EMPTY_HISTORY_UI, report: { section: 'w1', id: 'h' } } }), pinned(), T0).querySelector('.hist-report-none')?.textContent).toBe('No detail.');
+    root = sheet('a');
+    expect(disabled(root)).toEqual([['Older report', true], ['Newer report', false]]);
+    expect(texts(root, '.hist-report-meta > *')).toEqual(['Today 08:51', 'Session 7c21']);
+    // A report gone since the sheet opened shows the newest; days before today name their day.
+    expect(sheet('gone').querySelector('.hist-report-count')?.textContent).toBe('3 of 3 · latest');
+    expect(sheet('a', T0 + 24 * 60 * MINUTE).querySelector('.hist-report-meta time')?.textContent).toBe('Yesterday 08:51');
+  });
+
+  it('names no session in the picker when one session wrote every report, and draws no sheet for a group with no reports', () => {
+    const one = historyReports(withStates([report('a', 1)]), 'w1', null, HEAD)[0]!;
+
+    expect(reportOption(one, false, T0)).toBe('09:01 · State a');
+    expect(reportOption(one, true, T0 + 2 * 24 * 60 * MINUTE)).toMatch(/^\S+ \d+ 09:01 · State a · session abc12345$/);
+    expect(reportOption({ ...one, shortId: null }, true, T0)).toBe('09:01 · State a');
+    expect(renderReportSheet(open({ ui: { ...EMPTY_HISTORY_UI, report: { section: 'w1', id: 'a' } } }), null, T0, HEAD)).toBeNull();
+    expect(renderReportSheet(open({ view: null, ui: { ...EMPTY_HISTORY_UI, report: { section: 'w1', id: 'a' } } }), pinned(), T0, HEAD)).toBeNull();
+    expect(renderReportSheet(open(), pinned(), T0, HEAD)).toBeNull();
+    expect(renderReportSheet(null, pinned(), T0, HEAD)).toBeNull();
+    // The History tab itself never draws the sheet.
+    expect(draw(open({ view: withStates([report('a', 1)]), ui: { ...EMPTY_HISTORY_UI, report: { section: 'w1', id: 'a' } } }), pinned()).querySelector('.sheet')).toBeNull();
   });
 });

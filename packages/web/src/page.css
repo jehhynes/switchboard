@@ -1252,11 +1252,9 @@ ol.hist-timeline > :last-child::before { bottom: auto; height: 14px; }
 .hist-detail { margin-top: 3px; padding: 4px 8px; border-left: 2px solid color-mix(in srgb, var(--vscode-foreground) 25%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--vscode-descriptionForeground); }
 .hist-lines { margin: 3px 0 0; padding-left: 16px; color: var(--vscode-descriptionForeground); }
 .hist-lines li { line-height: 18px; overflow-wrap: anywhere; }
-.hist-state-body { margin-top: 6px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--vscode-widget-border, transparent); background: var(--vscode-editorWidget-background); }
-.hist-more > summary { display: inline-flex; justify-content: center; align-items: center; gap: 4px; margin-top: 2px; cursor: pointer; list-style: none; font-size: 12px; color: var(--vscode-textLink-foreground); }
-.hist-more > summary::-webkit-details-marker { display: none; }
-.hist-more > summary::after { font-family: codicon; content: '\eab4'; font-size: 12px; }
-.hist-more[open] > summary::after { content: '\eab7'; }
+/* A state entry's headline opens the State reports sheet at it: a link in the timeline's text, its box the whole target. */
+.history-view button.hist-report-link { margin: 0; padding: 0; border: none; background: none; font: inherit; line-height: inherit; text-align: left; overflow-wrap: anywhere; color: var(--vscode-textLink-foreground); cursor: pointer; }
+.history-view button.hist-report-link:hover { text-decoration: underline; color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
 .hist-entry.reconstructed .hist-dot { box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-foreground) 15%, transparent); border: 1px dashed color-mix(in srgb, var(--vscode-foreground) 35%, transparent); }
 /* Category and tone colours: the dot takes the category, a tone overrides it; a state's dot is filled. */
 .hist-entry.cat-you .hist-dot { color: var(--vscode-charts-blue, var(--vscode-focusBorder)); }
@@ -1285,8 +1283,24 @@ ol.hist-timeline > :last-child::before { bottom: auto; height: 14px; }
 .hist-now-head .unread-dot { margin-left: auto; }
 .hist-now-headline { margin: 10px 0 6px; padding-left: 16px; font-size: 16px; font-weight: 600; line-height: 1.35; text-wrap: balance; overflow-wrap: anywhere; }
 .hist-now-body { padding-left: 16px; }
-.hist-now-body.md-doc > :first-child, .hist-state-body.md-doc > :first-child { margin-top: 0; }
-.hist-now-body.md-doc > :last-child, .hist-state-body.md-doc > :last-child { margin-bottom: 0; }
+.hist-now-body.md-doc > :first-child, .hist-report-body.md-doc > :first-child { margin-top: 0; }
+.hist-now-body.md-doc > :last-child, .hist-report-body.md-doc > :last-child { margin-bottom: 0; }
+.hist-now-foot { padding: 10px 0 0 16px; }
+.hist-now-earlier { display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; min-height: 28px; padding: 0 10px; border: 1px solid var(--vscode-button-border, var(--vscode-widget-border, transparent)); border-radius: 4px; font: inherit; font-size: 12px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
+.hist-now-earlier:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+/* The State reports sheet: a fixed height, so paging between reports of different lengths moves none of its controls. */
+.hist-report-sheet { width: min(640px, 100%); height: min(640px, 100%); }
+.hist-report-nav { display: flex; align-items: center; gap: 8px; }
+.hist-report-nav .hist-report-pick { flex: 1; min-width: 0; width: auto; }
+.hist-report-step { flex: none; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 28px; height: 28px; padding: 0; border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border, transparent)); border-radius: 4px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
+.hist-report-step:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)); }
+.hist-report-step:disabled { opacity: 0.4; cursor: default; }
+.hist-report-where { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; margin: 8px 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
+.hist-report { padding-top: 12px; border-top: 1px solid var(--vscode-panel-border); }
+.hist-report-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.hist-report-meta .hist-tag { margin-left: 0; }
+.hist-report-headline { margin: 6px 0 10px; font-size: 16px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.hist-report-none { margin: 0; color: var(--vscode-descriptionForeground); }
 .hist-now-none { margin: 0; color: var(--vscode-descriptionForeground); }
 .hist-now.empty .hist-now-card { padding-bottom: 10px; }
 .hist-now.stale .hist-now-card, .hist-now.empty .hist-now-card { border-color: var(--vscode-widget-border, var(--vscode-panel-border, transparent)); background: var(--vscode-editorWidget-background); }
@@ -1304,17 +1318,20 @@ ol.hist-timeline > :last-child::before { bottom: auto; height: 14px; }
   .history-view .hist-tools > button.hist-chip { display: none; }
   .history-view .hist-tools.chips-open > button.hist-chip { display: inline-flex; }
   .hist-now-card { padding-right: 12px; }
-  .hist-now-headline, .hist-now-body { padding-left: 12px; }
+  .hist-now-headline, .hist-now-body, .hist-now-foot { padding-left: 12px; }
   .hist-day { padding-left: calc(var(--hist-rail) + 13px); }
 }
-/* On a touch screen the filter and the icon buttons are 44 px targets. The chips, links, Details, group headings and runs are 32 px each way
-   (operator decision 2026-11-26), so the timeline keeps its density: the box each shows is its whole target, and at least 4 px lies between
-   two targets. */
+/* On a touch screen the filter, the icon buttons, Earlier reports and the State reports sheet's controls are 44 px targets. The chips, links,
+   state headlines, group headings and runs are 32 px each way (operator decisions 2026-11-26 and 2026-11-27), so the timeline keeps its
+   density: the box each shows is its whole target, and at least 4 px lies between two targets. */
 @media (hover: none), (pointer: coarse) {
   .hist-toolbar button.icon { min-width: 44px; min-height: 44px; }
   .hist-tl-title { flex-basis: 100%; }
   .hist-filter-box { min-height: 44px; }
-  .history-view button.hist-chip, .history-view button.hist-chips-toggle, .history-view button.hist-link, .hist-more > summary, .history-view button.hist-group-toggle, .hist-run > details > summary { box-sizing: border-box; min-width: 32px; min-height: 32px; }
+  .history-view button.hist-chip, .history-view button.hist-chips-toggle, .history-view button.hist-link, .history-view button.hist-group-toggle, .hist-run > details > summary { box-sizing: border-box; min-width: 32px; min-height: 32px; }
+  .history-view button.hist-report-link { display: inline-flex; align-items: center; box-sizing: border-box; min-width: 32px; min-height: 32px; vertical-align: middle; }
+  .hist-now-earlier { min-height: 44px; padding: 0 14px; }
+  .hist-report-step { width: 44px; height: 44px; }
   .hist-head-links { row-gap: 4px; }
   /* Two runs in a row keep 4 px between their summaries. */
   .hist-run > details > summary { margin: 2px 0; }

@@ -54,7 +54,9 @@ const SETTINGS_PAGES = {
   'settings-persona': ['personas', 'persona:0'],
 };
 /** The modal sheets, each opened by OPEN's presses and checked by modalFailures: Delete's question, Snooze, an input dialog, the header's sheets. */
-const MODAL_VIEWS = ['sheet', 'snooze', 'comment', 'new-session', 'folders', 'pair', 'held', 'log', 'extension', 'shortcut', 'holder'];
+// History's State reports sheet: opened from the pinned state at the latest, paged back two, and opened from a timeline entry.
+const REPORT_VIEWS = ['history-report', 'history-report-back', 'history-report-entry'];
+const MODAL_VIEWS = ['sheet', 'snooze', 'comment', 'new-session', 'folders', 'pair', 'held', 'log', 'extension', 'shortcut', 'holder', ...REPORT_VIEWS];
 /** The bell's views: one notice, three, three with the dropdown open, and a one-time notice's toast with none; the list view has none either. */
 const NOTICE_VIEWS = ['notices-1', 'notices-3', 'notices-open', 'notice-toast'];
 /** The modal views whose first text box is filled past its cap, to see it grow and then scroll. */
@@ -204,7 +206,7 @@ class FakeSource {
     this.listeners = {};
     // The one-time notice the hub sends after a holder restart that went well, shown as a toast.
     if (view === 'notice-toast') setTimeout(() => this.emit('notice', { notice: { id: 'holder-restarted:1', text: 'The terminal holder restarted and 2 sessions resumed.', at: now } }), 120);
-    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open && !loading ? [session] : [], items, more: false, state: view === 'history' ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0, ...(mic ? { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: false, error: null, recognizer: null } } : {}) }), 20);
+    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open && !loading ? [session] : [], items, more: false, state: view === 'history' || view?.startsWith('history-report') ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0, ...(mic ? { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: false, error: null, recognizer: null } } : {}) }), 20);
     // The tabs view's artifacts change after the page first shows them, so each is unread until its tab shows it.
     if (view === 'tabs') setTimeout(() => artifacts.forEach((artifact) => this.emit('artifact', { artifact: { ...artifact, updatedAt: artifact.updatedAt + 60000 } })), 120);
     // check-resize pauses the stream (window.__paused), so a resize is shown without a redraw.
@@ -236,6 +238,7 @@ const historyView = { key: 'gh 1', title: longTitle, url: 'https://github.com/o/
   { key: 'w1', workItemId: 1, title: 'dev:build', status: 'Running', tone: null, facts: ['Created 2026-11-25 08:02', '1 session, 2h 40m'], prompt: null, entries: [
     he('a1', 170, { category: 'triage', icon: 'filter', text: 'Triage chose dev:build' }),
     he('a2', 165, { icon: 'terminal', text: 'Session a3f9 started', shortId: 'a3f9', links: [{ label: 'Open in terminal', icon: 'terminal', title: 'Attach to session a3f9', open: { type: 'open', session: 's', workItemId: 1 } }] }),
+    hstate('st-0', 150, 'Read the dialer code; the registration never renews', { shortId: '5e10', body: 'The softphone registers once at start-up and never again, so the carrier drops it when the binding lapses.\\n\\n- **Next:** plan a refresh before expiry.' }),
     hstate('stage-s-1', 120, 'Planning the registration refresh', { stage: true, category: 'state' }),
     he('a4', 95, { category: 'you', icon: 'account', text: 'You sent a message', tone: 'accent' }),
     // A link with a short label, so its touch target's width is measured.
@@ -620,9 +623,9 @@ const TOUCH = `(() => {
     return null;
   };
   const boxes = [];
-  // History's run rows, links, group headings and chips, and the Settings playbooks table and, outside a phone, its navigation, are 32 px on a
+  // History's run rows, links, state headlines, group headings and chips, and the Settings playbooks table and, outside a phone, its navigation, are 32 px on a
   // touch screen (operator decision 2026-11-26; page.css, settings.css).
-  const COMPACT = '.hist-run > details > summary, .hist-more > summary, .history-view :is(button.hist-link, button.hist-group-toggle, button.hist-chip, button.hist-chips-toggle), .settings-table :is(button.link, .settings-box), html:not(.phone) .settings-nav-entry';
+  const COMPACT = '.hist-run > details > summary, .history-view :is(button.hist-link, button.hist-report-link, button.hist-group-toggle, button.hist-chip, button.hist-chips-toggle), .settings-table :is(button.link, .settings-box), html:not(.phone) .settings-nav-entry';
   const small = (() => {
     // Every control shown is a touch target of at least 44 px each way (architecture.md § Web page, Phones first), measured as its box cut by
     // every ancestor that clips without scrolling. Not held to it: line 2's pills, whose press is an open question; links inside prose; and a
@@ -799,6 +802,9 @@ const OPEN = {
   'changes-options': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-options]', '.tree-options-menu [data-option=regex]'],
   // History's chips shown, one turned off, as a phone shows them behind Filters; a wider pane shows them without it.
   'history-filters': ['[data-side=history], [data-tab=history]', '[data-action=history-chips]', '.hist-chip[data-category="you"]'],
+  'history-report': ['[data-side=history], [data-tab=history]', '.hist-now [data-action=history-report]'],
+  'history-report-back': ['[data-side=history], [data-tab=history]', '.hist-now [data-action=history-report]', '[data-action=history-report-step][data-step="-1"]', '[data-action=history-report-step][data-step="-1"]'],
+  'history-report-entry': ['[data-side=history], [data-tab=history]', '.hist-entry[data-entry="st-2"] [data-action=history-report]'],
   // The mic views' tab, from the strip or from More where the strip has no room for it; the desktop's in its column, then maximized.
   'mic-history': [openTab('[data-tab="history"]')],
   'mic-changes': [openTab('[data-action="diff-tab"]')],

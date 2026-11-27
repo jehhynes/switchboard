@@ -7,9 +7,16 @@ import { UnreadDot } from './header.js';
 import { SourceLogo } from './listHeader.js';
 import { renderMarkdown } from './markdown.js';
 import { ago } from './render.js';
+import { ModalFrame } from './sheetFrame.js';
 import { trusted } from './trusted.js';
 
-/** What the operator set in a ticket's History while the page is open: hidden chips, the filter, opened or closed groups, expanded runs and state bodies. */
+/** Which state report the State reports sheet shows: the History group it pages through, by its key, and the state's ID. */
+export interface ReportAt {
+  section: string;
+  id: string;
+}
+
+/** What the operator set in a ticket's History while the page is open: hidden chips, the filter, opened or closed groups, expanded runs and the open State reports sheet. */
 export interface HistoryUi {
   hidden: string[];
   query: string;
@@ -17,13 +24,13 @@ export interface HistoryUi {
   sections: Record<string, boolean>;
   /** Runs of state changes the operator expanded, by their newest entry's key. */
   runs: string[];
-  /** State bodies the operator opened or closed, by entry key; the rest follow the default, which opens the newest `OPEN_BODIES`. */
-  bodies: Record<string, boolean>;
+  /** The state report the State reports sheet shows; null while it is closed. */
+  report: ReportAt | null;
   /** Whether a narrow pane shows the filter chips. */
   chips: boolean;
 }
 
-export const EMPTY_HISTORY_UI: HistoryUi = { hidden: [], query: '', sections: {}, runs: [], bodies: {}, chips: false };
+export const EMPTY_HISTORY_UI: HistoryUi = { hidden: [], query: '', sections: {}, runs: [], report: null, chips: false };
 
 /** The History the page shows: its ticket, the hub's view and chips once read, why the last read failed, and the operator's settings. */
 export interface HistoryOpen {
@@ -52,8 +59,6 @@ export interface HistoryHead {
 
 /** More consecutive session state changes than this collapse into one row. */
 export const RUN_LIMIT = 5;
-/** The newest states show their body; older ones keep it behind Details. */
-export const OPEN_BODIES = 3;
 
 const two = (value: number): string => String(value).padStart(2, '0');
 
@@ -200,7 +205,7 @@ function Link({ link, local }: { link: HistoryLink; local: boolean }) {
 /** A shown item of a group's timeline: a day heading, an entry, or a run of state changes. */
 type Item =
   | { kind: 'day'; key: string; text: string }
-  | { kind: 'entry'; entry: HistoryEntry; body: 'open' | 'closed' | null }
+  | { kind: 'entry'; entry: HistoryEntry }
   | { kind: 'run'; key: string; entries: HistoryEntry[] };
 
 interface Group {
@@ -217,11 +222,10 @@ interface Group {
 
 /**
  * The timeline's groups as the page draws them, newest first: each group's entries that pass the filter, less the pinned state's reply entry,
- * with day headings, runs of more than `RUN_LIMIT` state changes and which state bodies show.
+ * with day headings and runs of more than `RUN_LIMIT` state changes.
  */
 export function historyGroups(view: HistoryView, ui: HistoryUi, head: HistoryHead, pinned: string | null, now: number): Group[] {
   const hasOwn = view.sections.some((section) => section.workItemId !== null && section.workItemId === head.workItemId);
-  let bodies = 0;
 
   // The open work item's group comes first, so the pinned state heads the timeline whichever work item is open.
   const sections = hasOwn ? [...view.sections].sort((a, b) => Number(b.workItemId === head.workItemId) - Number(a.workItemId === head.workItemId)) : view.sections;
@@ -261,14 +265,7 @@ export function historyGroups(view: HistoryView, ui: HistoryUi, head: HistoryHea
         continue;
       }
 
-      const hasBody = entry.category === 'state' && entry.body !== null && !(entry.stage && entry.stateId === pinned);
-      const byDefault = hasBody && open && bodies++ < OPEN_BODIES;
-
-      items.push({
-        kind: 'entry',
-        entry,
-        body: !hasBody ? null : (ui.bodies[entry.key] ?? byDefault) ? 'open' : 'closed',
-      });
+      items.push({ kind: 'entry', entry });
       index++;
     }
 
@@ -286,10 +283,7 @@ export function historyGroups(view: HistoryView, ui: HistoryUi, head: HistoryHea
   });
 }
 
-/**
- * What Expand all opens: every group, run and state body behind Details, whatever the chips and filter hide now, so clearing them later shows
- * every body and run as Expand all or Collapse all left it.
- */
+/** What Expand all opens: every group and run, whatever the chips and filter hide now, so clearing them later shows every run as Expand all left it. */
 export function expandable(view: HistoryView, ui: HistoryUi, head: HistoryHead, pinned: string | null, now: number): HistoryUi {
   const sections = Object.fromEntries(view.sections.map((section) => [section.key, true]));
   const items = [...historyGroups(view, { ...ui, sections }, head, pinned, now), ...historyGroups(view, { ...ui, sections, hidden: [], query: '' }, head, pinned, now)].flatMap((group) => group.items);
@@ -298,15 +292,173 @@ export function expandable(view: HistoryView, ui: HistoryUi, head: HistoryHead, 
     ...ui,
     sections,
     runs: [...new Set(items.flatMap((item) => (item.kind === 'run' ? [item.key] : [])))],
-    bodies: Object.fromEntries(items.flatMap((item) => (item.kind === 'entry' && item.body !== null ? [[item.entry.key, true]] : []))),
   };
+}
+
+/** One state report a session wrote, as the State reports sheet shows it. */
+export interface StateReport {
+  id: string;
+  at: number;
+  headline: string;
+  body: string | null;
+  /** The short ID of the session that wrote it; null without one. */
+  shortId: string | null;
+  stage: boolean;
+}
+
+/**
+ * The state reports of the History group `sectionKey`, oldest first, one per state: its state entries, and for the open work item's group the
+ * pinned state too, which a read made before it was written does not hold yet. The pinned state's headline and body are the current ones.
+ */
+export function historyReports(view: HistoryView, sectionKey: string, state: StateView | null, head: HistoryHead): StateReport[] {
+  const section = view.sections.find((one) => one.key === sectionKey);
+
+  if (section === undefined) {
+    return [];
+  }
+
+  const reports = new Map<string, StateReport>();
+
+  for (const entry of section.entries) {
+    if (entry.category !== 'state' || entry.stateId === null) {
+      continue;
+    }
+
+    const known = reports.get(entry.stateId);
+
+    reports.set(entry.stateId, {
+      id: entry.stateId,
+      at: known?.at ?? entry.at,
+      headline: entry.text,
+      body: entry.body ?? known?.body ?? null,
+      shortId: entry.shortId ?? known?.shortId ?? null,
+      stage: entry.stage || (known?.stage ?? false),
+    });
+  }
+
+  if (state !== null && section.workItemId !== null && section.workItemId === head.workItemId) {
+    const known = reports.get(state.id);
+
+    reports.set(state.id, {
+      id: state.id,
+      at: known?.at ?? state.at,
+      headline: state.headline,
+      body: state.body ?? known?.body ?? null,
+      shortId: state.shortId ?? known?.shortId ?? null,
+      stage: known?.stage ?? false,
+    });
+  }
+
+  return [...reports.values()].sort((a, b) => a.at - b.at);
+}
+
+/** Where `id` stands in `reports`: its index, the newest for an ID no longer there, and -1 with none. */
+export function reportIndex(reports: StateReport[], id: string): number {
+  const at = reports.findIndex((report) => report.id === id);
+
+  return at === -1 ? reports.length - 1 : at;
+}
+
+/** The report `step` places older (-1) or newer (1) than `id`, kept at the oldest and the newest; null with none. */
+export function reportStep(reports: StateReport[], id: string, step: number): string | null {
+  const at = reportIndex(reports, id);
+
+  return at === -1 ? null : reports[Math.max(0, Math.min(reports.length - 1, at + step))]!.id;
+}
+
+/** A report's day and time for the picker: `14:02` today, `Yesterday 14:02`, else `Nov 25 14:02`. */
+function shortWhen(time: number, now: number): string {
+  const day = dayText(time, now);
+
+  return day === 'Today'
+    ? clock(time)
+    : day === 'Yesterday'
+      ? `Yesterday ${clock(time)}`
+      : `${new Date(time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${clock(time)}`;
+}
+
+/**
+ * The pinned state's button: how many reports are older than it, or, for a pinned state older than every other report, as another session's
+ * can be, how many are newer.
+ */
+export function earlierLabel(reports: StateReport[], id: string): string {
+  const at = reportIndex(reports, id);
+
+  return at > 0 ? `Earlier reports · ${at}` : `Newer reports · ${reports.length - 1}`;
+}
+
+/** The picker's line for a report: its time, its headline and, where the reports come from more than one session, its session. */
+export function reportOption(report: StateReport, several: boolean, now: number): string {
+  return [shortWhen(report.at, now), report.headline, several && report.shortId !== null ? `session ${report.shortId}` : null].filter((one) => one !== null).join(' · ');
+}
+
+/**
+ * The State reports sheet (operator decision 2026-11-27): one report at a time, its headline, time, session and whole body, with Older and
+ * Newer, where it stands as "n of N", a picker of every report newest first, and Back to latest once paged back.
+ */
+function ReportSheet({ reports, id, now }: { reports: StateReport[]; id: string; now: number }) {
+  const at = reportIndex(reports, id);
+  const report = reports[at]!;
+  const latest = at === reports.length - 1;
+  const several = new Set(reports.map((one) => one.shortId)).size > 1;
+
+  return (
+    <ModalFrame title="State reports" titleId="hist-report-title" dismiss="history-report-close" close wide="hist-report-sheet">
+      <div class="hist-report-nav">
+        <button type="button" class="hist-report-step" data-action="history-report-step" data-step="-1" disabled={at === 0} title="Older report" aria-label="Older report">
+          <span class="codicon codicon-chevron-left" aria-hidden="true"></span>
+        </button>
+        <select class="sheet-select hist-report-pick" aria-label="Choose a state report">
+          {[...reports].reverse().map((one) => (
+            <option value={one.id} selected={one.id === report.id}>
+              {reportOption(one, several, now)}
+            </option>
+          ))}
+        </select>
+        <button type="button" class="hist-report-step" data-action="history-report-step" data-step="1" disabled={latest} title="Newer report" aria-label="Newer report">
+          <span class="codicon codicon-chevron-right" aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="hist-report-where">
+        <span class="hist-report-count" aria-live="polite">{`${at + 1} of ${reports.length}${latest ? ' · latest' : ''}`}</span>
+        {latest ? null : (
+          <button type="button" class="sheet-button secondary hist-report-latest" data-action="history-report-latest">
+            Back to latest
+          </button>
+        )}
+      </div>
+      <article class="hist-report" data-state={report.id}>
+        <p class="hist-report-meta">
+          <time dateTime={new Date(report.at).toISOString()} title={stamp(report.at)}>
+            {`${dayText(report.at, now)} ${clock(report.at)}`}
+          </time>
+          {report.shortId === null ? null : <span>{`Session ${report.shortId}`}</span>}
+          {report.stage ? <span class="hist-tag">stage report</span> : null}
+        </p>
+        <h3 class="hist-report-headline">{report.headline}</h3>
+        {report.body !== null ? (
+          <Markdown class="hist-report-body" text={report.body} />
+        ) : (
+          <p class="hist-report-none">{report.stage ? 'No detail: a stage report sets a headline alone.' : 'No detail.'}</p>
+        )}
+      </article>
+    </ModalFrame>
+  );
+}
+
+/** The State reports sheet over the page while the open History's `ui.report` names a group with reports; null otherwise. */
+export function renderReportSheet(open: HistoryOpen | null, state: StateView | null, now: number, head: HistoryHead): VNode | null {
+  const at = open?.ui.report ?? null;
+  const reports = open?.view == null || at === null ? [] : historyReports(open.view, at.section, state, head);
+
+  return at === null || reports.length === 0 ? null : <ReportSheet reports={reports} id={at.id} now={now} />;
 }
 
 function Markdown({ text, class: name }: { text: string; class: string }) {
   return <div class={`${name} md-doc body`}>{trusted(renderMarkdown(stripQuestionMarkup(text)))}</div>;
 }
 
-function Entry({ entry, body, pinned, ui, local }: { entry: HistoryEntry; body: 'open' | 'closed' | null; pinned: boolean; ui: HistoryUi; local: boolean }) {
+function Entry({ entry, pinned, local, report }: { entry: HistoryEntry; pinned: boolean; local: boolean; report: string | null }) {
   const classes = [
     'hist-entry',
     `cat-${entry.category}`,
@@ -331,7 +483,13 @@ function Entry({ entry, body, pinned, ui, local }: { entry: HistoryEntry; body: 
       </span>
       <div class="hist-entry-body">
         <div class="hist-text">
-          <span class="hist-words">{text}</span>
+          {report === null || entry.stateId === null ? (
+            <span class="hist-words">{text}</span>
+          ) : (
+            <button type="button" class="hist-words hist-report-link" data-action="history-report" data-section={report} data-state={entry.stateId} aria-haspopup="dialog" title="Show this state report">
+              {text}
+            </button>
+          )}
           {entry.stage && !pinned ? <span class="hist-tag">stage report</span> : null}
           {entry.shortId === null || text.includes(entry.shortId) ? null : (
             <span class="hist-sid" title={`Session ${entry.shortId}`}>
@@ -355,12 +513,6 @@ function Entry({ entry, body, pinned, ui, local }: { entry: HistoryEntry; body: 
             ))}
           </ul>
         )}
-        {body !== null && entry.body !== null ? (
-          <details class="hist-more" data-body={entry.key} open={body === 'open'}>
-            <summary>Details</summary>
-            <Markdown class="hist-state-body" text={entry.body} />
-          </details>
-        ) : null}
         {entry.links.length === 0 ? null : (
           <div class="hist-entry-links">
             {entry.links.map((link) => (
@@ -373,7 +525,10 @@ function Entry({ entry, body, pinned, ui, local }: { entry: HistoryEntry; body: 
   );
 }
 
-function Items({ items, ui, pinned, local }: { items: Item[]; ui: HistoryUi; pinned: string | null; local: boolean }) {
+/** A group's items; each state entry's headline opens the State reports sheet at it, paging through the group `section`'s reports. */
+function Items({ items, ui, pinned, local, section }: { items: Item[]; ui: HistoryUi; pinned: string | null; local: boolean; section: string }) {
+  const report = (entry: HistoryEntry) => (entry.category === 'state' && entry.stateId !== null ? section : null);
+
   return (
     <>
       {items.map((item) =>
@@ -390,7 +545,7 @@ function Items({ items, ui, pinned, local }: { items: Item[]; ui: HistoryUi; pin
               </summary>
               <ol class="hist-timeline">
                 {item.entries.map((entry) => (
-                  <Entry key={`entry:${entry.key}`} entry={entry} body={null} pinned={false} ui={ui} local={local} />
+                  <Entry key={`entry:${entry.key}`} entry={entry} pinned={false} local={local} report={report(entry)} />
                 ))}
               </ol>
             </details>
@@ -399,10 +554,9 @@ function Items({ items, ui, pinned, local }: { items: Item[]; ui: HistoryUi; pin
           <Entry
             key={`entry:${item.entry.key}`}
             entry={item.entry}
-            body={item.body}
             pinned={item.entry.stage && item.entry.stateId !== null && item.entry.stateId === pinned}
-            ui={ui}
             local={local}
+            report={report(item.entry)}
           />
         ),
       )}
@@ -413,9 +567,9 @@ function Items({ items, ui, pinned, local }: { items: Item[]; ui: HistoryUi; pin
 /**
  * The pinned state (architecture.md § States), the head of the timeline's rail: Now while current, As of the last turn once its turn ended, Last
  * state once its session ended or with none; another session's names it. Its box spans the timeline, its time and dot on the rail. Only it
- * carries `data-unread`, so only it reports seen.
+ * carries `data-unread`, so only it reports seen. With earlier reports in its group `section`, Earlier reports opens the State reports sheet at it.
  */
-function Pinned({ state, head, now }: { state: StateView | null; head: HistoryHead; now: number }) {
+function Pinned({ state, head, now, section, reports }: { state: StateView | null; head: HistoryHead; now: number; section: string | null; reports: StateReport[] }) {
   if (state === null) {
     return (
       <li class="hist-now empty" key="now">
@@ -467,6 +621,14 @@ function Pinned({ state, head, now }: { state: StateView | null; head: HistoryHe
         </div>
         <h3 class="hist-now-headline">{state.headline}</h3>
         {state.body === null ? null : <Markdown class="hist-now-body" text={state.body} />}
+        {section === null || reports.length < 2 ? null : (
+          <div class="hist-now-foot">
+            <button type="button" class="hist-now-earlier" data-action="history-report" data-section={section} data-state={state.id} aria-haspopup="dialog" title="Page through this work item's state reports">
+              <span class="codicon codicon-history" aria-hidden="true"></span>
+              {earlierLabel(reports, state.id)}
+            </button>
+          </div>
+        )}
       </div>
     </li>
   );
@@ -519,8 +681,9 @@ export function renderHistory(open: HistoryOpen | null, state: StateView | null,
   const playbook = own?.section.title ?? head.playbook ?? view?.playbook ?? null;
   const key = view?.key ?? open?.key ?? head.key;
   const title = view?.title ?? head.title;
+  const ownReports = view === null || own === undefined ? [] : historyReports(view, own.section.key, state, head);
   // A pool ticket has no work item, so no state.
-  const pinned = head.workItemId === null ? null : <Pinned state={state} head={head} now={now} />;
+  const pinned = head.workItemId === null ? null : <Pinned state={state} head={head} now={now} section={own?.section.key ?? null} reports={ownReports} />;
   const pill =
     head.needsYou !== null ? (
       <span class="hist-pill tone-warning hist-needs-you">
@@ -645,7 +808,7 @@ export function renderHistory(open: HistoryOpen | null, state: StateView | null,
               {group.own || group.open ? (
                 <ol class="hist-timeline">
                   {group.own ? pinned : null}
-                  {group.open ? <Items items={group.items} ui={ui} pinned={pinnedId} local={local} /> : null}
+                  {group.open ? <Items items={group.items} ui={ui} pinned={pinnedId} local={local} section={group.section.key} /> : null}
                 </ol>
               ) : null}
               {group.open && group.shown === 0 ? (

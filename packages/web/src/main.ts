@@ -50,7 +50,7 @@ import type { ContextDetails, ContextDetailsState, ContextMenuState } from '@swi
 
 /** How long the context meter's details may take: Claude's plan usage comes from a Claude Code process the hub gives 30 s. */
 const CONTEXT_DETAILS_MS = 40_000;
-import { EMPTY_HISTORY_UI, expandable, needsYou, renderHistory } from './history.js';
+import { EMPTY_HISTORY_UI, expandable, historyReports, needsYou, renderHistory, renderReportSheet, reportStep } from './history.js';
 import type { HistoryHead, HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
@@ -215,6 +215,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const composerHost = root.querySelector<HTMLElement>('#composer')!;
   const note = root.querySelector<HTMLElement>('#note')!;
   const sheetHost = root.querySelector<HTMLElement>('#sheet')!;
+  const reportHost = root.querySelector<HTMLElement>('#report-sheet')!;
   // The list header's sheets (listHeader.tsx), at the page's root like the others, so no column's stacking or display hides them.
   const listSheet = root.querySelector<HTMLElement>('#list-sheet')!;
   // The toast over the page (toast.tsx): every refusal and failure, a copy that worked and the needs-you message.
@@ -2825,6 +2826,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (state.scope === null || pending !== null) {
       iframe.follow(null);
       followHistory(false);
+      mount(reportHost, null);
+      modals.sync();
       mount(head, pending === null ? null : [renderOpeningHead(pending, view.connection), side ? null : renderOpeningTabs(false)]);
       plainPane(panel);
       drawPane(panel, pending === null ? renderEmpty(state.connected ? 'No work item open. Choose one in the list to see its conversation.' : 'Connecting to Switchboard…') : renderOpening(pending));
@@ -2850,8 +2853,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     const strip = { ...(browserTab() ? { links: iframe.tabs, link: iframe.selected } : {}), open: shownArtifact, fit: view.tabFit, menu: view.tabMenu, now: deps.now(), closed: closedNow(), unread: unreadArtifacts(state.artifacts, state.scope.workItemId ?? null, artifactsSeen), files: localFiles.view, changes: changes.view };
 
-    // The History tab reads the hub only while it shows.
-    followHistory((side ? sideTab() : mainTab()) === 'history' && !(isPhone() && root.classList.contains('listing')));
+    // The History tab reads the hub only while it shows, and shows its State reports sheet only then.
+    const historyShows = (side ? sideTab() : mainTab()) === 'history' && !(isPhone() && root.classList.contains('listing'));
+
+    followHistory(historyShows);
+    mount(reportHost, historyShows && offersHistory() ? renderReportSheet(shownHistory, state.state, deps.now(), historyHead()) : null);
+    modals.sync();
     mount(head, [renderHeader(state, view, deps.now()), side ? null : renderTabs({ ...view, tab: mainTab() }, state, showBrowser(), strip, showConsole())]);
 
     const artifact = view.artifact === null ? undefined : state.artifacts.find((one) => one.path === view.artifact);
@@ -3805,11 +3812,47 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       sessionId: state.scope?.sessionId ?? null,
     };
   };
-  /** The operator changed the open History's chips, filter, groups, runs or state bodies: kept for the ticket while the page is open. */
+  /** The operator changed the open History's chips, filter, groups, runs or State reports sheet: kept for the ticket while the page is open. */
   const setHistoryUi = (ui: HistoryUi): void => {
     if (shownHistory !== null) {
       shownHistory.ui = ui;
       historyUis.set(shownHistory.ticketId, ui);
+    }
+  };
+  /** The button that opened the State reports sheet, as a selector, which takes the focus back when it closes. */
+  let reportOpener: string | null = null;
+  /** The State reports sheet shows the report `id`. */
+  const showReport = (id: string): void => {
+    if (shownHistory?.ui.report != null) {
+      setHistoryUi({ ...shownHistory.ui, report: { ...shownHistory.ui.report, id } });
+      draw();
+    }
+  };
+  /** The State reports sheet steps `step` reports newer, or older when negative, kept at the oldest and the newest. */
+  const stepReport = (step: number): void => {
+    const at = shownHistory?.ui.report;
+
+    if (shownHistory?.view == null || at == null) {
+      return;
+    }
+
+    const next = reportStep(historyReports(shownHistory.view, at.section, state.state, historyHead()), at.id, step);
+    const focused = document.activeElement;
+
+    if (next !== null && next !== at.id) {
+      showReport(next);
+      // A step button that reached the end is disabled, so the focus moves to the picker.
+      if (focused instanceof HTMLButtonElement && focused.disabled) {
+        root.querySelector<HTMLElement>('.hist-report-pick')?.focus();
+      }
+    }
+  };
+  const closeReport = (): void => {
+    if (shownHistory?.ui.report != null) {
+      setHistoryUi({ ...shownHistory.ui, report: null });
+      draw();
+      (reportOpener === null ? null : root.querySelector<HTMLElement>(reportOpener))?.focus();
+      reportOpener = null;
     }
   };
 
@@ -3819,6 +3862,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     if (shownHistory !== null && field.classList?.contains('hist-filter')) {
       setHistoryUi({ ...shownHistory.ui, query: field.value });
       draw();
+    } else if (shownHistory?.ui.report != null && field.classList?.contains('hist-report-pick')) {
+      showReport(field.value);
     }
   }, { signal: listening.signal });
   // A section or run the operator opened or closed stays so across redraws.
@@ -3828,17 +3873,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       const details = event.target as HTMLDetailsElement;
       const section = details.dataset?.['section'];
       const run = details.dataset?.['run'];
-      const body = details.dataset?.['body'];
 
       if (shownHistory === null || !(details instanceof HTMLDetailsElement) || details.closest('.history-view') === null) {
         return;
       }
 
       // Drawn again, so the next drawing compares against what the page shows, and Expand all opens a run the operator closed.
-      if (body !== undefined && shownHistory.ui.bodies[body] !== details.open) {
-        setHistoryUi({ ...shownHistory.ui, bodies: { ...shownHistory.ui.bodies, [body]: details.open } });
-        draw();
-      } else if (section !== undefined && (shownHistory.ui.sections[section] ?? null) !== details.open) {
+      if (section !== undefined && (shownHistory.ui.sections[section] ?? null) !== details.open) {
         setHistoryUi({ ...shownHistory.ui, sections: { ...shownHistory.ui.sections, [section]: details.open } });
         draw();
       } else if (run !== undefined && shownHistory.ui.runs.includes(run) !== details.open) {
@@ -4824,13 +4865,39 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       case 'history-all':
         if (shownHistory?.view != null) {
-          // Expand all opens the groups, the runs and the older states' bodies; Collapse all closes them.
+          // Expand all opens the groups and the runs; Collapse all closes them.
           setHistoryUi(
             button!.dataset['all'] === 'open'
               ? expandable(shownHistory.view, shownHistory.ui, historyHead(), state.state?.id ?? null, deps.now())
-              : { ...shownHistory.ui, sections: Object.fromEntries(shownHistory.view.sections.map((section) => [section.key, false])), runs: [], bodies: Object.fromEntries(Object.keys(expandable(shownHistory.view, shownHistory.ui, historyHead(), state.state?.id ?? null, deps.now()).bodies).map((key) => [key, false])) },
+              : { ...shownHistory.ui, sections: Object.fromEntries(shownHistory.view.sections.map((section) => [section.key, false])), runs: [] },
           );
           draw();
+        }
+
+        break;
+      case 'history-report':
+        if (shownHistory?.view != null) {
+          const entryKey = button!.closest<HTMLElement>('[data-entry]')?.dataset['entry'];
+
+          // Closing the sheet gives the focus back to the button that opened it.
+          reportOpener = entryKey === undefined ? '.hist-now [data-action="history-report"]' : `.hist-entry[data-entry=${JSON.stringify(entryKey)}] [data-action="history-report"]`;
+          setHistoryUi({ ...shownHistory.ui, report: { section: button!.dataset['section'] ?? '', id: button!.dataset['state'] ?? '' } });
+          draw();
+          root.querySelector<HTMLElement>('.hist-report-pick')?.focus();
+        }
+
+        break;
+      case 'history-report-step':
+        stepReport(Number(button!.dataset['step']));
+        break;
+      case 'history-report-latest':
+        stepReport(Infinity);
+        root.querySelector<HTMLElement>('.hist-report-pick')?.focus();
+        break;
+      case 'history-report-close':
+        // A press on the sheet itself is not one on its backdrop.
+        if (!button!.classList.contains('sheet-backdrop') || target === button) {
+          closeReport();
         }
 
         break;
@@ -5272,6 +5339,22 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       tabs[next]!.focus();
       event.preventDefault();
       return;
+    }
+
+    // The State reports sheet: Escape closes it, and Left and Right step older and newer except in its picker, which takes them itself.
+    if (shownHistory?.ui.report != null && root.querySelector('.hist-report-sheet') !== null && !event.defaultPrevented) {
+      if (event.key === 'Escape') {
+        closeReport();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+
+      if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !(event.target instanceof HTMLSelectElement) && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        stepReport(event.key === 'ArrowLeft' ? -1 : 1);
+        event.preventDefault();
+        return;
+      }
     }
 
     // Ctrl+Enter goes ahead in an input sheet, whose box takes several lines.
