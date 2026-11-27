@@ -74,6 +74,8 @@ const SIZES = [
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
   { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
+  // A common 1920 px desktop, for the column's strip and its maximize button, in the tabs view also with the column narrowed a pixel at a time.
+  { device: 'desktop', label: '1920', orientation: 'landscape', width: 1920, height: 1080, screen: [1920, 1080], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
@@ -492,6 +494,7 @@ const measure = `(() => {
       return {
         tabs: tabs.length,
         more: strip.querySelector('.tab-more') !== null,
+        maximize: [...strip.querySelectorAll(':scope > .panel-max')].some((one) => shown(one) && one.getBoundingClientRect().width > 0),
         moreUnread: (strip.querySelector('.tab-more-button')?.getAttribute('aria-label') ?? '').includes('unread'),
         // Whether History shows, and how many artifact tabs show besides the one chosen: the tabs whose unread dots the tabs view expects.
         history: tabs.some((tab) => tab.dataset.id === 'history'),
@@ -1316,6 +1319,8 @@ function failures(view, size, m) {
     if (strip.fixedCut.length > 0) out.push('a tab strip cuts the fixed tabs\' labels ' + strip.fixedCut.join(', '));
     if (strip.past.length > 0) out.push('a tab passes its strip: ' + strip.past.slice(0, 4).join(', '));
   }
+  // The desktop's column ends its strip with the maximize button, which the check above holds inside the strip.
+  if (size.device === 'desktop' && (view === 'tabs' || view.startsWith('mic-max-')) && !m.strips.some((strip) => strip.maximize)) out.push('the column\'s strip shows no maximize button');
   // Two unselected tabs side by side show where one ends: the line between them, or their fills, at SEAM_MIN against each other at least.
   for (const seam of m.strips.flatMap((strip) => strip.seams)) {
     if (Math.max(seam.line ?? 1, seam.fills) < SEAM_MIN) out.push('the tabs ' + seam.left + ' and ' + seam.right + ' run together: their line is ' + seam.line + ':1 and their fills ' + seam.fills + ':1, under ' + SEAM_MIN + ':1');
@@ -1496,7 +1501,7 @@ try {
         await send('Emulation.setSafeAreaInsetsOverride', { insets: size.insets });
         await send('Page.navigate', { url: base + '?view=' + view + (historyCase === null ? '' : '&hcase=' + historyCase) });
         await evaluate('new Promise((done) => { const wait = () => (document.querySelector("#root .header, #root .list-header") ? setTimeout(done, 200) : setTimeout(wait, 50)); wait(); })');
-        const name = scheme + ' ' + size.device + ' ' + size.orientation + ' ' + view;
+        const name = [scheme, size.device, size.label, size.orientation, view].filter((one) => one !== undefined).join(' ');
         const steps = OPEN[view] ?? [];
         const missing = [];
 
@@ -1827,6 +1832,33 @@ try {
           else if (size.phone && dirty.bar > 52 + size.insets.bottom + 0.5) found.push('the bar is ' + dirty.bar + ' px tall on a phone, more than one 52 px row');
         }
 
+        // At 1920 px the column narrowed a pixel at a time, by widening the conversation, keeps every tab, More and the maximize button inside its
+        // strip and the screen at each width, wherever its tabs come within a pixel or two of filling it.
+        if (size.label === '1920' && view === 'tabs') {
+          const passes = await evaluate(`(async () => {
+            const root = document.getElementById('root');
+            const start = document.querySelector('#root > .main').getBoundingClientRect().width;
+            const out = [];
+            const widths = [];
+
+            for (let step = 1; step <= 160; step++) {
+              root.style.setProperty('--chat-width', (start + step) + 'px');
+              await new Promise((done) => setTimeout(done, 60));
+              const strip = document.querySelector('.detail .side-switch');
+              const edge = strip.getBoundingClientRect();
+              widths.push(edge.width);
+              const past = [...strip.children].filter((one) => { const box = one.getBoundingClientRect(); return box.width > 0 && (box.right > edge.right + 0.5 || box.right > innerWidth + 0.5); });
+
+              if (past.length > 0) out.push(Math.round(edge.width) + ' px: ' + past.map((one) => one.dataset.id ?? one.className).join(', '));
+            }
+            root.style.removeProperty('--chat-width');
+            await new Promise((done) => setTimeout(done, 250));
+            return { out, narrowed: widths[0] - widths[widths.length - 1] };
+          })()`);
+
+          if (passes.narrowed < 150) found.push('widening the conversation by 160 px narrowed the column by ' + Math.round(passes.narrowed) + ' px, not about 160');
+          if (passes.out.length > 0) found.push('the column narrowed to ' + passes.out.slice(0, 3).join('; ') + ' passes its strip or the screen');
+        }
         results.push({ name, ...m });
         // History's screenshots show its top too: the head, the pinned state and the filter; the list's, its first groups.
         if (shots !== null && (view.startsWith('history') || view === 'list')) {
