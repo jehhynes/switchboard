@@ -93,10 +93,9 @@ describe('the route', () => {
     expect(Object.keys(sets)[0]).toBe('w6');
     expect(parseTabSets(JSON.stringify(sets))).toEqual(sets);
     expect(parseTabSets(JSON.stringify({ w1: set, w2: { ...set, file: 2 }, w3: { ...set, files: [{ target: 1, line: null }] }, w4: { ...set, changes: 'yes' }, '5': set, w6: null }))).toEqual({ w1: set });
-    // A set kept while History could close drops whether it was open, and one that named Status names History, which a set naming History keeps.
+    // A set keeps whether History is open, one that names it otherwise is malformed, and one that named Status names History.
     expect(parseTabSets(JSON.stringify({ w1: { ...set, history: true }, w2: { ...set, history: 'yes' }, w3: { ...set, side: 'status', tab: 'status' }, w4: { ...set, side: 'history', tab: 'history' } }))).toEqual({
-      w1: set,
-      w2: set,
+      w1: { ...set, history: true },
       w3: { ...set, side: 'history', tab: 'history' },
       w4: { ...set, side: 'history', tab: 'history' },
     });

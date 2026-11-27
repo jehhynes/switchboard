@@ -51,6 +51,11 @@ describe('the page in use', () => {
   };
   const flush = () => new Promise((resolve) => setImmediate(resolve));
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
+  /** Opens History from the conversation header's ··· menu. */
+  const openHistory = () => {
+    click('[data-action="actions"]');
+    click('.actions-menu [data-action="row-history"]');
+  };
   /** The panel's text as read: a folded reply's fade is only a glimpse, hidden from screen readers. */
   const shownText = () => {
     const panel = root.querySelector('#panel')!.cloneNode(true) as Element;
@@ -260,7 +265,7 @@ describe('the page in use', () => {
     const seenState = () => posts.filter((post) => post.url.endsWith('/seen') && (post.body['ids'] as string[]).includes('st-r1')).length;
 
     hello(FakeSource.last!);
-    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
+    openHistory();
     now += 1_100;
     await vi.advanceTimersByTimeAsync(300);
     expect(seenState()).toBe(1);
@@ -526,9 +531,9 @@ describe('the page in use', () => {
     // Closed on every device: the route does not open it again.
     hello(source, { tabs: { tab: null, closed: [{ path: 'chat/plan.md', updatedAt: 1_500 }] } });
     await flush();
-    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail .changes-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(selected()).toBeNull();
-    expect(location.hash).toBe('#w=1&t=history');
+    expect(location.hash).toBe('#w=1&t=changes');
     expect(kept()).toEqual([]);
     // A wide page adds no history entry.
     expect(history.length).toBe(entries);
@@ -715,7 +720,7 @@ describe('the page in use', () => {
     expect(reads()).toBe(before + 1);
 
     // A tab's scroll place stays too.
-    click('#head [data-tab="history"]');
+    openHistory();
     const panel = root.querySelector<HTMLElement>('#panel')!;
 
     panel.scrollTop = 237;
@@ -895,7 +900,7 @@ describe('the page in use', () => {
     const panel = root.querySelector<HTMLElement>('#panel')!;
 
     hello(source);
-    click('#head [data-tab="history"]');
+    openHistory();
     // History scrolls its own body.
     panel.querySelector<HTMLElement>('.hist-body')!.scrollTop = 120;
     click('#head [data-tab="conversation"]');
@@ -934,7 +939,7 @@ describe('the page in use', () => {
     helloFor(source, 2);
     await flush();
     expect(fileTabs()).toEqual([]);
-    expect(shown()?.dataset['side']).toBe('history');
+    expect(shown()?.classList.contains('changes-tab')).toBe(true);
     click('#detail [data-side="console"]');
     expect(shown()?.dataset['side']).toBe('console');
 
@@ -993,7 +998,7 @@ describe('the page in use', () => {
     await flush();
     doc().scrollTop = 380;
     doc().dispatchEvent(new Event('scroll'));
-    click('#detail [data-side="history"]');
+    click('#detail [data-side="console"]');
     expect(root.querySelector('#detail .local-view')).toBeNull();
     // Back on the file tab, and after another work item and back, it is where it was left.
     click('#detail [data-action="local-tab"]');
@@ -1039,8 +1044,8 @@ describe('the page in use', () => {
     const other = JSON.parse(localStorage.getItem('switchboard.tabs')!) as Record<string, unknown>;
 
     localStorage.setItem('switchboard.tabs', JSON.stringify({ ...other, w2: { side: 'console', tab: 'conversation', artifact: null, changes: false, changesFile: null, files: [], file: null } }));
-    click('#detail [data-side="history"]');
-    expect(JSON.parse(localStorage.getItem('switchboard.tabs')!)).toMatchObject({ w2: { side: 'console' }, w1: { side: 'history' } });
+    click('#detail [data-side="console"]');
+    expect(JSON.parse(localStorage.getItem('switchboard.tabs')!)).toMatchObject({ w2: { side: 'console' }, w1: { side: 'console' } });
     page.close();
   });
 

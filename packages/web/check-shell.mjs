@@ -75,7 +75,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-filters', 'changes', 'changes-options', 'changes-explore', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-closed', 'history-filters', 'changes', 'changes-options', 'changes-explore', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
   // A common 1920 px desktop, for the column's strip and its maximize button, in the tabs view also with the column narrowed a pixel at a time.
   { device: 'desktop', label: '1920', orientation: 'landscape', width: 1920, height: 1080, screen: [1920, 1080], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
 ];
@@ -86,7 +86,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'changes-explore', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one)), 'row-done'];
+const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'history-closed', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'changes-explore', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one)), 'row-done'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -405,6 +405,11 @@ const measure = `(() => {
       return { headings: [...body.querySelectorAll('h1, h2, h3')].map((one) => one.tagName + ' ' + parseFloat(getComputedStyle(one).fontSize)), title: top('h1'), state: top('.hist-now-headline'), screen: body.clientHeight };
     })(),
     histEnd: (() => { const body = document.querySelector('.hist-body'); return body === null ? null : parseFloat(getComputedStyle(body).paddingBottom); })(),
+    // The History tab, open only on request (architecture.md § Web page): whether it is selected and has its close mark; the id of the tab each
+    // shown strip selects; and whether the open Actions menu offers History.
+    historyTab: (() => { const tab = [...document.querySelectorAll('.tabs .history-tab')].find(shown); return tab === undefined ? null : { selected: tab.classList.contains('selected'), close: tab.querySelector('[data-action=close-history]') !== null }; })(),
+    selectedTabs: [...document.querySelectorAll('.tabs:not(.opening-tabs)')].filter(shown).map((strip) => strip.querySelector(':scope > .selected, :scope > [aria-selected="true"]')?.dataset.id ?? null),
+    menuHistory: document.querySelector('.actions-menu [data-action=row-history]') !== null,
     band: document.getElementById('safe-top').getBoundingClientRect().height,
     // The list's and the conversation's top bars' room to move: how much taller the box each sits in is than the bar (mechanics.md M176).
     // Settings' and the persona dialog's bars share their dialog's box and are not checked: no tap there was reported astray.
@@ -810,8 +815,13 @@ function openTab(selector) {
   return { name: selector, eval: '(async () => { const tab = document.querySelector(' + JSON.stringify('.tabs ' + selector) + '); if (tab) { tab.click(); return true; } document.querySelector(".tab-more-button")?.click(); await new Promise((done) => setTimeout(done, 150)); const row = document.querySelector(' + JSON.stringify('.tab-menu ' + selector) + '); row?.click(); return row !== null; })()' };
 }
 
+/** The steps that open the History tab from the Actions menu. */
+const HISTORY = ['[data-action=actions]', '.actions-menu [data-action=row-history]'];
+
 const OPEN = {
-  history: ['[data-side=history], [data-tab=history]'],
+  // History opened as the operator asks for it, from the conversation header's Actions menu, which selects it; and opened, then closed by its close mark.
+  history: HISTORY,
+  'history-closed': [...HISTORY, '.history-tab [data-action=close-history]'],
   // Settings as it opens: on a phone its navigation's categories alone.
   'settings-nav': ['[data-action=list-more]', '[data-action=list-settings]'],
   ...Object.fromEntries(Object.entries(SETTINGS_PAGES).map(([view, keys]) => [view, ['[data-action=list-more]', '[data-action=list-settings]', ...keys.map((key) => (key.endsWith('/page') ? '.settings-nav-entry[data-key="' + key + '"], .settings-page-title h2' : '.settings-nav-entry[data-key="' + key + '"]'))]])),
@@ -836,7 +846,8 @@ const OPEN = {
   // Devices with a pairing address shown.
   'settings-pair': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="devices"]', '.settings-devices > .sheet-button'],
   // An artifact chosen from More, so the strip keeps it beside the tabs it always keeps: the oldest, so the newest stays unread where it has room.
-  tabs: ['.tab-more-button', '.tab-menu [data-action=artifact][data-path="chat/a0.md"]'],
+  // History opened first from the Actions menu, so it shows unselected with its state unread.
+  tabs: [...HISTORY, '.tab-more-button', '.tab-menu [data-action=artifact][data-path="chat/a0.md"]'],
   // The Changes tab with its tree shown, as a phone shows it: over the diffs. A pinned tree has no flyout button, so that press finds none.
   changes: ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search'],
   // Its search's options menu open, Regular expression chosen, which keeps the menu open.
@@ -844,16 +855,16 @@ const OPEN = {
   // Explore with what git ignores muted: .wip opened, read when it opens, and src/dialer opened beside its ignored log.
   'changes-explore': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-files][data-mode=all]', '.tree-row[data-key="dir:.wip"]', '.tree-row[data-key="dir:src"]', '.tree-row[data-key="dir:src/dialer"]'],
   // History's chips shown, one turned off, as a phone shows them behind Filters; a wider pane shows them without it.
-  'history-filters': ['[data-side=history], [data-tab=history]', '[data-action=history-chips]', '.hist-chip[data-category="you"]'],
-  'history-report': ['[data-side=history], [data-tab=history]', '.hist-now [data-action=history-report]'],
-  'history-report-back': ['[data-side=history], [data-tab=history]', '.hist-now [data-action=history-report]', '[data-action=history-report-step][data-step="-1"]', '[data-action=history-report-step][data-step="-1"]'],
-  'history-report-entry': ['[data-side=history], [data-tab=history]', '.hist-entry[data-entry="st-2"] [data-action=history-report]'],
+  'history-filters': [...HISTORY, '[data-action=history-chips]', '.hist-chip[data-category="you"]'],
+  'history-report': [...HISTORY, '.hist-now [data-action=history-report]'],
+  'history-report-back': [...HISTORY, '.hist-now [data-action=history-report]', '[data-action=history-report-step][data-step="-1"]', '[data-action=history-report-step][data-step="-1"]'],
+  'history-report-entry': [...HISTORY, '.hist-entry[data-entry="st-2"] [data-action=history-report]'],
   // The mic views' tab, from the strip or from More where the strip has no room for it; the desktop's in its column, then maximized.
-  'mic-history': [openTab('[data-tab="history"]')],
+  'mic-history': HISTORY,
   'mic-changes': [openTab('[data-action="diff-tab"]')],
   'mic-artifact': [openTab('[data-action="artifact"][data-path="chat/plan.md"]')],
   'mic-console': [openTab('[data-tab="console"]')],
-  'mic-max-history': [openTab('[data-side="history"]'), '.panel-max'],
+  'mic-max-history': [...HISTORY, '.panel-max'],
   'mic-max-changes': [openTab('[data-action="diff-tab"]'), '.panel-max'],
   'mic-max-artifact': [openTab('[data-action="artifact"][data-path="chat/plan.md"]'), '.panel-max'],
   // The long menus (menuFailures): the open work item's Actions, the list's More actions, and a row's menu by a right click or long press on it.
@@ -1315,6 +1326,15 @@ function failures(view, size, m) {
   }
   // History's last entry scrolls clear of the home indicator.
   if (view === 'history' && m.histEnd === null) out.push('History drew no entries');
+  // History has no tab until asked for; opened from the Actions menu it is selected, with its close mark; closed, the strip shows Chat, or the
+  // column Changes, its first tab.
+  if (view === 'conversation' && m.historyTab !== null) out.push('History has a tab before it was asked for');
+  if (view === 'actions-menu' && !m.menuHistory) out.push('the Actions menu offers no History');
+  if ((view === 'history' || view.startsWith('history-report') || view === 'history-filters') && !(m.historyTab?.selected && m.historyTab.close)) out.push('History opened from the Actions menu is ' + (m.historyTab === null ? 'not a tab' : (m.historyTab.selected ? '' : 'not selected') + (m.historyTab.close ? '' : ' without its close mark')));
+  if (view === 'history-closed') {
+    if (m.historyTab !== null) out.push('History keeps its tab after its close mark');
+    if (m.selectedTabs.join() !== (size.phone || size.device === 'ipad' ? 'conversation' : 'changes')) out.push('History closed leaves ' + JSON.stringify(m.selectedTabs) + ' selected, not ' + (size.phone || size.device === 'ipad' ? 'Chat' : 'Changes'));
+  }
   // The title is History's first heading at Settings' 20 px, its groups' headings 14 px, above the pinned state, which a first screen shows.
   if (view === 'history' && m.histHead !== null) {
     const [first, ...rest] = m.histHead.headings;
@@ -1400,12 +1420,13 @@ function failures(view, size, m) {
     if (one.close !== null && one.dot.right > one.close.left - 0.5 && one.dot.left < one.close.right + 0.5 && one.dot.bottom > one.close.top - 0.5 && one.dot.top < one.close.bottom + 0.5) out.push(where + ' covers its close mark');
     if (Math.abs(one.widthChange) > 0.5) out.push(where + ' changes its tab\'s or label\'s width by ' + one.widthChange + ' px');
   }
-  // The tabs view's state and artifacts are unread: History's dot, a tab without a close mark, shows wherever History has room after Changes,
+  // The tabs view's state and artifacts are unread: History's dot, History opened then left for an artifact, shows wherever History has room after Changes,
   // and an artifact's, with a close mark, cut or not, wherever the strip has room for an artifact tab besides the one shown.
   if (view === 'tabs') {
-    if (m.strips.some((strip) => strip.history) && !dots.some((one) => !one.closable && !one.more)) out.push('no unread dot on a tab without a close mark');
-    if (m.strips.some((strip) => strip.artifacts > 0) && !dots.some((one) => one.closable)) out.push('no unread dot on an artifact tab');
-    if (size.device === 'ipad' && !(dots.some((one) => one.closable && one.cut) && dots.some((one) => one.closable && !one.cut))) out.push('no unread dot on both a cut and a whole artifact title');
+    if (m.strips.some((strip) => strip.history) && !dots.some((one) => one.tab === 'History' && !one.more)) out.push('no unread dot on History');
+    const artifactDots = dots.filter((one) => one.closable && one.tab !== 'History');
+    if (m.strips.some((strip) => strip.artifacts > 0) && artifactDots.length === 0) out.push('no unread dot on an artifact tab');
+    if (size.device === 'ipad' && !(artifactDots.some((one) => one.cut) && artifactDots.some((one) => !one.cut))) out.push('no unread dot on both a cut and a whole artifact title');
   }
   // The tabs view's strip has more tabs than fit, so More holds the rest; More shows its dot exactly while its name says a row is unread.
   if (view === 'tabs' && !m.strips.some((strip) => strip.more)) out.push('no strip shows More for a work item with more tabs than fit');

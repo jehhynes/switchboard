@@ -256,7 +256,8 @@ it.each(['Escape', 'reconnect'])('cancels a deferred control on %s before a matc
 });
 
 it('anchors right-click menus at the pointer and does not open an empty menu', () => {
-  start([group('review', [row(1, { url: 'https://example.test/1' }), row(2)])]);
+  // A pool ticket with nothing to offer: a work item's row always offers History.
+  start([group('review', [row(1, { url: 'https://example.test/1' }), row(2, { workItemId: null })])]);
   el('.row').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 80, clientY: 70 }));
   expect(el('.row-menu-anchor').style.left).toBe('80px');
   expect(el('.row-menu-anchor').style.top).toBe('70px');
@@ -265,7 +266,7 @@ it('anchors right-click menus at the pointer and does not open an empty menu', (
   expect(native.defaultPrevented).toBe(true);
   expect(el('.row-menu-anchor').style.top).toBe('70px');
   key(el('.row-menu .menu-row'), 'Escape');
-  key(el('.row[data-row="item:2"]'), 'ContextMenu');
+  key(el('.row[data-row="ticket:2"]'), 'ContextMenu');
   expect(root.querySelector('.row-menu')).toBeNull();
 });
 
@@ -355,7 +356,7 @@ it('opens a row menu whose first row is a write with nothing chosen, so Enter al
   expect(posts.filter((post) => !post.url.endsWith('/page-focus'))).toEqual([]);
   expect(root.querySelector('.row-menu')).not.toBeNull();
   key(document.activeElement as HTMLElement, 'ArrowUp');
-  expect(document.activeElement).toBe(el('.row-menu .menu-row'));
+  expect(document.activeElement).toBe([...root.querySelectorAll('.row-menu .menu-row')].at(-1));
 });
 
 it.each(['ContextMenu', 'F10', 'right-click'])('opens a work-item menu with %s, walks it and returns focus with Escape', (method) => {

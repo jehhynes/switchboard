@@ -40,7 +40,7 @@ const Separator = () => <li class="menu-separator" role="separator"></li>;
 
 /**
  * A row's menu, as rows of a `menu` list (architecture.md § Web page), grouped: the main control, the work controls, the
- * state controls, Add comment…, the order controls, what the row opens (Copy, several drafts in a Copy submenu, Open in VS Code and Open report, History for a work item's row in the list, Open ticket and its
+ * state controls, Add comment…, the order controls, what the row opens (Copy, several drafts in a Copy submenu, Open in VS Code and Open report, History for a work item's row, Open ticket and its
  * links, more than two of them in an Open link submenu), then the controls that ask first; empty when the row offers none. Each item names its
  * row, so a pool ticket's menu in the list runs as the header's does.
  */
@@ -50,7 +50,7 @@ const waiting = (view: Pick<View, 'acting' | 'connection'>): boolean => view.act
 /** Why a row's action waits while offline, as its tooltip. */
 const offlineTitle = (view: Pick<View, 'connection'>): string | undefined => (view.connection != null && view.connection.tone !== 'live' ? 'This cannot be done while offline.' : undefined);
 
-export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 'copyMenu' | 'connection'>, { history = true }: { history?: boolean } = {}): VNode[] {
+export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 'copyMenu' | 'connection'>): VNode[] {
   const actions = row.actions;
   const pastes = row.pastes;
   const commands = row.opens;
@@ -87,9 +87,10 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 
     ...copy,
     // Open report opens its draft in a file tab of the page; Open in VS Code asks the hub to start VS Code.
     ...commands.map((one) => item(one.file === undefined ? { 'data-action': 'row-command', 'data-label': one.label } : { 'data-action': 'row-report', 'data-file': one.file, title: one.file }, one.icon, one.label)),
-    // History, which opens the work item on its History tab; a pool ticket has no work item open, so no tab to show it in, and the header, beside
-    // the tab itself, leaves it out (operator decision 2026-11-26).
-    ...(!history || row.history === null || row.workItemId === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
+    // History, which opens the work item's History tab and shows it, in the header's menu and a row's (operator decision 2026-11-27: History is
+    // a tab only on request), for every work item, since the tab shows its state without a ticket's History too; a pool ticket has no work item
+    // open, so no tab to show it in.
+    ...(row.workItemId === null ? [] : [item({ 'data-action': 'row-history' }, 'history', 'History')]),
     ...(row.url === '' ? [] : [link('ticket', 'Open ticket', 'link-external')]),
     ...(row.links.length > MENU_LINKS ? submenu : row.links.map((one, index) => link(String(index), `Open ${one.label}`, 'link-external'))),
   ];
@@ -100,21 +101,33 @@ export function menuRows(row: PageRow, view: Pick<View, 'acting' | 'linkMenu' | 
 
 /**
  * The header's row actions (architecture.md § Web page): the row's main control as a button, then the row's menu (`menuRows`) under an
- * ellipsis; nothing when the row offers none.
+ * ellipsis; nothing when the row offers none. A work item open without a row in the list still has History, so its menu holds that alone.
  */
-function Actions({ row, view }: { row: PageRow | null; view: View }) {
-  const rows = row === null ? [] : menuRows(row, view, { history: false });
+function Actions({ row, view, workItem }: { row: PageRow | null; view: View; workItem: boolean }) {
+  const rows =
+    row !== null
+      ? menuRows(row, view)
+      : workItem
+        ? [
+            <li role="none">
+              <button type="button" class="menu-row" role="menuitem" data-action="open-history">
+                <span class="menu-gutter" aria-hidden="true"><span class="codicon codicon-history"></span></span>
+                <span class="title">History</span>
+              </button>
+            </li>,
+          ]
+        : [];
 
-  if (row === null || rows.length === 0) {
+  if (rows.length === 0) {
     return null;
   }
 
-  const main = row.actions.find((one) => one.group === 'main');
+  const main = row?.actions.find((one) => one.group === 'main');
 
   return (
     <>
       {main === undefined ? null : (
-        <button type="button" class="row-main" data-action="row-action" data-row={rowKey(row)} data-label={main.label} disabled={waiting(view)} title={offlineTitle(view) ?? main.label}>
+        <button type="button" class="row-main" data-action="row-action" data-row={rowKey(row!)} data-label={main.label} disabled={waiting(view)} title={offlineTitle(view) ?? main.label}>
           <span class={`codicon codicon-${main.icon}`} aria-hidden="true"></span>
           <span class="row-main-label">{main.label}</span>
         </button>
@@ -274,7 +287,7 @@ export function renderHeader(state: PageState, view: View, now = Date.now()): VN
         </button>
         {pickerMenu}
       </div>
-      <Actions row={selectedRow(state)} view={view} />
+      <Actions row={selectedRow(state)} view={view} workItem={state.scope?.workItemId != null} />
       <ConnectionDot dot={view.connection} />
     </header>
   );
@@ -301,7 +314,7 @@ export function UnreadDot({ label = 'Unread' }: { label?: string }) {
 
 /**
  * What a strip shows beside the fixed tabs: the link tabs and the link shown, the open artifact while one shows, the room its tabs have, whether
- * the More menu is open and the time for its ages, the file tabs, and the Changes tab while it applies.
+ * the More menu is open and the time for its ages, the file tabs, the Changes tab while it applies, and whether History is open.
  */
 export interface ArtifactStrip {
   links?: FrameLink[];
@@ -319,6 +332,27 @@ export interface ArtifactStrip {
   files?: LocalFilesView;
   /** The Changes tab's view, or none for a strip without it. */
   changes?: ChangesView;
+  /** Whether the History tab is open (`stripTabs`). */
+  history?: boolean;
+}
+
+/**
+ * The History tab, open only once History was asked for (main.ts `openHistory`), with a close mark that closes it as an artifact's does; the unread
+ * dot on its icon's corner while the state it shows is unread.
+ */
+function HistoryTab({ selected, unread, attr }: { selected: boolean; unread: boolean; attr: string }) {
+  return (
+    <span class={`tab artifact-tab history-tab${selected ? ' selected' : ''}`} role="presentation">
+      <button class="tab-open" type="button" role="tab" {...{ [attr]: 'history' }} aria-selected={selected} tabindex={selected ? 0 : -1} title="History" aria-label={unread ? 'History, unread' : 'History'}>
+        <span class="codicon codicon-history" aria-hidden="true"></span>
+        {unread ? <UnreadDot /> : null}
+        <span class="tab-label">History</span>
+      </button>
+      <button class="tab-close" type="button" data-action="close-history" aria-label="Close History" title="Close" tabindex={selected ? 0 : -1}>
+        <span class="codicon codicon-close" aria-hidden="true"></span>
+      </button>
+    </span>
+  );
 }
 
 /**
@@ -438,7 +472,7 @@ function stripContent(layout: StripLayout, shown: Tab, state: PageState, browser
   const attr = layout === 'wide' ? 'data-side' : 'data-tab';
   const closed = strip.closed ?? new Set<string>();
   const files = strip.files ?? { tabs: [], open: null };
-  const tabs = stripTabs({ shown, stateUnread: state.state?.unread === true, browser, links: strip.links, link: strip.link, artifacts: state.artifacts, open: strip.open, closed, files, changes: strip.changes !== undefined, console }, layout);
+  const tabs = stripTabs({ shown, stateUnread: state.state?.unread === true, history: strip.history === true, browser, links: strip.links, link: strip.link, artifacts: state.artifacts, open: strip.open, closed, files, changes: strip.changes !== undefined, console }, layout);
   // The closed artifacts, newest first, but the one shown, which keeps its tab.
   const shut = [...state.artifacts].sort((a, b) => b.updatedAt - a.updatedAt).filter((artifact) => closed.has(artifact.path) && !tabs.some((tab) => tab.id === `artifact:${artifact.path}`));
   const { shown: fitted, hidden } = fitTabs(tabs, strip.fit ?? UNMEASURED, shut.length > 0);
@@ -446,9 +480,13 @@ function stripContent(layout: StripLayout, shown: Tab, state: PageState, browser
   const draw = (tab: DocTab): VNode => {
     switch (tab.kind) {
       case 'fixed': {
+        // History, open, has the unread dot while its state is unread; the page shows no unread counts.
+        if (tab.tab === 'history') {
+          return HistoryTab({ selected: tab.selected, unread: tab.unread, attr });
+        }
+
         const { label, icon } = TABS.find((one) => one.tab === tab.tab)!;
 
-        // History has the unread dot while its state is unread; the page shows no unread counts.
         return TabButton({ selected: tab.selected, label, icon, unread: tab.unread, attrs: { [attr]: tab.tab } });
       }
       case 'link':

@@ -264,7 +264,7 @@ describe('the page in use', () => {
 
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1', links: [link('PR #5', 'https://github.com/o/r/pull/5'), link(long, 'https://example.test/long')] })])] });
     click('button.actions');
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open ticket', 'Open PR #5', `Open ${long.slice(0, 42).trimEnd()}…`]);
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['History', 'Open ticket', 'Open PR #5', `Open ${long.slice(0, 42).trimEnd()}…`]);
     expect(root.querySelector('.actions-menu [data-link="1"]')!.getAttribute('title')).toBe(`Open ${long}`);
     click('.actions-menu [data-link="ticket"]');
     expect(opened).toEqual(['https://github.com/o/r/issues/1']);
@@ -272,9 +272,9 @@ describe('the page in use', () => {
 
     source.emit('list', { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', links: [link('One', 'https://example.test/1'), link('Two', 'https://example.test/2'), link('Three', 'https://example.test/3')] })])] });
     click('button.actions');
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open link']);
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['History', 'Open link']);
     click('.actions-menu [data-action="link-menu"]');
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open link', 'One', 'Two', 'Three']);
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['History', 'Open link', 'One', 'Two', 'Three']);
     expect(root.querySelector('.actions-menu [data-action="link-menu"]')!.getAttribute('aria-expanded')).toBe('true');
     click('.actions-menu [data-link="2"]');
     expect(opened.at(-1)).toBe('https://example.test/3');
@@ -414,7 +414,12 @@ describe('the page in use', () => {
     const open = () => startPage(root, { fetch: (async (url: string, init?: { body?: string }) => (posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) }), { status: answer(url), ok: answer(url) === 200, json: async () => ({}), text: async () => '' })) as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, standalone: () => true, toExtension: async () => ({ ok: true }) });
     let page = open();
     let source = FakeSource.last!;
-    const shown = () => root.querySelector<HTMLElement>('#head .tab.selected')?.dataset['tab'];
+    const shown = () => root.querySelector<HTMLElement>('#head [role="tab"][aria-selected="true"]')?.dataset['tab'];
+    // History shows only on request, from the header's menu.
+    const openHistory = () => {
+      click('#head [data-action="actions"]');
+      click('.actions-menu [data-action="row-history"]');
+    };
     const paired = { enabled: true, extension: 'paired', extensionId: 'ext', marker: null, shown: false, error: null };
     const rows = [listGroup('progress', [listRow(1, { title: 'Fix it', url: 'https://github.com/o/r/issues/1' }), listRow(2, { title: 'Side', url: 'https://github.com/o/r/issues/2' })])];
     // Each opening rule that picks another tab: an artifact kept for the work item, Browser chosen for every work item, no status report yet.
@@ -430,7 +435,7 @@ describe('the page in use', () => {
     expect(shown()).toBe('conversation');
 
     // A tab chosen there stays while the work item is open.
-    click('#head [data-tab="history"]');
+    openHistory();
     source.emit('pane', { pane: { ...paired, shown: true } });
     expect(shown()).toBe('history');
 
@@ -441,7 +446,7 @@ describe('the page in use', () => {
     expect(root.classList.contains('listing')).toBe(false);
     expect(shown()).toBe('conversation');
 
-    // Another work item, as from the header's list: the conversation.
+    // Another work item, as from the header's list: the conversation. History, opened, stays open for work item 1.
     click('#head [data-tab="history"]');
     click('.header > button.back-toggle');
     click('[data-work-item="2"]');
@@ -450,7 +455,7 @@ describe('the page in use', () => {
     expect(shown()).toBe('conversation');
 
     // A conversation of its dropdown the hub refuses to open leaves the open one's tab as it was.
-    click('#head [data-tab="history"]');
+    openHistory();
     click('.header > button.back-toggle');
     refuse = true;
     click('[data-work-item="1"]');

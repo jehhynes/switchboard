@@ -157,7 +157,7 @@ describe('the page in use', () => {
 
     try {
       hello(source, { groups: [listGroup('progress', [listRow(1, { questions: 1 })])], questions, items: [reply('r2', 3, { opening: 'Checking.', kind: 'aside' })], more: true });
-      root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
+      root.querySelector<HTMLElement>('[data-action="diff-tab"]')!.click();
       expect(root.classList.contains('off-conversation')).toBe(true);
       // A read slower than the jump's wait still ends at the card.
       let answer = (): void => {};
@@ -226,7 +226,7 @@ describe('the page in use', () => {
       expect(chip()!.hidden).toBe(false);
       // On another tab, where the card is not shown, too; a click goes back to it.
       cardTop = 100;
-      root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
+      root.querySelector<HTMLElement>('[data-action="diff-tab"]')!.click();
       expect(chip()!.hidden).toBe(false);
       click('#composer .question-waiting');
       expect(root.classList.contains('off-conversation')).toBe(false);

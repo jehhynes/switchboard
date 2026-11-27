@@ -136,7 +136,8 @@ export function withScroll(places: Record<string, ScrollPlace>, key: string, pla
 /**
  * A work item's tabs as this device left them: the column's and the conversation pane's tab (`side`, `tab`) and the artifact shown, whether
  * the Changes tab was open and the file it was at, and the file tabs in their order with the one shown, so another work item and back, or a
- * reload, brings them back. The artifact tabs follow the work item's artifacts and the closed ones the hub keeps (architecture.md § Web page).
+ * reload, brings them back, and whether History is open. The artifact tabs follow the work item's artifacts and the closed ones the hub keeps
+ * (architecture.md § Web page).
  */
 export interface TabSet {
   side: string;
@@ -149,6 +150,8 @@ export interface TabSet {
   file: number | null;
   /** The link tabs (`LinkSet` in iframeBrowser.ts); absent in a set kept before they were kept. */
   links?: { open: Array<{ url: string; name: string }>; closed: string[]; selected: string };
+  /** True while the History tab is open, which it is only on request; absent while closed. */
+  history?: boolean;
 }
 
 /** Where this device keeps each work item's tabs. */
@@ -200,10 +203,11 @@ export function parseTabSets(raw: string | null): Record<string, TabSet> {
           Array.isArray(set.files) &&
           set.files.every((one) => one !== null && typeof one === 'object' && text(one.target) && lineOrNull(one.line)) &&
           (set.file === null || (typeof set.file === 'number' && Number.isSafeInteger(set.file) && set.file >= 0 && set.file < set.files.length)) &&
-          (set.links === undefined || linkSet(set.links)),
+          (set.links === undefined || linkSet(set.links)) &&
+          (set.history === undefined || typeof set.history === 'boolean'),
       ).map(([key, set]) => {
-        // A set kept before History took the Status tab's place names `status`, and one kept while History could close says whether it was open.
-        const { history: _history, ...kept } = set as TabSet & { history?: unknown };
+        // A set kept before History took the Status tab's place names `status`.
+        const kept = set as TabSet;
 
         return [key, { ...kept, side: kept.side === 'status' ? 'history' : kept.side, tab: kept.tab === 'status' ? 'history' : kept.tab }];
       }),

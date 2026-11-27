@@ -217,7 +217,9 @@ describe('the page in use', () => {
     expect(root.querySelector('#head .tabs')).toBeNull();
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.querySelector('#panel .timeline')).not.toBeNull();
-    expect(root.querySelector('#detail .history-view')).not.toBeNull();
+    // History is closed until asked for, so the column falls back to Changes.
+    expect(root.querySelector('#detail .history-view')).toBeNull();
+    expect(root.querySelector('#detail .changes-tab')?.getAttribute('aria-selected')).toBe('true');
     expect(root.querySelectorAll('#detail .artifact-tab')).toHaveLength(2);
     // An artifact row in the conversation opens in the column, and the conversation stays.
     click('#panel [data-action="artifact"][data-path="chat/p.html"]');
@@ -401,7 +403,8 @@ describe('the page in use', () => {
     expect(root.classList.contains('drawers')).toBe(true);
     expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin list');
     // History is a tab of the open work item, so the list stays the drawer and keeps its pin.
-    click('[data-tab="history"], [data-side="history"]');
+    click('[data-action="actions"]');
+    click('.actions-menu [data-action="row-history"]');
     expect(root.querySelector('[data-tab="history"], [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(root.classList.contains('drawers')).toBe(true);
     expect(root.querySelector('.side-head .list-pin')?.getAttribute('aria-label')).toBe('Pin list');

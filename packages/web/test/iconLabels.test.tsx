@@ -37,8 +37,8 @@ function labelSelector(): string {
 
 describe('the tab strips', () => {
   const strips = [
-    draw(renderTabs(newView(), state, true, { open: null, menu: false, now: 0, changes }, true)),
-    draw(renderSideSwitch('history', state, true, { open: 'chat/a2.md', fit: room(7), menu: false, now: 0, changes }, true)),
+    draw(renderTabs(newView(), state, true, { open: null, menu: false, now: 0, changes, history: true }, true)),
+    draw(renderSideSwitch('history', state, true, { open: 'chat/a2.md', fit: room(7), menu: false, now: 0, changes, history: true }, true)),
   ];
 
   it('TabStrips_EveryTab_ShowsAnIcon', () => {
@@ -68,8 +68,8 @@ describe('the tab strips', () => {
     // History's unread dot stays in its name once the label is hidden.
     expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Chat', 'History, unread', 'Browser', 'Console']);
     expect(strips[0]!.querySelector('.changes-tab ~ [data-tab="console"]')).not.toBeNull();
-    // History has no close mark.
-    expect(strips.map((strip) => strip.querySelector('[data-action="close-history"]'))).toEqual([null, null]);
+    // History has a close mark, as an artifact's tab.
+    expect(strips.map((strip) => strip.querySelector('.history-tab > [data-action="close-history"]')?.getAttribute('aria-label'))).toEqual(['Close History', 'Close History']);
     expect(TABS.every((one) => one.icon !== '')).toBe(true);
   });
 

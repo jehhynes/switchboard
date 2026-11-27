@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitTabs, stripTabs, UNMEASURED } from '../src/tabs.js';
+import { closable, fitTabs, stripTabs, UNMEASURED } from '../src/tabs.js';
 import type { DocTab, StripState, TabFit } from '../src/tabs.js';
 import { renderSideSwitch, renderTabs } from '../src/header.js';
 import { newChanges } from '../src/changes.js';
@@ -17,10 +17,11 @@ const read: LocalTab = { id: 7, target: 'src/b.ts', line: 3, entry: { state: 'ok
 const loading: LocalTab = { id: 4, target: 'docs/a.md', line: null, entry: { state: 'loading' } };
 const links = [frameLink('https://github.com/o/r/issues/1', 'Issue 1'), frameLink('https://github.com/o/r/pull/2', 'PR #2')];
 
-/** Every tab applying: Changes, History, two links, three artifacts out of order, two file tabs and Console. */
+/** Every tab applying: Changes, History open, two links, three artifacts out of order, two file tabs and Console. */
 const full: StripState = {
   shown: 'history',
   stateUnread: false,
+  history: true,
   browser: true,
   links,
   link: links[1]!.url,
@@ -94,11 +95,28 @@ describe('stripTabs', () => {
   it('StripTabs_HistoryShown_DropsItsUnreadDot', () => {
     expect(stripTabs({ ...full, shown: 'history', stateUnread: true }, 'narrow').some((tab) => tab.kind === 'fixed' && tab.unread)).toBe(false);
   });
+
+  it('StripTabs_HistoryNotOpened_LeavesItOutWithItsUnreadDot', () => {
+    const { history: _history, ...closed } = full;
+
+    // Not open by default: no tab, so no unread dot for the state anywhere in the strip, nor in More.
+    for (const state of [closed, { ...full, history: false }]) {
+      const tabs = stripTabs({ ...state, shown: 'conversation', stateUnread: true }, 'narrow');
+
+      expect(ids(tabs)).toEqual(['conversation', ...ORDER.filter((id) => id !== 'history')]);
+      expect(tabs.some((tab) => tab.kind === 'fixed' && tab.unread)).toBe(false);
+    }
+  });
+
+  it('Closable_HistoryLinksArtifactsFiles_HaveACloseMarkAndTheFixedTabsNone', () => {
+    expect(stripTabs(full, 'narrow').filter(closable).map((tab) => tab.id)).toEqual(ORDER.filter((id) => id !== 'changes' && id !== 'console'));
+  });
 });
 
 describe('the strips drawn from stripTabs', () => {
   const state: PageState = { ...EMPTY, artifacts: full.artifacts as ArtifactView[] };
   const strip = { links, link: links[1]!.url, open: null, menu: false, now: 0, files: full.files, changes: newChanges() };
+  const open = { ...strip, history: true };
   const draw = (tree: ReturnType<typeof renderTabs>): HTMLElement[] => {
     const host = document.createElement('div');
 
@@ -111,11 +129,11 @@ describe('the strips drawn from stripTabs', () => {
   const drawnOrder = ['changes', 'history', `link:${links[0]!.url}`, `link:${links[1]!.url}`, 'artifact:chat/a9.md', 'artifact:chat/a5.md', 'artifact:chat/a2.md', 'file:7', 'file:4', 'console'];
 
   it('SideSwitch_EveryTab_DrawnInTheStripOrderSoLeftAndRightFollowIt', () => {
-    expect(draw(renderSideSwitch('history', state, true, strip, true)).map(name)).toEqual(drawnOrder);
+    expect(draw(renderSideSwitch('history', state, true, open, true)).map(name)).toEqual(drawnOrder);
   });
 
   it('ConversationStrip_EveryTab_DrawnInTheSameOrderAfterConversation', () => {
-    expect(draw(renderTabs(newView(), state, true, strip, true)).map(name)).toEqual(['conversation', ...drawnOrder]);
+    expect(draw(renderTabs(newView(), state, true, open, true)).map(name)).toEqual(['conversation', ...drawnOrder]);
   });
 
   it('Strip_TabsBeyondTheFit_GoToMoreAtTheEnd', () => {
@@ -123,13 +141,32 @@ describe('the strips drawn from stripTabs', () => {
     // Room for Changes, History and the first link beside More.
     const fit: TabFit = { width: 350, more: 50, plain: 100, closable: 100, measured: {} };
 
-    mount(host, renderSideSwitch('history', state, true, { ...strip, fit }, true));
-    expect(draw(renderSideSwitch('history', state, true, { ...strip, fit }, true)).map(name)).toEqual(drawnOrder.slice(0, 3));
+    mount(host, renderSideSwitch('history', state, true, { ...open, fit }, true));
+    expect(draw(renderSideSwitch('history', state, true, { ...open, fit }, true)).map(name)).toEqual(drawnOrder.slice(0, 3));
     // After every tab drawn, naming how many it holds, Console among them.
     expect(host.querySelector('nav')!.lastElementChild!.classList.contains('tab-more')).toBe(true);
     expect(host.querySelector('.tab-more-button')!.getAttribute('title')).toBe(`${drawnOrder.length - 3} more tabs`);
     // Each drawn tab names its id, by which the page measures it.
     expect([...host.querySelectorAll<HTMLElement>('nav > [data-id]')].map((tab) => tab.dataset['id'])).toEqual(ORDER.slice(0, 3));
+  });
+
+  it('HistoryTab_Open_DrawsACloseMarkAndNoneWhileClosed', () => {
+    const host = document.createElement('div');
+
+    mount(host, renderSideSwitch('history', { ...state, state: { id: 'st', sessionId: null, at: 0, headline: 'Built', body: null, stale: null, unread: true } }, true, { ...strip, history: true }, true));
+    const tab = host.querySelector<HTMLElement>('.history-tab')!;
+
+    expect(tab.querySelector('[data-side="history"]')!.getAttribute('aria-selected')).toBe('true');
+    expect(tab.querySelector('.tab-close')!.getAttribute('data-action')).toBe('close-history');
+    expect(tab.querySelector('.tab-close')!.getAttribute('aria-label')).toBe('Close History');
+    // Shown, its state is being read, so no dot; another tab shown, the dot is on History's icon.
+    expect(tab.querySelector('.unread-dot')).toBeNull();
+    mount(host, renderSideSwitch('diff', { ...state, state: { id: 'st', sessionId: null, at: 0, headline: 'Built', body: null, stale: null, unread: true } }, true, { ...strip, history: true }, true));
+    expect(host.querySelector('.history-tab [data-side="history"] .unread-dot')).not.toBeNull();
+    // Closed, there is no History tab and no unread dot at all.
+    mount(host, renderSideSwitch('diff', { ...state, state: { id: 'st', sessionId: null, at: 0, headline: 'Built', body: null, stale: null, unread: true } }, true, strip, true));
+    expect(host.querySelector('[data-side="history"]')).toBeNull();
+    expect(host.querySelector('.unread-dot')).toBeNull();
   });
 
   it('LinkTab_Tooltip_IsItsFullNameAndUrl', () => {
@@ -147,8 +184,8 @@ describe('fitTabs', () => {
   // Every tab 100 px, a closable one 120 px, More 60 px.
   const fit = (width: number, measured: Record<string, number> = {}): TabFit => ({ width, more: 60, plain: 100, closable: 120, measured });
   const all = ['conversation', ...ORDER];
-  // 4 plain tabs (Chat, Changes, History, Console) and 7 closable ones (two links, three artifacts, two files).
-  const total = 4 * 100 + 7 * 120;
+  // 3 plain tabs (Chat, Changes, Console) and 8 closable ones (History, two links, three artifacts, two files).
+  const total = 3 * 100 + 8 * 120;
 
   it('FitTabs_UnmeasuredOrRoomForAll_ShowsEveryTab', () => {
     expect(ids2(fitTabs(tabs, UNMEASURED))).toEqual([all, []]);
@@ -159,17 +196,17 @@ describe('fitTabs', () => {
   });
 
   it('FitTabs_TooNarrow_KeepsTheSelectedTabConversationChangesAndHistoryThenTheRestInStripOrder', () => {
-    // 60 for More, 120 for the selected artifact, 100 each for Chat, Changes and History, then the first link at 120: 600.
-    const [shown, hidden] = ids2(fitTabs(tabs, fit(600)));
+    // 60 for More, 120 for the selected artifact, 100 each for Chat and Changes, 120 for History, then the first link at 120: 620.
+    const [shown, hidden] = ids2(fitTabs(tabs, fit(620)));
 
     expect(shown).toEqual(['conversation', 'changes', 'history', `link:${links[0]!.url}`, 'artifact:chat/a2.md']);
     expect(hidden).toEqual(all.filter((id) => !shown.includes(id)));
     // One pixel short of the link: it and every tab after it go, even one that would fit.
-    expect(ids2(fitTabs(tabs, fit(599)))[0]).toEqual(['conversation', 'changes', 'history', 'artifact:chat/a2.md']);
+    expect(ids2(fitTabs(tabs, fit(619)))[0]).toEqual(['conversation', 'changes', 'history', 'artifact:chat/a2.md']);
   });
 
   it('FitTabs_StripTooNarrowForTheKeptTabs_DropsHistoryThenChangesThenConversationButNeverTheSelectedTab', () => {
-    expect(ids2(fitTabs(tabs, fit(479)))[0]).toEqual(['conversation', 'changes', 'artifact:chat/a2.md']);
+    expect(ids2(fitTabs(tabs, fit(499)))[0]).toEqual(['conversation', 'changes', 'artifact:chat/a2.md']);
     expect(ids2(fitTabs(tabs, fit(379)))[0]).toEqual(['conversation', 'artifact:chat/a2.md']);
     expect(ids2(fitTabs(tabs, fit(279)))[0]).toEqual(['artifact:chat/a2.md']);
     expect(ids2(fitTabs(tabs, fit(10)))[0]).toEqual(['artifact:chat/a2.md']);
@@ -181,12 +218,13 @@ describe('fitTabs', () => {
     const conversation = stripTabs({ ...full, shown: 'conversation' }, 'narrow');
 
     expect(ids2(fitTabs(conversation, fit(260)))[0]).toEqual(['conversation', 'changes']);
-    expect(ids2(fitTabs(conversation, fit(360)))[0]).toEqual(['conversation', 'changes', 'history']);
+    expect(ids2(fitTabs(conversation, fit(379)))[0]).toEqual(['conversation', 'changes']);
+    expect(ids2(fitTabs(conversation, fit(380)))[0]).toEqual(['conversation', 'changes', 'history']);
   });
 
   it('FitTabs_MeasuredTab_UsesItsOwnWidthOverItsKinds', () => {
     // The first link measured at 300 px no longer fits where it did at 120.
-    expect(ids2(fitTabs(tabs, fit(600, { [`link:${links[0]!.url}`]: 300 })))[0]).toEqual(['conversation', 'changes', 'history', 'artifact:chat/a2.md']);
+    expect(ids2(fitTabs(tabs, fit(620, { [`link:${links[0]!.url}`]: 300 })))[0]).toEqual(['conversation', 'changes', 'history', 'artifact:chat/a2.md']);
     // A narrow History measured at 60 px lets the first link in at 560.
     expect(ids2(fitTabs(tabs, fit(560, { history: 60 })))[0]).toEqual(['conversation', 'changes', 'history', `link:${links[0]!.url}`, 'artifact:chat/a2.md']);
   });

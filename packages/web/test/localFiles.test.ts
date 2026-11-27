@@ -683,7 +683,7 @@ describe('local file tabs', () => {
       start(true, 10);
       link('Review').click();
       await flush();
-      root.querySelector<HTMLElement>('[data-side="history"]')!.click();
+      root.querySelector<HTMLElement>('#detail [data-action="diff-tab"]')!.click();
       await flush();
       const shownStatus = localGets().length;
 

@@ -87,11 +87,11 @@ export function renderOpening(opening: Opening): VNode {
 const PLACEHOLDER: (string | number[][])[] = ['9em', [[100, 96, 98, 62]], '15em', [[97, 100, 88], [94, 45]], '6em', [[99, 70]]];
 
 /**
- * The tab strip in the place of the work item's own while it opens: Chat where the tabs hold it, then History and Console, dimmed and
+ * The tab strip in the place of the work item's own while it opens: Chat where the tabs hold it, then Changes and Console, dimmed and
  * inert, so the strip keeps its height and the work item's own replaces it in place. `column` for the strip atop the column right of the conversation.
  */
 export function renderOpeningTabs(column: boolean): VNode {
-  const labels = column ? ['History', 'Console'] : ['Chat', 'History', 'Console'];
+  const labels = column ? ['Changes', 'Console'] : ['Chat', 'Changes', 'Console'];
 
   return (
     <nav class={`tabs opening-tabs${column ? ' side-switch' : ''}`} aria-hidden="true">

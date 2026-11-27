@@ -14,6 +14,8 @@ export interface StripState {
   shown: Tab;
   /** Whether the state History shows is unread. */
   stateUnread: boolean;
+  /** Whether the History tab is open: opened on request, until its close mark closes it (main.ts `historyFor`). */
+  history?: boolean | undefined;
   /** Whether the Browser tab shows, which it does only while the strip has no link tabs (`links`). */
   browser: boolean;
   /** The embedded link tabs, while the page has them (architecture.md § Embedded link tabs). */
@@ -48,7 +50,7 @@ export type DocTab =
 export const filePath = (tab: LocalTab): string => (tab.entry.state === 'ok' ? tab.entry.data.path : tab.target);
 
 /**
- * The strip's tabs in order, each only while it applies: Chat (narrow strip only), Changes, History, the links (or Browser),
+ * The strip's tabs in order, each only while it applies: Chat (narrow strip only), Changes, History while open, the links (or Browser),
  * the artifacts newest first but those closed, unless shown, the file tabs in the order they were opened, then Console.
  */
 export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
@@ -61,7 +63,7 @@ export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
   return [
     ...(layout === 'narrow' ? [fixed('conversation')] : []),
     ...(state.changes ? [{ id: 'changes', kind: 'changes' as const, selected: shown === 'diff' }] : []),
-    fixed('history'),
+    ...(state.history === true ? [fixed('history')] : []),
     ...(state.links === undefined ? (state.browser ? [fixed('browser')] : []) : state.links.map((link): DocTab => ({ id: `link:${link.url}`, kind: 'link', link, selected: shown === 'browser' && state.link === link.url }))),
     ...artifacts.map((artifact): DocTab => ({ id: `artifact:${artifact.path}`, kind: 'artifact', artifact, selected: shown === 'artifacts' && artifact.path === state.open })),
     ...state.files.tabs.map((file): DocTab => ({ id: `file:${filePath(file)}`, kind: 'file', file, selected: shown === 'file' && file.id === state.files.open })),
@@ -85,8 +87,8 @@ export interface TabFit {
 /** A strip not measured yet, which shows every tab. */
 export const UNMEASURED: TabFit = { width: 0, more: 0, plain: 0, closable: 0, measured: {} };
 
-/** Whether a tab has a close mark: a link, an artifact or a file. */
-export const closable = (tab: DocTab): boolean => tab.kind === 'link' || tab.kind === 'artifact' || tab.kind === 'file';
+/** Whether a tab has a close mark: History, a link, an artifact or a file. */
+export const closable = (tab: DocTab): boolean => tab.id === 'history' || tab.kind === 'link' || tab.kind === 'artifact' || tab.kind === 'file';
 
 /** The tabs a strip short of room keeps first after the selected one, in this order. */
 const FIRST_KEPT = ['conversation', 'changes', 'history'];

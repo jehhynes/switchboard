@@ -63,7 +63,7 @@ function Row({ row, selected, menu, menuPoint, pillsOpen, movable, drag, index, 
   const dragged = drag !== null && drag.dragging === row.workItemId ? ['dragging'] : [];
   const classes = ['row', ...(row.stripe === null ? [] : [`stripe-${row.stripe}`]), ...(row.dim ? ['dim'] : []), ...(selected ? ['selected'] : []), ...(movable ? ['movable'] : []), ...dragged, ...dropEdge].join(' ');
   const key = rowKey(row);
-  const hasMenu = row.actions.length + row.pastes.length + row.opens.length + row.links.length > 0 || row.url !== '' || row.history !== null;
+  const hasMenu = row.actions.length + row.pastes.length + row.opens.length + row.links.length > 0 || row.url !== '' || row.workItemId !== null;
   // Without the browser pane a pill with a link opens it instead of the row's click (PRD R52).
   const opens = (which: string): Record<string, string> => (pillsOpen ? { 'data-action': 'open-link', 'data-row': key, 'data-link': which } : {});
   // The key's source logo, a plugin's own or a built-in one, stands for its label, such as `gh`, which is left in for screen readers.

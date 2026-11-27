@@ -964,11 +964,12 @@ describe('the Console tab', () => {
 
   it('is the last tab, after Changes, in both strips', () => {
     const state = { ...EMPTY, connected: true, scope, session: session() };
+    const opened = { open: null, menu: false, now: 0, history: true };
 
-    expect([...html(renderTabs(newView(), state)).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'history', 'console']);
-    expect([...html(renderSideSwitch('console', state)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['history', 'console']);
-    expect(html(renderSideSwitch('console', state))).toMatch(/aria-selected="true"[^>]*aria-label="Console"[ >]/);
-    expect([...html(renderSideSwitch('browser', state, true)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['history', 'browser', 'console']);
+    expect([...html(renderTabs(newView(), state, false, opened)).matchAll(/data-tab="(\w+)"/g)].map((match) => match[1])).toEqual(['conversation', 'history', 'console']);
+    expect([...html(renderSideSwitch('console', state, false, opened)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['history', 'console']);
+    expect(html(renderSideSwitch('console', state, false, opened))).toMatch(/aria-selected="true"[^>]*aria-label="Console"[ >]/);
+    expect([...html(renderSideSwitch('browser', state, true, opened)).matchAll(/data-side="(\w+)"/g)].map((match) => match[1])).toEqual(['history', 'browser', 'console']);
     // After Changes, and before the column's end, as the maximize button.
     const strip = { open: null, menu: false, now: 0, changes: newChanges() };
 
@@ -1023,7 +1024,7 @@ describe('the Console tab', () => {
     // A redraw keeps the mounted console; another tab ends it.
     source.emit('session', { type: 'session', session: session({ state: 'running' }) });
     expect(mounts).toHaveLength(1);
-    root.querySelector<HTMLElement>('[data-tab="history"]')!.click();
+    root.querySelector<HTMLElement>('[data-tab="conversation"]')!.click();
     expect(mounts[0]!.disposed).toBe(true);
     expect(root.querySelector('.console')).toBeNull();
     root.querySelector<HTMLElement>('[data-tab="console"]')!.click();

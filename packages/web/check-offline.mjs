@@ -524,7 +524,12 @@ try {
       const found = [];
 
       await open(2);
-      await evaluate('document.querySelector("#head [data-tab=\\"history\\"]")?.click()');
+      // History shows only on request: the Actions menu opens it, selected.
+      await evaluate('document.querySelector("[data-action=actions]").click()');
+      await wait(100);
+      await evaluate('document.querySelector(".actions-menu [data-action=row-history]").click()');
+      await wait(100);
+      if ((await evaluate('document.querySelector("#head [data-tab=\\"history\\"]")?.getAttribute("aria-selected")')) !== 'true') found.push('History from the Actions menu is not selected');
       await evaluate('(() => { const box = document.querySelector("#composer textarea"); box.value = "Half a thought"; box.dispatchEvent(new Event("input", { bubbles: true })); })()');
       await wait(300);
       const hash = await evaluate('location.hash');

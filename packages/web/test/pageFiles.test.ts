@@ -344,7 +344,7 @@ describe('the page in use', () => {
 
     click('button.actions');
     // The row menu's groups: main, work, state, order, what the row opens, and what asks first.
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Approve', 'Stop session', 'Mark done', 'Snooze…', 'Move up', 'Copy Reply', 'Delete']);
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Approve', 'Stop session', 'Mark done', 'Snooze…', 'Move up', 'Copy Reply', 'History', 'Delete']);
     expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(5);
     click('.actions-menu [data-label="Move up"]');
     await flush();
@@ -432,7 +432,7 @@ describe('the page in use', () => {
     hello(source, { groups: [listGroup('review', [listRow(1, { pastes: ['Reply', 'Summary'] })])] });
     click('button.actions');
     // One Copy item, closed, in place of an item per draft.
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy']);
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy', 'History']);
     expect(root.querySelector('.actions-menu [data-action="copy-menu"]')!.getAttribute('aria-expanded')).toBe('false');
     click('.actions-menu [data-action="copy-menu"]');
     expect(root.querySelector('.actions-menu [data-action="copy-menu"]')!.getAttribute('aria-expanded')).toBe('true');
@@ -490,8 +490,8 @@ describe('the page in use', () => {
     expect(root.querySelector('.sheet')).toBeNull();
 
     click('button.actions');
-    // Add comment… is its own group.
-    expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(2);
+    // Add comment… is its own group, before History's.
+    expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(3);
     click('.actions-menu [data-label="Start with guidance…"]');
     expect(root.querySelector<HTMLSelectElement>('.sheet-select')!.value).toBe('dev:build');
     // Neither a text nor a changed choice: the button waits.
@@ -534,8 +534,8 @@ describe('the page in use', () => {
 
     hello(source, { groups: [listGroup('review', [listRow(1, { title: 'Fix it', opens, pastes: ['Reply'], url: 'https://github.com/o/r/issues/1' })])] });
     click('button.actions');
-    // One group: Copy, then what opens in VS Code, then the ticket.
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code', 'Open report', 'Open ticket']);
+    // One group: Copy, then what opens in VS Code, History, then the ticket.
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code', 'Open report', 'History', 'Open ticket']);
     expect(root.querySelectorAll('.actions-menu .menu-separator')).toHaveLength(0);
     expect(root.querySelector('.actions-menu [data-label="Open in VS Code"] .codicon-vscode')).not.toBeNull();
     // Open report reads its draft through local-file into a file tab, never through VS Code.
@@ -580,7 +580,7 @@ describe('the page in use', () => {
     await flush();
     expect(files()).toEqual([]);
     expect(shownArtifact()).toBe('chat/plan.md');
-    click('#detail [data-side="history"]');
+    click('#detail [data-action="diff-tab"]');
     const read1 = reads();
 
     click('#panel a.path-link[data-target=".wip/artifacts/w1/chat/plan.md"]');
@@ -623,7 +623,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click(link);
     await settle();
     expect(shown()).toBe('artifact:chat/plan.md');
-    click('#detail [data-side="history"]');
+    click('#detail [data-action="diff-tab"]');
 
     // The link now resolves to a file outside the artifact folder: it opens that file, not the artifact it named before.
     answers['local-file'] = read('D:/elsewhere/plan.md');
@@ -631,7 +631,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await settle();
     expect(shown()).toBe('file:D:/elsewhere/plan.md');
     click('#detail .local-tab.selected [data-action="local-close"]');
-    click('#detail [data-side="history"]');
+    click('#detail [data-action="diff-tab"]');
 
     // A read the hub refuses now, as on a paired device, says why and opens no artifact.
     answers['local-file'] = { status: 403, body: { error: 'This device can only open files in the work item’s folders.' } };
@@ -657,14 +657,14 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     hello(source, { items: [reply('r1', 2, { opening: `See [plan](${plan}).` })] });
     click(`#panel a.path-link[data-target="${plan}"]`);
     await flush();
-    click('#detail [data-side="history"]');
+    click('#detail [data-action="diff-tab"]');
 
     const before = kept();
 
     release();
     await flush();
     await flush();
-    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail [data-action="diff-tab"]')?.getAttribute('aria-selected')).toBe('true');
     expect(root.querySelector('#detail .local-tab')).toBeNull();
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).not.toBeNull();
     expect(kept()).toBe(before);
@@ -759,7 +759,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click('#panel a.path-link[data-target="src/b.ts"]');
     await flush();
     click('#detail .local-tab [data-action="local-tab"]');
-    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['changes', 'history', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'console']);
+    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['changes', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'console']);
     expect(shown()).toBe('file:src/a.ts');
 
     // Closing a tab not shown changes nothing else, a file's or an artifact's.
@@ -771,12 +771,12 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(shown()).toBe('file:src/a.ts');
     expect(kept().slice(before)).toEqual([expect.objectContaining({ close: { path: 'chat/plan.md', updatedAt: 1_500 } })]);
 
-    // Closing the tab shown shows the one before it, an artifact here, then with no document left Status; neither is kept as a choice.
+    // Closing the tab shown shows the one before it, an artifact here, then with no document left Changes; neither is kept as a choice.
     click('#detail .local-tab.selected [data-action="local-close"]');
     expect(shown()).toBe('artifact:chat/p.html');
     expect(kept().slice(before)).toHaveLength(1);
     click('#detail .artifact-tab.selected .tab-close');
-    expect(shown()).toBe('history');
+    expect(shown()).toBe('changes');
     expect(kept().slice(before)).toEqual([expect.objectContaining({ close: { path: 'chat/plan.md', updatedAt: 1_500 } }), expect.objectContaining({ close: { path: 'chat/p.html', updatedAt: 1_500 } })]);
     page.close();
   });
@@ -796,9 +796,9 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(root.querySelector('#head .artifact-tab[data-path="chat/plan.md"]')).toBeNull();
     expect(root.querySelector('#head [data-tab="conversation"]')?.getAttribute('aria-selected')).toBe('true');
     expect(root.classList.contains('off-conversation')).toBe(false);
-    // On a wider page the column shows Status, as it would have.
+    // On a wider page the column shows Changes, as it would have.
     resizeTo(1920);
-    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail [data-action="diff-tab"]')?.getAttribute('aria-selected')).toBe('true');
     expect(kept()).toBe(before);
     page.close();
   });
@@ -842,7 +842,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     // Chosen again, it reads again; a failed read keeps what it shows.
     answers['local-file'] = { status: 500, body: { error: 'The disk is busy.' } };
-    click('#detail [data-side="history"]');
+    click('#detail [data-action="diff-tab"]');
     click('#detail [data-action="local-tab"]');
     await settle();
     expect(reads()).toBe(3);
@@ -891,7 +891,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     expect(kept()).toEqual([]);
     page.close();
 
-    // Closed on every device, it stays closed: Status shows.
+    // Closed on every device, it stays closed: Changes shows.
     localStorage.setItem('switchboard.tabs', JSON.stringify({ w1: tabs(plan) }));
     const again = start();
 
@@ -899,7 +899,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     await flush();
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/plan.md"]')).toBeNull();
-    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('#detail [data-action="diff-tab"]')?.getAttribute('aria-selected')).toBe('true');
     expect(kept()).toEqual([]);
 
     // A read that answers after the page has left its work item is dropped, there and on the work item's return.
@@ -1011,7 +1011,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', pastes: ['Reply'], opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })])] });
     expect(root.querySelector('[data-tab="console"]')).not.toBeNull();
     click('button.actions');
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code']);
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Copy Reply', 'Open in VS Code', 'History']);
     page.close();
   });
 
@@ -1021,12 +1021,12 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
 
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', opens })])] });
     click('button.actions');
-    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open report']);
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open report', 'History']);
     click('button.actions');
     // A list event drops it too, and the row's own menu shows the same rows.
     source.emit('list', { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', opens })])] });
     root.querySelector('#list .row')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
-    expect([...root.querySelectorAll('#list .row-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open report']);
+    expect([...root.querySelectorAll('#list .row-menu .menu-row')].map((row) => row.textContent)).toEqual(['Open report', 'History']);
     expect(root.querySelector('[data-action="row-command"]')).toBeNull();
     page.close();
   });
@@ -1035,7 +1035,10 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const { page, source } = start(undefined, { local: false });
 
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', opens: [{ label: 'Open in VS Code', icon: 'vscode' }] })])] });
-    expect(root.querySelector('button.actions')).toBeNull();
+    // History keeps a menu, with nothing else in it.
+    click('button.actions');
+    expect([...root.querySelectorAll('.actions-menu .menu-row')].map((row) => row.textContent)).toEqual(['History']);
+    expect(root.querySelector('[data-action="row-command"]')).toBeNull();
     page.close();
   });
 

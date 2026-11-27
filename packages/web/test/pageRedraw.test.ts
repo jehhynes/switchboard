@@ -31,6 +31,9 @@ describe('the page', () => {
     return { page, source: FakeSource.last! };
   };
   const flush = () => new Promise((resolve) => setImmediate(resolve));
+  /** Keeps work item 1's History tab open, on the Chat tab, so it is there to switch to. */
+  const keepHistoryOpen = () =>
+    localStorage.setItem('switchboard.tabs', JSON.stringify({ w1: { side: 'history', tab: 'conversation', artifact: null, changes: false, changesFile: null, files: [], file: null, history: true } }));
 
 
   it('redraws by changing only what differs, keeping the focus on a list row and the conversation at its end until the operator scrolls away', () => {
@@ -136,6 +139,8 @@ describe('the page', () => {
   });
 
   it('keeps the composer\'s box across tabs, says Sent in the toast after a send that ends off the Chat tab, shows it for files dropped there, and shows an ended session\'s reason above the composer', async () => {
+    // The route opens the History tab, which shows only on request.
+    history.replaceState(null, '', '#w=1&t=history');
     const { page, source } = start();
     const composer = root.querySelector<HTMLElement>('#composer')!;
 
@@ -151,7 +156,7 @@ describe('the page', () => {
     await flush();
     await flush();
     expect(posts.some((post) => post.url.endsWith('/send') && post.body['text'] === 'From the status')).toBe(true);
-    expect(root.querySelector('.tab.selected')?.getAttribute('data-tab')).toBe('history');
+    expect(root.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-tab')).toBe('history');
     // The folded tabs hide the composer off the Chat tab, so the toast says it went, not the composer's own line.
     expect(root.classList.contains('off-conversation')).toBe(true);
     expect(composer.querySelector<HTMLElement>('.composer-sent')!.hidden).toBe(true);
@@ -189,6 +194,7 @@ describe('the page', () => {
 
   it('marks #root.off-conversation while the tabs show another tab, which hides the composer, keeping the draft and dropping its focus, and never in the wide layout', () => {
     window.innerWidth = 700;
+    keepHistoryOpen();
 
     const { page, source } = start();
     const composer = root.querySelector<HTMLElement>('#composer')!;
@@ -224,6 +230,7 @@ describe('the page', () => {
     vi.useFakeTimers();
     onTestFinished(() => void vi.useRealTimers());
     window.innerWidth = 700;
+    keepHistoryOpen();
 
     const { page, source } = start();
     const composer = root.querySelector<HTMLElement>('#composer')!;
@@ -294,6 +301,7 @@ describe('the page', () => {
     onTestFinished(() => void vi.useRealTimers());
     window.innerWidth = 700;
 
+    keepHistoryOpen();
     const fetch = vi.fn(async (url: string) =>
       (url.endsWith('/mic') ? { status: 409, ok: false, json: async () => ({ error: 'The mic did not change.' }), text: async () => '' } : { status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response,
     );
@@ -327,6 +335,7 @@ describe('the page', () => {
   });
 
   it('brings the conversation back where the operator left it after the Status tab', () => {
+    keepHistoryOpen();
     const { page, source } = start();
 
     source.emit('hello', { key: 'pk', groups: [], scope, sessions: [session()], items: [reply('r1', 1)], more: false, state: null, artifacts: [] });

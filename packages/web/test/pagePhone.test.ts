@@ -578,7 +578,7 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     // At once: the column stays, its strip History and Console dimmed over a loading note, and the composer keeps its place, hidden by page.css.
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.classList.contains('item-opening')).toBe(true);
-    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['History', 'Console']);
+    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['Changes', 'Console']);
     expect(root.querySelector('#detail .detail-head .opening-tabs')?.getAttribute('aria-hidden')).toBe('true');
     expect(root.querySelector('#detail .detail-body .opening-side')?.textContent).toContain('Loading…');
     expect(root.querySelector('#head .opening-tabs')).toBeNull();
@@ -589,27 +589,29 @@ it("turns the mic off through Back's path when a phone's conversation is left by
     expect(root.classList.contains('wide')).toBe(true);
     expect(root.classList.contains('item-opening')).toBe(false);
     expect(root.querySelector('#detail .opening-tabs')).toBeNull();
-    expect(root.querySelector('#detail .detail-head [data-side="history"]')).not.toBeNull();
+    expect(root.querySelector('#detail .detail-head .changes-tab')).not.toBeNull();
     expect(root.querySelector('#detail .detail-body .opening-side')).toBeNull();
 
     // Where the tabs fold into the conversation's, the placeholder strip is under its head; a refused open keeps it, and the column comes back
     // with no loading note when the page widens.
     resizeTo(1000);
     refuse = true;
-    root.querySelector<HTMLElement>('#head [data-tab="history"]')!.click();
+    root.querySelector<HTMLElement>('[data-action="actions"]')!.click();
+    root.querySelector<HTMLElement>('.actions-menu [data-action="row-history"]')!.click();
+    expect(root.querySelector('#head [data-tab="history"]')?.getAttribute('aria-selected')).toBe('true');
     expect(root.classList.contains('off-conversation')).toBe(true);
     root.querySelector<HTMLElement>('[data-work-item="1"]')!.click();
     // It opens on the Chat tab, so the composer keeps its place meanwhile.
     expect(root.classList.contains('off-conversation')).toBe(false);
-    expect(labels('#head .opening-tabs .tab')).toEqual(['Chat', 'History', 'Console']);
+    expect(labels('#head .opening-tabs .tab')).toEqual(['Chat', 'Changes', 'Console']);
     await flush();
     await flush();
     expect(root.querySelector('#panel .opening-failed')).not.toBeNull();
     expect(root.classList.contains('wide')).toBe(false);
-    expect(labels('#head .opening-tabs .tab')).toEqual(['Chat', 'History', 'Console']);
+    expect(labels('#head .opening-tabs .tab')).toEqual(['Chat', 'Changes', 'Console']);
     resizeTo(1440);
     expect(root.classList.contains('wide')).toBe(true);
-    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['History', 'Console']);
+    expect(labels('#detail .detail-head .opening-tabs .tab')).toEqual(['Changes', 'Console']);
     expect(root.querySelector('#detail .detail-body')?.textContent).toBe('');
     expect(root.querySelector('#head .opening-tabs')).toBeNull();
     page.close();

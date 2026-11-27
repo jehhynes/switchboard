@@ -47,6 +47,11 @@ describe('the page in use', () => {
   };
   const flush = () => new Promise((resolve) => setImmediate(resolve));
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
+  /** Opens History from the conversation header's ··· menu. */
+  const openHistory = () => {
+    click('[data-action="actions"]');
+    click('.actions-menu [data-action="row-history"]');
+  };
   /** The panel's text as read: a folded reply's fade is only a glimpse, hidden from screen readers. */
   const shownText = () => {
     const panel = root.querySelector('#panel')!.cloneNode(true) as Element;
@@ -95,7 +100,7 @@ describe('the page in use', () => {
     const { page, source } = start(async () => true);
 
     hello(source);
-    click('[data-tab="history"]');
+    openHistory();
     await flush();
     expect(drawn).toEqual(['graph TD; A-->B;\n']);
     expect(root.querySelector('pre.mermaid')!.textContent).toBe('svg');
@@ -132,7 +137,7 @@ describe('the page in use', () => {
     const workState = (body: string) => ({ id: 'st-r1', sessionId: 's', at: 5_000, headline: 'Working on it', body, stale: null, unread: false });
 
     hello(source);
-    click('[data-tab="history"]');
+    openHistory();
     await flush();
     expect(drawn).toEqual(['graph TD; A-->B;\n']);
     source.emit('state', { state: workState('```mermaid\ngraph TD; A-->C;\n```') });
@@ -201,7 +206,7 @@ describe('the page in use', () => {
     // A changed artifact is unread again, with the dot on its own tab where the strip has room for it, until its tab shows it.
     vi.restoreAllMocks();
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
-    click('#detail [data-side="history"]');
+    openHistory();
     source.emit('artifact', { artifact: { path: 'chat/a4.md', owner: 'chat', kind: 'note', title: 'Note 4', ext: 'md', type: 'markdown', updatedAt: 20_000 } });
     const tabDot = (path: string) => root.querySelector(`#detail .artifact-tab[data-path="${path}"] .tab-open > :is(.codicon, .file-icon) + .unread-dot`);
 
@@ -273,7 +278,7 @@ describe('the page in use', () => {
     again.page.close();
   });
 
-  it("shows History as a tab of the column after Changes, opened from its tab and not the header's actions menu, with Console last, and an artifact's tab replaces it", () => {
+  it('HistoryTab_HeaderMenu_OpensItAfterChangesBeforeConsoleAndAnArtifactTabReplacesIt', () => {
     window.innerWidth = 1920;
     history.replaceState(null, '', '#w=1');
     onTestFinished(() => {
@@ -281,25 +286,25 @@ describe('the page in use', () => {
     });
 
     const { page, source } = start();
-    const tabs = () => [...root.querySelectorAll('#detail .side-switch > .tab:not(.artifact-tab):not(.panel-max)')].map((one) => one.textContent);
+    const tabs = () => [...root.querySelectorAll('#detail .side-switch > .tab:not(.artifact-tab):not(.panel-max), #detail .side-switch > .history-tab')].map((one) => one.textContent);
 
-    // History is in the strip whether or not the row offers the ticket's History.
+    // History has no tab until asked for, whether or not the row offers the ticket's History.
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
-    expect(tabs()).toEqual(['Changes', 'History', 'Console']);
+    expect(tabs()).toEqual(['Changes', 'Console']);
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' }, actions: [{ label: 'Mark done', action: 'done', icon: 'check', group: 'state', confirm: null, input: null }] })])] });
     source.emit('artifact', { artifact: { path: 'chat/new.md', owner: 'chat', kind: 'note', title: 'New', ext: 'md', type: 'markdown', updatedAt: 1 } });
-    // Console comes last, before the maximize button.
-    expect(tabs()).toEqual(['Changes', 'History', 'Console']);
+    expect(tabs()).toEqual(['Changes', 'Console']);
     expect(root.querySelector('#detail .side-switch > :last-child')?.classList.contains('panel-max')).toBe(true);
     expect(root.querySelector('#detail .artifact-tab[data-path="chat/new.md"]')).not.toBeNull();
-    // The header's actions menu has no History, which its tab beside it opens (operator decision 2026-11-26).
+    // The header's actions menu opens it, selected, after Changes, with Console last, before the maximize button (operator decision 2026-11-27).
     click('[data-action="actions"]');
-    expect(root.querySelector('.actions-menu .menu-row')).not.toBeNull();
-    expect(root.querySelector('.actions-menu [data-action="row-history"]')).toBeNull();
-    click('[data-action="actions"]');
-    click('#detail [data-side="history"]');
+    expect(root.querySelector('.actions-menu [data-action="row-history"]')?.textContent).toBe('History');
+    click('.actions-menu [data-action="row-history"]');
+    expect(root.querySelector('.actions-menu')).toBeNull();
     expect(tabs()).toEqual(['Changes', 'History', 'Console']);
+    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((one) => one.getAttribute('data-id'))).toEqual(['changes', 'history', 'artifact:chat/new.md', 'console']);
     expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(root.querySelector('#detail [data-side="history"]'));
     expect(root.querySelector('#detail .detail-body .history-view')).not.toBeNull();
     // History lies in its tab, not over the conversation: the conversation and its column stay.
     expect(root.classList.contains('history')).toBe(false);
@@ -309,9 +314,13 @@ describe('the page in use', () => {
     expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-path')).toBe('chat/new.md');
     expect(root.querySelector('.history-view')).toBeNull();
     expect(JSON.parse(localStorage.getItem('switchboard.artifactsSeen')!)).toEqual({ '1': { 'chat/new.md': 1 } });
+    // Chosen again from the menu while open, it is selected and stays one tab.
+    click('[data-action="actions"]');
+    click('.actions-menu [data-action="row-history"]');
+    expect(tabs()).toEqual(['Changes', 'History', 'Console']);
+    expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
 
     // A row that stops offering History keeps the tab, which then shows the head and the state alone.
-    click('#detail [data-side="history"]');
     hello(source, { artifacts: [], groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])] });
     expect(tabs()).toContain('History');
     expect(root.querySelector('#detail [data-side="history"]')?.getAttribute('aria-selected')).toBe('true');
@@ -334,10 +343,11 @@ describe('the page in use', () => {
       source.emit('artifact', { artifact: { path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 10_000 + index } });
     }
 
-    const paths = () => [...root.querySelectorAll<HTMLElement>('#detail .artifact-tab')].map((tab) => tab.dataset['path']);
+    const paths = () => [...root.querySelectorAll<HTMLElement>('#detail .artifact-tab[data-path]')].map((tab) => tab.dataset['path']);
     const selected = () => root.querySelector<HTMLElement>('#detail .tabs > .tab.selected');
     const menuRows = () => [...root.querySelectorAll<HTMLElement>('#detail .tab-menu .menu-row')];
 
+    openHistory();
     // Unmeasured, the strip shows every tab and no More.
     expect(paths()).toHaveLength(10);
     expect(root.querySelector('#detail .tab-more')).toBeNull();
@@ -349,7 +359,7 @@ describe('the page in use', () => {
     click('#detail [data-side="console"]');
     expect(paths()).toEqual(['chat/a7.md', 'chat/a6.md', 'chat/a5.md', 'chat/a4.md']);
     expect(root.querySelector('#detail .side-switch > .changes-tab')).not.toBeNull();
-    expect(root.querySelector('#detail .side-switch > [data-side="history"]')).not.toBeNull();
+    expect(root.querySelector('#detail .side-switch > [data-id="history"]')).not.toBeNull();
     expect(root.querySelector('#detail .tab-more-button')!.getAttribute('title')).toBe('6 more tabs');
 
     // More lists the rest in strip order, the older artifacts; picking one chooses it, closes the menu, and gives it a tab in place of Console,
@@ -454,7 +464,7 @@ describe('the page in use', () => {
     // Another device closing the open artifact shows Status here, and keeps nothing.
     source.emit('tabs', { workItemId: 1, tabs: { tab: null, closed: [{ path: 'chat/a1.md', updatedAt: 10_001 }] } });
     expect(kept()).toHaveLength(echoed);
-    expect(selected()!.getAttribute('data-side')).toBe('history');
+    expect(selected()!.getAttribute('data-id')).toBe('history');
     expect(paths()).not.toContain('chat/a1.md');
     narrow.mockRestore();
     click('#detail [data-side="history"]');
@@ -467,8 +477,8 @@ describe('the page in use', () => {
     // An artifact that goes away leaves Status shown.
     click('#detail .artifact-tab[data-path="chat/a7.md"]');
     hello(source, { artifacts: [] });
-    expect(root.querySelector('#detail .artifact-tab')).toBeNull();
-    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-side')).toBe('history');
+    expect(root.querySelector('#detail .artifact-tab[data-path]')).toBeNull();
+    expect(root.querySelector('#detail .tab.selected')!.getAttribute('data-id')).toBe('history');
     vi.unstubAllGlobals();
     page.close();
   });
@@ -501,7 +511,7 @@ describe('the page in use', () => {
     };
     const selected = () => root.querySelector<HTMLElement>('#detail .tabs > .tab.selected, #detail .tabs > .selected')!.dataset['id'];
 
-    click('#detail [data-side="history"]');
+    openHistory();
     expect(root.querySelector('#detail .tab-more')).not.toBeNull();
 
     // A press on another tab in the strip chooses it and closes the menu.
@@ -601,8 +611,10 @@ describe('the page in use', () => {
       source.emit('artifact', { artifact: { path: `chat/a${index}.md`, owner: 'chat', kind: 'note', title: `Note ${index}`, ext: 'md', type: 'markdown', updatedAt: 10_000 + index } });
     }
 
+    openHistory();
+
     // page.css's sizing: --sb-tab-pad is 14 px, or 9 px in a strip of 480 px or less. Each tab is drawn at its least width under the padding in
-    // force, its label 44 px: an artifact's pad + 99 px, Status 2 * pad + 67 px, Changes 2 * pad + 111 px, More 2 * pad + 43 px.
+    // force, its label 44 px: a closable tab's, an artifact's or History's, pad + 99 px, another 2 * pad + 67 px, Changes 2 * pad + 111 px, More 2 * pad + 43 px.
     let pad = 14;
     let strip = 600;
 
@@ -626,20 +638,20 @@ describe('the page in use', () => {
     const shown = () => [...root.querySelectorAll<HTMLElement>('#detail .tabs > [data-id]')].map((tab) => tab.dataset['id']);
     const redraw = () => click('#detail [data-side="history"]');
 
-    // 600 px at 14 px padding: Changes (139 px), History (95 px) and two artifacts (113 px each) beside More (71 px); the rest, hidden, were
+    // 600 px at 14 px padding: Changes (139 px), History (113 px) and two artifacts (113 px each) beside More (71 px); the rest, hidden, were
     // measured at 113 px.
     redraw();
     expect(shown()).toEqual(['changes', 'history', 'artifact:chat/a7.md', 'artifact:chat/a6.md']);
-    // 385 px takes 9 px padding: Changes 129 px, History 85 px and More 61 px leave 110 px, one artifact's room at 108 px. With a7 closed, a6
+    // 408 px takes 9 px padding: Changes 129 px, History 108 px and More 61 px leave 110 px, one artifact's room at 108 px. With a7 closed, a6
     // fits at 108 px, which a measure kept from 14 px padding would hide.
-    strip = 385;
+    strip = 408;
     pad = 9;
     redraw();
     expect(shown()).toEqual(['changes', 'history', 'artifact:chat/a7.md']);
     root.querySelector<HTMLElement>('#detail .artifact-tab[data-path="chat/a7.md"] .tab-close')!.click();
     expect(shown()).toEqual(['changes', 'history', 'artifact:chat/a6.md']);
-    // Back to 14 px padding at 750 px: Changes, History and More leave 445 px, room for three artifacts at 113 px, not for a fourth that
-    // measures kept from 9 px padding (Changes 129 px, History 85 px, a6 108 px) would let in.
+    // Back to 14 px padding at 750 px: Changes, History and More leave 427 px, room for three artifacts at 113 px, not for a fourth that
+    // measures kept from 9 px padding (Changes 129 px, History 108 px, a6 108 px) would let in.
     strip = 750;
     pad = 14;
     redraw();
@@ -657,18 +669,16 @@ describe('the page in use', () => {
 
     hello(source);
     source.emit('artifact', { artifact: { path: 'chat/a7.md', owner: 'chat', kind: 'note', title: 'Note 7', ext: 'md', type: 'markdown', updatedAt: 10_007 } });
-    // History drawn with its whole 90 px label (141 px), Changes 139 px, an artifact 113 px with its label at 44 px, and More 71 px in a 440 px strip: History and Changes
-    // leave 89 px, too little for the artifact. Counting History's label cut to 44 px (95 px) would keep the artifact, which then passes the strip.
+    // Changes, the fixed tab chosen, drawn with its whole 90 px label (141 px), an artifact 113 px with its label at 44 px, and More 71 px in a 300 px strip:
+    // Changes leaves 88 px, too little for the artifact. Counting Changes' label cut to 44 px (95 px) would keep the artifact, which then passes the strip.
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
       const width = this.matches('#detail .tabs')
-        ? 440
+        ? 300
         : this.matches('#detail .tabs > .tab-more')
           ? 71
           : this.matches('#detail .tabs > .changes-tab')
-            ? 139
-            : this.matches('#detail .tabs > [data-side="history"]')
-              ? 141
-              : this.matches('#detail .tabs > [data-id]')
+            ? 141
+            : this.matches('#detail .tabs > [data-id]')
                 ? 113
                 : this.matches('#detail .tabs > .tab > .tab-label')
                   ? 90
@@ -681,9 +691,9 @@ describe('the page in use', () => {
 
     const shown = () => [...root.querySelectorAll<HTMLElement>('#detail .tabs > [data-id]')].map((tab) => tab.dataset['id']);
 
-    click('#detail [data-side="history"]');
-    click('#detail [data-side="history"]');
-    expect(shown()).toEqual(['changes', 'history']);
+    click('#detail .changes-tab');
+    click('#detail .changes-tab');
+    expect(shown()).toEqual(['changes']);
     expect(root.querySelector('#detail .tab-more-button')).not.toBeNull();
     page.close();
   });
@@ -693,12 +703,12 @@ describe('the page in use', () => {
 
     answers['/artifact/'] = { status: 200, body: {}, text: '---\ntitle: Plan\n---\n# Plan\n\n![pic](plan/pic.png) ![up](../x.png)' };
     hello(source);
-    click('[data-tab="history"]');
+    openHistory();
     expect(root.querySelector('#panel')!.innerHTML).toContain('hist-now');
     expect(mermaid).toHaveBeenCalled();
     // Each artifact has its own tab, newest first, and no Artifacts tab lists them.
     expect(root.querySelector('[data-tab="artifacts"]')).toBeNull();
-    expect([...root.querySelectorAll<HTMLElement>('#head .artifact-tab')].map((tab) => tab.dataset['path'])).toHaveLength(2);
+    expect([...root.querySelectorAll<HTMLElement>('#head .artifact-tab[data-path]')].map((tab) => tab.dataset['path'])).toHaveLength(2);
     click('#head .artifact-tab[data-path="chat/plan.md"]');
     await flush();
     await flush();
@@ -714,7 +724,7 @@ describe('the page in use', () => {
     // Closing its tab shows the tab after it, with none before it, and the closed tab goes.
     click('#head .artifact-tab.selected .tab-close');
     expect(root.querySelector('#head .tab.selected')!.getAttribute('data-path')).toBe('chat/p.html');
-    expect(root.querySelectorAll('#head .artifact-tab')).toHaveLength(1);
+    expect(root.querySelectorAll('#head .artifact-tab[data-path]')).toHaveLength(1);
     click('#head .artifact-tab[data-path="chat/p.html"]');
     expect(root.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
     click('[data-tab="conversation"]');

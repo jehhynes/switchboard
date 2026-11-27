@@ -184,6 +184,8 @@ describe('the page', () => {
 
     document.body.replaceChildren(root);
     localStorage.clear();
+    // History open, so the strip has a tab to switch to that keeps every artifact out of the chosen one.
+    history.replaceState(null, '', '#w=1&t=history');
 
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000 });
 
@@ -193,7 +195,7 @@ describe('the page', () => {
 
     // Newest first: old.md, last.svg, more.md, x.zzz with the plain file icon, data.json, chart.html, notes.md.
     const shown = ['file-icon seti-1', 'file-icon seti-4', 'file-icon seti-1', 'file-icon seti-0', 'file-icon seti-3', 'file-icon seti-2', 'file-icon seti-1'];
-    const tabIcons = [...root.querySelectorAll('.artifact-tab .tab-open > span:first-child')].map((icon) => icon.className);
+    const tabIcons = [...root.querySelectorAll('.artifact-tab:not(.history-tab) .tab-open > span:first-child')].map((icon) => icon.className);
 
     // Unmeasured, the strip shows every tab.
     expect(tabIcons).toEqual(shown);

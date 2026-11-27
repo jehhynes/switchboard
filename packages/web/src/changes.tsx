@@ -1479,13 +1479,13 @@ export class ChangesController {
       const response = await answer;
       const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
-      if (response.ok) {
+      if (response.ok && Array.isArray(body['rows'])) {
         // An answer without a range, as from a hub older than the page, is every change since the base.
         const read = body as Partial<ChangesList>;
 
         list = { ...(body as unknown as ChangesList), from: read.from ?? 'base', to: read.to ?? 'worktree', commits: Array.isArray(read.commits) ? read.commits : [], commitsMore: read.commitsMore === true };
       } else {
-        error = String(body['error'] ?? `Switchboard could not load this (status ${response.status}). Try again.`);
+        error = String(body['error'] ?? (response.ok ? 'Switchboard sent no changes.' : `Switchboard could not load this (status ${response.status}). Try again.`));
         stale = body['stale'] === true;
       }
     } catch (failure) {

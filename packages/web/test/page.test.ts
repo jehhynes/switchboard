@@ -142,7 +142,9 @@ describe('question cards in replies', () => {
       return host.querySelector(selector);
     };
 
-    for (const [markup, tab] of [[html(renderTabs(newView(), unread)), '[data-tab="history"]'], [html(renderSideSwitch('console', unread)), '[data-side="history"]']] as const) {
+    const opened = { open: null, menu: false, now: 0, history: true };
+
+    for (const [markup, tab] of [[html(renderTabs(newView(), unread, false, opened)), '[data-tab="history"]'], [html(renderSideSwitch('console', unread, false, opened)), '[data-side="history"]']] as const) {
       const shown = dot(markup, `${tab} .unread-dot`);
 
       expect(shown?.getAttribute('role')).toBe('img');
@@ -156,9 +158,11 @@ describe('question cards in replies', () => {
     expect(dot(html(renderState(unread.state, 2)), '.hist-now-head .unread-dot')?.getAttribute('aria-label')).toBe('Unread');
     expect(host.querySelector('.hist-now-head')?.textContent).not.toContain('New');
 
-    // A seen state has none.
-    expect(dot(html(renderTabs(newView(), seen)), '.unread-dot')).toBeNull();
-    expect(dot(html(renderSideSwitch('console', seen)), '.unread-dot')).toBeNull();
+    // A seen state has none, nor a closed History, which has no tab.
+    expect(dot(html(renderTabs(newView(), seen, false, opened)), '.unread-dot')).toBeNull();
+    expect(dot(html(renderSideSwitch('console', seen, false, opened)), '.unread-dot')).toBeNull();
+    expect(dot(html(renderTabs(newView(), unread)), '.unread-dot')).toBeNull();
+    expect(dot(html(renderSideSwitch('console', unread)), '.unread-dot')).toBeNull();
     expect(dot(html(renderState(seen.state, 2)), '.unread-dot')).toBeNull();
   });
 
