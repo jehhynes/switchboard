@@ -3901,22 +3901,32 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     return state.scope === null || state.key === null ? null : String(state.scope.workItemId ?? '');
   }
 
-  /** The newest `select`, and the comment it waits to send first. */
+  /** The newest `select` or `selectSession`, and the comment it waits to send first. */
   let selecting = 0;
   let flushing: Promise<unknown> | null = null;
   /**
-   * Opens a work item; `sameHead` for a conversation the shown work item's dropdown made, which opens under its head. `sessionId` names an earlier
-   * session of it to show read-only; null shows its current session.
+   * Sends each comment still waiting to its conversation before the page moves on, while the hub still takes it from this page. True when no later
+   * choice came meanwhile, which wins over this one.
    */
-  const select = async (workItemId: number, sameHead = false, sessionId: string | null = null): Promise<void> => {
+  const leaveComments = (): boolean | Promise<boolean> => {
     const mine = ++selecting;
 
     cardWanted = null;
 
-    // comment still waiting goes to its conversation before the page moves on, while the hub still takes it from this page; a later choice
-    // wins over this one while it waits.
-    if (commentTimers.size > 0) {
-      const all = Promise.all([flushing, flushComments()]);
+    // Until no comment waits and no draft is on its way, also one sent before this choice or typed while it waits.
+    if (flushing === null && (commentTimers.size > 0 || draftsSent.size > 0)) {
+      const all = (async () => {
+        for (;;) {
+          // setDraft counts each draft it sends at once, so what is left is what is on its way.
+          void flushComments();
+
+          if (draftsSent.size === 0) {
+            break;
+          }
+
+          await Promise.all([...draftsSent]);
+        }
+      })();
 
       flushing = all;
       void all.finally(() => {
@@ -3926,12 +3936,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       });
     }
 
-    if (flushing !== null) {
-      await flushing;
+    // Nothing waiting: the choice goes on at once, in the same task.
+    return flushing === null || flushing.then(() => mine === selecting);
+  };
+  /**
+   * Opens a work item; `sameHead` for a conversation the shown work item's dropdown made, which opens under its head. `sessionId` names an earlier
+   * session of it to show read-only; null shows its current session.
+   */
+  const select = async (workItemId: number, sameHead = false, sessionId: string | null = null): Promise<void> => {
+    const left = leaveComments();
 
-      if (mine !== selecting) {
-        return;
-      }
+    if (left !== true && !(await left)) {
+      return;
     }
 
     if (hostSelection !== null && hostSelection.item !== workItemId) hostSelection = null;
@@ -3999,8 +4015,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    * Shows one session of the shown work item from its dropdown or the earlier session's note: an earlier one read-only, or with null its current
    * one, through the same requests as `select`, keeping the tab, the artifact and the places shown.
    */
-  const selectSession = (workItemId: number, sessionId: string | null): void => {
-    cardWanted = null;
+  const selectSession = async (workItemId: number, sessionId: string | null): Promise<void> => {
+    const left = leaveComments();
+
+    if (left !== true && !(await left)) {
+      return;
+    }
+
     closeMenus();
     leaveDraft();
     selections++;
@@ -4342,7 +4363,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     // A conversation still shown goes at the generation it is shown at now, as after a reconnect.
     const scopeGen = target.sessionId === state.session?.id ? (state.scope?.scopeGen ?? target.scopeGen) : target.scopeGen;
 
-    return command('card-draft', { ...target, scopeGen, card: key, draft }).then((answer) => {
+    const sent = command('card-draft', { ...target, scopeGen, card: key, draft }).then((answer) => {
       ui.pending--;
 
       // Only the newest draft's answer counts; an older one's is overtaken by it.
@@ -4363,7 +4384,13 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         draw();
       }
     });
+
+    draftsSent.add(sent);
+    void sent.finally(() => draftsSent.delete(sent));
+    return sent;
   };
+  /** Each `card-draft` the hub has not answered yet. */
+  const draftsSent = new Set<Promise<void>>();
   /** Sends each card's comment still waiting for a pause now, to the session it was typed in, as before the page shows another conversation. */
   const flushComments = (): Promise<unknown> =>
     Promise.all(
@@ -4735,7 +4762,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         listFocus = button!.dataset['row'] ?? null;
         // The dropdown's row or the note's button of the shown work item shows its current session in place; a list row opens the work item.
         if (button!.dataset['row'] === undefined && state.scope?.workItemId === workItemId && state.scope.earlier === true) {
-          selectSession(workItemId, null);
+          void selectSession(workItemId, null);
         } else {
           void select(workItemId);
         }
@@ -4744,7 +4771,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       }
       case 'select-session':
         // An earlier session of the shown work item, read-only.
-        selectSession(Number(button!.dataset['workItem']), button!.dataset['session'] ?? null);
+        void selectSession(Number(button!.dataset['workItem']), button!.dataset['session'] ?? null);
         break;
       case 'list-pin':
         pinList(!listPinned);
@@ -4922,7 +4949,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         // An earlier session shows read-only; the hub shows the current one as the conversation.
         if (Number.isInteger(workItemId) && sessionId !== '') {
-          selectSession(workItemId, sessionId);
+          void selectSession(workItemId, sessionId);
         }
 
         break;

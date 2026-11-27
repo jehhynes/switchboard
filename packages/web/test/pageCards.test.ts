@@ -871,6 +871,114 @@ describe('the page in use', () => {
     }
   });
 
+  it('gives an earlier session chosen while Other text is on its way the win over a work item chosen before it, and sends the text first', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { page, source } = start();
+    let release = () => {};
+    try {
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      const earlier = [{ sessionId: 's1', title: 'Task session s1', state: 'ended' as const, startedAt: 1_000, provider: 'claude' }];
+      const listed = { ...scope, conversations: [{ ...scope.conversations[0]!, sessionTitle: 'Task session s', sessionStartedAt: 2_000, sessions: earlier }, { ...scope.conversations[0]!, workItemId: 2, title: 'Side', primary: false }] };
+      hello(source, { scope: listed, items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
+      await vi.advanceTimersByTimeAsync(0);
+      answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>(done => release = done) };
+      const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
+      field.value = 'on its way';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      posts = [];
+      click('#list [data-work-item="1"]');
+      click('#list [data-work-item="2"]');
+      click('button.picker');
+      click('.session-row[data-session="s1"]');
+      await vi.advanceTimersByTimeAsync(0);
+      // Nothing is asked until the text has gone to the session it was typed in.
+      expect(posts.map((post) => post.url.split('/').at(-1)).filter((name) => name !== 'composer')).toEqual(['card-draft']);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.filter((post) => post.url.endsWith('/card-draft')).map((post) => [post.body['sessionId'], (post.body['draft'] as { picks: Record<string, { other: string }> }).picks['port-choice']!.other])).toEqual([['s', 'on its way']]);
+      expect(posts.filter((post) => post.url.endsWith('/select')).map((post) => [post.body['workItemId'], post.body['sessionId']])).toEqual([[1, 's1']]);
+      expect(location.hash).toBe('#w=1');
+    } finally {
+      release();
+      page.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the shown session after a refused earlier session chosen over a work item while Other text was on its way, and asks for neither again', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { page, source } = start();
+    let release = () => {};
+    try {
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      const earlier = [{ sessionId: 's1', title: 'Task session s1', state: 'ended' as const, startedAt: 1_000, provider: 'claude' }];
+      const listed = { ...scope, conversations: [{ ...scope.conversations[0]!, sessionTitle: 'Task session s', sessionStartedAt: 2_000, sessions: earlier }, { ...scope.conversations[0]!, workItemId: 2, title: 'Side', primary: false }] };
+      hello(source, { scope: listed, items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
+      await vi.advanceTimersByTimeAsync(0);
+      answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>(done => release = done) };
+      answers['/select'] = { status: 404, body: { error: 'That session is gone.' } };
+      const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
+      field.value = 'on its way';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      posts = [];
+      click('#list [data-work-item="2"]');
+      click('button.picker');
+      click('.session-row[data-session="s1"]');
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.filter((post) => post.url.endsWith('/select')).map((post) => [post.body['workItemId'], post.body['sessionId']])).toEqual([[1, 's1']]);
+      expect(root.textContent).toContain('That session is gone.');
+      expect(root.querySelector('textarea.qc-comment')).not.toBeNull();
+      expect(location.hash).toBe('#w=1');
+    } finally {
+      release();
+      page.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits for a draft already on its way and for Other text typed while it waits before it shows an earlier session', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { page, source } = start();
+    let release = () => {};
+    try {
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      const earlier = [{ sessionId: 's1', title: 'Task session s1', state: 'ended' as const, startedAt: 1_000, provider: 'claude' }];
+      const listed = { ...scope, conversations: [{ ...scope.conversations[0]!, sessionTitle: 'Task session s', sessionStartedAt: 2_000, sessions: earlier }] };
+      hello(source, { scope: listed, items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
+      await vi.advanceTimersByTimeAsync(0);
+      const type = (text: string) => {
+        const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-comment')!;
+        field.value = text;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const names = () => posts.map((post) => post.url.split('/').at(-1)).filter((name) => name !== 'composer');
+      answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>(done => release = done) };
+      // The pause has passed, so the draft is on its way and no comment waits.
+      type('sent');
+      await vi.advanceTimersByTimeAsync(COMMENT_SETTLE_MS);
+      posts = [];
+      click('button.picker');
+      click('.session-row[data-session="s1"]');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(names()).toEqual([]);
+      // Typed while the choice waits: it goes too, before the select.
+      type('typed meanwhile');
+      answers['/card-draft'] = { status: 200, body: {} };
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(names()).toEqual(['card-draft', 'select']);
+      expect((posts[0]!.body['draft'] as { picks: Record<string, { other: string }> }).picks['port-choice']!.other).toBe('typed meanwhile');
+      expect(posts.at(-1)!.body).toMatchObject({ workItemId: 1, sessionId: 's1' });
+    } finally {
+      release();
+      page.close();
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps newer Other text when an older draft the hub carried back times out, so Send sends the newer text', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { page, source } = start();
