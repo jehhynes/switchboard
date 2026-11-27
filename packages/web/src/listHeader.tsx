@@ -8,6 +8,8 @@ import { GrowingText } from './grow.js';
 import { AppShortcut } from './appShortcut.js';
 import { trusted } from './trusted.js';
 import type { SourceIcon } from '@switchboard/core';
+import { fullTime } from '@switchboard/conversation/messageMeta';
+import { timeAgo, timeAt } from '@switchboard/core/time';
 import type { NoticeAction, PageGroup, PageHeader, PageNotice, PageRow, SourceGroup } from '@switchboard/protocol';
 import type { PhoneVoiceState } from './phoneVoice.js';
 import { ConnectionDot } from './connectionView.js';
@@ -318,23 +320,9 @@ export function holderRestart(header: PageHeader | null): Extract<NoticeAction, 
   return null;
 }
 
-/** When a notice first showed, as the bell lists it: `Just now`, `8 min ago`, `2 h ago`, else its date and time. */
+/** When a notice first showed, as the bell lists it: how long ago (`timeAgo`) within a day, else when (`timeAt`). */
 export function noticeTime(at: number, now: number): string {
-  const minutes = Math.floor(Math.max(0, now - at) / 60_000);
-
-  if (minutes < 1) {
-    return 'Just now';
-  }
-
-  if (minutes < 60) {
-    return `${minutes} min ago`;
-  }
-
-  if (minutes < 24 * 60) {
-    return `${Math.floor(minutes / 60)} h ago`;
-  }
-
-  return new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return now - at < 24 * 60 * 60_000 ? timeAgo(Math.min(at, now), now) : timeAt(at, now);
 }
 
 /**
@@ -388,7 +376,7 @@ function NoticePanel({ notices, local, now }: { notices: PageNotice[]; local: bo
               <div class="notice-body">
                 <p class="notice-text">{notice.text}</p>
                 <p class="notice-meta">
-                  <time dateTime={new Date(notice.at).toISOString()} title={new Date(notice.at).toLocaleString()}>
+                  <time dateTime={new Date(notice.at).toISOString()} title={fullTime(notice.at)}>
                     {noticeTime(notice.at, now)}
                   </time>
                   {action === null ? null : (
@@ -658,7 +646,7 @@ export function PairAddress({ host, copied, copy }: { host: string; copied: bool
 
 /** When a device was last used, as the device list says it. */
 export function usedText(at: number): string {
-  return new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return timeAt(at, Date.now());
 }
 
 /**

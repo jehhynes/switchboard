@@ -1,5 +1,6 @@
 import { SESSION_ICONS, SESSION_TONES, sessionIcon } from '@switchboard/core/group';
 import type { IconTone, SessionIcon } from '@switchboard/core/group';
+import { timeAt } from '@switchboard/core/time';
 import type { ArtifactView, ConversationEntry, ItemView, PageGroup, PageHeader, PageRow, QuestionsView, ReplyView, ScopeView, SessionView, StateView, VoiceView } from '@switchboard/protocol';
 
 /** What the page shows, kept from its conversation stream (architecture.md § Web page). */
@@ -296,9 +297,7 @@ export function awaitingReply(items: readonly ItemView[], session: SessionView |
 export function stateIcon(state: SessionView['state'] | null | undefined, waitingFor: SessionView['waitingFor'] = null, limit: SessionView['limit'] = null): { icon: string; text: string; tone: IconTone } {
   // A session waiting for a usage limit to reset (architecture.md § Rate limits).
   if (limit != null) {
-    const at = new Date(limit.until);
-    const time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    const when = at.toDateString() === new Date().toDateString() ? time : `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+    const when = timeAt(limit.until, Date.now());
 
     return { icon: SESSION_ICONS.limited, text: `${limit.throttle === true ? 'Rate limited' : 'Usage limit'} · ${limit.retry ? 'retries' : 'resumes'} ${when}`, tone: SESSION_TONES.limited };
   }

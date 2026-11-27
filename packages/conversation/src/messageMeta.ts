@@ -2,10 +2,11 @@
  * The line under a message or a reply, drawn by the web page for every message and reply (architecture.md
  * § Conversation view, § Web page): its marks on the left and its time at the right. The copy button and error marks always show; the
  * optional marks (a dictated message's, a reply's tone, Not spoken) and every item's time show only with Show message details on; without it only the
- * first item after a day's divider shows its time, and the others have it as their tooltip. Imports nothing, for browser bundles.
+ * first item after a day's divider shows its time, and the others have it as their tooltip. Imports only core's time formats, for browser bundles.
  */
 
-const STAMP = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' });
+import { timeAt } from '@switchboard/core/time';
+
 const STAMP_FULL = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
 
 function escape(text: string): string {
@@ -21,7 +22,7 @@ export function fullTime(at: number): string {
 
 /** An item's time as shown: hour and minute, its full time as the tooltip. */
 export function stampTime(at: number): string {
-  return `<time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(fullTime(at))}">${STAMP.format(at)}</time>`;
+  return `<time class="stamp" datetime="${new Date(at).toISOString()}" title="${escape(fullTime(at))}">${timeAt(at, at, 'time')}</time>`;
 }
 
 /** Whether an item shows its time: with message details on every timed item does, otherwise only the first after a day's divider. */

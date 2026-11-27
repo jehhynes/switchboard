@@ -1,6 +1,7 @@
 import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, retries, reviewOrder, triageLabel, turnOf, waitsOnPermission, waitsOnQuestion, waitsToStart } from '@switchboard/core/group';
 import type { Provider, TicketBlocker } from '@switchboard/core';
 import { waitsOnLimit } from '@switchboard/core/limit';
+import { timeAt } from '@switchboard/core/time';
 import type { Group } from '@switchboard/core/group';
 import type { Notice, NoticeAction } from './notices.js';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
@@ -648,16 +649,9 @@ function limitWord(limit: { kind?: string }): string {
   return limit.kind === 'throttle' ? 'Rate limited' : 'Usage limit';
 }
 
-/** A limit's time: `1:20 PM` today, else with its weekday, `Mon 4:00 AM`; `full` gives the date too. */
+/** A limit's time (`timeAt`): `1:20 PM` on `now`'s day, else with the day, `Mon, Nov 30, 4:00 AM`, as `full` always gives it. */
 export function limitTime(at: number, now: number | null, full = false): string {
-  const date = new Date(at);
-  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-
-  if (full) {
-    return date.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  }
-
-  return now !== null && new Date(now).toDateString() === date.toDateString() ? time : `${date.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+  return timeAt(at, now ?? at, full || now === null ? 'dated' : 'auto');
 }
 
 /**

@@ -212,9 +212,9 @@ describe('History model', () => {
 
     expect(view).toMatchObject({ key: 'gh 77', title: 'Inbox badge', reconstructed: false });
     expect(view).toMatchObject({ status: 'Queued', tone: null, playbook: 'dev:question' });
-    expect(view.facts).toEqual([`Yours since ${timeText(T0)}`, 'Waited on you 2h 12m', '1 work item, 1 session, 2h 11m']);
+    expect(view.facts).toEqual([`Yours since ${timeText(T0, run.now)}`, 'Waited on you 2h 12m', '1 work item, 1 session, 2h 11m']);
     expect(view.links.map((link) => link.label)).toEqual(['Open ticket']);
-    expect(item).toMatchObject({ title: 'dev:question', status: 'Queued', facts: [`Created ${timeText(T0)}`, '1 session, 2h 11m', 'Waited on you 2h 12m (logged)'] });
+    expect(item).toMatchObject({ title: 'dev:question', status: 'Queued', facts: [`Created ${timeText(T0, run.now)}`, '1 session, 2h 11m', 'Waited on you 2h 12m (logged)'] });
     expect(texts(item!.entries)).toEqual([
       'Work item created: Triaging',
       'Triage chose dev:question',
@@ -603,7 +603,9 @@ describe('History model', () => {
   });
 
   it('formats times and durations', () => {
-    expect(timeText(new Date(2026, 9, 7, 9, 5).getTime())).toBe('2026-10-07 09:05');
+    expect(timeText(new Date(2026, 9, 7, 9, 5).getTime(), new Date(2026, 9, 7, 18).getTime())).toBe('9:05 AM');
+    expect(timeText(new Date(2026, 9, 7, 9, 5).getTime(), new Date(2026, 9, 8).getTime())).toBe('Wed, Oct 7, 9:05 AM');
+    expect(timeText(new Date(2025, 9, 7, 9, 5).getTime(), new Date(2026, 9, 8).getTime())).toBe('Tue, Oct 7, 2025, 9:05 AM');
     expect(durationText(59_999)).toBe('59s');
     expect(durationText(3_600_000)).toBe('1h 0m');
     expect(durationText(86_400_000 + 3_600_000)).toBe('1d 1h');

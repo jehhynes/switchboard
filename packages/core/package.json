@@ -8,6 +8,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./time": {
+      "types": "./dist/time.d.ts",
+      "default": "./dist/time.js"
+    },
     "./hubRecord": {
       "types": "./dist/hubRecord.d.ts",
       "default": "./dist/hubRecord.js"

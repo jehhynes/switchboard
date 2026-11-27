@@ -2,11 +2,13 @@
 // ticket's activity with every state a session wrote (PRD R59, R98), from the views the hub builds, drawn by the page's own code.
 import type { VNode } from 'preact';
 import type { HistoryCategory, HistoryEntry, HistoryLink, HistorySection, HistoryView, PageRow, StateView } from '@switchboard/protocol';
+import { fullTime } from '@switchboard/conversation/messageMeta';
 import { stripQuestionMarkup } from '@switchboard/conversation/questions';
+import { timeAt } from '@switchboard/core/time';
 import { UnreadDot } from './header.js';
 import { SourceLogo } from './listHeader.js';
 import { renderMarkdown } from './markdown.js';
-import { ago } from './render.js';
+import { ago, dayLabel } from './render.js';
 import { ModalFrame } from './sheetFrame.js';
 import { trusted } from './trusted.js';
 
@@ -60,45 +62,13 @@ export interface HistoryHead {
 /** More consecutive session state changes than this collapse into one row. */
 export const RUN_LIMIT = 5;
 
-const two = (value: number): string => String(value).padStart(2, '0');
-
-/** A time of day such as `09:05`. */
-function clock(time: number): string {
-  const date = new Date(time);
-
-  return `${two(date.getHours())}:${two(date.getMinutes())}`;
-}
-
-/** A local time such as `2026-10-07 14:02:30`, for an entry's tooltip. */
-function stamp(time: number): string {
-  const date = new Date(time);
-
-  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${clock(time)}:${two(date.getSeconds())}`;
-}
+/** A time of day such as `9:05 AM`, under a heading that names its day. */
+const clock = (time: number): string => timeAt(time, time, 'time');
 
 function dayKey(time: number): string {
   const date = new Date(time);
 
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-}
-
-/** A day heading: Today, Yesterday, else the date. */
-function dayText(time: number, now: number): string {
-  if (dayKey(time) === dayKey(now)) {
-    return 'Today';
-  }
-
-  const yesterday = new Date(now);
-
-  yesterday.setDate(yesterday.getDate() - 1);
-  return dayKey(time) === dayKey(yesterday.getTime())
-    ? 'Yesterday'
-    : new Date(time).toLocaleDateString(undefined, {
-        weekday: 'short',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      });
 }
 
 /** Whether an entry passes the chips and the filter text. */
@@ -251,7 +221,7 @@ export function historyGroups(view: HistoryView, ui: HistoryUi, head: HistoryHea
         items.push({
           kind: 'day',
           key: `day:${lastDay}`,
-          text: dayText(entry.at, now),
+          text: dayLabel(entry.at, now),
         });
       }
 
@@ -366,15 +336,9 @@ export function reportStep(reports: StateReport[], id: string, step: number): st
   return at === -1 ? null : reports[Math.max(0, Math.min(reports.length - 1, at + step))]!.id;
 }
 
-/** A report's day and time for the picker: `14:02` today, `Yesterday 14:02`, else `Nov 25 14:02`. */
+/** A report's time for the picker (`timeAt`): `2:02 PM` today, else with its day. */
 function shortWhen(time: number, now: number): string {
-  const day = dayText(time, now);
-
-  return day === 'Today'
-    ? clock(time)
-    : day === 'Yesterday'
-      ? `Yesterday ${clock(time)}`
-      : `${new Date(time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${clock(time)}`;
+  return timeAt(time, now);
 }
 
 /**
@@ -429,8 +393,8 @@ function ReportSheet({ reports, id, now }: { reports: StateReport[]; id: string;
       </div>
       <article class="hist-report" data-state={report.id}>
         <p class="hist-report-meta">
-          <time dateTime={new Date(report.at).toISOString()} title={stamp(report.at)}>
-            {`${dayText(report.at, now)} ${clock(report.at)}`}
+          <time dateTime={new Date(report.at).toISOString()} title={fullTime(report.at)}>
+            {timeAt(report.at, now, 'dated')}
           </time>
           {report.shortId === null ? null : <span>{`Session ${report.shortId}`}</span>}
           {report.stage ? <span class="hist-tag">stage report</span> : null}
@@ -475,7 +439,7 @@ function Entry({ entry, pinned, local, report }: { entry: HistoryEntry; pinned: 
 
   return (
     <li class={classes} data-entry={entry.key}>
-      <time dateTime={new Date(entry.at).toISOString()} title={stamp(entry.at)}>
+      <time dateTime={new Date(entry.at).toISOString()} title={fullTime(entry.at)}>
         {clock(entry.at)}
       </time>
       <span class="hist-dot">
@@ -595,7 +559,7 @@ function Pinned({ state, head, now, section, reports }: { state: StateView | nul
       : other
         ? `From session ${short ?? 'another session'} · ${ago(state.at, now)}`
         : state.stale === 'session' && state.endedAt != null
-          ? `Session ${short ?? ''} ended ${clock(state.endedAt)} · state from ${ago(state.at, now)}`.replace('Session  ended', 'The session ended')
+          ? `Session ${short ?? ''} ended ${timeAt(state.endedAt, now)} · state from ${ago(state.at, now)}`.replace('Session  ended', 'The session ended')
           : `State from session ${short ?? ''} · ${ago(state.at, now)}`.replace('session  ·', 'the session ·');
 
   return (
@@ -607,7 +571,7 @@ function Pinned({ state, head, now, section, reports }: { state: StateView | nul
     >
       <div class="hist-now-card">
         <div class="hist-now-top">
-          <time dateTime={new Date(state.at).toISOString()} title={stamp(state.at)}>
+          <time dateTime={new Date(state.at).toISOString()} title={fullTime(state.at)}>
             {clock(state.at)}
           </time>
           <span class="hist-dot">
@@ -792,7 +756,7 @@ export function renderHistory(open: HistoryOpen | null, state: StateView | null,
           {view.reconstructed && view.recordedSince !== null ? (
             <p class="hist-banner">
               <span class="codicon codicon-info" aria-hidden="true"></span>
-              {`Switchboard began logging on ${stamp(view.recordedSince).slice(0, 16)}. Entries marked ≈ are estimated from times stored before then; anything else that happened earlier was not recorded.`}
+              {`Switchboard began logging on ${timeAt(view.recordedSince, now)}. Entries marked ≈ are estimated from times stored before then; anything else that happened earlier was not recorded.`}
             </p>
           ) : null}
           {own === undefined && pinned !== null ? <ol class="hist-timeline hist-pinned">{pinned}</ol> : null}

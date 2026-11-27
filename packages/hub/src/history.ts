@@ -2,6 +2,7 @@
 // bundle can import it through `@switchboard/hub/history`.
 import type { ConversationState, HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
 import { adhocLabel, DONE_WORDS, MARK_ICONS, PERMISSION_PROMPT, resumesHeld, START_PROMPT } from '@switchboard/core/group';
+import { timeAt } from '@switchboard/core/time';
 import { shownKey, ticketKey } from './rows.js';
 
 /** The stored start of a done report waiting for the second read (`UNCONFIRMED_DONE` in core's flow.ts, which the flow matches), and its words. */
@@ -135,12 +136,9 @@ const OPERATOR: Record<string, { text: string; icon: string }> = {
   'reset-position': { text: 'You reset its place in Ready for review', icon: 'list-ordered' },
 };
 
-/** A local time such as `2026-10-07 14:02`. */
-export function timeText(time: number): string {
-  const date = new Date(time);
-  const two = (value: number) => String(value).padStart(2, '0');
-
-  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`;
+/** When (`timeAt`): `8:44 AM` on `now`'s day, else with the day, `Tue, Nov 24, 8:44 AM`. */
+export function timeText(time: number, now = Date.now()): string {
+  return timeAt(time, now);
 }
 
 /** A duration such as `45s`, `12m`, `2h 5m` or `3d 4h`. */
@@ -905,10 +903,10 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
   const sections: Section[] = history.workItems.map((item) => {
     // A moved ticket's ad-hoc work item is its first, because an ad-hoc ticket has one (PRD R83).
     const playbook = item.playbook ?? (ticket.source === 'adhoc' || (ticket.adhocKey !== null && item.id === Math.min(...history.workItems.map((other) => other.id))) ? ADHOC_SECTIONS[adhocLabel(item, ticket)] : 'No playbook yet');
-    const facts = [`Created ${timeText(item.createdAt)}`];
+    const facts = [`Created ${timeText(item.createdAt, now)}`];
 
     if (item.doneAt !== null) {
-      facts.push(`Done ${timeText(item.doneAt)}`);
+      facts.push(`Done ${timeText(item.doneAt, now)}`);
     }
 
     if (item.sessions.length > 0) {
@@ -941,7 +939,7 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
   const facts: string[] = [];
 
   if (ticket.scopeAt !== null) {
-    facts.push(`${ticket.pool ? 'In the pool since' : 'Yours since'} ${timeText(ticket.scopeAt)}`);
+    facts.push(`${ticket.pool ? 'In the pool since' : 'Yours since'} ${timeText(ticket.scopeAt, now)}`);
   }
 
   const waited = [...waiting.values()].reduce((total, time) => total + time, 0);
@@ -955,7 +953,7 @@ export function historyView(history: TicketHistory, now: number): HistoryView {
   facts.push(`${count(history.workItems.length, 'work item')}, ${count(allSessions.length, 'session')}${allSessions.length === 0 ? '' : `, ${durationText(sessionTime(allSessions, now))}`}`);
 
   if (ticket.snoozed) {
-    facts.push(ticket.snoozedUntil === null ? 'Snoozed indefinitely' : `Snoozed until ${timeText(ticket.snoozedUntil)}`);
+    facts.push(ticket.snoozedUntil === null ? 'Snoozed indefinitely' : `Snoozed until ${timeText(ticket.snoozedUntil, now)}`);
   }
 
   const links: EntryLink[] = [];

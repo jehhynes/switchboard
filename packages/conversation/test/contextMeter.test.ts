@@ -152,7 +152,7 @@ describe('renderContextMeter', () => {
         'Last compacted: by itself, 2 h ago',
         'Usage limit',
         '5-hour: 79% · resets 9:50 PM',
-        'Weekly (Fable): 0% · resets Sat 3:00 AM',
+        'Weekly (Fable): 0% · resets Sat, Nov 28, 3:00 AM',
       ]);
     });
 
@@ -182,8 +182,8 @@ describe('renderContextMeter', () => {
     it('names a window by its length, and says a time and an age briefly', () => {
       expect([300, 60, 10_080, 2_880, 90, null, 0].map((minutes) => windowName({ minutes, limit: null, usedPercent: 0, resetsAt: null }))).toEqual(['5-hour', '1-hour', 'Weekly', '2-day', '90-minute', 'Usage', 'Usage']);
       expect(clockTime(new Date(2026, 10, 26, 9, 5).getTime(), now)).toBe('9:05 AM');
-      expect(clockTime(new Date(2026, 10, 27, 9, 5).getTime(), now)).toBe('Fri 9:05 AM');
-      expect([30_000, 12 * 60_000, 47 * 3_600_000, 49 * 3_600_000].map((ago) => timeAgo(now - ago, now))).toEqual(['just now', '12 min ago', '47 h ago', '2 d ago']);
+      expect(clockTime(new Date(2026, 10, 27, 9, 5).getTime(), now)).toBe('Fri, Nov 27, 9:05 AM');
+      expect([30_000, 12 * 60_000, 47 * 3_600_000, 49 * 3_600_000].map((ago) => timeAgo(now - ago, now))).toEqual(['just now', '12 min ago', '1 d ago', '2 d ago']);
     });
   });
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { timeAt } from '@switchboard/core/time';
 import { timeline } from '../src/model.js';
 import { html } from './html.js';
 import { loadMermaid, startPage, SEND_RETRY_MS } from '../src/main.js';
@@ -212,7 +213,7 @@ describe('the page in use', () => {
     expect(FakeSource.last).not.toBe(source);
     expect(posts.some((post) => post.url === '/page/ping')).toBe(true);
     await vi.advanceTimersByTimeAsync(100);
-    expect([...root.querySelectorAll('.conn-banner')].map((one) => one.textContent)).toEqual(Array(2).fill('Offline. Showing what was here at ' + new Date(10_000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '.Retry'));
+    expect([...root.querySelectorAll('.conn-banner')].map((one) => one.textContent)).toEqual(Array(2).fill('Offline. Showing what was here at ' + timeAt(10_000, Date.now()) + '.Retry'));
     expect(root.classList.contains('stale')).toBe(true);
     expect(input.disabled).toBe(true);
     expect(input.placeholder).toBe('Messages cannot be sent while offline.');

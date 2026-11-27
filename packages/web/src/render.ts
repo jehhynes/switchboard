@@ -259,12 +259,8 @@ export function dayLabel(at: number, now: number): string {
   return days === 0 ? 'Today' : days === 1 ? 'Yesterday' : (new Date(at).getFullYear() === new Date(now).getFullYear() ? DAY : DAY_WITH_YEAR).format(at);
 }
 
-/** How long ago, in the largest whole unit: "just now", "4 min ago", "2 h ago", "3 d ago". */
-export function ago(at: number, now: number): string {
-  const minutes = Math.floor((now - at) / 60_000);
-
-  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / 1440)} d ago`;
-}
+/** How long ago (`timeAgo`), as everything on the page says it. */
+export { timeAgo as ago } from '@switchboard/core/time';
 
 /** The groups the list shows collapsed until the operator opens them. */
 export const COLLAPSED_GROUPS: readonly string[] = ['done', 'snoozed'];

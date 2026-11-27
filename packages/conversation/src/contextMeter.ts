@@ -1,8 +1,10 @@
 /**
  * The composer's context meter (architecture.md § Context meter), drawn by the web page: a small ring that
  * fills with the share of the session's context in use, toward its auto-compact threshold, with the numbers in its tooltip and a Compact action
- * in its menu. Also the hub's reading of a context size against the model's window. Imports nothing, for browser bundles.
+ * in its menu. Also the hub's reading of a context size against the model's window. Imports only core's time formats, for browser bundles.
  */
+
+import { timeAgo, timeAt } from '@switchboard/core/time';
 
 /**
  * A session's context size as the hub reads it (architecture.md § Context meter): `used` tokens in its latest request; `window` the model's
@@ -219,20 +221,12 @@ export function windowName(window: UsageWindow): string {
   return window.limit === null ? length : `${length} (${window.limit})`;
 }
 
-/** A time as the details show it: `4:20 PM` today, else with its weekday, `Fri 8:00 AM`. */
+/** A time as the details show it (`timeAt`). */
 export function clockTime(at: number, now: number): string {
-  const date = new Date(at);
-  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-
-  return new Date(now).toDateString() === date.toDateString() ? time : `${date.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
+  return timeAt(at, now);
 }
 
-/** How long ago a time was: `just now`, `12 min ago`, `2 h ago`, `3 d ago`. */
-export function timeAgo(at: number, now: number): string {
-  const minutes = Math.floor((now - at) / 60_000);
-
-  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 2_880 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / 1_440)} d ago`;
-}
+export { timeAgo };
 
 const row = (name: string, value: string, sub = false): string =>
   `<div class="context-row${sub ? ' sub' : ''}"><span>${escape(name)}</span><span>${escape(value)}</span></div>`;

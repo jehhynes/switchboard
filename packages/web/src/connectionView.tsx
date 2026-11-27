@@ -1,6 +1,7 @@
 // What the page shows of its connection (architecture.md § Web page, Connection): a dot in the heads, a banner once offline, a screen in the
 // page's place when it never connected or is signed out, and the Update ready card. Nothing changes during the grace period.
 import type { VNode } from 'preact';
+import { timeAt } from '@switchboard/core/time';
 import type { ConnectionState } from './connection.js';
 
 /** How long offline before the dot turns from amber to grey. */
@@ -21,7 +22,7 @@ export interface DotView {
   label: string;
 }
 
-const clock = (at: number): string => new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+const clock = (at: number): string => timeAt(at, Date.now());
 
 export function dotView(view: ConnectionView, now: number): DotView | null {
   if (view.state === 'connecting') {

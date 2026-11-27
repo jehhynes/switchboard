@@ -4,6 +4,7 @@
 // diffs or opened as a flyout from the bar. Read-only: nothing here writes to git or GitHub.
 import type { ComponentChildren, VNode } from 'preact';
 import type { ChangeRow, ChangesList, CommitInfo, SearchData, StackData, StackLink, TreeData } from '@switchboard/protocol';
+import { fullTime } from '@switchboard/conversation/messageMeta';
 import { FileIcon } from './fileIcons.js';
 import { ago } from './render.js';
 
@@ -193,7 +194,7 @@ function CommitRow({ sha, info, depth, state, now, shown }: { sha: string; info:
 
   return (
     <>
-      <TreeRow depth={depth} action="tree-toggle" data={{ key: `commit:${sha}`, sha }} open={open} label={subject} sub={info === undefined ? '' : ago(info.time * 1000, now)} title={info === undefined ? sha : `${sha}\n${subject}\n${new Date(info.time * 1000).toLocaleString()}`} selected={chosen} className="commit">
+      <TreeRow depth={depth} action="tree-toggle" data={{ key: `commit:${sha}`, sha }} open={open} label={subject} sub={info === undefined ? '' : ago(info.time * 1000, now)} title={info === undefined ? sha : `${sha}\n${subject}\n${fullTime(info.time * 1000)}`} selected={chosen} className="commit">
         <RangeLink range={range} title={`Show the whole diff of ${short(sha)}`} />
         <MenuButton point={sha} state={state} label={short(sha)} />
       </TreeRow>

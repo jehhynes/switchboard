@@ -576,8 +576,8 @@ describe('limitTexts (architecture.md § Rate limits)', () => {
     expect(labels(item(1, { status: 'blocked', error: 'The session finished its turn without reporting done.', sessions: [session({ state: 'ended' })] }))).not.toContain('Retry');
   });
 
-  it('names another day by its weekday', () => {
-    expect(limitTime(NOW + 26 * 3_600_000, NOW)).toMatch(/^[A-Z][a-z]{2} \d{1,2}:\d{2} [AP]M$/);
+  it('names another day by its weekday and date', () => {
+    expect(limitTime(NOW + 26 * 3_600_000, NOW)).toMatch(/^[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M$/);
     expect(limitTime(NOW, NOW)).toMatch(/^\d{1,2}:\d{2} [AP]M$/);
   });
 

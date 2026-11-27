@@ -159,7 +159,7 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(root.querySelector('[data-unread]')).toBeNull();
     root = draw(open(), pinned({ stale: 'session', unread: false, endedAt: new Date(2026, 9, 7, 9, 30).getTime() }), {}, T0);
     expect(root.querySelector('.hist-now-label')?.textContent).toBe('Last state');
-    expect(root.querySelector('.hist-now-sub')?.textContent).toBe('Session abc12345 ended 09:30 · state from 4 min ago');
+    expect(root.querySelector('.hist-now-sub')?.textContent).toBe('Session abc12345 ended 9:30 AM · state from 4 min ago');
     root = draw(open(), pinned({ sessionId: 's0', shortId: '7c21', stale: 'session', unread: false }), {}, T0);
     expect(root.querySelector('.hist-now-sub')?.textContent).toBe('From session 7c21 · 4 min ago');
     root = draw(open(), pinned({ sessionId: null, shortId: null, stale: 'session', unread: false }), {}, T0);
@@ -189,7 +189,7 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(root.querySelector('[data-entry="g"] button.hist-words')?.getAttribute('data-state')).toBe('stage-s1-5');
     // Entries other than states keep plain text.
     expect(root.querySelector('[data-entry="a"] .hist-words')?.tagName).toBe('SPAN');
-    expect(root.querySelector('[data-entry="s1"] time')?.textContent).toBe('09:01');
+    expect(root.querySelector('[data-entry="s1"] time')?.textContent).toBe('9:01 AM');
     // The open work item's group carries no status pill, since the head says it; another shows its own and, closed, its last state and size.
     expect(root.querySelector('[data-section="w1"] .hist-pill')).toBeNull();
     expect(root.querySelector('[data-section="w1"] .hist-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
@@ -247,7 +247,7 @@ describe("the page's History (architecture.md § Web page)", () => {
     const long = view({ reconstructed: true, recordedSince: T0, sections: [{ ...view().sections[0]!, entries: states }] });
 
     root = draw(open({ view: long }));
-    expect(root.querySelector('.hist-run summary')?.textContent).toBe(`${RUN_LIMIT + 1} session state changes, 09:00 to 09:05`);
+    expect(root.querySelector('.hist-run summary')?.textContent).toBe(`${RUN_LIMIT + 1} session state changes, 9:00 AM to 9:05 AM`);
     expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.dataset['run']).toBe('s5');
     expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(false);
     expect(expandable(long, EMPTY_HISTORY_UI, HEAD, null, T0)).toMatchObject({ sections: { w1: true }, runs: ['s5'] });
@@ -257,7 +257,7 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(root.querySelector<HTMLDetailsElement>('.hist-run details')?.open).toBe(true);
     root = draw(open({ view: { ...long, sections: [{ ...long.sections[0]!, entries: states.slice(0, RUN_LIMIT) }] } }));
     expect(root.querySelector('.hist-run')).toBeNull();
-    expect(root.querySelector('.hist-banner')?.textContent).toContain('Switchboard began logging on 2026-10-07 09:00.');
+    expect(root.querySelector('.hist-banner')?.textContent).toContain('Switchboard began logging on Wed, Oct 7, 9:00 AM.');
   });
 
   it('draws each entry with its marks, details, lines and links, and opens a link where the page can', () => {
@@ -833,7 +833,7 @@ describe("History's State reports (operator decision 2026-11-27)", () => {
     expect(root.querySelector('.hist-report-count')?.textContent).toBe('3 of 3 · latest');
     expect(root.querySelector('.hist-report-headline')?.textContent).toBe('2/5 fixing tests');
     expect(root.querySelector('.hist-report-body strong')?.textContent).toBe('left');
-    expect(texts(root, '.hist-report-meta > *')).toEqual(['Today 08:56', 'Session abc12345']);
+    expect(texts(root, '.hist-report-meta > *')).toEqual([expect.stringMatching(/^[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}, 8:56 AM$/), 'Session abc12345']);
     expect(root.querySelector('[data-action="history-report-latest"]')).toBeNull();
     expect(disabled(root)).toEqual([['Older report', false], ['Newer report', true]]);
     // The picker lists every report newest first, naming the session since two wrote them.
@@ -841,9 +841,9 @@ describe("History's State reports (operator decision 2026-11-27)", () => {
 
     expect(pick.getAttribute('aria-label')).toBe('Choose a state report');
     expect([...pick.options].map((one) => [one.value, one.textContent, one.selected])).toEqual([
-      ['st-1', '08:56 · 2/5 fixing tests · session abc12345', true],
-      ['b', '08:52 · State b · session abc12345', false],
-      ['a', '08:51 · State a · session 7c21', false],
+      ['st-1', '8:56 AM · 2/5 fixing tests · session abc12345', true],
+      ['b', '8:52 AM · State b · session abc12345', false],
+      ['a', '8:51 AM · State a · session 7c21', false],
     ]);
     // Paged back: both steps, Back to latest, and a stage report with no body says so.
     root = sheet('b');
@@ -856,18 +856,18 @@ describe("History's State reports (operator decision 2026-11-27)", () => {
     expect(drawSheet(open({ view: withStates([report('h', -9, { body: null }), report('i', -8)]), ui: { ...EMPTY_HISTORY_UI, report: { section: 'w1', id: 'h' } } }), pinned(), T0).querySelector('.hist-report-none')?.textContent).toBe('No detail.');
     root = sheet('a');
     expect(disabled(root)).toEqual([['Older report', true], ['Newer report', false]]);
-    expect(texts(root, '.hist-report-meta > *')).toEqual(['Today 08:51', 'Session 7c21']);
+    expect(texts(root, '.hist-report-meta > *')).toEqual([expect.stringMatching(/^[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}, 8:51 AM$/), 'Session 7c21']);
     // A report gone since the sheet opened shows the newest; days before today name their day.
     expect(sheet('gone').querySelector('.hist-report-count')?.textContent).toBe('3 of 3 · latest');
-    expect(sheet('a', T0 + 24 * 60 * MINUTE).querySelector('.hist-report-meta time')?.textContent).toBe('Yesterday 08:51');
+    expect(sheet('a', T0 + 24 * 60 * MINUTE).querySelector('.hist-report-meta time')?.textContent).toMatch(/^[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}, 8:51 AM$/);
   });
 
   it('names no session in the picker when one session wrote every report, and draws no sheet for a group with no reports', () => {
     const one = historyReports(withStates([report('a', 1)]), 'w1', null, HEAD)[0]!;
 
-    expect(reportOption(one, false, T0)).toBe('09:01 · State a');
-    expect(reportOption(one, true, T0 + 2 * 24 * 60 * MINUTE)).toMatch(/^\S+ \d+ 09:01 · State a · session abc12345$/);
-    expect(reportOption({ ...one, shortId: null }, true, T0)).toBe('09:01 · State a');
+    expect(reportOption(one, false, T0)).toBe('9:01 AM · State a');
+    expect(reportOption(one, true, T0 + 2 * 24 * 60 * MINUTE)).toMatch(/^[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}, 9:01 AM · State a · session abc12345$/);
+    expect(reportOption({ ...one, shortId: null }, true, T0)).toBe('9:01 AM · State a');
     expect(renderReportSheet(open({ ui: { ...EMPTY_HISTORY_UI, report: { section: 'w1', id: 'a' } } }), null, T0, HEAD)).toBeNull();
     expect(renderReportSheet(open({ view: null, ui: { ...EMPTY_HISTORY_UI, report: { section: 'w1', id: 'a' } } }), pinned(), T0, HEAD)).toBeNull();
     expect(renderReportSheet(open(), pinned(), T0, HEAD)).toBeNull();

@@ -771,13 +771,6 @@ export const ENROLL_SENTENCES = [
   'Now keep speaking about anything, in your usual voice, until the minute is up.',
 ];
 
-/** The time as `yyyy-MM-dd HH:mm`, in local time. */
-function localMinute(at: Date): string {
-  const two = (value: number): string => String(value).padStart(2, '0');
-
-  return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}:${two(at.getMinutes())}`;
-}
-
 /**
  * The enrolment row: how enrolment stands, with a refusal first, and Enroll my voice, Enroll again or Cancel;
  * the sentences show only while it records.
@@ -786,7 +779,7 @@ export function enrollmentRow(enrollment: Enrollment | null, error: string | nul
   const when = enrollment?.enrolledAt === null || enrollment?.enrolledAt === undefined ? null : new Date(enrollment.enrolledAt);
   const enrolled =
     when !== null && !Number.isNaN(when.getTime())
-      ? `Enrolled ${localMinute(when)}. Dictated speech that does not match it is dropped, and when you speak over a spoken reply while dictation is on, the reply stops.`
+      ? `Enrolled ${timeAt(when.getTime(), Date.now())}. Dictated speech that does not match it is dropped, and when you speak over a spoken reply while dictation is on, the reply stops.`
       : 'Not enrolled. Until you enrol, every dictated piece passes the voice check, and when you speak over a spoken reply while dictation is on, the reply stops only on two words that are not the reply’s.';
   const status =
     enrollment === null
@@ -2233,4 +2226,5 @@ export function fieldView(field: Field, value: Json | undefined, errors: string[
   const selected = typeof value === 'string' ? value : value !== undefined && field.invalidChoice !== undefined ? field.invalidChoice : (field.placeholder ?? '');
 
   return { field, text: shown, checked, selected, errors };
-}
+}import { timeAt } from '@switchboard/core/time';
+

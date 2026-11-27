@@ -490,7 +490,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-enroll .sheet-button')?.textContent).toBe('Cancel');
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(host.querySelector('.settings-enroll-status')?.textContent).toMatch(/^Enrolled 2026-11-20 \d\d:00\./);
+    expect(host.querySelector('.settings-enroll-status')?.textContent).toMatch(/^Enrolled (Fri, Nov 20, )?\d{1,2}:00 [AP]M\./);
     expect(host.querySelector('.settings-enroll .sheet-button')?.textContent).toBe('Enroll again');
     expect(host.querySelectorAll('.settings-enroll-sentences p')).toHaveLength(0);
 
