@@ -47,19 +47,44 @@ export function renderOpening(opening: Opening): VNode {
     );
   }
 
+  // The placeholder is drawn as the conversation is: the timeline's rows, replies as lines of text across the column and messages as bubbles.
   return (
     <div class="opening" role="status" aria-busy="true">
-      <p class="opening-note">
-        <span class="codicon codicon-loading codicon-modifier-spin" aria-hidden="true"></span>
-        <span>Opening…</span>
-      </p>
-      <div class="opening-skeleton mine"></div>
-      <div class="opening-skeleton"></div>
-      <div class="opening-skeleton mine"></div>
-      <div class="opening-skeleton"></div>
+      <ul class="timeline">
+        <li class="opening-note">
+          <span class="codicon codicon-loading codicon-modifier-spin" aria-hidden="true"></span>
+          <span>Opening…</span>
+        </li>
+        {PLACEHOLDER.map((row) =>
+          typeof row === 'string' ? (
+            <li class="message" aria-hidden="true">
+              <div class="bubble">
+                <div class="box opening-box" style={{ width: row }}></div>
+              </div>
+            </li>
+          ) : (
+            <li class="reply" aria-hidden="true">
+              <span class="dot"></span>
+              <div class="body">
+                {row.map((paragraph) => (
+                  <p class="opening-lines">
+                    {paragraph.map((width) => (
+                      <span class="opening-line" style={{ width: `${width}%` }}></span>
+                    ))}
+                  </p>
+                ))}
+              </div>
+              <div class="meta"></div>
+            </li>
+          ),
+        )}
+      </ul>
     </div>
   );
 }
+
+/** The placeholder's rows: a message as its bubble's width, a reply as its paragraphs' line widths in percent of the column, the last line shorter. */
+const PLACEHOLDER: (string | number[][])[] = ['9em', [[100, 96, 98, 62]], '15em', [[97, 100, 88], [94, 45]], '6em', [[99, 70]]];
 
 /**
  * The tab strip in the place of the work item's own while it opens: Chat where the tabs hold it, then History and Console, dimmed and

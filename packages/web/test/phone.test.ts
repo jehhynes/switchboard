@@ -61,7 +61,7 @@ describe('the page on a phone', () => {
 
     // The conversation's pane is the container, so a narrow column on a wide screen narrows too, and a phone's width alone does not.
     expect(css).toMatch(/(^|\n)\.main \{[^}]*container: conversation \/ inline-size;/);
-    expect(narrow).toContain('.scroll:has(> .timeline) { padding-left: 8px; padding-right: 8px; }');
+    expect(narrow).toContain('.scroll:has(> .timeline, > .opening > .timeline) { padding-left: 8px; padding-right: 8px; }');
     // A conversation narrowed on its sash keeps its timeline as wide as the pane less that padding.
     expect(narrow).toContain('.timeline { max-width: calc(var(--chat-width, 940px) - 16px); }');
     expect(narrow).toContain('.reply, .timeline > li.artifact { padding-left: 20px; }');

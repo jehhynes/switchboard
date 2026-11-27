@@ -62,12 +62,15 @@ describe('the page in use', () => {
     const { page, source } = start();
 
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(3, { title: 'Other work' })])] });
-    expect(root.querySelector('#panel .timeline')).not.toBeNull();
+    expect(root.querySelector('#panel ol.timeline')).not.toBeNull();
     answers['/select'] = { status: 200, body: {}, wait: new Promise(() => {}) };
     root.querySelector<HTMLElement>('[data-work-item="3"]')!.click();
     expect(root.querySelector('#head .opening-title')?.textContent).toBe('Other work');
-    expect(root.querySelector('#panel .timeline')).toBeNull();
+    expect(root.querySelector('#panel ol.timeline')).toBeNull();
     expect(root.querySelector('#panel .opening-note')?.textContent).toContain('Opening…');
+    // The placeholder draws the conversation's rows (a ul, the conversation's own timeline an ol): replies' lines and messages' bubbles, hidden from screen readers.
+    expect(root.querySelectorAll('#panel .opening li.reply[aria-hidden="true"] .opening-line').length).toBeGreaterThan(0);
+    expect(root.querySelectorAll('#panel .opening li.message[aria-hidden="true"] .opening-box').length).toBeGreaterThan(0);
     // The composer keeps its place, hidden by page.css, so nothing moves when the work item comes.
     expect(root.querySelector<HTMLElement>('#composer')!.hidden).toBe(false);
     expect(root.classList.contains('item-opening')).toBe(true);
@@ -75,10 +78,10 @@ describe('the page in use', () => {
     expect(root.querySelector('[data-work-item="3"]')!.classList.contains('selected')).toBe(true);
     // An event for the work item shown before changes nothing.
     source.emit('reply', { reply: reply('r9', 9) });
-    expect(root.querySelector('#panel .timeline')).toBeNull();
+    expect(root.querySelector('#panel ol.timeline')).toBeNull();
     hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(3, { title: 'Other work' })])], scope: { ...scope, workItemId: 3, title: 'Other work', conversations: [{ ...scope.conversations[0]!, workItemId: 3, title: 'Other work' }] } });
     expect(root.querySelector('#head .opening-title')).toBeNull();
-    expect(root.querySelector('#panel .timeline')).not.toBeNull();
+    expect(root.querySelector('#panel ol.timeline')).not.toBeNull();
     page.close();
   });
 
@@ -90,7 +93,7 @@ describe('the page in use', () => {
     root.querySelector<HTMLElement>('[data-work-item="3"]')!.click();
     source.emit('scope', { scope: { ...scope, workItemId: 3, title: 'Other work', scopeGen: 4, conversations: [{ ...scope.conversations[0]!, workItemId: 3, title: 'Other work' }] } });
     expect(root.querySelector('#panel .opening-note')).not.toBeNull();
-    expect(root.querySelector('#panel .timeline')).toBeNull();
+    expect(root.querySelector('#panel ol.timeline')).toBeNull();
     page.close();
   });
 

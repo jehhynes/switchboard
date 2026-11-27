@@ -66,7 +66,7 @@ describe('the page', () => {
     const fetch = vi.fn(async () => ({ status: 200, ok: true, json: async () => ({}), text: async () => '' }) as unknown as Response);
     const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: (run) => void frames.push(run), now: () => 10_000 });
     const source = FakeSource.last!;
-    const replies = () => root.querySelectorAll('#panel .reply').length;
+    const replies = () => root.querySelectorAll('#panel .reply[data-id]').length;
 
     source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1, { title: 'Fix it' })])], scope, sessions: [session()], items: [], more: false, state: null, artifacts: [] });
 

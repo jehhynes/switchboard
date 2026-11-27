@@ -1,5 +1,6 @@
 // Checks the page's shell at iPhone sizes and an iPad's, and its tabs on a desktop, in a real headless Chrome or Edge (testing.md § Web page shell check): in the installed
-// app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, History (its title first at 20 px, its
+// app's standalone mode, portrait and landscape, light and dark, the list, a conversation, an empty one, the placeholder of one being opened (its
+// lines and bubbles where a reply's text and a message's bubble are, as tall), History (its title first at 20 px, its
 // groups' headings at 14 px, and its pinned state on the first screen), History's filter and the Changes tree's search box (each at least 160 px
 // wide and covered by nothing else of its bar, with History's chips shown and the search's options menu open), Settings, the drawer, a sheet,
 // a work item with more tabs than fit, the composer under each other tab and a maximized column with the mic on, a conversation with questions waiting, the long Actions, More actions, row and More tabs menus, and the list at 200, 260, 300, 330 and 420 px. Every tab shown keeps its label, no tab passes its strip,
@@ -60,7 +61,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
@@ -69,10 +70,12 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
+// The opening view's placeholder is checked against the conversation's column, so the conversation view runs with it.
+if (only?.includes('opening') && !only.includes('conversation')) only.push('conversation');
 const shots = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
 /** --history-case <ended|turn|waiting|filter> draws History's pinned state ended or as of the last turn, its row waiting on you, or a filter. */
 const historyCase = process.argv.includes('--history-case') ? process.argv[process.argv.indexOf('--history-case') + 1] : null;
@@ -147,15 +150,17 @@ const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empt
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
 const listing = view === 'list' || view === 'more-menu' || view === 'row-menu' || narrow !== null;
 const open = !listing && !view?.startsWith('settings');
+// The opening view asks for work item 1 by its address and the hub never sends its scope, so the placeholder stays (opening.tsx).
+const loading = view === 'opening';
 if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list { width: ' + narrow + 'px !important; min-width: 0 !important; max-width: none !important; }</style>');
 // A title longer than any header here fits, so the header shows how much of it is left beside the main control.
 const longTitle = 'Call Center dialer stops receiving incoming calls when its registration lapses';
-const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: longTitle, scopeGen: 3, conversations: [{ workItemId: 1, title: longTitle, primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0, sessionTitle: 'switchboard · dev:build · github 1' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
+const scope = open && !loading ? { kind: 'page', key: 'k', folder: 'D:/w', title: longTitle, scopeGen: 3, conversations: [{ workItemId: 1, title: longTitle, primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0, sessionTitle: 'switchboard · dev:build · github 1' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
 const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, ...(view === 'limited' ? { limit: { until: now + 5_400_000, retry: false } } : {}), ...(view === 'context' ? { provider: 'claude', context: { used: 120000, window: 200000, compactAt: 167000, model: 'claude-opus-4-5' } } : { context: { used: 618_000, window: 1_000_000, compactAt: 967_000, model: 'claude-opus-5-5' } }) };
 // The context meter's details (architecture.md § Context meter), as the hub answers them for a Claude session.
 const contextDetails = { provider: 'claude', model: 'claude-opus-5-5', effort: 'medium', parts: { cacheRead: 598_000, cacheWrite: 14_000, input: 2_000, output: 4_000, reasoning: null }, compacted: { at: Date.now() - 7_200_000, trigger: 'auto' }, windows: [{ minutes: 300, limit: null, usedPercent: 79, resetsAt: Date.now() + 9_000_000 }, { minutes: 10_080, limit: null, usedPercent: 63, resetsAt: Date.now() + 120_000_000 }, { minutes: 10_080, limit: 'Fable', usedPercent: 4, resetsAt: Date.now() + 120_000_000 }], limit: null };
 const items = [];
-for (let i = 0; view !== 'empty' && open && i < 30; i++) {
+for (let i = 0; view !== 'empty' && open && !loading && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
   items.push({ type: 'reply', id: 'r' + i, sessionId: 's', at: now - 99000 + i * 2000, ord: i * 2 + 1, provisional: false, kind: 'reply', answers: null, opening: 'Reply ' + i + ', long enough to wrap across a phone screen.' + (i === 29 ? '\\n\\n| Column | Another column |\\n|---|---|\\n| a | b |' : i === 28 ? '\\n\\n~~~\\nnpm run build --workspace @switchboard/web && npm run check:shell --workspace @switchboard/web\\n~~~' : i === 27 ? '\\n\\n- [x] Find the cause\\n- [ ] Fix the renewal' : ''), rewrittenBy: null, withdrawn: false, unread: false, speak: null, tone: null, spoken: { state: 'none', atMs: null, saidChars: null } });
 }
@@ -177,7 +182,7 @@ const artifacts = mic ? [{ path: 'chat/plan.md', owner: 'chat', kind: 'note', ti
 class FakeSource {
   constructor() {
     this.listeners = {};
-    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open ? [session] : [], items, more: false, state: view === 'history' ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0, ...(mic ? { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: false, error: null, recognizer: null } } : {}) }), 20);
+    setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open && !loading ? [session] : [], items, more: false, state: view === 'history' ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0, ...(mic ? { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: false, error: null, recognizer: null } } : {}) }), 20);
     // The tabs view's artifacts change after the page first shows them, so each is unread until its tab shows it.
     if (view === 'tabs') setTimeout(() => artifacts.forEach((artifact) => this.emit('artifact', { artifact: { ...artifact, updatedAt: artifact.updatedAt + 60000 } })), 120);
     // check-resize pauses the stream (window.__paused), so a resize is shown without a redraw.
@@ -244,6 +249,52 @@ window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), 
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
+
+/**
+ * The conversation's column, measured from its pane's padding box: where a reply's text starts and ends and a message's bubble ends, a reply's line
+ * height and a one-line bubble's height; and, in the placeholder of a work item being opened (opening.tsx), the same from its lines and bubbles.
+ */
+const COLUMN = `(() => {
+  const panel = document.getElementById('panel');
+  const box = panel.getBoundingClientRect();
+  const style = getComputedStyle(panel);
+  const left = box.left + panel.clientLeft + parseFloat(style.paddingLeft);
+  const right = box.left + panel.clientLeft + panel.clientWidth - parseFloat(style.paddingRight);
+  const edges = (nodes) => nodes.map((node) => node.getBoundingClientRect()).map((one) => ({ left: one.left - left, right: right - one.right, height: one.height, top: one.top }));
+  const placeholder = panel.querySelector('.opening .timeline');
+  if (placeholder === null) {
+    const text = [...panel.querySelectorAll('.timeline > li.reply > .body > p')];
+    const bubbles = [...panel.querySelectorAll('.timeline > li.message .box')].filter((one) => one.getBoundingClientRect().height < 40);
+    if (text.length === 0 || bubbles.length === 0) return null;
+    const [reply] = edges(text);
+    const [bubble] = edges(bubbles);
+    return { replyLeft: reply.left, replyRight: reply.right, bubbleRight: bubble.right, line: parseFloat(getComputedStyle(text[0]).lineHeight), bubble: bubble.height };
+  }
+  const lines = edges([...placeholder.querySelectorAll('.opening-line')]);
+  const bubbles = edges([...placeholder.querySelectorAll('.opening-box')]);
+  const first = [...placeholder.querySelector('.opening-lines').children].map((one) => one.getBoundingClientRect().top);
+  return {
+    replyLeft: Math.min(...lines.map((one) => one.left)), replyLeftMax: Math.max(...lines.map((one) => one.left)), replyRight: Math.min(...lines.map((one) => one.right)),
+    bubbleRight: Math.min(...bubbles.map((one) => one.right)), bubbleRightMax: Math.max(...bubbles.map((one) => one.right)), bubbleLeft: Math.min(...bubbles.map((one) => one.left)),
+    line: first[1] - first[0], bubble: bubbles[0].height, lines: lines.length, bubbles: bubbles.length,
+  };
+})()`;
+
+/** Checks the placeholder of a work item being opened against the conversation's column measured at the same size: its replies' lines start where a reply's text does, the widest ends where it does, a line is a reply's line tall, and its bubbles end where a message's does, one line tall, inside the column. */
+function openingFailures(real, shown) {
+  const out = [];
+  const off = (one, two) => Math.abs(one - two) > 1;
+
+  if (shown === null || shown.lines === 0 || shown.bubbles === 0) return ['the placeholder shows no lines or no bubbles'];
+  if (shown.replyLeft < 0 || shown.replyRight < -0.5 || shown.bubbleLeft < 0 || shown.bubbleRight < -0.5) out.push('the placeholder passes its column: ' + JSON.stringify(shown));
+  if (real === undefined) return out;
+  if (off(shown.replyLeft, real.replyLeft) || off(shown.replyLeftMax, real.replyLeft)) out.push("the placeholder's lines start " + shown.replyLeft + ' to ' + shown.replyLeftMax + " px into the column, a reply's text " + real.replyLeft + ' px');
+  if (off(shown.replyRight, real.replyRight)) out.push("the placeholder's widest line ends " + shown.replyRight + " px short of the column's end, a reply's text " + real.replyRight + ' px');
+  if (off(shown.line, real.line)) out.push("the placeholder's lines are " + shown.line + " px apart, a reply's lines " + real.line + ' px');
+  if (off(shown.bubbleRight, real.bubbleRight) || off(shown.bubbleRightMax, real.bubbleRight)) out.push("the placeholder's bubbles end " + shown.bubbleRight + ' to ' + shown.bubbleRightMax + " px short of the column's end, a message's " + real.bubbleRight + ' px');
+  if (off(shown.bubble, real.bubble)) out.push("the placeholder's bubbles are " + shown.bubble + " px tall, a one-line message's " + real.bubble + ' px');
+  return out;
+}
 
 /** Measures the open view: the document, whatever reaches past the viewport outside a scroller, and the scrollers. */
 const measure = `(() => {
@@ -1063,7 +1114,8 @@ function failures(view, size, m) {
     if (strip.moreUnread !== strip.dots.some((one) => one.more)) out.push(strip.moreUnread ? 'More holds an unread row but shows no dot' : 'More shows a dot with no unread row');
   }
   // The header keeps one line with its main control: on a phone its icon alone, a 44 px target named by its label; elsewhere with its label.
-  if (m.header !== null) {
+  // A work item being opened shows its title alone, without its controls (opening.tsx).
+  if (m.header !== null && view !== 'opening') {
     const h = m.header;
 
     if (h.overlap <= 0) out.push('the header takes more than one line');
@@ -1189,6 +1241,8 @@ try {
   };
   const evaluate = async (expression) => (await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })).result.value;
   const results = [];
+  /** The conversation's column at each scheme and size, which the opening view's placeholder is checked against. */
+  const columns = new Map();
 
   for (const scheme of ['dark', 'light']) {
     for (const size of SIZES) {
@@ -1256,6 +1310,15 @@ try {
         if (view.startsWith('settings') && view !== 'settings-nav' && missing.length === 0) found.push(...settingsFailures(view, size, await evaluate(SETTINGS)));
 
         if (view.startsWith('mic-') && missing.length === 0) found.push(...micFailures(view, size, await evaluate(MIC)));
+
+        // The placeholder of a work item being opened is laid out as the conversation is (opening.tsx), checked against it where it ran first.
+        if (view === 'conversation') columns.set(scheme + size.device + size.orientation, await evaluate(COLUMN));
+        if (view === 'opening') {
+          const shown = await evaluate(COLUMN);
+
+          if (report) console.log(name + ' placeholder: ' + JSON.stringify(shown) + ' conversation: ' + JSON.stringify(columns.get(scheme + size.device + size.orientation)));
+          found.push(...openingFailures(columns.get(scheme + size.device + size.orientation), shown));
+        }
 
         // The context meter's menu shows its details whole inside the viewport, each row on one line with its value beside its name.
         if (view === 'context-details' && missing.length === 0) found.push(...(await evaluate(CONTEXT_DETAILS)));
