@@ -195,7 +195,8 @@ describe("the page's History (architecture.md § Web page)", () => {
     expect(root.querySelector('[data-section="w1"] .hist-pill')).toBeNull();
     expect(root.querySelector('[data-section="w1"] .hist-group-toggle')?.getAttribute('aria-expanded')).toBe('true');
     expect(root.querySelector('[data-section="w0"] .hist-pill')?.textContent).toBe('Done');
-    expect(root.querySelector('[data-section="w0"] .hist-group-facts')?.textContent).toBe('Created 2026-10-06 09:00 · Last state: Plan written · 1 entry');
+    expect(root.querySelector('[data-section="w0"] .hist-group-facts')?.textContent).toBe('Created 2026-10-06 09:00 · Plan written · 1 entry');
+    expect(root.querySelector('[data-section="w0"] .hist-group-facts span')?.getAttribute('title')).toBe('Last state');
     expect(root.querySelector('[data-section="w0"] .hist-entry')).toBeNull();
     expect(root.querySelector('[data-section="ticket"] .hist-prompt')).toBeNull();
   });

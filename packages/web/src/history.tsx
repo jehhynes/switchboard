@@ -600,11 +600,12 @@ function Pinned({ state, head, now, section, reports }: { state: StateView | nul
 
 function GroupHead({ group }: { group: Group }) {
   const { section } = group;
-  const facts = [...section.facts];
   const filtering = group.shown < group.total;
+  const facts: (string | VNode)[] = [...section.facts];
 
+  // A closed group's last state shows bare; its tooltip names it.
   if (!group.open && group.lastState !== null) {
-    facts.push(`Last state: ${group.lastState}`);
+    facts.push(<span title="Last state">{group.lastState}</span>);
   }
 
   if (filtering) {
@@ -622,7 +623,7 @@ function GroupHead({ group }: { group: Group }) {
           {group.own || section.status === '' ? null : <span class={`hist-pill${section.tone === null ? '' : ` tone-${section.tone}`}`}>{section.status}</span>}
         </button>
       </h2>
-      {facts.length === 0 ? null : <p class="hist-group-facts">{facts.join(' · ')}</p>}
+      {facts.length === 0 ? null : <p class="hist-group-facts">{facts.flatMap((fact, at) => (at === 0 ? [fact] : [' · ', fact]))}</p>}
     </div>
   );
 }

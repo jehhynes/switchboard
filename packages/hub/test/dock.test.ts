@@ -211,7 +211,7 @@ describe('dockView', () => {
     expect(row(item(1, { status: 'queued', waits: [{ kind: 'snoozed' }] })).details).toEqual([{ text: 'Starts after the snooze ends', title: 'The ticket is snoozed.', tone: null }]);
   });
 
-  it("dims a state whose turn ended and names one whose session ended the last state, so neither reads as current", () => {
+  it("dims a state whose turn ended and names one whose session ended the last state in its tooltip, so neither reads as current", () => {
     const long = 'a headline that runs past the forty characters of the row';
 
     expect(row(item(1, { state: workState('fixing tests', NOW - 60_000, { turnEnded: true }), sessions: [session()] })).details).toEqual([
@@ -219,10 +219,10 @@ describe('dockView', () => {
     ]);
     // A session between turns makes its state old even before the turn end reaches the state.
     expect(row(item(1, { status: 'finished', state: workState('ready for review', NOW - 60_000), sessions: [session({ state: 'idle' })] })).details).toContainEqual({ text: 'ready for review · 1m', title: 'ready for review\nAs of the last turn', tone: 'dim' });
-    expect(row(item(1, { status: 'finished', state: workState('done', NOW - 60_000), sessions: [session({ state: 'ended' })] })).details).toContainEqual({ text: 'Last state: done · 1m', title: 'Last state: done', tone: 'dim' });
+    expect(row(item(1, { status: 'finished', state: workState('done', NOW - 60_000), sessions: [session({ state: 'ended' })] })).details).toContainEqual({ text: 'done · 1m', title: 'Last state: done', tone: 'dim' });
     // A stage carried over from before states has no session; a state of a session that is gone is old too.
-    expect(row(item(1, { status: 'finished', state: workState('done', NOW - 60_000, { sessionId: null }), sessions: [session()] })).details).toContainEqual({ text: 'Last state: done · 1m', title: 'Last state: done', tone: 'dim' });
-    expect(row(item(1, { status: 'finished', state: workState('done', NOW - 60_000, { sessionId: 'gone' }), sessions: [session()] })).details).toContainEqual({ text: 'Last state: done · 1m', title: 'Last state: done', tone: 'dim' });
+    expect(row(item(1, { status: 'finished', state: workState('done', NOW - 60_000, { sessionId: null }), sessions: [session()] })).details).toContainEqual({ text: 'done · 1m', title: 'Last state: done', tone: 'dim' });
+    expect(row(item(1, { status: 'finished', state: workState('done', NOW - 60_000, { sessionId: 'gone' }), sessions: [session()] })).details).toContainEqual({ text: 'done · 1m', title: 'Last state: done', tone: 'dim' });
     // A long headline is cut to 40 characters, with the whole in its title.
     expect(row(item(1, { state: workState(long, NOW - 60_000), sessions: [session()] })).details).toEqual([{ text: 'a headline that runs past the forty… · 1m', title: long, tone: null }]);
   });

@@ -604,7 +604,7 @@ function oneLine(text: string): string {
 
 /**
  * The approval summary, else the state's headline, each with its age, for line 3 (PRD R27, R58). A state whose turn ended is dimmed; one whose
- * session ended is dimmed and named the last state (architecture.md § States).
+ * session ended is dimmed, and its tooltip names it the last state (architecture.md § States).
  */
 function progress(item: WorkItemView, now: number): DockText[] {
   const summary = item.status === 'awaiting-approval' ? item.approvalSummary : null;
@@ -626,10 +626,9 @@ function progress(item: WorkItemView, now: number): DockText[] {
 
   const old = stateStale(state, state.sessionId === null ? null : (item.sessions.find((session) => session.id === state.sessionId) ?? null));
   const { text, full } = clip(state.headline, CAPS.state);
-  const shown = old === 'session' ? `Last state: ${text}` : text;
   const title = staleTitle ?? (old === 'session' ? `Last state: ${state.headline}` : old === 'turn' ? `${state.headline}\nAs of the last turn` : full);
 
-  return [{ text: `${shown} · ${age(state.at, now)}`, title, tone: stale !== null ? 'warning' : old === null ? null : 'dim' }];
+  return [{ text: `${text} · ${age(state.at, now)}`, title, tone: stale !== null ? 'warning' : old === null ? null : 'dim' }];
 }
 
 /**
