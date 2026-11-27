@@ -1030,7 +1030,28 @@ const modalMeasure = (grow) => `(async () => {
     dismiss: [...sheet.querySelectorAll('[data-dismiss]')].filter(inView).map((one) => one.getAttribute('aria-label') ?? one.textContent.trim()),
     wide: body ? body.scrollWidth - body.clientWidth : null,
     grow: null,
+    cover: null,
   };
+  // The backdrop lies over the whole viewport: its box is the viewport's, and at points across the list, the conversation, the side column and a
+  // grid outside the sheet, the topmost element is the backdrop or the sheet, so nothing of the page shows undimmed or takes a press beside it.
+  const backdrop = sheet.closest('.sheet-backdrop, .settings-backdrop');
+  if (backdrop) {
+    const b = backdrop.getBoundingClientRect();
+    const name = (node) => node ? node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/\s+/).join('.') : '') : 'nothing';
+    const points = [];
+    for (const selector of ['#list', '.list-pane', '#panel', '#detail', '.detail-body', '.detail-head', '.header', '.tabs']) {
+      for (const node of document.querySelectorAll(selector)) {
+        const r = node.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) for (const [fx, fy] of [[0.1, 0.1], [0.5, 0.5], [0.9, 0.9], [0.9, 0.1], [0.1, 0.9]]) points.push([selector, r.left + r.width * fx, r.top + r.height * fy]);
+      }
+    }
+    for (let i = 1; i < 10; i++) for (let j = 1; j < 10; j++) points.push(['grid', innerWidth * i / 10, innerHeight * j / 10]);
+    const uncovered = points.filter(([, x, y]) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight).flatMap(([where, x, y]) => {
+      const top = document.elementFromPoint(x, y);
+      return top !== null && (top === backdrop || backdrop.contains(top)) ? [] : [where + ' at ' + Math.round(x) + ',' + Math.round(y) + ' shows ' + name(top)];
+    });
+    out.cover = { box: { top: b.top, left: b.left, right: b.right, bottom: b.bottom }, uncovered: uncovered.slice(0, 6), count: uncovered.length };
+  }
   if (${grow}) {
     const text = sheet.querySelector('textarea');
     if (text) {
@@ -1056,6 +1077,12 @@ function modalFailures(view, m) {
   if (m.head !== null && m.head.lines > 2.05) out.push('the title box is ' + m.head.lines.toFixed(2) + ' lines tall, past two');
   if (m.dismiss.length === 0) out.push('no Cancel, Close, Back or X is in view');
   if (m.wide === null || m.wide > 1) out.push("the sheet's body is " + m.wide + ' px wider than the sheet');
+  if (m.cover === null) out.push('the sheet has no backdrop');
+  else {
+    const b = m.cover.box;
+    if (b.top > 0.5 || b.left > 0.5 || b.right < m.viewport.width - 0.5 || b.bottom < m.viewport.height - 0.5) out.push("the backdrop does not cover the viewport: " + JSON.stringify(b));
+    if (m.cover.count > 0) out.push(m.cover.count + ' points beside the sheet are not under its backdrop: ' + m.cover.uncovered.join('; '));
+  }
   if (GROWING.includes(view)) {
     if (m.grow === null) out.push('no text box to grow');
     else {
