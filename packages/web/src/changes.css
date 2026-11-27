@@ -225,6 +225,8 @@
   .tree-item:not(.section) { height: 32px; }
   .tree-row { min-height: 32px; }
   .tree-options-button, .tree-pin, .changes-tree-button, .tree-toggle button, .file-toggle button, .tree-item.section .tree-link { min-width: 44px; min-height: 44px; }
+  /* The options' count sits inside its button's corner, so no part of the button takes a press outside the box it shows. */
+  .tree-options-count { top: 3px; right: 3px; }
   .tree-item:not(.section) :is(.tree-link, .tree-viewed) { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 32px; height: 32px; }
   .tree-viewed input { width: 20px; height: 20px; }
   /* The search field itself is 44 px tall, as the list's is. */

@@ -378,7 +378,8 @@ svg.source-logo.custom { color: var(--source-icon-color); width: var(--source-ic
 .sliver > .stripe-warning { background: var(--sb-status-warning); }
 .sliver > .stripe-error { background: var(--sb-status-error); }
 .sliver > .stripe-turn { background: var(--sb-status-turn); }
-/* On a touch screen the sliver takes touches 16 px in from the edge, so a swipe right from the edge shows the drawer (main.ts). */
+/* On a touch screen the sliver takes touches 16 px in from the edge, so a swipe right from the edge shows the drawer (main.ts). It is the one
+   area that takes presses beyond what it shows, kept as a deliberate exception (operator decision 2026-11-27; architecture.md § Web page). */
 .sliver { touch-action: pan-y; }
 @media (pointer: coarse) { .sliver::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 16px; } }
 :where(html:not(.phone)) #root.drawers:not(.listing) > .side { box-sizing: border-box; position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--sb-z-drawer); padding-top: var(--sb-top); padding-left: env(safe-area-inset-left); visibility: hidden; transform: translateX(-100%); }
@@ -871,10 +872,10 @@ body.artifact-window > .artifact-view { height: 100%; }
   .composer-tool, .send, .voice-controls .ghost.icon, .toast .dismiss, .conn-update button.conn-reload { min-width: 44px; }
   .voice-controls .ghost.talk-here { line-height: 44px; }
   .attachments { gap: 12px 8px; }
-  .attachment { min-height: 28px; }
   .meta .resend { min-width: 44px; min-height: 44px; }
-  .attachment-remove { position: relative; }
-  .attachment-remove::after { content: ""; position: absolute; inset: -11px; }
+  /* An attached file's remove button is 32 px each way, the box it shows being its whole target, as History's compact rows are
+     (operator decision 2026-11-26). */
+  .attachment-remove { width: 32px; height: 32px; }
   .menu-row { height: 44px; }
 }
 /* iOS zooms the page into a text field under 16 px when it takes the focus, so on a touch screen every field types at 16 px; the composer's

@@ -13,8 +13,8 @@
 // the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them.
 // Only Blocked on you's group count is in the warning text colour and none is in the accent badge's, each one not zero at 4.5:1 contrast.
 // A usage-limited session's hourglass, in its list row and, also on a desktop, the header, draws from the extra icons' face as its SVG does, not as tofu. Every control shown is a touch target of at least 44 px each way,
-// but for the Changes tree's rows and their controls, History's run rows, links, Details, group headings and chips and the Settings playbooks table and, outside a phone,
-// its navigation, 32 px each way, the latter at least 4 px from any other target, and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
+// but for the Changes tree's rows and their controls, History's run rows, links, Details, group headings and chips, the Settings playbooks table and, outside a phone,
+// its navigation, and an attached file's remove button, 32 px each way, the latter at least 4 px from any other target; no control takes a press beyond the box it shows, and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
 // task list, whose read-only boxes are not controls; on the desktop a question card's step dots are at least 24 px tall.
 // The list header's bell shows only with an action notice, counting them, at least 44 px by its own box on a touch screen, its dropdown inside the
 // viewport, the list right under the header with or without it, and a one-time notice in the toast.
@@ -79,7 +79,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
+const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -119,6 +119,8 @@ localStorage.removeItem('switchboard.route');
 // whatever an earlier view showed.
 localStorage.removeItem('switchboard.artifactsSeen');
 localStorage.removeItem('switchboard.tabs');
+// The attachments view's composer holds two attached files, so their chips' remove buttons are measured.
+if (view === 'attachments') localStorage.setItem('switchboard.attachments', JSON.stringify({ 1: [{ name: 'dialer-registration-log.txt', path: 'D:/w/.uploads/a.txt', image: false }, { name: 'screenshot.png', path: 'D:/w/.uploads/b.png', image: true }] })); else localStorage.removeItem('switchboard.attachments');
 sessionStorage.removeItem('switchboard.scroll');
 const now = Date.now();
 const row = (id, title, patch = {}) => ({ workItemId: id, ticketId: id, title, priority: null, time: null, ticket: 'gh ' + id, ticketNumber: String(id), sourceKind: 'github', url: '', playbook: 'dev:build', links: [], returned: 0, comment: null, mark: null, details: [], stripe: null, dim: false, host: null, actions: [], main: null, pastes: [], search: '', opens: [], band: null, voice: null, history: null, ...patch });
@@ -600,7 +602,8 @@ function settingsFailures(view, size, s) {
 
 /** What each view opens with, clicked in order. */
 /**
- * The touch targets under 44 px in the open view (architecture.md § Web page, Phones first), each as its name and size; `checks` counts the checkboxes
+ * The touch targets under 44 px in the open view (architecture.md § Web page, Phones first), each as its name and size; `past` names those that take
+ * presses beyond the box they show (operator decision 2026-11-26); `checks` counts the checkboxes
  * measured, so a view meant to show some proves it did; `tasks` holds whether each task list box shown is read-only; `overlaps` names the
  * targets of one layer whose boxes cross; `crowded` names a 32 px target (COMPACT) and a target of its layer less than 4 px apart.
  */
@@ -623,16 +626,36 @@ const TOUCH = `(() => {
     return null;
   };
   const boxes = [];
-  // History's run rows, links, state headlines, group headings and chips, and the Settings playbooks table and, outside a phone, its navigation, are 32 px on a
-  // touch screen (operator decision 2026-11-26; page.css, settings.css).
-  const COMPACT = '.hist-run > details > summary, .history-view :is(button.hist-link, button.hist-report-link, button.hist-group-toggle, button.hist-chip, button.hist-chips-toggle), .settings-table :is(button.link, .settings-box), html:not(.phone) .settings-nav-entry';
+  // The controls that take presses past the box they show.
+  const past = [];
+  // History's run rows, links, state headlines, group headings and chips, the Settings playbooks table and, outside a phone, its navigation, and an attached
+  // file's remove button are 32 px on a touch screen (operator decision 2026-11-26; page.css, settings.css).
+  const COMPACT = '.hist-run > details > summary, .history-view :is(button.hist-link, button.hist-report-link, button.hist-group-toggle, button.hist-chip, button.hist-chips-toggle), .settings-table :is(button.link, .settings-box), html:not(.phone) .settings-nav-entry, .attachment-remove';
+  // Whether a control takes presses past the box it shows: a pseudo-element of it that takes presses and is fixed, or absolute with a negative
+  // inset, which the browser resolves from its size too, or placed by a box around the control; or a press 2 px outside the box, at each
+  // side's ends and middle, that lands on it.
+  const reaches = (target, box) => {
+    const placed = getComputedStyle(target).position !== 'static';
+    const pseudo = ['::before', '::after'].some((part) => {
+      const style = getComputedStyle(target, part);
+      if (style.content === 'none' || style.pointerEvents === 'none') return false;
+      if (style.position === 'fixed') return true;
+      return style.position === 'absolute' && (!placed || [style.top, style.right, style.bottom, style.left].some((one) => parseFloat(one) < 0));
+    });
+    if (pseudo) return true;
+    const xs = [box.left + 1, (box.left + box.right) / 2, box.right - 1];
+    const ys = [box.top + 1, (box.top + box.bottom) / 2, box.bottom - 1];
+    const outside = [...xs.flatMap((x) => [[x, box.top - 2], [x, box.bottom + 2]]), ...ys.flatMap((y) => [[box.left - 2, y], [box.right + 2, y]])];
+    return outside.some(([x, y]) => { if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return false; const at = document.elementFromPoint(x, y); return at !== null && target.contains(at); });
+  };
   const small = (() => {
     // Every control shown is a touch target of at least 44 px each way (architecture.md § Web page, Phones first), measured as its box cut by
     // every ancestor that clips without scrolling. Not held to it: line 2's pills, whose press is an open question; links inside prose; and a
     // tab's own buttons, which fill their tab between its 1 px top and bottom borders, its whole height less those.
   return [...document.querySelectorAll('button, a[href], [role="tab"], [role="menuitem"], [role="link"], [role="button"], input[type="checkbox"], input[type="radio"], input[type="search"], select, summary')].filter(shown).flatMap((node) => {
       // A row's waiting questions are held to it no more than its pills: a press that misses them opens the work item, whose conversation offers the card.
-      if (node.matches('.row .pill, .row-head .questions, :is(.body, .artifact-doc, .sheet-detail, .hist-body p, .group-empty) a')) return [];
+      // These are held only to taking no press beyond their box.
+      const free = node.matches('.row .pill, .row-head .questions, :is(.body, .artifact-doc, .sheet-detail, .hist-body p, .group-empty) a');
       // A task list's boxes are read-only (markdown.ts), so they take no press; one that takes a press is held to it.
       if (node.matches('.task-list-item-checkbox')) {
         tasks.push(node.disabled);
@@ -657,26 +680,13 @@ const TOUCH = `(() => {
       const width = right - left;
       const height = bottom - top;
       const tab = node.parentElement?.matches('.tab') ? node.parentElement : null;
+      // Every control's box is its whole target (operator decision 2026-11-26), so a press lands on what it appears to land on.
+      if (reaches(target, { left, top, right, bottom })) past.push(name(node));
+      if (free) return [];
       const compact = target.matches(COMPACT);
       boxes.push({ node: target, layer: layer(target), left, top, right, bottom, compact });
-      // The Changes tree's rows are 32 px on a touch screen (operator decision 2026-11-26, changes.css): a row's own button and each control
-      // in it are held to 32 px each way by the box it shows, which is its whole target, with no pseudo-element taking presses beyond it.
-      if (target.closest('.changes-tree .tree-item:not(.section)') !== null) {
-        const beyond = ['::before', '::after'].some((part) => { const style = getComputedStyle(target, part); return style.content !== 'none' && style.position === 'absolute' && style.pointerEvents !== 'none'; });
-        return width >= 31.5 && height >= 31.5 && !beyond ? [] : [name(node) + ' ' + Math.round(width) + 'x' + Math.round(height) + (beyond ? ', a hit area beyond its box' : ', under 32 px')];
-      }
-      // A 32 px control is held to 32 px each way by the box it shows, its whole target, with no pseudo-element taking presses beyond it.
-      if (compact) {
-        // A pseudo-element that takes presses reaches past the box when it is fixed, or absolute with a negative inset or placed by a box around the control.
-        const placed = getComputedStyle(target).position !== 'static';
-        const beyond = ['::before', '::after'].some((part) => {
-          const style = getComputedStyle(target, part);
-          if (style.content === 'none' || style.pointerEvents === 'none') return false;
-          if (style.position === 'fixed') return true;
-          return style.position === 'absolute' && (!placed || [style.top, style.right, style.bottom, style.left].some((one) => parseFloat(one) < 0));
-        });
-        return width >= 31.5 && height >= 31.5 && !beyond ? [] : [name(node) + ' ' + Math.round(width) + 'x' + Math.round(height) + (beyond ? ', a hit area beyond its box' : ', under 32 px')];
-      }
+      // The Changes tree's rows and the controls in them (changes.css) and the COMPACT controls are held to 32 px each way by the box they show.
+      if (compact || target.closest('.changes-tree .tree-item:not(.section)') !== null) return width >= 31.5 && height >= 31.5 ? [] : [name(node) + ' ' + Math.round(width) + 'x' + Math.round(height) + ', under 32 px'];
       const tall = tab === null ? height >= 43.5 : tab.getBoundingClientRect().height >= 43.5 && height >= tab.clientHeight - 0.5;
       return width >= 43.5 && tall ? [] : [name(node) + ' ' + Math.round(width) + 'x' + Math.round(height)];
     });
@@ -694,7 +704,7 @@ const TOUCH = `(() => {
       else if ((one.compact || other.compact) && Math.max(-width, -height) < 3.5) crowded.push(name(one.node) + ' and ' + name(other.node) + ' ' + Math.max(0, Math.round(Math.max(-width, -height) * 10) / 10) + ' px apart');
     }
   }
-  return { small, checks, tasks, overlaps, crowded };
+  return { small, past, checks, tasks, overlaps, crowded };
 })()`;
 
 /** A toast with its work item's link and Dismiss (toast.tsx), and the console's foot with Reconnect (console.ts). */
@@ -1671,11 +1681,12 @@ try {
         // view at first is measured too.
         if (missing.length === 0 && size.mouse !== true) {
           const small = new Set();
+          const past = new Set();
           const overlaps = new Set();
           const crowded = new Set();
           const tasks = [];
           let checks = 0;
-          const take = async () => { const touch = await evaluate(TOUCH); touch.small.forEach((one) => small.add(one)); touch.overlaps.forEach((one) => overlaps.add(one)); touch.crowded.forEach((one) => crowded.add(one)); tasks.push(...touch.tasks); checks += touch.checks; };
+          const take = async () => { const touch = await evaluate(TOUCH); touch.small.forEach((one) => small.add(one)); touch.past.forEach((one) => past.add(one)); touch.overlaps.forEach((one) => overlaps.add(one)); touch.crowded.forEach((one) => crowded.add(one)); tasks.push(...touch.tasks); checks += touch.checks; };
           const scrollers = await evaluate('[...document.querySelectorAll("body *")].filter((node) => /auto|scroll/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight + 1).length');
 
           await take();
@@ -1700,11 +1711,12 @@ try {
             await take();
           }
           for (const one of small) found.push('a touch target under 44 px: ' + one);
+          for (const one of past) found.push('a touch target takes presses beyond the box it shows: ' + one);
           for (const one of overlaps) found.push('touch targets overlap: ' + one);
           for (const one of crowded) found.push('a 32 px touch target closer than 4 px to another: ' + one);
           if (SWITCHED.includes(view) && checks === 0) found.push('Settings showed no switch or checkbox to measure');
           if (view === 'conversation' && tasks.length === 0) found.push("a reply's task list showed no box to check");
-          const seen = { diffs: ['.diff-chevron', '.diff-viewed'], context: ['.context-action'], questions: ['.qc-dot', '.question-waiting'], snooze: ['.sheet-choice'] }[view] ?? [];
+          const seen = { diffs: ['.diff-chevron', '.diff-viewed'], context: ['.context-action'], questions: ['.qc-dot', '.question-waiting'], snooze: ['.sheet-choice'], attachments: ['.attachment-remove'] }[view] ?? [];
           for (const selector of seen) {
             if (!(await evaluate('document.querySelector(' + JSON.stringify(selector) + ') !== null'))) found.push('the view showed no ' + selector + ' to measure');
           }
