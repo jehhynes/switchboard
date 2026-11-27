@@ -17,7 +17,7 @@ const read: LocalTab = { id: 7, target: 'src/b.ts', line: 3, entry: { state: 'ok
 const loading: LocalTab = { id: 4, target: 'docs/a.md', line: null, entry: { state: 'loading' } };
 const links = [frameLink('https://github.com/o/r/issues/1', 'Issue 1'), frameLink('https://github.com/o/r/pull/2', 'PR #2')];
 
-/** Every tab applying: Changes, History open, two links, three artifacts out of order, two file tabs and Console. */
+/** Every tab applying: Changes, Files, History open, two links, three artifacts out of order, two file tabs and Console. */
 const full: StripState = {
   shown: 'history',
   stateUnread: false,
@@ -34,7 +34,7 @@ const full: StripState = {
 };
 const ids = (tabs: DocTab[]): string[] => tabs.map((tab) => tab.id);
 const selected = (tabs: DocTab[]): string[] => tabs.filter((tab) => tab.selected).map((tab) => tab.id);
-const ORDER = ['changes', 'history', `link:${links[0]!.url}`, `link:${links[1]!.url}`, 'artifact:chat/a9.md', 'artifact:chat/a5.md', 'artifact:chat/a2.md', 'file:D:/w/src/b.ts', 'file:docs/a.md', 'console'];
+const ORDER = ['changes', 'files', 'history', `link:${links[0]!.url}`, `link:${links[1]!.url}`, 'artifact:chat/a9.md', 'artifact:chat/a5.md', 'artifact:chat/a2.md', 'file:D:/w/src/b.ts', 'file:docs/a.md', 'console'];
 
 describe('stripTabs', () => {
   it('StripTabs_WideLayout_OrdersChangesHistoryLinksArtifactsFilesConsole', () => {
@@ -53,7 +53,7 @@ describe('stripTabs', () => {
   });
 
   it('StripTabs_BrowserWithoutLinkTabs_ShowsTheBrowserTabWhereTheLinksGo', () => {
-    expect(ids(stripTabs({ ...full, links: undefined }, 'wide')).slice(0, 4)).toEqual(['changes', 'history', 'browser', 'artifact:chat/a9.md']);
+    expect(ids(stripTabs({ ...full, links: undefined }, 'wide')).slice(0, 5)).toEqual(['changes', 'files', 'history', 'browser', 'artifact:chat/a9.md']);
     // No Browser tab beside link tabs, even an empty list of them, nor without the browser.
     expect(ids(stripTabs({ ...full, links: [] }, 'wide'))).not.toContain('browser');
     expect(ids(stripTabs({ ...full, links: undefined, browser: false }, 'wide'))).not.toContain('browser');
@@ -109,7 +109,7 @@ describe('stripTabs', () => {
   });
 
   it('Closable_HistoryLinksArtifactsFiles_HaveACloseMarkAndTheFixedTabsNone', () => {
-    expect(stripTabs(full, 'narrow').filter(closable).map((tab) => tab.id)).toEqual(ORDER.filter((id) => id !== 'changes' && id !== 'console'));
+    expect(stripTabs(full, 'narrow').filter(closable).map((tab) => tab.id)).toEqual(ORDER.filter((id) => id !== 'changes' && id !== 'files' && id !== 'console'));
   });
 });
 
@@ -126,7 +126,7 @@ describe('the strips drawn from stripTabs', () => {
   // Each drawn tab named as stripTabs names it.
   const name = (tab: HTMLElement): string =>
     tab.dataset['tab'] ?? tab.dataset['side'] ?? (tab.dataset['url'] !== undefined ? `link:${tab.dataset['url']}` : tab.closest<HTMLElement>('.artifact-tab')?.dataset['path'] !== undefined ? `artifact:${tab.closest<HTMLElement>('.artifact-tab')!.dataset['path']}` : tab.dataset['local'] !== undefined ? `file:${tab.dataset['local']}` : tab.classList.contains('changes-tab') ? 'changes' : '?');
-  const drawnOrder = ['changes', 'history', `link:${links[0]!.url}`, `link:${links[1]!.url}`, 'artifact:chat/a9.md', 'artifact:chat/a5.md', 'artifact:chat/a2.md', 'file:7', 'file:4', 'console'];
+  const drawnOrder = ['changes', 'files', 'history', `link:${links[0]!.url}`, `link:${links[1]!.url}`, 'artifact:chat/a9.md', 'artifact:chat/a5.md', 'artifact:chat/a2.md', 'file:7', 'file:4', 'console'];
 
   it('SideSwitch_EveryTab_DrawnInTheStripOrderSoLeftAndRightFollowIt', () => {
     expect(draw(renderSideSwitch('history', state, true, open, true)).map(name)).toEqual(drawnOrder);
@@ -138,7 +138,7 @@ describe('the strips drawn from stripTabs', () => {
 
   it('Strip_TabsBeyondTheFit_GoToMoreAtTheEnd', () => {
     const host = document.createElement('div');
-    // Room for Changes, History and the first link beside More.
+    // Room for Changes, Files and History beside More.
     const fit: TabFit = { width: 350, more: 50, plain: 100, closable: 100, measured: {} };
 
     mount(host, renderSideSwitch('history', state, true, { ...open, fit }, true));
@@ -184,8 +184,8 @@ describe('fitTabs', () => {
   // Every tab 100 px, a closable one 120 px, More 60 px.
   const fit = (width: number, measured: Record<string, number> = {}): TabFit => ({ width, more: 60, plain: 100, closable: 120, measured });
   const all = ['conversation', ...ORDER];
-  // 3 plain tabs (Chat, Changes, Console) and 8 closable ones (History, two links, three artifacts, two files).
-  const total = 3 * 100 + 8 * 120;
+  // 4 plain tabs (Chat, Changes, Files, Console) and 8 closable ones (History, two links, three artifacts, two files).
+  const total = 4 * 100 + 8 * 120;
 
   it('FitTabs_UnmeasuredOrRoomForAll_ShowsEveryTab', () => {
     expect(ids2(fitTabs(tabs, UNMEASURED))).toEqual([all, []]);
@@ -196,13 +196,13 @@ describe('fitTabs', () => {
   });
 
   it('FitTabs_TooNarrow_KeepsTheSelectedTabConversationChangesAndHistoryThenTheRestInStripOrder', () => {
-    // 60 for More, 120 for the selected artifact, 100 each for Chat and Changes, 120 for History, then the first link at 120: 620.
-    const [shown, hidden] = ids2(fitTabs(tabs, fit(620)));
+    // 60 for More, 120 for the selected artifact, 100 each for Chat and Changes, 120 for History, then Files at 100 and the first link at 120: 720.
+    const [shown, hidden] = ids2(fitTabs(tabs, fit(720)));
 
-    expect(shown).toEqual(['conversation', 'changes', 'history', `link:${links[0]!.url}`, 'artifact:chat/a2.md']);
+    expect(shown).toEqual(['conversation', 'changes', 'files', 'history', `link:${links[0]!.url}`, 'artifact:chat/a2.md']);
     expect(hidden).toEqual(all.filter((id) => !shown.includes(id)));
     // One pixel short of the link: it and every tab after it go, even one that would fit.
-    expect(ids2(fitTabs(tabs, fit(619)))[0]).toEqual(['conversation', 'changes', 'history', 'artifact:chat/a2.md']);
+    expect(ids2(fitTabs(tabs, fit(719)))[0]).toEqual(['conversation', 'changes', 'files', 'history', 'artifact:chat/a2.md']);
   });
 
   it('FitTabs_StripTooNarrowForTheKeptTabs_DropsHistoryThenChangesThenConversationButNeverTheSelectedTab', () => {
@@ -224,8 +224,8 @@ describe('fitTabs', () => {
 
   it('FitTabs_MeasuredTab_UsesItsOwnWidthOverItsKinds', () => {
     // The first link measured at 300 px no longer fits where it did at 120.
-    expect(ids2(fitTabs(tabs, fit(620, { [`link:${links[0]!.url}`]: 300 })))[0]).toEqual(['conversation', 'changes', 'history', 'artifact:chat/a2.md']);
-    // A narrow History measured at 60 px lets the first link in at 560.
-    expect(ids2(fitTabs(tabs, fit(560, { history: 60 })))[0]).toEqual(['conversation', 'changes', 'history', `link:${links[0]!.url}`, 'artifact:chat/a2.md']);
+    expect(ids2(fitTabs(tabs, fit(720, { [`link:${links[0]!.url}`]: 300 })))[0]).toEqual(['conversation', 'changes', 'files', 'history', 'artifact:chat/a2.md']);
+    // A narrow History measured at 60 px lets the first link in at 660.
+    expect(ids2(fitTabs(tabs, fit(660, { history: 60 })))[0]).toEqual(['conversation', 'changes', 'files', 'history', `link:${links[0]!.url}`, 'artifact:chat/a2.md']);
   });
 });

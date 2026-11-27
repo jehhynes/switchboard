@@ -61,12 +61,13 @@ describe('the tab strips', () => {
     // Each shows an icon before its label, whichever codicon it is, and is titled by its label.
     expect(tabs.map((tab) => [tab.dataset['tab'], tab.querySelector('.codicon') !== null, tab.querySelector('.tab-label')!.textContent, tab.title])).toEqual([
       ['conversation', true, 'Chat', 'Chat'],
+      ['files', true, 'Files', 'Files'],
       ['history', true, 'History', 'History'],
       ['browser', true, 'Browser', 'Browser'],
       ['console', true, 'Console', 'Console'],
     ]);
     // History's unread dot stays in its name once the label is hidden.
-    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Chat', 'History, unread', 'Browser', 'Console']);
+    expect(tabs.map((tab) => tab.getAttribute('aria-label'))).toEqual(['Chat', 'Files', 'History, unread', 'Browser', 'Console']);
     expect(strips[0]!.querySelector('.changes-tab ~ [data-tab="console"]')).not.toBeNull();
     // History has a close mark, as an artifact's tab.
     expect(strips.map((strip) => strip.querySelector('.history-tab > [data-action="close-history"]')?.getAttribute('aria-label'))).toEqual(['Close History', 'Close History']);

@@ -759,7 +759,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click('#panel a.path-link[data-target="src/b.ts"]');
     await flush();
     click('#detail .local-tab [data-action="local-tab"]');
-    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['changes', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'console']);
+    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((tab) => tab.getAttribute('data-id'))).toEqual(['changes', 'files', 'artifact:chat/p.html', 'artifact:chat/plan.md', 'file:src/a.ts', 'file:src/b.ts', 'console']);
     expect(shown()).toBe('file:src/a.ts');
 
     // Closing a tab not shown changes nothing else, a file's or an artifact's.

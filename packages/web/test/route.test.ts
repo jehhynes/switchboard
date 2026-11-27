@@ -19,6 +19,12 @@ describe('the route', () => {
 
     expect(local).toBe('#w=3&t=file&p=D%3A%2Fw%2FREADME.md&l=40&h=9&hk=gh%209');
     expect(parseRoute(local)).toEqual({ w: 3, t: 'file', f: null, p: 'D:/w/README.md', l: 40, u: null, h: { ticketId: 9, key: 'gh 9' } });
+    // The Files tab's file, by its path in the worktree, at a line.
+    const files = routeHash({ w: 3, t: 'files', p: 'src/a b.ts', l: 7 });
+
+    expect(files).toBe('#w=3&t=files&p=src%2Fa%20b.ts&l=7');
+    expect(parseRoute(files)).toMatchObject({ w: 3, t: 'files', f: null, p: 'src/a b.ts', l: 7 });
+    expect(routeHash({ w: 3, t: 'files' })).toBe('#w=3&t=files');
     // What a tab shows belongs to that tab only.
     expect(routeHash({ w: 3, t: 'status', f: 'x', p: 'y', l: 2 })).toBe('#w=3&t=status');
     // History over the list, with no work item open.

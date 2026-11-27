@@ -33,14 +33,14 @@ export interface StripState {
 }
 
 interface TabBase {
-  /** `history`, `changes`, `console`, `conversation` and `browser` for the fixed tabs, `link:<url>`, `artifact:<path>` or `file:<path>`. */
+  /** `history`, `changes`, `files`, `console`, `conversation` and `browser` for the fixed tabs, `link:<url>`, `artifact:<path>` or `file:<path>`. */
   id: string;
   selected: boolean;
 }
 
 /** A strip's tab: a fixed tab, a link, an artifact, a file or Changes. */
 export type DocTab =
-  | (TabBase & { kind: 'fixed'; tab: 'conversation' | 'history' | 'browser' | 'console'; unread: boolean })
+  | (TabBase & { kind: 'fixed'; tab: 'conversation' | 'history' | 'browser' | 'console' | 'files'; unread: boolean })
   | (TabBase & { kind: 'link'; link: FrameLink })
   | (TabBase & { kind: 'artifact'; artifact: ArtifactView })
   | (TabBase & { kind: 'file'; file: LocalTab })
@@ -50,19 +50,19 @@ export type DocTab =
 export const filePath = (tab: LocalTab): string => (tab.entry.state === 'ok' ? tab.entry.data.path : tab.target);
 
 /**
- * The strip's tabs in order, each only while it applies: Chat (narrow strip only), Changes, History while open, the links (or Browser),
+ * The strip's tabs in order, each only while it applies: Chat (narrow strip only), Changes and Files, History while open, the links (or Browser),
  * the artifacts newest first but those closed, unless shown, the file tabs in the order they were opened, then Console.
  */
 export function stripTabs(state: StripState, layout: StripLayout): DocTab[] {
   const { shown } = state;
-  const fixed = (tab: 'conversation' | 'history' | 'browser' | 'console'): DocTab => ({ id: tab, kind: 'fixed', tab, selected: shown === tab, unread: tab === 'history' && state.stateUnread && shown !== tab });
+  const fixed = (tab: 'conversation' | 'history' | 'browser' | 'console' | 'files'): DocTab => ({ id: tab, kind: 'fixed', tab, selected: shown === tab, unread: tab === 'history' && state.stateUnread && shown !== tab });
   const artifacts = [...state.artifacts]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .filter((artifact) => !state.closed.has(artifact.path) || (shown === 'artifacts' && artifact.path === state.open));
 
   return [
     ...(layout === 'narrow' ? [fixed('conversation')] : []),
-    ...(state.changes ? [{ id: 'changes', kind: 'changes' as const, selected: shown === 'diff' }] : []),
+    ...(state.changes ? [{ id: 'changes', kind: 'changes' as const, selected: shown === 'diff' }, fixed('files')] : []),
     ...(state.history === true ? [fixed('history')] : []),
     ...(state.links === undefined ? (state.browser ? [fixed('browser')] : []) : state.links.map((link): DocTab => ({ id: `link:${link.url}`, kind: 'link', link, selected: shown === 'browser' && state.link === link.url }))),
     ...artifacts.map((artifact): DocTab => ({ id: `artifact:${artifact.path}`, kind: 'artifact', artifact, selected: shown === 'artifacts' && artifact.path === state.open })),

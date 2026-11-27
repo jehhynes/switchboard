@@ -413,7 +413,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** The column's tab where no other applies: History while it is open, else Changes, the column's first tab. */
   const sideFallback = (): SideTab => (historyShown() ? 'history' : 'diff');
   /** The tab the conversation's pane shows: always the conversation while the column has its own place, and never a Browser tab that is gone. */
-  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'history' && !historyShown()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) || (view.tab === 'file' && localFiles.shown() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? (historyShown() ? 'history' : 'conversation') : view.tab);
+  const mainTab = (): Tab => (wide() || (view.tab === 'browser' && !showBrowser()) || (view.tab === 'history' && !historyShown()) || (view.tab === 'artifacts' && openArtifact() === null) || (view.tab === 'diff' && !changes.view.tab) || (view.tab === 'files' && !changes.filesOpen) || (view.tab === 'file' && localFiles.shown() === null) ? 'conversation' : view.tab === 'console' && !showConsole() ? (historyShown() ? 'history' : 'conversation') : view.tab);
   /** The work item whose tabs were last chosen on its opening, and whether the operator has chosen a tab since. */
   let openedItem: number | null = null;
   let tabChosen = false;
@@ -490,8 +490,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const workItemId = state.scope?.workItemId ?? null;
     const shown = wide() ? sideTab() : mainTab();
 
-    // The Changes tab or a file tab lasts as long as the page shows the work item, so it is not kept.
-    if (workItemId === null || shown === 'conversation' || shown === 'diff' || shown === 'file') {
+    // The Changes, Files or a file tab lasts as long as the page shows the work item, so it is not kept.
+    if (workItemId === null || shown === 'conversation' || shown === 'diff' || shown === 'files' || shown === 'file') {
       return;
     }
 
@@ -553,7 +553,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     return next;
   };
   /** What the column right of the conversation shows: `sideFallback` in place of a tab that is gone or closed. */
-  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'history' && !historyShown()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) || (view.side === 'file' && localFiles.shown() === null) ? sideFallback() : view.side);
+  const sideTab = (): SideTab => ((view.side === 'browser' && !showBrowser()) || (view.side === 'history' && !historyShown()) || (view.side === 'console' && !showConsole()) || (view.side === 'artifacts' && openArtifact() === null) || (view.side === 'diff' && !changes.view.tab) || (view.side === 'files' && !changes.filesOpen) || (view.side === 'file' && localFiles.shown() === null) ? sideFallback() : view.side);
   /** The artifact whose tab is chosen, while the work item still has it; artifacts have no list of their own, only a tab each and a menu. */
   function openArtifact(): string | null {
     return view.artifact !== null && state.artifacts.some((one) => one.path === view.artifact) ? view.artifact : null;
@@ -634,13 +634,18 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       chooseTab('diff');
       draw();
     },
+    showFiles: () => {
+      leaving('files');
+      chooseTab('files');
+      draw();
+    },
     loadDiff: () => deps.loadDiff?.() ?? Promise.resolve(null),
     takePane: (pane) => takePane(pane),
     command: (name, body) => command(name, body),
     workItemId: () => state.scope?.workItemId ?? null,
     diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
     local: () => localPage(),
-    inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (mainTab() === 'diff' || (wide() && sideTab() === 'diff')),
+    inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (['diff', 'files'].includes(mainTab()) || (wide() && ['diff', 'files'].includes(sideTab()))),
     drawDiagrams: (element) => drawDiagrams(element),
     quote: (text) => quoteInMessage(text),
   });
@@ -2953,7 +2958,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       pane.classList.toggle('console-pane', tab === 'console');
       pane.classList.toggle('browser-pane', tab === 'browser');
       pane.classList.toggle('history-pane', tab === 'history');
-      pane.classList.toggle('diff-pane', tab === 'diff' || (tab === 'file' && localFiles.codeShown()) || (tab === 'artifacts' && artifact !== undefined && artifactCode(artifact)));
+      pane.classList.toggle('diff-pane', tab === 'diff' || tab === 'files' || (tab === 'file' && localFiles.codeShown()) || (tab === 'artifacts' && artifact !== undefined && artifactCode(artifact)));
 
       if (tab !== 'file') {
         filePlaced.delete(pane);
@@ -2975,6 +2980,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         placeHistory(pane);
       } else if (tab === 'diff') {
         changes.drawDiff(pane);
+      } else if (tab === 'files') {
+        changes.drawFiles(pane);
       } else if (tab === 'file') {
         localFiles.draw(pane);
         placeFile(pane);
@@ -3346,9 +3353,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   const routeOf = (): Route => {
     const tab = wide() ? sideTab() : mainTab();
     const shownFile = tab === 'file' ? localFiles.shown() : null;
-    const t = tab === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : tab === 'console' || tab === 'history' ? tab : tab === 'browser' ? 'link' : tab === 'diff' ? 'changes' : shownFile !== null ? 'file' : null;
+    const disk = tab === 'files' ? changes.diskFile : null;
+    const t = tab === 'artifacts' ? `artifact:${openArtifact() ?? ''}` : tab === 'console' || tab === 'history' || tab === 'files' ? tab : tab === 'browser' ? 'link' : tab === 'diff' ? 'changes' : shownFile !== null ? 'file' : null;
 
-    return { w: wanted, t, f: tab === 'diff' ? changes.focusPath : null, p: shownFile?.target ?? null, l: shownFile?.line ?? null, u: tab === 'browser' ? iframe.selected || null : null, h: null };
+    return { w: wanted, t, f: tab === 'diff' ? changes.focusPath : null, p: disk?.path ?? shownFile?.target ?? null, l: disk?.line ?? shownFile?.line ?? null, u: tab === 'browser' ? iframe.selected || null : null, h: null };
   };
   /** Puts the route in the address and keeps it on this device, once the work item asked for shows (route.ts). */
   let keptRoute: string | null = null;
@@ -3391,7 +3399,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** Tabs whose own viewers scroll inside them, so the pane's scroll means nothing; the Changes tab's place is its file in the route. */
   // An artifact's document scrolls inside its own view: its place is that view's (`artifactTop`).
   // History scrolls its body under its sticky toolbar (`historyPlace`).
-  const ownScroller = (tab: Tab): boolean => tab === 'diff' || tab === 'file' || tab === 'console' || tab === 'browser' || tab === 'artifacts' || tab === 'history';
+  const ownScroller = (tab: Tab): boolean => tab === 'diff' || tab === 'files' || tab === 'file' || tab === 'console' || tab === 'browser' || tab === 'artifacts' || tab === 'history';
   /** A conversation's place's key: by work item and session, so an earlier session shown keeps its own place and lends it to no other. */
   const conversationPlace = (w: number): string => `${w} conversation ${state.session?.id ?? ''}`;
   /** History's place: its body's scroll top in the pane that shows it. */
@@ -3553,7 +3561,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const files = localFiles.view.tabs;
     const shownFile = files.findIndex((one) => one.id === localFiles.view.open);
     const links = iframe.kept(w);
-    const set: TabSet = { side: view.side, tab: view.tab, artifact: view.artifact, changes: changes.view.tab && !changesFallback, changesFile: changes.view.tab && !changesFallback ? changes.focusPath : null, files: files.map((one) => ({ target: one.target, line: one.line })), file: shownFile === -1 ? null : shownFile, ...(links === null ? {} : { links }), ...(historyShown() ? { history: true } : {}) };
+    const set: TabSet = { side: view.side, tab: view.tab, artifact: view.artifact, changes: changes.view.tab && !changesFallback, changesFile: changes.view.tab && !changesFallback ? changes.focusPath : null, filesTab: changes.filesOpen, filesFile: changes.filesOpen ? (changes.diskFile?.path ?? null) : null, files: files.map((one) => ({ target: one.target, line: one.line })), file: shownFile === -1 ? null : shownFile, ...(links === null ? {} : { links }), ...(historyShown() ? { history: true } : {}) };
     const key = tabSetKey(w);
 
     if (Object.keys(tabSets).at(-1) === key && JSON.stringify(tabSets[key]) === JSON.stringify(set)) {
@@ -3590,6 +3598,14 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       changes.openChanges(set.changesFile);
     }
 
+    if (set.filesTab === true) {
+      if (set.filesFile != null) {
+        changes.openDiskFile(set.filesFile, null);
+      } else {
+        changes.openFiles();
+      }
+    }
+
     for (const one of set.files) {
       localFiles.open(one.target, one.line, false);
     }
@@ -3597,7 +3613,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     localFiles.view.open = (set.file === null ? undefined : localFiles.view.tabs[set.file])?.id ?? localFiles.view.tabs.at(-1)?.id ?? null;
     historyFor = set.history === true ? w : null;
 
-    if ([...SIDE_TABS, 'diff', 'file'].includes(set.side)) {
+    if ([...SIDE_TABS, 'diff', 'files', 'file'].includes(set.side)) {
       view.side = set.side as SideTab;
     }
 
@@ -4376,6 +4392,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         chooseTab(tab);
       } else if (tab === 'changes') {
         changes.openChanges(route.f ?? null);
+      } else if (tab === 'files') {
+        if (route.p != null) {
+          changes.openDiskFile(route.p, route.l ?? null);
+        } else {
+          changes.openFiles();
+        }
       } else if (tab === 'file' && route.p != null) {
         openDoc(`file:${route.p}`, { line: route.l ?? null, chosen: false });
       } else if (tab === null) {
@@ -4867,6 +4889,12 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
     const sideTab = target.closest<HTMLElement>('[data-side]')?.dataset['side'];
+
+    // The Files tab opens through its controller, which reads its tree the first time.
+    if (sideTab === 'files' || target.closest<HTMLElement>('[data-tab]')?.dataset['tab'] === 'files') {
+      changes.openFiles();
+      return;
+    }
 
     if (SIDE_TABS.includes(sideTab as SideTab)) {
       chooseTab(sideTab as SideTab);
@@ -6420,7 +6448,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       if (type === 'hello' && rebound && wanted !== null && state.scope?.workItemId === wanted && !keep) {
         rebound = false;
 
-        if (changes.view.tab) {
+        if (changes.view.tab || changes.filesOpen) {
           void changes.refresh();
         }
 

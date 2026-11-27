@@ -62,11 +62,12 @@ const REPORT_VIEWS = ['history-report', 'history-report-back', 'history-report-e
 const MODAL_VIEWS = ['sheet', 'snooze', 'comment', 'new-session', 'folders', 'pair', 'held', 'log', 'extension', 'shortcut', 'holder', ...REPORT_VIEWS, 'row-snooze', 'row-comment'];
 /**
  * One file of each kind the viewer draws (docs/plan.md, docs/renew.ts, docs/shot.png, docs/spec.pdf), a tagged artifact, opened each way the page
- * opens a file: its artifact's tab, a link's file tab, and the Changes tab's Explore, which shows it inside the tab; and a link to the docs
- * folder, which opens Explore there (architecture.md § Web page, File viewer).
+ * opens a file: its artifact's tab, a link's file tab, and the Files tab's tree, which shows it inside the tab; and a link to the docs
+ * folder, which opens the Files tab there; and a changed file in the Files tab with its Diff, and that Diff's way to Changes (architecture.md
+ * § Web page, File viewer and Files).
  */
 const FILE_KINDS = { md: 'plan.md', code: 'renew.ts', image: 'shot.png', pdf: 'spec.pdf' };
-const FILE_VIEWS = [...Object.keys(FILE_KINDS).flatMap((kind) => ['artifact', 'tab', 'explore'].map((way) => `file-${way}-${kind}`)), 'file-folder'];
+const FILE_VIEWS = [...Object.keys(FILE_KINDS).flatMap((kind) => ['artifact', 'tab', 'explore'].map((way) => `file-${way}-${kind}`)), 'file-folder', 'files-changed', 'files-diff'];
 /** The bell's views: one notice, three, three with the dropdown open, and a one-time notice's toast with none; the list view has none either. */
 const NOTICE_VIEWS = ['notices-1', 'notices-3', 'notices-open', 'notice-toast'];
 /** A row menu's controls chosen in the list for a work item not open, which act in place: Snooze…'s and Add comment…'s sheets, and Mark done. */
@@ -228,6 +229,8 @@ const fileKind = view?.startsWith('file-') ? (view.split('-')[2] ?? 'md') : null
 const FILES = { md: { name: 'plan.md', type: 'markdown', local: 'markdown', media: null }, code: { name: 'renew.ts', type: 'file', local: 'text', media: null }, image: { name: 'shot.png', type: 'image', local: 'image', media: 'image/png' }, pdf: { name: 'spec.pdf', type: 'file', local: 'pdf', media: 'application/pdf' } };
 const viewed = FILES[fileKind] ?? FILES.md;
 const codeText = Array.from({ length: 60 }, (_, i) => 'export const step' + i + ' = () => renew(' + i + ', { lead: 30, check: "the inbound route again, which is a long line to wrap" });').join('\\n');
+// The Files tab's file by its path: docs/'s file of the view's kind, or any other file of the worktree as code.
+const fileOf = (path) => (path === 'docs/' + viewed.name ? { path, side: 'disk', contents: viewedText(), binary: false, tooLarge: false, bytes: 1000, media: viewed.media } : { path, side: 'disk', contents: codeText, binary: false, tooLarge: false, bytes: codeText.length, media: null });
 // Read when asked, after planText is set.
 const viewedText = () => (fileKind === 'code' ? codeText : viewed.media === null ? planText : null);
 const artifacts = fileKind !== null ? [{ path: '@1/' + viewed.name, owner: '@1', kind: 'plan', title: viewed.name === 'plan.md' ? 'Plan' : viewed.name, ext: viewed.name.slice(viewed.name.lastIndexOf('.') + 1), type: viewed.type, updatedAt: now - 60000, file: 'D:/w/docs/' + viewed.name }] : mic ? [{ path: 'chat/plan.md', owner: 'chat', kind: 'note', title: 'Plan', ext: 'md', type: 'markdown', updatedAt: now - 1000 }] : view === 'tabs' || view === 'tab-menu' ? Array.from({ length: view === 'tab-menu' ? 20 : 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: i === 9 ? 'Plan' : 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
@@ -298,7 +301,7 @@ const newSide = 'export function renew() {\\n  register();\\n  schedule();\\n}\\
 const diffOf = (path) => ({ path, status: 'M', patch: 'diff --git a/' + path + ' b/' + path + '\\n--- a/' + path + '\\n+++ b/' + path + '\\n@@ -1,3 +1,4 @@\\n export function renew() {\\n   register();\\n+  schedule();\\n }\\n', old: oldSide, new: newSide, binary: false, tooLarge: null });
 const planText = '# Plan\\n\\n' + Array.from({ length: 40 }, (_, i) => 'Step ' + (i + 1) + ': renew the registration 30 s before it lapses, and check the inbound route again.').join('\\n\\n');
 const stackData = { scopeGen: 3, repo: 'switchboard', root: 'D:/w', branch: 'fix/dialer-registration', head: 'c1', commitIds: ['c1'], more: false, incomplete: false, github: { state: 'none', observedAt: null }, links: [], main: { ref: 'origin/main', behind: 0, fetchedAt: now } };
-const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? treeOf(new URL(url, location.href).searchParams.get('dir')) : url.includes('/v1/conversation/file?') ? { path: 'docs/' + viewed.name, side: 'disk', contents: viewedText(), binary: false, tooLarge: false, bytes: 1000, media: viewed.media } : url.includes('/v1/conversation/local-file?') ? (new URL(url, location.href).searchParams.get('path') === 'docs/' ? { path: 'D:/w/docs', name: 'docs', kind: 'dir', contents: null, tooLarge: false, size: null, entries: [], more: false, modified: null } : { path: 'D:/w/docs/' + viewed.name, name: viewed.name, kind: viewed.local, contents: viewedText(), tooLarge: false, size: 1000, entries: null, more: false, modified: now - 60000 }) : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
+const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? treeOf(new URL(url, location.href).searchParams.get('dir')) : url.includes('/v1/conversation/file?') ? fileOf(new URL(url, location.href).searchParams.get('path')) : url.includes('/v1/conversation/local-file?') ? (new URL(url, location.href).searchParams.get('path') === 'docs/' ? { path: 'D:/w/docs', name: 'docs', kind: 'dir', contents: null, tooLarge: false, size: null, entries: [], more: false, modified: null } : { path: 'D:/w/docs/' + viewed.name, name: viewed.name, kind: viewed.local, contents: viewedText(), tooLarge: false, size: 1000, entries: null, more: false, modified: now - 60000 }) : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
 // The worktree's files with what git ignores that Explore shows (.wip, out on the way to a shown out/reports, and a log beside the code), and .wip's entries.
 const treeOf = (dir) => (dir === '.wip' ? { scopeGen: 3, dir, paths: [], ignored: ['.wip/artifacts/', '.wip/notes.md', '.wip/registration-trace.txt'], more: false } : dir !== null ? { scopeGen: 3, dir, paths: [], ignored: [], more: false } : { scopeGen: 3, paths: [...changesList.rows.map((row) => row.path), 'README.md', 'package.json', 'docs/' + viewed.name], ignored: ['.wip/', 'out/', 'src/dialer/registration.log'], more: false });
 // Background sessions: one of a work item and one without.
@@ -872,7 +875,10 @@ const OPEN = {
   // Its search's options menu open, Regular expression chosen, which keeps the menu open.
   'changes-options': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-options]', '.tree-options-menu [data-option=regex]'],
   // Explore with what git ignores muted: .wip opened, read when it opens, and src/dialer opened beside its ignored log.
-  'changes-explore': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-files][data-mode=all]', '.tree-row[data-key="dir:.wip"]', '.tree-row[data-key="dir:src"]', '.tree-row[data-key="dir:src/dialer"]'],
+  'changes-explore': [openTab('[data-side="files"], .tabs [data-tab="files"]'), '[data-action=tree-flyout], .tree-pinned .tree-search', '.tree-row[data-key="dir:.wip"]', '.tree-row[data-key="dir:src"]', '.tree-row[data-key="dir:src/dialer"]'],
+  // The Files tab's view of a changed file, with its Diff, and that Diff's way to the file's diff in Changes.
+  'files-changed': [openTab('[data-side="files"], .tabs [data-tab="files"]'), '[data-action=tree-flyout], .tree-pinned .tree-search', '.tree-row[data-key="dir:src"]', '.tree-row[data-key="dir:src/dialer"]', '[data-action=tree-disk][data-path="src/dialer/registration.ts"]'],
+  'files-diff': [openTab('[data-side="files"], .tabs [data-tab="files"]'), '[data-action=tree-flyout], .tree-pinned .tree-search', '.tree-row[data-key="dir:src"]', '.tree-row[data-key="dir:src/dialer"]', '[data-action=tree-disk][data-path="src/dialer/registration.ts"]', '.changes-bar [data-action=file-diff]'],
   // History's chips shown, one turned off, as a phone shows them behind Filters; a wider pane shows them without it.
   'history-filters': [...HISTORY, '[data-action=history-chips]', '.hist-chip[data-category="you"]'],
   'history-report': [...HISTORY, '.hist-now [data-action=history-report]'],
@@ -902,11 +908,11 @@ const OPEN = {
   context: ['[data-context=toggle]'],
   // The context meter's menu with its details shown.
   'context-details': ['.context-ring', '[data-context=details]'],
-  // Each file each way it opens (FILE_VIEWS): its artifact's tab, a link to it in a reply, and Explore in the Changes tab's tree; and the docs folder by a link.
+  // Each file each way it opens (FILE_VIEWS): its artifact's tab, a link to it in a reply, and the Files tab's tree; and the docs folder by a link.
   ...Object.fromEntries(Object.entries(FILE_KINDS).flatMap(([kind, name]) => [
     ['file-artifact-' + kind, [openTab('[data-action="artifact"][data-path="@1/' + name + '"]')]],
     ['file-tab-' + kind, [replyLink('docs/' + name)]],
-    ['file-explore-' + kind, ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-files][data-mode=all]', '[data-action=tree-toggle][data-key="dir:docs"]', '[data-action=tree-disk][data-path="docs/' + name + '"]']],
+    ['file-explore-' + kind, [openTab('[data-side="files"], .tabs [data-tab="files"]'), '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-toggle][data-key="dir:docs"]', '[data-action=tree-disk][data-path="docs/' + name + '"]']],
   ])),
   'file-folder': [replyLink('docs/')],
 };

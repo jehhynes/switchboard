@@ -391,6 +391,19 @@ describe('the page in use', () => {
     expect(localStorage.getItem('switchboard.route')).toBe('#w=1&t=file&p=D%3A%2Fw%2FREADME.md&l=4');
     second.page.close();
 
+    // The Files tab at a file of the worktree, at its line, reads it through the Changes routes.
+    history.replaceState(null, '', '#w=1&t=files&p=src%2Fa.ts&l=3');
+    posts = [];
+
+    const files = start();
+
+    hello(files.source);
+    await flush();
+    expect(posts.some((post) => post.url.startsWith('/v1/conversation/file?') && post.url.includes('path=src%2Fa.ts'))).toBe(true);
+    expect(root.querySelector('#detail [data-side="files"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(location.hash).toBe('#w=1&t=files&p=src%2Fa.ts&l=3');
+    files.page.close();
+
     // History is a tab of the work item's: an address from before, which named it apart as `h`, opens that tab.
     history.replaceState(null, '', '#w=1&h=7&hk=gh%207');
     posts = [];

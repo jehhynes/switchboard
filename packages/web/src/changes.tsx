@@ -12,7 +12,7 @@ import { keepWrap, storedWrap } from './wrapPref.js';
 import { CodeDraw, FileBody, FileHead, sayIn } from './fileView.js';
 import { worktreeMarkdown } from './changesMarkdown.js';
 import { ChangesTreeView, ignoredSet, isIgnored, newTree, PEEKS_KEPT } from './changesTree.js';
-import type { TreeState } from './changesTree.js';
+import type { TreeMode, TreeState } from './changesTree.js';
 import type { LineRange } from './diff/types.js';
 import type { ChangeRow, ChangesList, ChangeStage, ChangeStatus, CommitInfo, DiffData, FileData, SearchData, StackData, TreeData } from '@switchboard/protocol';
 import type { ChangesMount, DiffModule, DiffMount, RowContent } from './diff/types.js';
@@ -374,6 +374,8 @@ export function compareValid(range: ChangeRange, commits: readonly CommitInfo[],
 
 /** How the tree sits, for the bar: pinned beside the diffs, or a flyout open or closed; and the Compare picker's points while it is open. */
 export interface BarTree {
+  /** Which tab the bar is atop: the Changes tab's diffs, or the Files tab's file view; the Changes tab's by default. */
+  mode?: TreeMode;
   pinned: boolean;
   /** A file shows over the diffs, so the bar's back closes it before it changes the range. */
   fileOpen: boolean;
@@ -456,11 +458,16 @@ export function renderChangesBar(changes: ChangesView, wrapped: boolean, now = D
   const base = list?.base ?? null;
   const title = scopeTitle(changes.range, commits, base);
   const treeButton = tree.pinned ? null : (
-    <button class={`changes-tree-button${tree.flyout ? ' open' : ''}`} type="button" data-action="tree-flyout" aria-expanded={tree.flyout} title="Files and commits (Ctrl+B pins them)" aria-label="Files and commits">
+    <button class={`changes-tree-button${tree.flyout ? ' open' : ''}`} type="button" data-action="tree-flyout" aria-expanded={tree.flyout} title={tree.mode === 'files' ? 'Files (Ctrl+B pins them)' : 'Changes and commits (Ctrl+B pins them)'} aria-label={tree.mode === 'files' ? 'Files' : 'Changes and commits'}>
       {/* VS Code's sidebar toggle, so it reads as showing a panel rather than as another list beside Files. */}
       <span class={`codicon codicon-layout-sidebar-left${tree.flyout ? '' : '-off'}`} aria-hidden="true"></span>
     </button>
   );
+
+  // The Files tab's bar: the tree's button and the file viewer's head of the file shown, else what to do.
+  if (tree.mode === 'files') {
+    return [treeButton, tree.fileOpen ? (tree.file?.(wrapped) ?? null) : <span class="changes-note">Choose a file in the tree.</span>];
+  }
 
   // A file shown over the diffs keeps only what applies to it: the tree's button, the way back, then the file viewer's head, as a file tab
   // shows it. The diffs' controls return with the diffs.
@@ -515,6 +522,8 @@ export interface ChangesDeps {
   /** The page key, null before the stream's hello. */
   key(): string | null;
   draw(): void;
+  /** Shows the Files tab, as `showDiff` shows the Changes tab. */
+  showFiles(): void;
   /** Shows the Changes tab, in the side column on a wide screen and in the conversation's strip on a narrower one. */
   showDiff(): void;
   /** Loads the diff viewer's module on first use; null when it cannot load. */
@@ -693,6 +702,24 @@ function FileToggle(): VNode {
   );
 }
 
+/** Diff, in the Files tab's view of a changed file: shows that file's diff in the Changes tab, the file staying in the Files tab for the way back. */
+function DiffButton(): VNode {
+  return (
+    <button class="icon" type="button" data-action="file-diff" title="Show this file's diff in Changes" aria-label="Show this file's diff in Changes">
+      <span class="codicon codicon-diff" aria-hidden="true"></span>
+    </button>
+  );
+}
+
+/** File, on a diff of a file on disk: shows the file in the Files tab. */
+function FileButton({ path }: { path: string }): VNode {
+  return (
+    <button class="diff-wrap diff-file" type="button" data-action="diff-file" data-path={path} title="Show this file in Files" aria-label="Show this file in Files">
+      <span class="codicon codicon-go-to-file" aria-hidden="true"></span>
+    </button>
+  );
+}
+
 /** Quote, while lines are selected: puts them in the message being written, with the file, lines, side and revision. */
 function QuoteButton(): VNode {
   return (
@@ -703,10 +730,11 @@ function QuoteButton(): VNode {
 }
 
 /** What a file's own header carries after its counts: Quote while lines of it are selected, then its Viewed tick. */
-function DiffTools({ row, quote = false }: { row: ChangeRow | undefined; quote?: boolean }): VNode | null {
+function DiffTools({ row, quote = false, disk = false }: { row: ChangeRow | undefined; quote?: boolean; disk?: boolean }): VNode | null {
   return row === undefined ? null : (
     <>
       {quote ? <QuoteButton /> : null}
+      {disk && row.status !== 'D' ? <FileButton path={row.path} /> : null}
       <label class="diff-viewed" title={row.viewed === true ? 'Viewed; untick to read it again' : 'Mark viewed'}>
         <input type="checkbox" data-action="diff-viewed" data-path={row.path} checked={row.viewed === true} aria-label={`Viewed ${row.path}`} />
         <span class="diff-viewed-label">Viewed</span>
@@ -730,6 +758,21 @@ function slot(): HTMLElement {
 
   element.className = 'diff-slot';
   return element;
+}
+
+/** What both tabs' trees read once and share: the stack, the worktree's files, its ignored folders, the uncommitted changes and commits read open. */
+const SHARED_TREE = ['stack', 'stackError', 'tree', 'ignored', 'uncommitted', 'peeks'] as const;
+
+/** The Changes and Files tabs' trees, the Files tab's reading and writing the Changes tab's shared data, so a read serves both. */
+export function sharedTrees(): Record<TreeMode, TreeState> {
+  const changes = newTree();
+  const files = newTree();
+
+  for (const key of SHARED_TREE) {
+    Object.defineProperty(files, key, { get: () => changes[key], set: (value) => ((changes as unknown as Record<string, unknown>)[key] = value), enumerable: true });
+  }
+
+  return { changes, files };
 }
 
 /** The page's side of the Changes tab: reads the list and the diffs from the hub, and answers the clicks and presses on the tab, its bar and its Files menu. */
@@ -756,7 +799,34 @@ export class ChangesController {
   #collapseViewed = false;
   /** The binary, generated and large files collapsed once, so one the operator expanded is not collapsed again. */
   readonly #largeSeen = new Set<string>();
-  #file: FileOpen | null = null;
+  /**
+   * Which tab the controller draws and answers now: the Changes tab or the Files tab, which share the reads and the tree's data. Only one of
+   * them shows at a time, in the column on a wide page or in the strip on a narrower one, and each keeps its own file shown, tree choices and
+   * flyout.
+   */
+  #mode: TreeMode = 'changes';
+  readonly #shownFiles: Record<TreeMode, FileOpen | null> = { changes: null, files: null };
+  readonly #flyouts: Record<TreeMode, boolean> = { changes: false, files: false };
+  /** Whether the Files tab has been opened in this conversation, which reads the tree. */
+  #filesOpen = false;
+
+  /** The file the shown tab's file view shows: a revision in the Changes tab, a file on disk in the Files tab. */
+  get #file(): FileOpen | null {
+    return this.#shownFiles[this.#mode];
+  }
+
+  set #file(open: FileOpen | null) {
+    this.#shownFiles[this.#mode] = open;
+  }
+
+  /** Whether the shown tab's tree is open as a flyout while it is not pinned. */
+  get #flyout(): boolean {
+    return this.#flyouts[this.#mode];
+  }
+
+  set #flyout(open: boolean) {
+    this.#flyouts[this.#mode] = open;
+  }
   /** The pane the Changes tab drew into, watched so Auto follows a pane resized past 900 px without a redraw. */
   #resize: ResizeObserver | null = null;
   readonly #watched = new WeakSet<HTMLElement>();
@@ -770,8 +840,43 @@ export class ChangesController {
   /** Each file's header element the viewer shows before its name, by path, drawn again on every draw. */
   readonly #prefixes = new Map<string, HTMLElement>();
 
-  /** The tree beside the diffs: the stack, the worktree's files, the uncommitted changes, commits read open, search and its choices. */
-  readonly tree: TreeState = newTree();
+  /** Each tab's tree: the stack, the worktree's files and the uncommitted changes, read once and shared, then each tab's open rows, search and choices. */
+  #trees: Record<TreeMode, TreeState> = sharedTrees();
+
+  /** The shown tab's tree. */
+  get tree(): TreeState {
+    return this.#trees[this.#mode];
+  }
+
+  /** Which tab the controller last drew or opened. */
+  get mode(): TreeMode {
+    return this.#mode;
+  }
+
+  /**
+   * Where a file on disk has a diff, for the Files tab's Diff: the range the diffs show when it ends on disk and changes the file, else the
+   * uncommitted changes when they do; null for a file with no change. Read from the lists as they are now, so a list read later offers it.
+   */
+  #diskDiff(path: string): ChangeRange | null {
+    const changes = (list: ChangesList | null): boolean => list?.rows.some((one) => one.path === path && one.status !== 'D') === true;
+
+    if (this.view.list !== null && this.view.list.to === 'worktree' && changes(this.view.list)) {
+      return this.view.range;
+    }
+
+    // An uncommitted change is in every range to disk too, so before the Changes tab reads its list its range to disk is kept.
+    return !changes(this.tree.uncommitted) ? null : this.view.list === null && this.view.range.to === 'worktree' ? this.view.range : UNCOMMITTED;
+  }
+
+  /** The file the Files tab shows, for the route; null for none. */
+  get diskFile(): FileOpen | null {
+    return this.#shownFiles.files;
+  }
+
+  /** Whether the Files tab is open in this conversation. */
+  get filesOpen(): boolean {
+    return this.#filesOpen;
+  }
   /** Bumped when the page leaves the conversation, so a tree read for the one it left is dropped. */
   #treeGen = 0;
   /** The latest read of each ignored folder, by its path, so an older answer is dropped. */
@@ -780,9 +885,9 @@ export class ChangesController {
   #treeReads = 0;
   #stackRetry: ReturnType<typeof setTimeout> | null = null;
   #searchGen = 0;
+  /** Each tree's latest search, by `#searchGen`, so a search of one tab's tree never drops or takes the other's. */
+  readonly #searches = new WeakMap<TreeState, number>();
   #searchTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Whether the tree's flyout is open while it is not pinned. */
-  #flyout = false;
   /** Whether the next bar drawn focuses its tree button, after the tree that had the focus closed. */
   #focusTreeButton = false;
   /** Whether the next bar drawn focuses the Compare picker's filter, just opened. */
@@ -837,7 +942,7 @@ export class ChangesController {
           line={file.line}
           at={at}
           quote={quote ? { action: 'diff-quote' } : null}
-          extra={file.rowPath === null ? null : <FileToggle />}
+          extra={this.#mode === 'files' ? (this.#diskDiff(file.path) === null ? null : <DiffButton />) : file.rowPath === null ? null : <FileToggle />}
           source={kind === 'markdown' ? { on: file.source, action: 'file-source' } : null}
           wrap={code ? { on: wrapped, action: 'changes-wrap', className: 'icon changes-file-wrap' } : null}
           open={kind === 'markdown' && !file.source ? { action: 'artifact-window' } : raw === null ? null : { href: raw }}
@@ -850,7 +955,7 @@ export class ChangesController {
   #barTree(): BarTree {
     const layout = storedLayout();
 
-    return { pinned: this.pinned, fileOpen: this.#file !== null, file: this.#fileBar(), flyout: this.#flyout, compare: this.view.compare === null ? null : this.#comparePoints(this.view.compare.point), layout: layout ?? 'auto' };
+    return { mode: this.#mode, pinned: this.pinned, fileOpen: this.#file !== null, file: this.#fileBar(), flyout: this.#flyout, compare: this.view.compare === null ? null : this.#comparePoints(this.view.compare.point), layout: layout ?? 'auto' };
   }
 
   /**
@@ -974,7 +1079,7 @@ export class ChangesController {
       for (const dir of [...this.tree.ignored.keys()]) {
         this.tree.ignored.delete(dir);
 
-        if (this.tree.open.has(`dir:${dir}`)) {
+        if (this.#trees.changes.open.has(`dir:${dir}`) || this.#trees.files.open.has(`dir:${dir}`)) {
           void this.#readIgnored(dir);
         }
       }
@@ -1054,41 +1159,45 @@ export class ChangesController {
     }
   }
 
-  /** Runs the search route for the box's text, dropping an answer for an older search. */
-  async #search(): Promise<void> {
+  /** Runs the search route for a tree's box text, the tree it was typed in, dropping an answer for an older search of that tree. */
+  async #search(tree: TreeState = this.tree): Promise<void> {
     const key = this.deps.key();
-    const query = this.tree.query.trim();
+    const query = tree.query.trim();
     const gen = ++this.#searchGen;
+    const treeGen = this.#treeGen;
 
-    if (key === null || query === '' || !this.tree.text) {
-      this.tree.search = null;
+    this.#searches.set(tree, gen);
+
+    if (key === null || query === '' || !tree.text) {
+      tree.search = null;
       this.deps.draw();
       return;
     }
 
-    this.tree.search = 'running';
-    this.tree.searchError = null;
+    tree.search = 'running';
+    tree.searchError = null;
     this.deps.draw();
+    const latest = (): boolean => this.#searches.get(tree) === gen && this.#treeGen === treeGen;
 
     const flag = (on: boolean) => (on ? '1' : '0');
 
     try {
-      const response = await this.deps.fetch(`/v1/conversation/search?window=${encodeURIComponent(key)}&gen=${gen}&q=${encodeURIComponent(query)}&case=${flag(this.tree.matchCase)}&word=${flag(this.tree.word)}&regex=${flag(this.tree.regex)}`, { credentials: 'same-origin' });
+      const response = await this.deps.fetch(`/v1/conversation/search?window=${encodeURIComponent(key)}&gen=${gen}&q=${encodeURIComponent(query)}&case=${flag(tree.matchCase)}&word=${flag(tree.word)}&regex=${flag(tree.regex)}`, { credentials: 'same-origin' });
       const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
-      if (gen !== this.#searchGen) {
+      if (!latest()) {
         return;
       }
 
       if (response.ok) {
-        this.tree.search = body as unknown as SearchData;
+        tree.search = body as unknown as SearchData;
       } else if (response.status !== 409) {
-        this.tree.search = null;
-        this.tree.searchError = String(body['error'] ?? `Switchboard could not load this (status ${response.status}). Try again.`);
+        tree.search = null;
+        tree.searchError = String(body['error'] ?? `Switchboard could not load this (status ${response.status}). Try again.`);
       }
     } catch (failure) {
-      if (gen === this.#searchGen) {
-        this.tree.searchError = `Switchboard did not answer: ${String(failure)}`;
+      if (latest()) {
+        tree.searchError = `Switchboard did not answer: ${String(failure)}`;
       }
     }
 
@@ -1200,10 +1309,6 @@ export class ChangesController {
         this.openDiskFile(data['path'] ?? '', Number.isInteger(line) && line > 0 ? line : null);
         return true;
       }
-      case 'tree-files':
-        this.tree.files = data['mode'] === 'all' ? 'all' : 'changed';
-        this.deps.draw();
-        return true;
       case 'tree-viewed':
         void this.#tickUncommitted(data['path'] ?? '');
         return true;
@@ -1416,13 +1521,17 @@ export class ChangesController {
       this.#largeSeen.clear();
       this.#hunk = null;
       this.#jump = null;
-      this.#file = null;
+      this.#shownFiles.changes = null;
+      this.#shownFiles.files = null;
       this.#unmount();
       Object.assign(this.view, newChanges(), { for: id });
-      Object.assign(this.tree, newTree());
+      this.#trees = sharedTrees();
       this.#treeGen++;
       this.#searchGen++;
-      this.#flyout = false;
+      this.#flyouts.changes = false;
+      this.#flyouts.files = false;
+      this.#filesOpen = false;
+      this.#reveal = null;
       this.#selection = null;
 
       if (this.#stackRetry !== null) {
@@ -1435,6 +1544,8 @@ export class ChangesController {
 
     if (turnEnded && (this.view.menu || this.view.tab)) {
       void this.refresh();
+    } else if (turnEnded && this.#filesOpen) {
+      void this.#readTree();
     }
   }
 
@@ -1458,7 +1569,7 @@ export class ChangesController {
     try {
       const answer = this.deps.fetch(`/v1/conversation/changes?window=${encodeURIComponent(key)}${this.#only()}`, { credentials: 'same-origin' });
 
-      if (this.view.tab && tree) {
+      if ((this.view.tab || this.#filesOpen) && tree) {
         void this.#readTree(force);
       }
 
@@ -1678,6 +1789,16 @@ export class ChangesController {
       return true;
     }
 
+    if (action === 'diff-file' && path !== undefined) {
+      this.openDiskFile(path, null);
+      return true;
+    }
+
+    if (action === 'files-tab') {
+      this.openFiles();
+      return true;
+    }
+
     if (action === 'diff-viewed' && path !== undefined) {
       void this.toggleViewed(path);
       return true;
@@ -1692,10 +1813,28 @@ export class ChangesController {
       return true;
     }
 
+    if (action === 'file-diff' && this.#mode === 'files') {
+      const path = this.#file?.path ?? '';
+      const range = this.#diskDiff(path);
+
+      if (range !== null) {
+        if (!sameRange(range, this.view.range)) {
+          this.#setRange(range);
+        }
+
+        this.openChanges(path);
+      }
+
+      return true;
+    }
+
     if (action === 'file-diff') {
       const row = this.#file?.rowPath ?? null;
 
-      this.#file = null;
+      // The Files tab keeps its file for the way back; the Changes tab's revision gives way to the diffs.
+      if (this.#mode === 'changes') {
+        this.#file = null;
+      }
 
       if (row !== null) {
         this.openChanges(row);
@@ -1726,6 +1865,8 @@ export class ChangesController {
 
   openChanges(path: string | null): void {
     const opening = !this.view.tab;
+
+    this.#mode = 'changes';
 
     if (path !== null) {
       this.#focusPath = path;
@@ -1767,7 +1908,7 @@ export class ChangesController {
   exploreFolder(dir: string): void {
     const parts = dir.split('/').filter((part) => part !== '' && part !== '.');
 
-    this.tree.files = 'all';
+    this.#mode = 'files';
     this.tree.closed.delete('files');
 
     for (let at = 1; at <= parts.length; at++) {
@@ -1776,21 +1917,67 @@ export class ChangesController {
 
     this.#reveal = parts.join('/');
     this.#flyout = true;
-    this.openChanges(null);
+    this.openFiles();
   }
 
-  /** Scrolls the tree to the folder `exploreFolder` asked for and focuses its row, once the tree is read; a folder it does not list is let go. */
+  /**
+   * Shows the Files tab (architecture.md § Web page, Files): its first showing in a conversation reads the tree, which the Changes tab shares.
+   * The file it showed stays.
+   */
+  openFiles(): void {
+    this.#mode = 'files';
+    this.view.menu = false;
+
+    if (!this.#filesOpen || this.tree.tree === null) {
+      void this.#readTree();
+    }
+
+    this.#filesOpen = true;
+    this.deps.showFiles();
+  }
+
+  /**
+   * Scrolls the tree to the folder `exploreFolder` asked for and focuses its row, once the tree is read and each ignored folder on the way to it,
+   * read in turn as the one above it lists it; a folder the tree does not list, once nothing on the way is left to read, is let go.
+   */
   #revealFolder(view: HTMLElement): void {
-    if (this.#reveal === null || this.tree.tree === null) {
+    if (this.#reveal === null || this.#mode !== 'files' || this.tree.tree === null) {
       return;
     }
 
     const key = `dir:${this.#reveal}`;
     const row = [...view.querySelectorAll<HTMLElement>('.changes-tree [data-action="tree-toggle"]')].find((one) => one.dataset['key'] === key);
 
+    // The folder itself is read too, when ignored, so it opens with its entries.
+    if (this.#readOnTheWay(this.#reveal) && row === undefined) {
+      return;
+    }
+
     this.#reveal = null;
     row?.scrollIntoView?.({ block: 'center' });
     row?.focus({ preventScroll: true });
+  }
+
+  /** Reads the next ignored folder on the way to `dir` the tree has not read; whether one is read or being read, so the reveal waits for it. */
+  #readOnTheWay(dir: string): boolean {
+    const parts = dir.split('/');
+    const ignored = ignoredSet(this.tree);
+
+    for (let at = 1; at <= parts.length; at++) {
+      const folder = parts.slice(0, at).join('/');
+      const read = this.tree.ignored.get(folder);
+
+      if (read === 'loading') {
+        return true;
+      }
+
+      if (read === undefined && isIgnored(ignored, folder)) {
+        void this.#readIgnored(folder);
+        return true;
+      }
+    }
+
+    return false;
   }
 
   #scrollToJump(): void {
@@ -1966,29 +2153,37 @@ export class ChangesController {
   }
 
   /**
-   * Shows a file at a line, from a line number clicked in its diff: the file on disk for the new side, the file at the base for the old side (a
-   * deleted file's only side), over the diffs, which keep their place for Back.
+   * Shows a file at a line, from a line number clicked in its diff: the new side of a list that ends on disk is the file on disk, which the Files
+   * tab shows; any other side is a revision, the file at the range's end commit or, for the old side (a deleted file's only side), its start,
+   * which the Changes tab shows over the diffs, which keep their place for Back.
    */
   openFileView(path: string, side: 'old' | 'new', line: number): void {
     const row = this.view.list?.rows.find((one) => one.path === path);
     const base = side === 'old' || row?.status === 'D';
 
     this.#focusPath = path;
+
+    if (!base && this.view.range.to === 'worktree') {
+      this.openDiskFile(path, line);
+      return;
+    }
+
+    this.#mode = 'changes';
     this.#openFile({ path: base ? (row?.from ?? path) : path, rowPath: row === undefined ? null : path, side: base ? 'base' : 'disk', range: this.view.range, line, entry: { state: 'loading' }, source: true });
   }
 
   /**
-   * Shows a file of the worktree as it is on disk, at a line, from the tree, a search result or a Markdown link, whatever range is chosen;
-   * Diff | File offers its diff only while the shown list's rows end on disk and it is one of them.
+   * Shows a file of the worktree as it is on disk in the Files tab, at a line, from its tree, a search result, a Markdown link, or a diff's line
+   * or File; Diff offers its diff while it is a changed file, of the list the diffs show or else of the uncommitted changes.
    */
   openDiskFile(path: string, line: number | null): void {
-    const list = this.view.list;
-    const row = list !== null && list.to === 'worktree' ? list.rows.find((one) => one.path === path && one.status !== 'D') : undefined;
+    const list = this.view.list !== null && this.view.list.to === 'worktree' ? this.view.list : this.tree.uncommitted;
+    const row = list?.rows.find((one) => one.path === path && one.status !== 'D');
 
-    this.view.tab = true;
+    this.#mode = 'files';
     // At a line, as from a search result, a Markdown file shows its source there; otherwise its preview.
     this.#openFile({ path, rowPath: row?.path ?? null, side: 'disk', range: UNCOMMITTED, line, entry: { state: 'loading' }, source: line !== null });
-    this.deps.showDiff();
+    this.openFiles();
   }
 
   #openFile(open: FileOpen): void {
@@ -2024,7 +2219,10 @@ export class ChangesController {
    */
   async #readFile(open: FileOpen, again = false, newer = true): Promise<void> {
     const key = this.deps.key();
-    const generation = this.#generation;
+    // The Files tab's file on disk outlives a change of the Changes tab's range, which bumps `#generation`; only leaving the conversation drops its read.
+    const disk = open === this.#shownFiles.files;
+    const current = (): number => (disk ? this.#treeGen : this.#generation);
+    const generation = current();
 
     if (key === null) {
       return;
@@ -2048,7 +2246,7 @@ export class ChangesController {
       } else {
         const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
-        if (!response.ok && this.#staleBack(body, generation)) {
+        if (!response.ok && !disk && this.#staleBack(body, generation)) {
           return;
         }
 
@@ -2064,7 +2262,7 @@ export class ChangesController {
       }
     }
 
-    if (generation !== this.#generation || this.#file !== open) {
+    if (generation !== current() || (this.#shownFiles.changes !== open && this.#shownFiles.files !== open)) {
       return;
     }
 
@@ -2273,9 +2471,27 @@ export class ChangesController {
    * the pane's width changes, and over both the file view while one is open.
    */
   drawDiff(pane: HTMLElement): void {
-    if (!this.view.tab) {
+    this.#draw(pane, 'changes');
+  }
+
+  /**
+   * Draws the Files tab into a pane (architecture.md § Web page, Files): the explorer beside the file view, as the Changes tab draws its tree
+   * beside the diffs, with a note in the file view's place until a file is chosen.
+   */
+  drawFiles(pane: HTMLElement): void {
+    this.#draw(pane, 'files');
+  }
+
+  #draw(pane: HTMLElement, mode: TreeMode): void {
+    if (mode === 'changes' ? !this.view.tab : !this.#filesOpen) {
       return;
     }
+
+    if (this.#mode !== mode) {
+      this.#selection = null;
+    }
+
+    this.#mode = mode;
 
     if (!this.#watched.has(pane) && typeof ResizeObserver === 'function') {
       this.#resize ??= new ResizeObserver((entries) => entries.forEach((one) => this.#relayout(one.target as HTMLElement)));
@@ -2284,12 +2500,13 @@ export class ChangesController {
     }
 
     let view = pane.querySelector<HTMLElement>(':scope > .diff-view');
+    const drawn = `${this.view.for ?? ''} ${mode}`;
 
-    if (view?.dataset['diff'] !== this.view.for) {
+    if (view?.dataset['diff'] !== drawn) {
       this.deps.takePane(pane);
       view = document.createElement('div');
-      view.className = 'diff-view';
-      view.dataset['diff'] = this.view.for ?? '';
+      view.className = mode === 'files' ? 'diff-view files-view' : 'diff-view';
+      view.dataset['diff'] = drawn;
       // Focusable, so a click in the diffs gives it the focus its keys need.
       view.tabIndex = 0;
 
@@ -2299,7 +2516,7 @@ export class ChangesController {
       const host = document.createElement('div');
 
       tree.className = 'changes-tree';
-      tree.setAttribute('aria-label', 'Files and commits');
+      tree.setAttribute('aria-label', mode === 'files' ? 'Files' : 'Changes and commits');
       splitter.className = 'tree-splitter';
       splitter.setAttribute('role', 'separator');
       splitter.setAttribute('aria-orientation', 'vertical');
@@ -2324,13 +2541,18 @@ export class ChangesController {
       view.style.setProperty('--tree-width', `${Math.round(width)}px`);
     }
 
-    mount(view.querySelector(':scope > .changes-tree')!, <ChangesTreeView state={this.tree} list={this.view.list} shown={this.view.range} now={Date.now()} pinned={pinned} canPin={!this.#phone() && (this.#width === 0 || this.#width >= TREE_FLYOUT_MAX_WIDTH)} />);
+    mount(view.querySelector(':scope > .changes-tree')!, <ChangesTreeView state={this.tree} list={this.view.list} shown={this.view.range} now={Date.now()} pinned={pinned} canPin={!this.#phone() && (this.#width === 0 || this.#width >= TREE_FLYOUT_MAX_WIDTH)} mode={mode} loading={this.view.loading} />);
     this.#revealFolder(view);
 
     const host = view.querySelector<HTMLElement>(':scope > .diff-host')!;
     const list = this.view.list;
 
-    if (this.#mount === null || this.#mount.host !== host) {
+    if (mode === 'files') {
+      if (host.dataset['said'] !== 'files') {
+        host.dataset['said'] = 'files';
+        this.#say(host, 'Choose a file in the tree to show it here.');
+      }
+    } else if (this.#mount === null || this.#mount.host !== host) {
       if (this.view.error !== null && list === null) {
         this.#say(host, this.view.error);
       } else if (list === null) {
@@ -2350,7 +2572,7 @@ export class ChangesController {
     }
 
     for (const [path, element] of this.#metas) {
-      mount(element, <DiffTools row={this.view.list?.rows.find((one) => one.path === path)} quote={this.#selection?.in === 'diff' && this.#selection.path === path} />);
+      mount(element, <DiffTools row={this.view.list?.rows.find((one) => one.path === path)} quote={this.#selection?.in === 'diff' && this.#selection.path === path} disk={this.view.range.to === 'worktree'} />);
     }
 
     for (const [path, element] of this.#prefixes) {
@@ -2432,7 +2654,7 @@ export class ChangesController {
     if (element === undefined) {
       element = slot();
       this.#metas.set(path, element);
-      mount(element, <DiffTools row={this.view.list?.rows.find((one) => one.path === path)} />);
+      mount(element, <DiffTools row={this.view.list?.rows.find((one) => one.path === path)} disk={this.view.range.to === 'worktree'} />);
     }
 
     return element;
@@ -2843,9 +3065,11 @@ export class ChangesController {
           clearTimeout(this.#searchTimer);
         }
 
+        const tree = this.tree;
+
         this.#searchTimer = setTimeout(() => {
           this.#searchTimer = null;
-          void this.#search();
+          void this.#search(tree);
         }, 250);
       }
 

@@ -1,7 +1,8 @@
-// The Changes tab's tree (PRD R118, R128; architecture.md § Web page, Changes), modelled on VS Code's Source Control: the repository and worktree,
-// a search box, FILES (the uncommitted files with their Viewed ticks, or the whole worktree), and COMMITS (this branch's commits, then each
-// branch it is stacked on, collapsed, then the remote default branch). Rows toggle; links choose what the diffs compare. Pinned beside the
-// diffs or opened as a flyout from the bar. Read-only: nothing here writes to git or GitHub.
+// The trees of the Changes and Files tabs (PRD R118, R128; architecture.md § Web page, Changes and Files): the repository and worktree and a
+// search box, then, in the Changes tab, modelled on VS Code's Source Control, CHANGES (the uncommitted files with their Viewed ticks) and COMMITS
+// (this branch's commits, then each branch it is stacked on, collapsed, then the remote default branch), and in the Files tab, modelled on its
+// Explorer, every file of the worktree as folders, and text search. Rows toggle; links choose what the diffs compare. Pinned beside the view or
+// opened as a flyout from the bar. Read-only: nothing here writes to git or GitHub.
 import type { ComponentChildren, VNode } from 'preact';
 import type { ChangeRow, ChangesList, CommitInfo, SearchData, StackData, StackLink, TreeData } from '@switchboard/protocol';
 import { fullTime } from '@switchboard/conversation/messageMeta';
@@ -27,8 +28,6 @@ export interface TreeState {
   /** The rows open: `files`, `commits`, `branch`, `commit:<sha>`, `link:<name>`, `dir:<path>`; and those closed that start open. */
   open: Set<string>;
   closed: Set<string>;
-  /** FILES shows the uncommitted files or every file; null until chosen, when it shows the uncommitted files. */
-  files: 'changed' | 'all' | null;
   query: string;
   /** Text search: the search route's results replace the tree. */
   text: boolean;
@@ -45,7 +44,7 @@ export interface TreeState {
 
 export const PEEKS_KEPT = 20;
 
-export const newTree = (): TreeState => ({ stack: null, stackError: null, tree: null, ignored: new Map(), uncommitted: null, peeks: new Map(), open: new Set(), closed: new Set(), files: null, query: '', text: false, matchCase: false, word: false, regex: false, search: null, searchError: null, menu: null, options: false });
+export const newTree = (): TreeState => ({ stack: null, stackError: null, tree: null, ignored: new Map(), uncommitted: null, peeks: new Map(), open: new Set(), closed: new Set(), query: '', text: false, matchCase: false, word: false, regex: false, search: null, searchError: null, menu: null, options: false });
 
 const short = (sha: string): string => sha.slice(0, 7);
 const baseName = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
@@ -57,11 +56,6 @@ const startsOpen = (key: string): boolean => key === 'files' || key === 'commits
 
 export function isOpen(state: TreeState, key: string): boolean {
   return startsOpen(key) ? !state.closed.has(key) : state.open.has(key);
-}
-
-/** Which FILES list shows: the one chosen, else the uncommitted files, even when there are none. */
-export function filesShown(state: TreeState): 'changed' | 'all' {
-  return state.files ?? 'changed';
 }
 
 /** Whether a row's text has the typed filter in it, ignoring case unless Aa is on. */
@@ -297,12 +291,15 @@ export function linkInfo(link: StackLink): string {
   return parts.join(' · ');
 }
 
+/** Which tab a tree serves: the Changes tab's source control, or the Files tab's explorer. */
+export type TreeMode = 'changes' | 'files';
+
 /** The tree's sections drawn from what has been read; `list` is the list the diffs show. */
-export function ChangesTreeView({ state, list, shown, now, pinned, canPin }: { state: TreeState; list: ChangesList | null; shown: TreeRange; now: number; pinned: boolean; canPin: boolean }): VNode {
+export function ChangesTreeView({ state, list, shown, now, pinned, canPin, mode = 'changes', loading = false }: { state: TreeState; list: ChangesList | null; shown: TreeRange; now: number; pinned: boolean; canPin: boolean; mode?: TreeMode; loading?: boolean }): VNode {
   const stack = state.stack;
   // The stack names every commit it groups, past the list's 200 too.
   const commits = new Map<string, CommitInfo & { files?: string[] }>([...(list?.commits ?? []), ...(stack?.infos ?? [])].map((commit) => [commit.sha, commit]));
-  const pinLabel = pinned ? 'Unpin the tree' : 'Pin the tree beside the diffs';
+  const pinLabel = pinned ? 'Unpin the tree' : mode === 'files' ? 'Pin the tree beside the file' : 'Pin the tree beside the diffs';
   const root = stack?.root ?? '';
 
   return (
@@ -320,15 +317,21 @@ export function ChangesTreeView({ state, list, shown, now, pinned, canPin }: { s
             </div>
           )}
         </div>
+        {/* The Files tab's bar holds the file shown alone, so its Refresh, which reads the tree again, is here; the Changes tab's is in its bar. */}
+        {mode === 'files' ? (
+          <button class="tree-pin" type="button" data-action="changes-refresh" title="Refresh" aria-label="Refresh" disabled={loading}>
+            <span class={`codicon codicon-refresh${loading ? ' codicon-modifier-spin' : ''}`} aria-hidden="true"></span>
+          </button>
+        ) : null}
         {canPin ? (
           <button class="tree-pin" type="button" data-action="tree-pin" aria-pressed={pinned} aria-label={pinLabel} title={`${pinLabel} (Ctrl+B)`}>
             <span class={`codicon codicon-${pinned ? 'pinned' : 'pin'}`} aria-hidden="true"></span>
           </button>
         ) : null}
       </div>
-      <SearchBox state={state} />
+      <SearchBox state={state} mode={mode} />
       {/* The header and search stay put; everything under them scrolls as one. */}
-      <div class="tree-scroll">{state.text && state.query.trim() !== '' ? <SearchResults state={state} /> : <Sections state={state} list={list} shown={shown} now={now} commits={commits} />}</div>
+      <div class="tree-scroll">{mode === 'files' ? (state.text && state.query.trim() !== '' ? <SearchResults state={state} /> : <Explorer state={state} />) : <Sections state={state} list={list} shown={shown} now={now} commits={commits} />}</div>
     </div>
   );
 }
@@ -346,14 +349,17 @@ const SEARCH_OPTIONS: ReadonlyArray<{ name: 'matchCase' | 'word' | 'regex' | 'te
  * text search, so the text keeps the box's width at any width (the operator's decision, 2026-11-26). The button's badge counts the options on
  * without changing its width; choosing an option keeps the menu open.
  */
-function SearchBox({ state }: { state: TreeState }): VNode {
-  const on = SEARCH_OPTIONS.filter(({ name }) => state[name]).length;
+function SearchBox({ state, mode }: { state: TreeState; mode: TreeMode }): VNode {
+  // Text search is the Files tab's; the Changes tab's box filters its changed files and commits by name.
+  const options = mode === 'files' ? SEARCH_OPTIONS : SEARCH_OPTIONS.filter(({ name }) => name !== 'text');
+  const on = options.filter(({ name }) => state[name]).length;
+  const named = mode === 'files' ? 'Search files' : 'Search changed files and commits';
   const label = on === 0 ? 'Search options' : `Search options, ${on} on`;
 
   return (
     <div class="tree-search">
       <span class="codicon codicon-search" aria-hidden="true"></span>
-      <input type="search" data-tree-search="1" value={state.query} placeholder="Search files and commits" aria-label="Search files and commits" />
+      <input type="search" data-tree-search="1" value={state.query} placeholder={named} aria-label={named} />
       <div class="menu-anchor tree-options">
         <button class={`tree-options-button${on > 0 ? ' active' : ''}`} type="button" data-action="tree-options" aria-haspopup="menu" aria-expanded={state.options} title={label} aria-label={label}>
           <span class="codicon codicon-filter" aria-hidden="true"></span>
@@ -365,7 +371,7 @@ function SearchBox({ state }: { state: TreeState }): VNode {
         </button>
         {state.options ? (
           <ul class="glass menu tree-options-menu" role="menu" aria-label="Search options">
-            {SEARCH_OPTIONS.map(({ name, label: text, glyph }) => (
+            {options.map(({ name, label: text, glyph }) => (
               <li role="none">
                 <button type="button" class="menu-row" role="menuitemcheckbox" aria-checked={state[name]} data-action="tree-option" data-option={name}>
                   <span class="menu-gutter" aria-hidden="true">
@@ -420,7 +426,6 @@ function SearchResults({ state }: { state: TreeState }): VNode {
 function Sections({ state, list, shown, now, commits }: { state: TreeState; list: ChangesList | null; shown: TreeRange; now: number; commits: Map<string, CommitInfo & { files?: string[] }> }): VNode {
   const stack = state.stack;
   const uncommitted = state.uncommitted;
-  const mode = filesShown(state);
   const filesOpen = isOpen(state, 'files');
   const commitsOpen = isOpen(state, 'commits');
   const changed = uncommitted?.rows.length ?? 0;
@@ -434,19 +439,11 @@ function Sections({ state, list, shown, now, commits }: { state: TreeState; list
   return (
     <>
       <div class="tree-section-head">
-        <TreeRow depth={0} action="tree-toggle" data={{ key: 'files' }} open={filesOpen} label="FILES" className="section">
+        <TreeRow depth={0} action="tree-toggle" data={{ key: 'files' }} open={filesOpen} label="CHANGES" sub={String(changed)} className="section">
           <RangeLink range={{ from: 'HEAD', to: 'worktree' }} title="Show the uncommitted changes" />
-          <span class="tree-toggle" role="group" aria-label="Files shown">
-            <button type="button" data-action="tree-files" data-mode="changed" aria-pressed={mode === 'changed'}>
-              {changed} Changed
-            </button>
-            <button type="button" data-action="tree-files" data-mode="all" aria-pressed={mode === 'all'} title="Every file of the worktree, as folders">
-              Explore
-            </button>
-          </span>
         </TreeRow>
       </div>
-      {!filesOpen ? null : mode === 'changed' ? <ChangedFiles state={state} /> : <AllFiles state={state} dir="" depth={1} />}
+      {!filesOpen ? null : <ChangedFiles state={state} />}
       <div class="tree-section-head">
         <TreeRow depth={0} action="tree-toggle" data={{ key: 'commits' }} open={commitsOpen} label="COMMITS" className="section" />
       </div>
@@ -480,6 +477,20 @@ function Sections({ state, list, shown, now, commits }: { state: TreeState; list
           )}
         </div>
       )}
+    </>
+  );
+}
+
+/** The Files tab's tree: every file of the worktree as folders, under one heading that folds them. */
+function Explorer({ state }: { state: TreeState }): VNode {
+  const open = isOpen(state, 'files');
+
+  return (
+    <>
+      <div class="tree-section-head">
+        <TreeRow depth={0} action="tree-toggle" data={{ key: 'files' }} open={open} label="FILES" className="section" />
+      </div>
+      {open ? <AllFiles state={state} dir="" depth={1} /> : null}
     </>
   );
 }

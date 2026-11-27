@@ -695,7 +695,7 @@ describe("the page's History tab in use", () => {
     // Opened from the menu it is selected after Changes; the close mark leaves the column on Changes again.
     openTab();
     await flush();
-    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((one) => one.getAttribute('data-id'))).toEqual(['changes', 'history']);
+    expect([...root.querySelectorAll('#detail .side-switch > [data-id]')].map((one) => one.getAttribute('data-id'))).toEqual(['changes', 'files', 'history']);
     expect(side()?.getAttribute('data-side')).toBe('history');
     expect(histories()).toEqual([77]);
     root.querySelector<HTMLElement>('#detail [data-action="close-history"]')!.click();
@@ -883,9 +883,9 @@ describe("the page's History tab in use", () => {
     expect(document.documentElement.classList.contains('phone')).toBe(true);
     const tabs = () => [...root.querySelectorAll('#head .tabs > .tab')].map((one) => one.textContent);
 
-    expect(tabs()).toEqual(['Chat', 'Changes']);
+    expect(tabs()).toEqual(['Chat', 'Changes', 'Files']);
     openTab();
-    expect(tabs()).toEqual(['Chat', 'Changes', 'History']);
+    expect(tabs()).toEqual(['Chat', 'Changes', 'Files', 'History']);
     expect(historyTab()?.getAttribute('aria-selected')).toBe('true');
     await flush();
     expect(root.querySelector('#panel.history-pane .history-view h1')?.textContent).toBe('Inbox <badge>');

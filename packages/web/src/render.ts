@@ -12,13 +12,14 @@ import { UNMEASURED } from './tabs.js';
 import type { TabFit } from './tabs.js';
 
 /** `diff` shows the open file's diff tab (`changes.tsx`), which has no fixed tab of its own. */
-export type Tab = 'conversation' | 'history' | 'artifacts' | 'console' | 'browser' | 'diff' | 'file';
+export type Tab = 'conversation' | 'history' | 'artifacts' | 'console' | 'browser' | 'diff' | 'files' | 'file';
 export const TABS: Array<{ tab: Tab; label: string; icon: string }> = [
   { tab: 'conversation', label: 'Chat', icon: 'comment-discussion' },
   { tab: 'history', label: 'History', icon: 'history' },
   { tab: 'artifacts', label: 'Artifacts', icon: 'files' },
   { tab: 'console', label: 'Console', icon: 'terminal' },
   { tab: 'browser', label: 'Browser', icon: 'globe' },
+  { tab: 'files', label: 'Files', icon: 'files' },
 ];
 
 /** A fixed tab's codicon, by its tab. */
@@ -27,7 +28,7 @@ export function tabIcon(tab: Tab | SideTab): string {
 }
 
 /** What the column right of the conversation shows on a wide screen. */
-export type SideTab = 'history' | 'artifacts' | 'console' | 'browser' | 'diff' | 'file';
+export type SideTab = 'history' | 'artifacts' | 'console' | 'browser' | 'diff' | 'files' | 'file';
 export const SIDE_TABS: readonly SideTab[] = ['history', 'artifacts', 'console', 'browser'];
 
 /**

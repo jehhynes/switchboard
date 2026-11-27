@@ -824,7 +824,7 @@ describe('the Changes list', () => {
   it('Escape_InAFileView_GoesBackToTheDiffs', async () => {
     start();
     await openRow(1);
-    changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
+    changesMounts[0]!.onLine!('src/new.ts', 'old', 12);
     await flush();
     await flush();
     // From inside the file view, which leaves the page: the focus goes back to the Changes view, so its keys keep working.
@@ -950,41 +950,61 @@ describe('the Changes list', () => {
     expect(ticks.map((one) => `${String(one['from'])} ${String(one['to'])}`)).toEqual(['base worktree', 'base worktree']);
   });
 
-  it("ChangesTab_LineNumberClicked_ShowsTheFileOverTheDiffsAndBackKeepsThem", async () => {
+  it("ChangesTab_LineNumberClicked_ShowsTheFileOnDiskInFilesAndARevisionOverTheDiffs", async () => {
     start();
     await openRow(1);
+    // The new side of the changes to disk is the file on disk, which the Files tab shows at the line, beside its tree.
     changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
     await flush();
     await flush();
-    expect(gets.at(-1)).toBe('/v1/conversation/file?window=pk&path=src%2Fnew.ts&side=disk');
+    expect(gets.at(-1)).toBe('/v1/conversation/file?window=pk&path=src%2Fnew.ts&side=disk&from=HEAD&to=worktree');
     expect(files.at(-1)).toEqual({ path: 'src/new.ts', side: 'disk', line: 12 });
-    // The bar has the file's name and the line after it, beside the way back; the file has no header of its own.
-    expect(root.querySelector('.file-overlay .fake')!.textContent).toBe('file src/new.ts at 12');
+    expect(root.querySelector('.diff-view.files-view .file-overlay .fake')!.textContent).toBe('file src/new.ts at 12');
     expect(root.querySelector('.changes-bar .file-path bdi')!.textContent).toBe('src/new.ts');
     expect(root.querySelector('.changes-bar .diff-at')!.textContent).toBe(':12');
-    expect(root.querySelector('.file-overlay .diff-head')).toBeNull();
-    expect(root.querySelector('[data-action="diff-open-vscode"]')).toBeNull();
+    expect(root.querySelector('[data-side="files"], [data-tab="files"]')!.getAttribute('aria-selected')).toBe('true');
 
-    // The bar's back, the one way back from a file and from a range, closes the file first.
-    expect(root.querySelector('.file-overlay [data-action="changes-back"], .file-overlay .diff-back')).toBeNull();
-    root.querySelector<HTMLElement>('.changes-bar [data-action="changes-back"]')!.click();
+    // Its Diff goes back to the file's diff in Changes; the Files tab keeps the file.
+    root.querySelector<HTMLElement>('.changes-bar [data-action="file-diff"]')!.click();
     await flush();
-    expect(root.querySelector('.file-overlay')).toBeNull();
-    expect(changesMounts).toHaveLength(1);
-    expect(changesMounts[0]!.disposed).toBe(false);
+    await flush();
+    expect(root.querySelector('.changes-tab')!.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelector('.diff-view.files-view')).toBeNull();
+    root.querySelector<HTMLElement>('[data-side="files"], [data-tab="files"]')!.click();
+    await flush();
+    expect(root.querySelector('.diff-view.files-view .file-overlay .fake')!.textContent).toBe('file src/new.ts at 12');
+    root.querySelector<HTMLElement>('.changes-tab')!.click();
+    await flush();
+    await flush();
 
-    // The old side's line opens the file at the base, by its old name.
-    changesMounts[0]!.onLine!('src/new.ts', 'old', 3);
+    // The old side's line opens the file at the base, by its old name, over the diffs, the bar's back closing it first.
+    changesMounts.at(-1)!.onLine!('src/new.ts', 'old', 3);
     await flush();
     await flush();
     expect(files.at(-1)).toEqual({ path: 'src/old.ts', side: 'base', line: 3 });
     expect(root.querySelector('.changes-bar .diff-at')!.textContent).toBe(':3 at the base');
+    expect(root.querySelector('.file-overlay .diff-head')).toBeNull();
+    expect(root.querySelector('.file-overlay [data-action="changes-back"], .file-overlay .diff-back')).toBeNull();
+    root.querySelector<HTMLElement>('.changes-bar [data-action="changes-back"]')!.click();
+    await flush();
+    expect(root.querySelector('.file-overlay')).toBeNull();
+    expect(changesMounts.at(-1)!.disposed).toBe(false);
+  });
+
+  it('DiffHeader_File_ShowsTheFileOnDiskInFiles', async () => {
+    start();
+    await openRow(1);
+    root.querySelector<HTMLElement>('.diff-host [data-action="diff-file"][data-path="src/new.ts"]')!.click();
+    await flush();
+    await flush();
+    expect(files.at(-1)).toEqual({ path: 'src/new.ts', side: 'disk', line: null });
+    expect(root.querySelector('[data-side="files"], [data-tab="files"]')!.getAttribute('aria-selected')).toBe('true');
   });
 
   it('offers the way back from a file view before the viewer draws its header', async () => {
     start();
     await openRow(1);
-    changesMounts[0]!.onLine!('src/new.ts', 'new', 12);
+    changesMounts[0]!.onLine!('src/new.ts', 'old', 12);
     expect(root.querySelector('.file-overlay .empty')!.textContent).toBe('Reading the file…');
     expect(root.querySelector('.changes-bar [data-action="changes-back"]')).not.toBeNull();
   });

@@ -4,7 +4,7 @@
 
 /**
  * The open work item and its tab: `history`, `console`, `artifact:<path>`, `link` with the link tab's URL `u`, `changes` with the file
- * `f` its diff was at, or `file` with the local file `p` at line `l`; null for its Chat tab. An address from before link tabs had URLs names
+ * `f` its diff was at, `files` with the worktree file `p` its view shows at line `l`, or `file` with the local file `p` at line `l`; null for its Chat tab. An address from before link tabs had URLs names
  * `browser`, read as `link` with no URL, and one from before History took the Status tab's place names `status`, read as `history`. `h` is the ticket whose History an address from before History was a tab showed, with its key, which
  * the page opens as the History tab. `list` is the phone's list (`#list`), which names no work item.
  */
@@ -48,7 +48,7 @@ export function parseRoute(hash: string): Route {
   const named = w === null ? null : params.get('t') || null;
   const t = named === 'browser' ? 'link' : named === 'status' ? 'history' : named;
 
-  return { w, t, f: t === 'changes' ? params.get('f') || null : null, p: t === 'file' ? params.get('p') || null : null, l: t === 'file' ? whole(params.get('l')) : null, u: t === 'link' ? params.get('u') || null : null, h };
+  return { w, t, f: t === 'changes' ? params.get('f') || null : null, p: t === 'file' || t === 'files' ? params.get('p') || null : null, l: t === 'file' || t === 'files' ? whole(params.get('l')) : null, u: t === 'link' ? params.get('u') || null : null, h };
 }
 
 export function routeHash(route: Route): string {
@@ -73,7 +73,7 @@ export function routeHash(route: Route): string {
       params.push(['u', route.u]);
     }
 
-    if (route.t === 'file' && route.p != null) {
+    if ((route.t === 'file' || route.t === 'files') && route.p != null) {
       params.push(['p', route.p]);
 
       if (route.l != null) {
@@ -145,6 +145,9 @@ export interface TabSet {
   artifact: string | null;
   changes: boolean;
   changesFile: string | null;
+  /** Whether the Files tab was open, and the worktree file it showed; absent in a set kept before the Files tab. */
+  filesTab?: boolean;
+  filesFile?: string | null;
   files: Array<{ target: string; line: number | null }>;
   /** The index in `files` of the file tab shown, or null. */
   file: number | null;
@@ -204,7 +207,9 @@ export function parseTabSets(raw: string | null): Record<string, TabSet> {
           set.files.every((one) => one !== null && typeof one === 'object' && text(one.target) && lineOrNull(one.line)) &&
           (set.file === null || (typeof set.file === 'number' && Number.isSafeInteger(set.file) && set.file >= 0 && set.file < set.files.length)) &&
           (set.links === undefined || linkSet(set.links)) &&
-          (set.history === undefined || typeof set.history === 'boolean'),
+          (set.history === undefined || typeof set.history === 'boolean') &&
+          (set.filesTab === undefined || typeof set.filesTab === 'boolean') &&
+          (set.filesFile === undefined || textOrNull(set.filesFile)),
       ).map(([key, set]) => {
         // A set kept before History took the Status tab's place names `status`.
         const kept = set as TabSet;

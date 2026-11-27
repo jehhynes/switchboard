@@ -416,16 +416,16 @@ describe('local file tabs', () => {
     expect(root.querySelector('.file-viewer .file-path .diff-at')!.textContent).toBe(':42');
     expect(root.querySelector('.local-tab.selected .tab-open')!.getAttribute('title')).toBe('D:/w/src/a.ts:42');
 
-    // A folder of the worktree opens in the Changes tab's explorer, at that folder, and gets no tab.
+    // A folder of the worktree opens in the Files tab, at that folder, and gets no tab.
     link('9 screenshots').click();
     await flush();
     expect(tabs().map(([name]) => name)).toEqual(['a.ts']);
-    expect(root.querySelector('#detail .changes-tab.selected')).not.toBeNull();
+    expect(root.querySelector('#detail [data-side="files"]')!.getAttribute('aria-selected')).toBe('true');
     expect(root.querySelector('.file-viewer')).toBeNull();
     await flush();
     await flush();
     // Every file as folders, the folder and those above it open, its row focused.
-    expect(root.querySelector('[data-action="tree-files"][data-mode="all"]')!.getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('.diff-view.files-view .changes-tree')).not.toBeNull();
     expect((document.activeElement as HTMLElement | null)?.dataset['key']).toBe('dir:.wip/shots');
     expect(root.querySelector('[data-action="tree-toggle"][data-key="dir:.wip"]')!.getAttribute('aria-expanded')).toBe('true');
     expect(root.querySelector('.changes-tree [data-action="tree-disk"][data-path=".wip/shots/a.png"]')).not.toBeNull();
@@ -453,7 +453,7 @@ describe('local file tabs', () => {
 
     expect(tabs()).toEqual([]);
     expect(root.querySelector('.toast-text')!.textContent).toBe('Only folders in this worktree open in the explorer');
-    expect(root.querySelector('#detail .changes-tab.selected')).toBeNull();
+    expect(root.querySelector('#detail [data-side="files"]')!.getAttribute('aria-selected')).not.toBe('true');
   });
 
   it('FolderLink_TheWorktreeItself_OpensTheExplorerAtItsRoot', async () => {
@@ -465,7 +465,7 @@ describe('local file tabs', () => {
 
     expect(tabs()).toEqual([]);
     expect(root.querySelector('.toast-text')).toBeNull();
-    expect(root.querySelector('#detail .changes-tab.selected')).not.toBeNull();
+    expect(root.querySelector('#detail [data-side="files"]')!.getAttribute('aria-selected')).toBe('true');
   });
 
   it('FileLink_RecordingOrVideo_PlaysInTheFileViewer', async () => {

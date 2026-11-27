@@ -175,7 +175,8 @@ describe('the Changes file view', () => {
     await openTab();
     await openLine('docs/a.md', 'new', 1);
     expect(codes.at(-1)).toEqual({ path: 'docs/a.md', side: 'disk', line: 1 });
-    // The bar names the file and holds Source just before Wrap; the code view draws no header of its own.
+    // The new side of the changes to disk shows in the Files tab, whose bar names the file and holds Source just before Wrap; the code view draws no header of its own.
+    expect(root.querySelector('.diff-view.files-view')).not.toBeNull();
     expect(headers.at(-1)).toBe(false);
     expect(bar()!.querySelector('.file-path bdi')!.textContent).toBe('docs/a.md');
     expect([...bar()!.querySelectorAll<HTMLElement>('[data-action]')].map((one) => one.dataset['action']).slice(-3)).toEqual(['file-source', 'changes-wrap', 'viewer-copy-path']);
@@ -196,7 +197,7 @@ describe('the Changes file view', () => {
       ['uri', null, true],
     ]);
     // A picture is read at the file's revision through the Changes routes, never a local file route.
-    expect(overlay()!.querySelector('.picture img, img')!.getAttribute('src')).toBe('/v1/conversation/file-raw?window=pk&path=docs%2Fshot.png&side=disk');
+    expect(overlay()!.querySelector('.picture img, img')!.getAttribute('src')).toBe('/v1/conversation/file-raw?window=pk&path=docs%2Fshot.png&side=disk&from=HEAD&to=worktree');
 
     // A refused link opens nothing, and no local file route is ever asked.
     links[1]!.click();
@@ -224,7 +225,7 @@ describe('the Changes file view', () => {
       LIST.rows.pop();
     }
 
-    expect(overlay()!.querySelector('img.media')!.getAttribute('src')).toBe('/v1/conversation/file-raw?window=pk&path=logo.png&side=disk&v=p1');
+    expect(overlay()!.querySelector('img.media')!.getAttribute('src')).toBe('/v1/conversation/file-raw?window=pk&path=logo.png&side=disk&from=HEAD&to=worktree&v=p1');
   });
 
   it("offers Diff for a file that is a side of a shown row, and names a renamed file's old side by its old path", async () => {
@@ -241,10 +242,10 @@ describe('the Changes file view', () => {
   });
 
   it('says why a file does not show, with the way back', async () => {
-    fileAnswers['src/new.ts'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done.' } };
+    fileAnswers['src/old.ts'] = { status: 403, body: { error: 'This page now shows another work item or session, so that was not done.' } };
     start();
     await openTab();
-    await openLine('src/new.ts', 'new', 1);
+    await openLine('src/new.ts', 'old', 1);
     expect(overlay()!.querySelector('.empty')!.textContent).toBe('This page now shows another work item or session, so that was not done.');
     expect(root.querySelector('.changes-bar [data-action="changes-back"]')).not.toBeNull();
     // The diffs' controls leave the bar while a file shows; Diff and Copy path stay, as they still apply to the file, and Wrap waits for its code.

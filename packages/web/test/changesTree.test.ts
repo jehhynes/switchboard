@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { patchLines, quoteText, treePinned } from '../src/changes.js';
 import type { ChangesList } from '../src/changes.js';
-import { filesShown, folderEntries, ignoredSet, isIgnored, linkInfo, newTree } from '../src/changesTree.js';
+import { folderEntries, ignoredSet, isIgnored, linkInfo, newTree } from '../src/changesTree.js';
 import type { DiffModule } from '../src/diff/types.js';
 import { startPage } from '../src/main.js';
 import type { StackData, StackLink } from '@switchboard/protocol';
@@ -100,11 +100,6 @@ describe('tree helpers', () => {
     expect(linkInfo(link({ relation: 'above', lacks: 2, source: 'github-stack', notInClone: true }))).toBe("lacks 2 of this branch's commits · not in this clone");
   });
 
-  it('shows the uncommitted files until All is chosen, even when there are none', () => {
-    expect(filesShown({ ...newTree(), uncommitted: { ...UNCOMMITTED, rows: [] } })).toBe('changed');
-    expect(filesShown({ ...newTree(), files: 'all' })).toBe('all');
-  });
-
   it('pins the tree from 1,100 px, never under 720 px, and as the device chose between', () => {
     expect(treePinned(1200, null)).toBe(true);
     expect(treePinned(900, null)).toBe(false);
@@ -135,6 +130,8 @@ describe('the Changes tree', () => {
   let folderAnswers: Map<string, { status: number; body: unknown }>;
   /** Each ignored folder's reads wait on these, in turn, after taking the answer set when they were asked. */
   let folderGates: Map<string, Array<Promise<void>>>;
+  /** Holds the file route's answers while set. */
+  let fileGate: Promise<void> | null = null;
   let posts: Array<Record<string, unknown>>;
   let stackAnswers: StackData[];
   let pages: Array<{ close(): void }>;
@@ -164,6 +161,7 @@ describe('the Changes tree', () => {
     ignoredTop = [];
     folderAnswers = new Map();
     folderGates = new Map();
+    fileGate = null;
     posts = [];
     stackAnswers = [];
     stackGates = [];
@@ -224,7 +222,14 @@ describe('the Changes tree', () => {
         return json({ path: 'src/match/pool.ts', status: 'M', patch: 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n keep();\n', old: null, new: null, binary: false, tooLarge: null, partial: true });
       }
 
+      if (url.startsWith('/v1/conversation/local-file?')) {
+        const path = new URLSearchParams(url.slice(url.indexOf('?'))).get('path') ?? '';
+
+        return path.endsWith('/') ? json({ path: `/wt/${path.replace(/\/$/, '')}`, name: 'x', kind: 'dir', contents: null, tooLarge: false, size: null, entries: [], more: false }) : json({ error: 'No such file.' }, 404);
+      }
+
       if (url.startsWith('/v1/conversation/file?')) {
+        await fileGate;
         return json({ path: new URLSearchParams(url.slice(url.indexOf('?'))).get('path'), side: 'disk', contents: 'x', binary: false, tooLarge: false });
       }
 
@@ -245,6 +250,13 @@ describe('the Changes tree', () => {
     await flush();
     await flush();
   };
+  /** The Files tab, opened from its tab in the column. */
+  const openFilesTab = async () => {
+    root.querySelector<HTMLElement>('[data-side="files"], [data-tab="files"]')!.click();
+    await flush();
+    await flush();
+    await flush();
+  };
   const tree = () => root.querySelector<HTMLElement>('.changes-tree')!;
   const rows = () => [...tree().querySelectorAll<HTMLElement>('.tree-item')].map((one) => [one.querySelector('.tree-label')?.textContent ?? '', one.querySelector('.tree-sub')?.textContent ?? '']);
   const row = (label: string) => [...tree().querySelectorAll<HTMLElement>('.tree-item')].find((one) => one.querySelector('.tree-label')?.textContent === label)!;
@@ -258,7 +270,7 @@ describe('the Changes tree', () => {
     expect(tree().querySelector('.tree-repo-name')!.textContent).toBe('jessy');
     expect(tree().querySelector('.tree-worktree')!.textContent).toBe('jessy-201worktree · /wt/jessy-201');
     expect(rows()).toEqual([
-      ['FILES', ''],
+      ['CHANGES', '2'],
       ['pool.ts', 'src/match'],
       ['README.md', ''],
       ['COMMITS', ''],
@@ -270,7 +282,8 @@ describe('the Changes tree', () => {
       ['main', 'behind 15 · last fetch here 2 h ago'],
     ]);
     expect(row('202-ui').querySelector('[data-action="tree-range"]')).toBeNull();
-    expect(tree().querySelector('.tree-toggle [aria-pressed="true"]')!.textContent).toBe('2 Changed');
+    // The Changes tab's tree shows the changed files alone: the whole worktree is the Files tab's.
+    expect(tree().querySelector('[data-action="tree-files"]')).toBeNull();
     // Reads kept apart from the list: the stack, the files and the uncommitted changes.
     expect(gets).toContain('/v1/conversation/stack?window=pk');
     expect(gets).toContain('/v1/conversation/tree?window=pk');
@@ -309,7 +322,7 @@ describe('the Changes tree', () => {
     await flush();
     expect(listGets().at(-1)).toBe(`/v1/conversation/changes?window=pk&from=${C1}&to=worktree`);
 
-    row('FILES').querySelector<HTMLElement>('[data-action="tree-range"]')!.click();
+    row('CHANGES').querySelector<HTMLElement>('[data-action="tree-range"]')!.click();
     await flush();
     expect(root.querySelector('.changes-scope-label')!.textContent).toBe('Uncommitted');
 
@@ -318,10 +331,10 @@ describe('the Changes tree', () => {
     expect(root.querySelector('.changes-scope-label')!.textContent).toBe('All changes');
   });
 
-  it('shows the whole worktree under All, folders opened one at a time, and opens a file on disk', async () => {
+  it('shows the whole worktree in the Files tab, folders opened one at a time, and opens a file on disk there', async () => {
     start();
     await openTab();
-    tree().querySelector<HTMLElement>('[data-action="tree-files"][data-mode="all"]')!.click();
+    await openFilesTab();
     expect(rows().slice(1, 3)).toEqual([
       ['src', ''],
       ['README.md', ''],
@@ -351,7 +364,7 @@ describe('the Changes tree', () => {
   it("ticks a file from the tree as its diff's tick does while the diffs show the uncommitted changes, collapsing it, and keeps the last choice", async () => {
     start();
     await openTab();
-    row('FILES').querySelector<HTMLElement>('[data-action="tree-range"]')!.click();
+    row('CHANGES').querySelector<HTMLElement>('[data-action="tree-range"]')!.click();
     await flush();
     await flush();
     collapses.length = 0;
@@ -382,8 +395,18 @@ describe('the Changes tree', () => {
 
     box.value = 'hnsw';
     box.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(rows().map(([label]) => label)).toEqual(['FILES', 'COMMITS', '202-ui', '201-exact-scan', 'drop HNSW rebuild job', '200-match-table', 'main']);
+    expect(rows().map(([label]) => label)).toEqual(['CHANGES', 'COMMITS', '202-ui', '201-exact-scan', 'drop HNSW rebuild job', '200-match-table', 'main']);
 
+    // Text search is the Files tab's, with its own box.
+    tree().querySelector<HTMLElement>('[data-action="tree-options"]')!.click();
+    expect(tree().querySelector('[data-option="text"]')).toBeNull();
+    await openFilesTab();
+
+    const files = tree().querySelector<HTMLInputElement>('input[data-tree-search]')!;
+
+    expect(files.value).toBe('');
+    files.value = 'hnsw';
+    files.dispatchEvent(new Event('input', { bubbles: true }));
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     tree().querySelector<HTMLElement>('[data-action="tree-options"]')!.click();
     tree().querySelector<HTMLElement>('[data-option="matchCase"]')!.click();
@@ -404,7 +427,7 @@ describe('the Changes tree', () => {
 
   it('keeps the search options in one menu from a button at the box\'s right end, open while choosing, until Escape or a press outside', async () => {
     start();
-    await openTab();
+    await openFilesTab();
 
     const search = () => tree().querySelector<HTMLElement>('.tree-search')!;
     const button = () => search().querySelector<HTMLButtonElement>('[data-action="tree-options"]')!;
@@ -764,7 +787,7 @@ describe('the Changes tree', () => {
     folderAnswers.set('out', { status: 404, body: { error: 'out is not an ignored folder Explore shows in this worktree.' } });
     start();
     await openTab();
-    tree().querySelector<HTMLElement>('[data-action="tree-files"][data-mode="all"]')!.click();
+    await openFilesTab();
 
     const folderReads = () => gets.filter((url) => url.includes('&dir='));
     const muted = () => [...tree().querySelectorAll<HTMLElement>('.tree-item.ignored')].map((one) => one.querySelector('.tree-label')!.textContent);
@@ -805,7 +828,7 @@ describe('the Changes tree', () => {
 
     box.value = 'pool';
     box.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(rows().slice(1, 4).map(([label]) => label)).toEqual(['pool.ts', 'pool.bench.ts', 'COMMITS']);
+    expect(rows().slice(1).map(([label]) => label)).toEqual(['pool.ts', 'pool.bench.ts']);
   });
 
   it("keeps Refresh's read of an open ignored folder when an older read of it answers first", async () => {
@@ -817,7 +840,7 @@ describe('the Changes tree', () => {
     folderGates.set('.wip', [gate(), gate()]);
     start();
     await openTab();
-    tree().querySelector<HTMLElement>('[data-action="tree-files"][data-mode="all"]')!.click();
+    await openFilesTab();
     row('.wip').querySelector<HTMLElement>('.tree-row')!.click();
     await flush();
 
@@ -844,32 +867,33 @@ describe('the Changes tree', () => {
     row('add match table').querySelector<HTMLElement>('.tree-row')!.click();
     await flush();
     await flush();
-    tree().querySelector<HTMLElement>('[data-action="tree-files"][data-mode="all"]')!.click();
-    row('src').querySelector<HTMLElement>('.tree-row')!.click();
-    row('match').querySelector<HTMLElement>('.tree-row')!.click();
 
     const depth = (label: string) => Number(row(label).style.getPropertyValue('--depth'));
 
     expect(['COMMITS', '201-exact-scan', 'drop HNSW rebuild job'].map(depth)).toEqual([0, 1, 2]);
     expect(['200-match-table', 'add match table', '1.ts'].map(depth)).toEqual([1, 2, 3]);
-    expect(['FILES', 'src', 'match', 'pool.ts'].map(depth)).toEqual([0, 1, 2, 3]);
-
-    // A file's icon sits in the twisty's room, so its name starts where a sibling folder's does, not one icon further in.
-    tree().querySelector<HTMLElement>('[data-action="tree-files"][data-mode="all"]')!.click();
-    expect(row('README.md').firstElementChild!.matches('.tree-twisty')).toBe(true);
-    expect(row('README.md').querySelector(':scope > .tree-twisty > .codicon, :scope > .tree-twisty > [class]')).not.toBeNull();
-    expect(row('README.md').querySelector(':scope > .tree-row > .tree-label')!.previousElementSibling).toBeNull();
 
     const branch = row('201-exact-scan').querySelector('.tree-row')!;
 
     expect([...branch.children].map((one) => one.className).slice(0, 2)).toEqual(['tree-twisty codicon codicon-chevron-down', 'codicon codicon-git-branch tree-branch-icon']);
+
+    await openFilesTab();
+    row('src').querySelector<HTMLElement>('.tree-row')!.click();
+    row('match').querySelector<HTMLElement>('.tree-row')!.click();
+    expect(['FILES', 'src', 'match', 'pool.ts'].map(depth)).toEqual([0, 1, 2, 3]);
+
+    // A file's icon sits in the twisty's room, so its name starts where a sibling folder's does, not one icon further in.
+    expect(row('README.md').firstElementChild!.matches('.tree-twisty')).toBe(true);
+    expect(row('README.md').querySelector(':scope > .tree-twisty > .codicon, :scope > .tree-twisty > [class]')).not.toBeNull();
+    expect(row('README.md').querySelector(':scope > .tree-row > .tree-label')!.previousElementSibling).toBeNull();
   });
+
 
   it('keeps the bar and its tree button in reach while a file shows, so one click opens the tree again', async () => {
     start(900);
     await openTab();
     root.querySelector<HTMLElement>('[data-action="tree-flyout"]')!.click();
-    tree().querySelector<HTMLElement>('[data-action="tree-files"][data-mode="all"]')!.click();
+    await openFilesTab();
     row('README.md').querySelector<HTMLElement>('.tree-row')!.click();
     await flush();
     await flush();
@@ -892,11 +916,11 @@ describe('the Changes tree', () => {
 
     box.value = '0042_match';
     box.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(rows().map(([label]) => label)).toEqual(['FILES', 'COMMITS', '202-ui', '201-exact-scan', '200-match-table', 'add match table', 'main']);
+    expect(rows().map(([label]) => label)).toEqual(['CHANGES', 'COMMITS', '202-ui', '201-exact-scan', '200-match-table', 'add match table', 'main']);
 
     box.value = 'pool.ts';
     box.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(rows().map(([label]) => label)).toEqual(['FILES', 'pool.ts', 'COMMITS', '202-ui', '201-exact-scan', 'query the match pool by exact distance', '200-match-table', 'main']);
+    expect(rows().map(([label]) => label)).toEqual(['CHANGES', 'pool.ts', 'COMMITS', '202-ui', '201-exact-scan', 'query the match pool by exact distance', '200-match-table', 'main']);
   });
 
   it('goes back from a file to the diffs first, then from a range to every change, with the one back in the bar', async () => {
@@ -905,8 +929,8 @@ describe('the Changes tree', () => {
     row('query the match pool by exact distance').querySelector<HTMLElement>('[data-action="tree-range"]')!.click();
     await flush();
     await flush();
-    tree().querySelector<HTMLElement>('[data-action="tree-files"][data-mode="all"]')!.click();
-    row('README.md').querySelector<HTMLElement>('.tree-row')!.click();
+    // A file of the commit's old side is a revision, which the Changes tab shows over its diffs.
+    viewer!.onLine!('src/match/pool.ts', 'old', 1);
     await flush();
 
     const back = () => root.querySelector<HTMLElement>('.changes-bar [data-action="changes-back"]');
@@ -927,5 +951,81 @@ describe('the Changes tree', () => {
     await flush();
     expect(root.querySelector('.changes-scope-label')!.textContent).toBe('All changes');
     expect(back()).toBeNull();
+  });
+
+  it('FilesTab_DiskReadPendingWhileTheChangesRangeChanges_StillShowsTheFile', async () => {
+    let release: () => void = () => {};
+
+    start();
+    await openTab();
+    await openFilesTab();
+    fileGate = new Promise<void>((done) => (release = done));
+    row('README.md').querySelector<HTMLElement>('.tree-row')!.click();
+    await flush();
+    await openTab();
+    row('query the match pool by exact distance').querySelector<HTMLElement>('[data-action="tree-range"]')!.click();
+    await flush();
+    release();
+    for (let i = 0; i < 4; i++) await flush();
+    await openFilesTab();
+    expect(root.querySelector('.files-view .file-overlay')).not.toBeNull();
+    expect(root.querySelector('.files-view .file-overlay')!.textContent).not.toContain('Reading the file');
+  });
+
+  it('FilesTab_TextSearchAnsweredAfterTheChangesTabShows_FillsTheFilesTree', async () => {
+    start();
+    await openFilesTab();
+    tree().querySelector<HTMLElement>('[data-action="tree-options"]')!.click();
+    tree().querySelector<HTMLElement>('[data-option="text"]')!.click();
+    await flush();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    const box = tree().querySelector<HTMLInputElement>('input[data-tree-search]')!;
+
+    box.value = 'pool';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    root.querySelector<HTMLElement>('.changes-tab')!.click();
+    vi.advanceTimersByTime(300);
+    vi.useRealTimers();
+    for (let i = 0; i < 4; i++) await flush();
+    // The Changes tree took none of it.
+    expect(rows().map(([label]) => label)).not.toContain('const pool = exact();');
+    await openFilesTab();
+    expect(rows().map(([label]) => label)).toContain('const pool = exact();');
+  });
+
+  it('FilesTab_DiffOfAFileTheShownRangeLacks_ShowsItInTheUncommittedChanges', async () => {
+    start();
+    await openTab();
+    row('query the match pool by exact distance').querySelector<HTMLElement>('[data-action="tree-range"]')!.click();
+    await flush();
+    await flush();
+    await openFilesTab();
+    row('README.md').querySelector<HTMLElement>('.tree-row')!.click();
+    await flush();
+    root.querySelector<HTMLElement>('.changes-bar [data-action="file-diff"]')!.click();
+    await flush();
+    await flush();
+    expect(root.querySelector('.changes-scope-label')!.textContent).toBe('Uncommitted');
+    // A file no list changes offers no Diff.
+    await openFilesTab();
+    row('src').querySelector<HTMLElement>('.tree-row')!.click();
+    row('match').querySelector<HTMLElement>('.tree-row')!.click();
+    row('hnsw.ts').querySelector<HTMLElement>('.tree-row')!.click();
+    await flush();
+    expect(root.querySelector('.changes-bar [data-action="file-diff"]')).toBeNull();
+  });
+
+  it('FolderLink_IntoAnIgnoredFolder_ReadsEachFolderOnTheWayAndFocusesIt', async () => {
+    ignoredTop = ['.wip/'];
+    folderAnswers.set('.wip', { status: 200, body: { scopeGen: 3, dir: '.wip', paths: [], ignored: ['.wip/artifacts/', '.wip/notes.md'], more: false } });
+    folderAnswers.set('.wip/artifacts', { status: 200, body: { scopeGen: 3, dir: '.wip/artifacts', paths: [], ignored: ['.wip/artifacts/plan.md'], more: false } });
+    start();
+    root.querySelector('#panel')!.insertAdjacentHTML('beforeend', '<a class="path-link" data-action="local-file" data-target=".wip/artifacts/">artifacts</a>');
+    root.querySelector<HTMLElement>('#panel a.path-link[data-target=".wip/artifacts/"]')!.click();
+    for (let i = 0; i < 8; i++) await flush();
+    expect(gets.filter((url) => url.includes('&dir='))).toEqual(['/v1/conversation/tree?window=pk&dir=.wip', '/v1/conversation/tree?window=pk&dir=.wip%2Fartifacts']);
+    expect((document.activeElement as HTMLElement | null)?.dataset['key']).toBe('dir:.wip/artifacts');
+    expect(row('plan.md')).toBeDefined();
   });
 });
