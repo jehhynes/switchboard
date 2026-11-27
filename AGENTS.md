@@ -34,6 +34,10 @@ Use concise, direct wording everywhere in this repository, including code, ident
 - Keep code simple. Comments should explain non-obvious behavior or constraints, not restate the code or narrate change history.
 - Preserve meaning, technical precision, uncertainty, diagnostic details, and recovery steps. Brevity must not hide relevant information or change behavior, required syntax, or external contracts.
 
+## Example data
+
+Use only sanctioned neutral examples in code, tests, fixtures, docs and screenshots: the organisation `acme`, repositories `acme/app` and `acme/tools`, the project `acme`, people Ada and Ben, the host `example.com` and the email `someone@example.com`. Never use a real company's name, repository, issue number, customer, person or domain, including the operator's employer and its projects. Scrub real data from recorded fixtures before committing them. `npm run verify` fails on a blocked name in tracked files.
+
 ## Documentation
 
 Read the document that covers the decision:
