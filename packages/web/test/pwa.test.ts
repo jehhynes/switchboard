@@ -266,6 +266,11 @@ describe('the installable page', () => {
   it('links the manifest from the page, with the theme colour, light first while the system is light, and has the worker keep every shell file the page loads', () => {
     const html = PAGE_ASSETS['index.html']!.body;
 
+    expect(html).toContain('<link rel="icon" sizes="192x192" href="icon-192.png">');
+    expect(html).toContain('<link rel="icon" type="image/svg+xml" sizes="any" href="switchboard-small.svg">');
+    const favicon = PAGE_ASSETS['switchboard-small.svg']!;
+    expect(favicon.mime).toBe('image/svg+xml');
+    expect(Buffer.from(favicon.body, 'base64')).toEqual(readFileSync(new URL('../../../assets/brand/switchboard-small.svg', import.meta.url)));
     expect(html).toContain('<link rel="manifest" href="manifest.webmanifest">');
     // A browser takes the first theme-color whose media matches, so the light one comes first and Dark Modern's is the fallback.
     expect(html).toContain(`<meta name="theme-color" media="(prefers-color-scheme: light)" content="${lightBars}">\n<meta name="theme-color" content="${bars}">`);
@@ -278,6 +283,9 @@ describe('the installable page', () => {
       expect(worker).toContain(`"/page/${PAGE_ASSETS[name]!.hashed}"`);
     }
 
+    for (const icon of ['switchboard-small.svg', 'icon-192.png', 'apple-touch-icon.png']) {
+      expect(worker).toContain(`"/page/${icon}"`);
+    }
     expect(worker).toContain('"/page/"');
     expect(PAGE_ASSETS['sw.js']!.mime).toBe('text/javascript; charset=utf-8');
     expect(PAGE_ASSETS['offline.html']).toBeUndefined();

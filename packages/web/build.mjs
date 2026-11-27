@@ -120,8 +120,15 @@ shell['page.js'] = hashedName('page.js', pageJs);
 const boot = readFileSync('src/boot.js', 'utf8').trim();
 const indexHtml = Object.entries(shell).reduce((page, [name, hashed]) => page.replaceAll(`{{${name}}}`, hashed), html('src/index.html').replace('{{boot}}', () => boot));
 // What the service worker keeps for each build (src/sw.ts): the page and its shell's files, the icons and the manifest.
-const precache = ['/page/', ...Object.values(shell).map((name) => `/page/${name}`), '/page/manifest.webmanifest', '/page/icon-192.png', '/page/icon-512.png', '/page/icon-maskable-512.png', '/page/apple-touch-icon.png'];
-const shellVersion = hashOf(indexHtml + JSON.stringify(shell));
+const icons = {
+  'switchboard-small.svg': binary('image/svg+xml', '../../assets/brand/switchboard-small.svg'),
+  'icon-192.png': binary('image/png', 'src/icon-192.png'),
+  'icon-512.png': binary('image/png', 'src/icon-512.png'),
+  'icon-maskable-512.png': binary('image/png', 'src/icon-maskable-512.png'),
+  'apple-touch-icon.png': binary('image/png', 'src/apple-touch-icon.png'),
+};
+const precache = ['/page/', ...[...Object.values(shell), 'manifest.webmanifest', ...Object.keys(icons)].map((name) => `/page/${name}`)];
+const shellVersion = hashOf(indexHtml + JSON.stringify(shell) + JSON.stringify(icons));
 /** A shell file under its plain name, and the hashed name the page loads it by. */
 const shellText = (name, mime, body) => ({ ...text(mime, body), hashed: shell[name] });
 const assets = {
@@ -141,12 +148,7 @@ const assets = {
   'seti.woff': binary('font/woff', 'src/seti/seti.woff'),
   'manifest.webmanifest': text('application/manifest+json', JSON.stringify(manifest)),
   'sw.js': text('text/javascript; charset=utf-8', await bundle('src/swEntry.ts', { __SHELL__: JSON.stringify(precache), __SHELL_VERSION__: JSON.stringify(shellVersion) })),
-  'icon-192.png': binary('image/png', 'src/icon-192.png'),
-  'icon-512.png': binary('image/png', 'src/icon-512.png'),
-  'icon-maskable-512.png': binary('image/png', 'src/icon-maskable-512.png'),
-  // iOS takes the Home Screen icon from apple-touch-icon, not the manifest, and fills a transparent one with black, so it is the opaque
-  // maskable icon at 180 px, the iPhone's size.
-  'apple-touch-icon.png': binary('image/png', 'src/apple-touch-icon.png'),
+  ...icons,
 };
 
 mkdirSync('dist', { recursive: true });

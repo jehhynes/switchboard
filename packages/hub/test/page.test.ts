@@ -847,7 +847,7 @@ describe('the web page routes', () => {
         },
         download: (origin) => zip([{ name: 'switchboard-extension/remote.json', body: Buffer.from(JSON.stringify({ origin })) }]),
       },
-      asset: (name) => (name === 'diff/b1/diff.js' ? { mime: 'text/javascript; charset=utf-8', body: 'plain', immutable: true, gzip: gzipSync('plain') } : name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page {{build}}</html>' } : ['manifest.webmanifest', 'sw.js', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
+      asset: (name) => (name === 'diff/b1/diff.js' ? { mime: 'text/javascript; charset=utf-8', body: 'plain', immutable: true, gzip: gzipSync('plain') } : name === 'index.html' ? { mime: 'text/html; charset=utf-8', body: '<html>page {{build}}</html>' } : ['manifest.webmanifest', 'sw.js', 'switchboard-small.svg', 'page.js'].includes(name) ? { mime: 'text/plain', body: name } : null),
       opened: (app) => {
         const key = `page-${++keys}`;
 
@@ -1286,6 +1286,7 @@ describe('the web page routes', () => {
     expect(manifest).toMatchObject({ status: 200, body: 'manifest.webmanifest' });
     expect(manifest.headers['content-security-policy']).toContain("frame-ancestors 'none'");
     expect((await send(server.port, 'GET', '/page/sw.js', {})).body).toBe('sw.js');
+    expect(await send(server.port, 'GET', '/page/switchboard-small.svg', {})).toMatchObject({ status: 200, body: 'switchboard-small.svg' });
     // A public name the page lacks is not found.
     expect((await send(server.port, 'GET', '/page/icon-512.png', {})).status).toBe(404);
     expect((await send(server.port, 'GET', '/page/page.js', {})).status).toBe(401);

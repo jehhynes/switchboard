@@ -362,7 +362,7 @@ export function deviceId(hash: string): string {
 }
 
 /** The page's files a browser fetches without its cookie, for installing the page and for the offline page; none holds anything private. */
-export const PUBLIC_PAGE_FILES = new Set(['manifest.webmanifest', 'sw.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']);
+export const PUBLIC_PAGE_FILES = new Set(['manifest.webmanifest', 'sw.js', 'switchboard-small.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']);
 
 /** What `/page/` answers a browser that is not signed in. */
 export const SIGNED_OUT_HTML = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="theme-color" content="#191a1b" media="(prefers-color-scheme: dark)"><meta name="theme-color" content="#fafafd" media="(prefers-color-scheme: light)"><title>Switchboard</title><style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{margin:0;display:grid;place-items:center;min-height:100vh;background:#191a1b;color:#bfbfbf;font:14px system-ui,sans-serif}main{max-width:28rem;padding:24px}h1{font-size:18px;font-weight:600;margin:0 0 8px}@media (prefers-color-scheme:light){body{background:#fafafd;color:#202020}}</style></head><body><main><h1>Not signed in</h1><p>This browser is not signed in to Switchboard. Open the page with a link from <code>hub.js web</code>.</p></main></body></html>';

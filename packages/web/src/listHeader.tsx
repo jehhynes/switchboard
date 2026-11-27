@@ -450,7 +450,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView, no
         <div class="list-header">
           {/* Shown only in the phone's layout (page.css), where the list is its own view and no window title names the app. */}
           <span class="list-title">
-            <img class="list-title-icon" src="icon-192.png" alt="" width="16" height="16" />
+            <img class="list-title-icon" src="switchboard-small.svg" alt="" width="16" height="16" />
             <span class="list-title-text">Switchboard</span>
             <ConnectionDot dot={view.connection} />
           </span>

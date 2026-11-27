@@ -92,7 +92,7 @@ describe('the list header (architecture.md § Web page)', () => {
     const title = host.querySelector('.list-header > .list-title:first-child');
 
     expect(title?.textContent).toBe('Switchboard');
-    expect(title?.querySelector('img.list-title-icon')?.getAttribute('src')).toBe('icon-192.png');
+    expect(title?.querySelector('img.list-title-icon')?.getAttribute('src')).toBe('switchboard-small.svg');
     expect(title?.querySelector('img')?.getAttribute('alt')).toBe('');
     expect(buttons.map((one) => one.getAttribute('aria-label'))).toEqual(['gh', 'Zoho Desk', 'jira']);
     expect(buttons[0]!.title).toBe('gh: on\nClick to stop polling gh');
