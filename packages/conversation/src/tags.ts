@@ -521,11 +521,47 @@ export function interruptNote(interrupted: { said: string; rest: string }): stri
 const LIST_NUMBER = /^[ \t]*\d{1,9}[.)](?=[ \t])|^[ \t]+(?:[a-z]{1,2}|[ivxlcdm]{1,8})[.)](?=[ \t])/gm;
 
 /**
+ * The text without its code fences' lines, which the screen does not draw, so a fence's language does not count (mechanics M175). A line inside
+ * code that looks like a fence is code and stays.
+ */
+function withoutFences(text: string): string {
+  let fence: string | null = null;
+
+  return text
+    .split('\n')
+    .filter((line) => {
+      const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+
+      if (open === null) {
+        return true;
+      }
+
+      if (fence === null) {
+        // A backtick fence's language holds no backtick.
+        if (open[1]![0] === '`' && open[2]!.includes('`')) {
+          return true;
+        }
+
+        fence = open[1]!;
+        return false;
+      }
+
+      if (open[1]![0] === fence[0] && open[1]!.length >= fence.length && open[2]!.trim() === '') {
+        fence = null;
+        return false;
+      }
+
+      return true;
+    })
+    .join('\n');
+}
+
+/**
  * Letters and digits only, by which a screen copy and a transcript copy of one reply compare: the screen shows Markdown rendered, with no
  * backticks or asterisks, links as their text and nested list numbers as letters, the transcript raw.
  */
 export const squash = (text: string): string =>
-  text
+  withoutFences(text)
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(LIST_NUMBER, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -570,11 +606,125 @@ export function keyOf(text: string): string {
   return squash(body) || bareOf(body);
 }
 
-/** The key a transcript copy's screen copy has when the terminal draws its links with their targets; null when that is its own key. */
-export function drawnKeyOf(text: string): string | null {
-  const key = keyOf(drawnLinks(text));
+const TABLE_DELIMITER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 
-  return key === keyOf(text) ? null : key;
+/** A Markdown table row's cells, without the outer pipes; a pipe after an odd number of backslashes is escaped and stays in its cell. */
+function tableCells(line: string): string[] {
+  const row = line.trim();
+  const cells: string[] = [''];
+  let slashes = 0;
+  let lastPipe = false;
+
+  for (const char of row) {
+    lastPipe = char === '|' && slashes % 2 === 0;
+
+    if (lastPipe) {
+      cells.push('');
+    } else {
+      cells[cells.length - 1] += char;
+    }
+
+    slashes = char === '\\' ? slashes + 1 : 0;
+  }
+
+  if (row.startsWith('|')) {
+    cells.shift();
+  }
+
+  if (lastPipe && cells.length > 1) {
+    cells.pop();
+  }
+
+  return cells.map((cell) => cell.trim());
+}
+
+/**
+ * The text with each Markdown table outside code written as Claude Code draws a table too wide for its terminal (mechanics M175): each row a
+ * record of "Column: cell" lines, an empty cell under an empty column left out, and a table with no rows as its column names alone. `drawn` says
+ * which tables, by their index, to write so; the others stay as they are.
+ */
+export function tableRecords(text: string, drawn: (table: number) => boolean = () => true): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let fence: string | null = null;
+  let table = -1;
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    const open = /^\s*(`{3,}|~{3,})/.exec(line);
+
+    if (open !== null && (fence === null || (open[1]![0] === fence[0] && open[1]!.length >= fence.length))) {
+      fence = fence === null ? open[1]! : null;
+    }
+
+    if (fence !== null || !line.includes('|') || !TABLE_DELIMITER.test(lines[index + 1] ?? '') || !(lines[index + 1] ?? '').includes('-')) {
+      out.push(line);
+      continue;
+    }
+
+    const header = tableCells(line);
+
+    if (tableCells(lines[index + 1]!).length !== header.length) {
+      out.push(line);
+      continue;
+    }
+
+    const rows: string[][] = [];
+    const from = index;
+
+    for (index += 2; index < lines.length && lines[index]!.includes('|') && lines[index]!.trim() !== ''; index++) {
+      const cells = tableCells(lines[index]!);
+
+      rows.push(header.map((_name, column) => cells[column] ?? ''));
+    }
+
+    index--;
+
+    if (!drawn(++table)) {
+      out.push(...lines.slice(from, index + 1));
+      continue;
+    }
+
+    if (rows.length === 0) {
+      out.push(header.join('\n'));
+      continue;
+    }
+
+    out.push(
+      rows
+        .map((cells) =>
+          cells
+            .flatMap((cell, column) => (header[column] === '' && cell === '' ? [] : [header[column] === '' ? cell : `${header[column]}: ${cell}`]))
+            .join('\n'),
+        )
+        .join('\n\n'),
+    );
+  }
+
+  return out.join('\n');
+}
+
+/** Of a reply with more tables than this, only all its tables drawn as records counts, not each mix of records and boxes. */
+const MIXED_TABLES = 3;
+
+/**
+ * The keys a transcript copy's screen copy has when the terminal draws its links with their targets (mechanics M130), some or all of its tables
+ * as records (M175), or both; its own key left out. The terminal picks a table's drawing by its width, so each mix counts, up to `MIXED_TABLES`
+ * tables.
+ */
+export function drawnKeysOf(text: string): string[] {
+  const own = keyOf(text);
+  let tables = 0;
+
+  tableRecords(text, () => {
+    tables++;
+    return false;
+  });
+
+  const mixes = tables === 0 ? [] : tables > MIXED_TABLES ? [(1 << tables) - 1] : Array.from({ length: (1 << tables) - 1 }, (_one, mix) => mix + 1);
+  const texts = [text, ...mixes.map((mix) => tableRecords(text, (table) => tables > MIXED_TABLES || (mix & (1 << table)) !== 0))];
+
+  return [...new Set(texts.flatMap((one) => [one, drawnLinks(one)]).map(keyOf))].filter((key) => key !== own);
 }
 
 const TAG_WORDS = ['aside', 'rewrite', 'state', 'status', 'details', 'speak', '/speak', 'tone', 'artifact'];

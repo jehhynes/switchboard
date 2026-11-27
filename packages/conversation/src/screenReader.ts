@@ -3,7 +3,7 @@
  * the whole model message is saved, while the screen shows it as soon as the text block is drawn. Claude Code's classic renderer draws a reply as
  * "● text" with two-space continuation lines; a block counts as finished once something is drawn after it.
  */
-import { drawnKeyOf, endsInOpenTag, isArtifactLine, isDetailsLine, isRewriteLine, isStateLine, startsArtifactLine, keyOf, parseReply, splitRewrite, stripAside } from './tags.js';
+import { drawnKeysOf, endsInOpenTag, isArtifactLine, isDetailsLine, isRewriteLine, isStateLine, startsArtifactLine, keyOf, parseReply, splitRewrite, stripAside } from './tags.js';
 
 /** The part of an xterm buffer cell the reader uses. */
 export interface Cell {
@@ -37,8 +37,68 @@ const REDRAWN_LETTERS = 80;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
 /**
+ * A table Claude Code drew as a box from `lines[start]`, its top edge (mechanics M175): each row's cells, read across the lines the row's
+ * cells wrap onto, and the index of the bottom edge. Null when the lines are not such a box, as when a cell holds a "│" of its own.
+ */
+export function boxTable(lines: string[], start: number): { rows: string[][]; end: number } | null {
+  const top = lines[start]!.trim();
+
+  if (!/^┌─[─┬]*┐$/.test(top)) {
+    return null;
+  }
+
+  const columns = top.split('┬').length;
+  const rows: string[][] = [];
+  let cells: string[] | null = null;
+
+  for (let index = start + 1; index < lines.length; index++) {
+    const line = lines[index]!.trim();
+
+    if (/^├─[─┼]*┤$/.test(line) || /^└─[─┴]*┘$/.test(line)) {
+      if (cells === null || line.split(/[┼┴]/).length !== columns) {
+        return null;
+      }
+
+      rows.push(cells);
+      cells = null;
+
+      if (line.startsWith('└')) {
+        return { rows, end: index };
+      }
+
+      continue;
+    }
+
+    const parts = line.split('│');
+
+    if (parts.length !== columns + 2 || parts[0] !== '' || parts.at(-1) !== '') {
+      return null;
+    }
+
+    const row: string[] = (cells ??= Array<string>(columns).fill(''));
+
+    parts.slice(1, -1).forEach((part, column) => {
+      const piece = part.trim();
+
+      if (piece !== '') {
+        row[column] = row[column] === '' ? piece : `${row[column]} ${piece}`;
+      }
+    });
+  }
+
+  return null;
+}
+
+/** A box table's rows, its column names first, as a Markdown table. */
+const markdownTable = (rows: string[][]): string[] => {
+  const line = (cells: string[]): string => `| ${cells.map((cell) => cell.replace(/\|/g, '\\|')).join(' | ')} |`;
+
+  return [line(rows[0]!), `|${' --- |'.repeat(rows[0]!.length)}`, ...rows.slice(1).map(line)];
+};
+
+/**
  * Joins lines the terminal wrapped, keeping paragraph breaks, list items, a rewrite tag's line of its own, and code fences with the lines inside
- * them as they are.
+ * them as they are. A table drawn as a box becomes a Markdown table, so its cells read in the transcript copy's order.
  */
 export function unwrap(lines: string[]): string {
   const out: string[] = [];
@@ -46,8 +106,26 @@ export function unwrap(lines: string[]): string {
   let alone = false;
   let fence: string | null = null;
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
     const open = FENCE.exec(line);
+    const table = fence === null && open === null ? boxTable(lines, index) : null;
+
+    if (table !== null) {
+      if (out.length > 0 && out.at(-1) !== '') {
+        out.push('');
+      }
+
+      out.push(...markdownTable(table.rows));
+      index = table.end;
+
+      if (index + 1 < lines.length && lines[index + 1]!.trim() !== '') {
+        out.push('');
+      }
+
+      alone = true;
+      continue;
+    }
 
     if (fence !== null || open !== null) {
       out.push(line.trimEnd());
@@ -253,8 +331,8 @@ export class ScreenReader {
   /** Keys already published, from the screen or the transcript. */
   readonly sent = new Set<string>();
   /**
-   * Keys of transcript copies with their links drawn with their targets, as the screen shows them. They count only as the same reply or one cut
-   * off, never in the check for a redraw, whose shared opening letters a long link target could make two replies have.
+   * Keys of transcript copies as the screen may draw them, with their links' targets or their tables as records. They count only as the same
+   * reply or one cut off, never in the check for a redraw, whose shared opening letters a long link target could make two replies have.
    */
   readonly drawn = new Set<string>();
   /** Key to the handles of screen copies still waiting for their transcript copies, oldest first. */
@@ -293,12 +371,10 @@ export class ScreenReader {
 
   /** A transcript copy's text, so its screen copies drawn either way are not published again. */
   saw(text: string): void {
-    const drawn = drawnKeyOf(text);
-
     this.sent.add(keyOf(text));
 
-    if (drawn !== null) {
-      this.drawn.add(drawn);
+    for (const key of drawnKeysOf(text)) {
+      this.drawn.add(key);
     }
   }
 

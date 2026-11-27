@@ -1,0 +1,17 @@
+Besides the main Segoe UI stack, the app uses two system fonts for text and two of its own icon fonts. Consolas, the monospace font, has the same small-size smoothing cut-off as Segoe UI, so code in the extension window will look jagged too.
+
+**Text fonts, taken from the operating system:**
+
+| Font stack | Used for | Defined in |
+|---|---|---|
+| `-apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif` | All page text: list, conversation, artifacts, settings, diff headers | [theme.css:100](./packages/web/src/theme.css#L100) (`--vscode-font-family`) |
+| `Consolas, "Courier New", monospace` | Inline and block code, command boxes, prompts in settings, the pairing code, the hub log, diff lines | [theme.css:102](./packages/web/src/theme.css#L102) (`--vscode-editor-font-family`) |
+| `ui-monospace, Consolas, monospace` | Code in Markdown documents and text artifacts | [page.css:681](./packages/web/src/page.css#L681), [page.css:685](./packages/web/src/page.css#L685) |
+| `Consolas, "Courier New", monospace`, 13px | The Console tab's terminal | [console.ts:75](./packages/web/src/console.ts#L75) |
+| `system-ui, -apple-system, "Segoe UI", sans-serif` | The page shown while Switchboard loads | [index.html:19](./packages/web/src/index.html#L19) |
+| `14px system-ui` | The extension window's "Checking Switchboard sign-in…" note | [iframeHost.html](./extensions/chrome/src/iframeHost.html) |
+
+**Icon fonts, shipped with the app:**
+
+- `codicon` (`codicon.ttf`): VS Code's icons in the web page, plus a copy named `switchboard-codicon` for the extension's marks on GitHub pages ([content.css:72](./extensions/chrome/src/content.css#L72)).
+- `seti` (`seti.woff`): file-type icons ([fileIcons.tsx:129](./packages/web/src/fileIcons.tsx#L129)).

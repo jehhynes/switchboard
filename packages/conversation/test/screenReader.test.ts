@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CONFIRM_MS, ScreenReader, isReplyCell, screenBlocks, unwrap } from '../src/screenReader.js';
+import { CONFIRM_MS, ScreenReader, boxTable, isReplyCell, screenBlocks, unwrap } from '../src/screenReader.js';
 import type { Cell } from '../src/screenReader.js';
 import { parseReply } from '../src/tags.js';
 
@@ -92,6 +92,27 @@ describe('screen blocks', () => {
     expect(unwrap(['- Queue:', '  a. phone layout and the', '     Chat rename;', '  b. GitHub button;', '     ii. deeper.', 'is. joined'])).toBe(
       '- Queue:\n  a. phone layout and the Chat rename;\n  b. GitHub button;\n     ii. deeper. is. joined',
     );
+  });
+
+  it('reads a table drawn as a box as a Markdown table, each cell joined across the lines it wraps onto (M175)', () => {
+    const lines = readFileSync(join(import.meta.dirname, 'fixtures', 'tables', 'box.txt'), 'utf8').trimEnd().split('\n');
+    const [block] = screenBlocks([...lines, '', '> '], all);
+
+    expect(block).toContain('Text fonts, taken from the operating system:\n\n| Font stack | Used for | Defined in |\n| --- | --- | --- |\n');
+    expect(block).toContain(
+      '\n| `Consolas, "Courier New", monospace` | Inline and block code, command boxes, prompts in settings, the pairing code, the hub log, diff lines | theme.css:102 (./packages/web/src/theme.css#L102) (`--vscode-editor-font-family`) |\n',
+    );
+    expect(block).toContain('| `14px system-ui` | The extension window\'s "Checking Switchboard sign-in…" note | iframeHost.html (./extensions/chrome/src/iframeHost.html) |\n\nIcon fonts, shipped with the app:');
+  });
+
+  it('leaves lines that only look like a box as they are', () => {
+    expect(boxTable(['┌───┬───┐', '│ a │ b │ c │', '└───┴───┘'], 0)).toBeNull();
+    expect(boxTable(['┌───┬───┐', '│ a │ b │'], 0)).toBeNull();
+    expect(boxTable(['┌───┬───┐', '│ a │ b │', '└───────┘'], 0)).toBeNull();
+    expect(boxTable(['Not ┌───┐'], 0)).toBeNull();
+    expect(unwrap(['Box:', '┌───┬───┐', '│ a │ b │', '├───┼───┤', '│ 1 │ 2 │', '│   │ 3 │', '└───┴───┘', 'After.'])).toBe('Box:\n\n| a | b |\n| --- | --- |\n| 1 | 2 3 |\n\nAfter.');
+    // Inside code a box is code.
+    expect(unwrap(['```', '┌───┐', '│ a │', '└───┘', '```'])).toBe('```\n┌───┐\n│ a │\n└───┘\n```');
   });
 
   it("tells a reply's bullet from a tool call's by its colour", () => {

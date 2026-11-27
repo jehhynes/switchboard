@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { drawnKeyOf, drawnLinks, endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, speechPart, splitArtifacts, splitHeard, splitPrimary, splitRewrite, splitSpeak, splitState, splitTone, stateParts, spokenText, stripAside, stripMessageTags } from '../src/tags.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { drawnKeysOf, drawnLinks, endsInOpenTag, interruptNote, keyOf, messageTags, parseReply, speechPart, splitArtifacts, splitHeard, splitPrimary, splitRewrite, splitSpeak, splitState, splitTone, stateParts, spokenText, stripAside, stripMessageTags, tableRecords } from '../src/tags.js';
+import { screenBlocks } from '../src/screenReader.js';
 import { typedText } from '../src/transcript.js';
 
 describe('reply tags', () => {
@@ -182,6 +185,64 @@ describe('reply tags', () => {
     expect(keyOf('Yes. Done.')).not.toBe(keyOf('Done.'));
   });
 
+  it('writes each table as the records Claude Code draws when the table does not fit its terminal (M175)', () => {
+    expect(tableRecords('Intro\n\n| A | B |\n|---|:-:|\n| 1 | x \\| y |\n|  | z |\n\nEnd')).toBe('Intro\n\nA: 1\nB: x \\| y\n\nA: \nB: z\n\nEnd');
+    // A cell under an empty column name is drawn alone, and left out when empty too.
+    expect(tableRecords('|  | B |\n|---|---|\n| 1 | 2 |\n|  | 3 |')).toBe('1\nB: 2\n\nB: 3');
+    // A table with no rows is its column names.
+    expect(tableRecords('| A | B |\n|---|---|\n\nEnd')).toBe('A\nB\n\nEnd');
+    // Code, a rule and a row whose delimiter has other columns are not tables.
+    expect(tableRecords('```\n| A | B |\n|---|---|\n| 1 | 2 |\n```')).toBe('```\n| A | B |\n|---|---|\n| 1 | 2 |\n```');
+    expect(tableRecords('a | b\n---\nc')).toBe('a | b\n---\nc');
+    expect(tableRecords('| A | B |\n|---|\n| 1 | 2 |')).toBe('| A | B |\n|---|\n| 1 | 2 |');
+    // A pipe after an even number of backslashes divides cells; after an odd number it is in its cell.
+    expect(tableRecords(String.raw`| A\\| B |` + '\n|---|---|\n| 1 | 2 |')).toBe(String.raw`A\\: 1` + '\nB: 2');
+    expect(tableRecords(String.raw`| A\| B |` + '\n|---|\n| 1 |')).toBe(String.raw`A\| B: 1`);
+    // Only the tables chosen, by index.
+    expect(tableRecords('| A |\n|---|\n| 1 |\n\n| B |\n|---|\n| 2 |', (table) => table === 1)).toBe('| A |\n|---|\n| 1 |\n\nB: 2');
+  });
+
+  it('keys a reply whose tables the terminal draws some as records and some as boxes, each mix, up to three tables (M175)', () => {
+    const raw = 'Two:\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nand\n\n| C | D |\n|---|---|\n| 3 | 4 |';
+
+    // The first as records, the second as a box, which the screen reader reads back as a Markdown table.
+    expect(drawnKeysOf(raw)).toContain(keyOf('Two:\n\nA: 1\nB: 2\n\nand\n\n| C | D |\n| --- | --- |\n| 3 | 4 |'));
+    expect(drawnKeysOf(raw)).toContain(keyOf('Two:\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nand\n\nC: 3\nD: 4'));
+    expect(drawnKeysOf(raw)).toHaveLength(3);
+
+    const four = [1, 2, 3, 4].map((n) => `| H${n} | G${n} |\n|---|---|\n| v${n} | w${n} |`).join('\n\n');
+
+    expect(drawnKeysOf(four)).toEqual([keyOf([1, 2, 3, 4].map((n) => `H${n}: v${n}\nG${n}: w${n}`).join('\n\n'))]);
+  });
+
+  it("keys a table's screen copy, drawn as records or as a box, like its transcript copy, and a different table apart (M175)", () => {
+    const fixture = (name: string): string => readFileSync(join(import.meta.dirname, 'fixtures', 'tables', name), 'utf8');
+    const drawn = (name: string): string => screenBlocks([...fixture(name).trimEnd().split('\n'), '', '> '], () => true)[0]!;
+
+    for (const name of ['records', 'box']) {
+      const raw = fixture(`${name}.md`);
+
+      expect([keyOf(raw), ...drawnKeysOf(raw)]).toContain(keyOf(drawn(`${name}.txt`)));
+    }
+
+    // Records match only the records key: as a box the cells would read across each row.
+    const raw = fixture('records.md');
+
+    expect(keyOf(drawn('records.txt'))).not.toBe(keyOf(raw));
+    expect(drawnKeysOf(raw.replace('9e2b7c4d1a0 rewrote the line', '9e2b7c4d1a0 kept the line'))).not.toContain(keyOf(drawn('records.txt')));
+    expect(drawnKeysOf(raw.replace('| 2-4 (no one', '| 2-7 (no one'))).not.toContain(keyOf(drawn('records.txt')));
+  });
+
+  it("keys a code block without its fences' language, which the screen does not draw (M175)", () => {
+    expect(keyOf('Run:\n\n```powershell\nnpm ci\n```\n\nDone.')).toBe(keyOf('Run:\n\nnpm ci\n\nDone.'));
+    expect(keyOf('~~~text\nAmine,\n~~~')).toBe('Amine');
+    // Only a fence's own line: a word after backticks inside a line, or a line inside code that looks like a fence, still counts.
+    expect(keyOf('Use ```text fences.')).toBe('Usetextfences');
+    expect(keyOf('````\n```delete\n````')).not.toBe(keyOf('````\n```keep\n````'));
+    expect(keyOf('````md\n```delete\n```\n````')).toBe('delete');
+    expect(keyOf('```a`b``` and')).toBe('aband');
+  });
+
   it('draws links as the terminal does: the text and its target, the target alone when it is the text, and code spans as written', () => {
     expect(drawnLinks('At [changes.ts:280](file:///D:/x/changes.ts#L280).')).toBe('At changes.ts:280 (file:///D:/x/changes.ts#L280).');
     expect(drawnLinks('See [https://a.dev/x](https://a.dev/x) and [](./b.md).')).toBe('See https://a.dev/x and ./b.md.');
@@ -197,8 +258,8 @@ describe('reply tags', () => {
     const raw = 'The code is at [changes.ts:280](file:///D:/git/switchboard/packages/hub/src/changes.ts#L280), in `main`.';
 
     expect(keyOf(raw)).toBe(keyOf('The code is at changes.ts:280, in main.'));
-    expect(drawnKeyOf(raw)).toBe(keyOf('The code is at changes.ts:280 (file:///D:/git/switchboard/packages/hub/src/changes.ts#L280), in main.'));
-    expect(drawnKeyOf('No links, **bold** and `code`.')).toBeNull();
+    expect(drawnKeysOf(raw)).toEqual([keyOf('The code is at changes.ts:280 (file:///D:/git/switchboard/packages/hub/src/changes.ts#L280), in main.')]);
+    expect(drawnKeysOf('No links, **bold** and `code`.')).toEqual([]);
     // The screen draws a bare www. link with the scheme of its target.
     expect(keyOf('- http://www.i21692: 200')).toBe(keyOf('- www.i21692: 200'));
   });

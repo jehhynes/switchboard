@@ -5,7 +5,7 @@ import { ScreenHold } from './screenHold.js';
 import type { HoldOptions, Via } from './screenHold.js';
 import { ScreenReader } from './screenReader.js';
 import { pasteText } from './input.js';
-import { drawnKeyOf, keyOf, parseReply, stripAside, stripMessageTags } from './tags.js';
+import { drawnKeysOf, keyOf, parseReply, stripAside, stripMessageTags } from './tags.js';
 import type { ArtifactTag, HeardTag } from './tags.js';
 import { imageLines, imagePasted, parseLine, readHead, readLines, readLinesBefore, transcriptEnd } from './transcript.js';
 import type { TranscriptEntry } from './transcript.js';
@@ -611,7 +611,7 @@ export class SessionConversation extends ConversationLog {
 
     const { text, aside } = stripAside(entry.text);
     const key = keyOf(text);
-    const drawn = drawnKeyOf(text);
+    const drawn = drawnKeysOf(text);
 
     // So a later redraw of it is not published again.
     this.#reader.saw(text);
@@ -619,7 +619,7 @@ export class SessionConversation extends ConversationLog {
     // Its screen copy, whole or cut off while still being drawn, if one waits: the raw Markdown replaces the screen's rendered copy. Only copies
     // still waiting count, because each transcript reply is a reply of its own, and a second "Yes." is a second answer.
     const opening = parseReply(entry.text).opening;
-    const shown = this.#waiting([key, drawn]) ?? this.#waiting([keyOf(opening), drawnKeyOf(opening)], this.#reader.adopted);
+    const shown = this.#waiting([key, ...drawn]) ?? this.#waiting([keyOf(opening), ...drawnKeysOf(opening)], this.#reader.adopted);
     const handle = shown === undefined ? undefined : this.#reader.take(shown);
     // The store keeps which reply each API message became, so a hub restart between two of its lines still joins them.
     const joined = entry.messageId === null ? null : this.deps.store.replyOfApiMessage(this.sessionId, entry.messageId);

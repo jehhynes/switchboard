@@ -1,4 +1,4 @@
-import { appendFileSync, copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -564,6 +564,84 @@ it('confirms messages typed as one by their shared line, each in order with its 
         { type: 'reply', source: 'transcript', opening: raw },
         { type: 'reply', source: 'screen', opening: 'Two left:\n- Queue:\n  a. phone layout;\n  b. touch targets.' },
       ]);
+    });
+  });
+
+  describe('a reply with a table, which the screen draws as a box or as records', () => {
+    // Replies of 2026-11-24 and 2026-11-25 that showed twice until their screen copies were withdrawn (mechanics M175); the records one scrubbed.
+    const fixture = (name: string): string => readFileSync(join(import.meta.dirname, 'fixtures', 'tables', name), 'utf8');
+
+    for (const name of ['box', 'records']) {
+      const raw = fixture(`${name}.md`).trimEnd();
+      const drawn = fixture(`${name}.txt`).trimEnd().split('\n');
+
+      it(`publishes only its transcript copy when that comes while the screen copy is held (${name})`, () => {
+        const { conversation, path, append, items, advance, changes, logs } = setup();
+
+        conversation.readScreen(screen(...drawn));
+        advance(100);
+        append(assistant('a1', T0 + 100, raw));
+        conversation.readTranscript(path);
+        advance(25_000);
+        conversation.tick(false);
+
+        expect(items()).toMatchObject([{ type: 'reply', source: 'transcript', opening: raw, withdrawn: false }]);
+        expect(items()).toHaveLength(1);
+        expect(changes).toHaveLength(1);
+        expect(logs.filter((line) => line.includes('withdrawn'))).toEqual([]);
+      });
+
+      it(`replaces its published screen copy in place with its transcript copy (${name})`, () => {
+        const { conversation, path, append, items, advance, changes, logs } = setup();
+
+        conversation.readScreen(screen(...drawn));
+        advance(300);
+        expect(items()).toMatchObject([{ type: 'reply', source: 'screen' }]);
+
+        const id = (items()[0] as { id: string }).id;
+
+        advance(500);
+        append(assistant('a1', T0 + 800, raw));
+        conversation.readTranscript(path);
+        advance(25_000);
+        conversation.tick(false);
+
+        expect(items()).toMatchObject([{ id, source: 'transcript', opening: raw, withdrawn: false }]);
+        expect(items()).toHaveLength(1);
+        expect(changes.map((change) => (change.type === 'reply' ? change.reply.id : null))).toEqual([id, id]);
+        expect(logs.filter((line) => line.includes('withdrawn'))).toEqual([]);
+      });
+
+      it(`publishes no screen copy read after its transcript copy (${name})`, () => {
+        const { conversation, path, append, items, advance, changes } = setup();
+
+        append(assistant('a1', T0, raw));
+        conversation.readTranscript(path);
+        advance(300);
+        conversation.readScreen(screen(...drawn));
+        advance(1000);
+
+        expect(items()).toMatchObject([{ type: 'reply', source: 'transcript', opening: raw }]);
+        expect(items()).toHaveLength(1);
+        expect(changes).toHaveLength(1);
+      });
+    }
+
+    it('still publishes a different reply with the same opening and table rows', () => {
+      const { conversation, path, append, items, advance } = setup();
+      const raw = fixture('records.md').trimEnd();
+      const drawn = fixture('records.txt').trimEnd().split('\n');
+
+      conversation.readScreen(screen(...drawn.map((line) => line.replace('Text: 9e2b7c4d1a0 rewrote the line', 'Text: 9e2b7c4d1a0 kept the line'))));
+      advance(300);
+      append(assistant('a1', T0 + 300, raw));
+      conversation.readTranscript(path);
+
+      expect(items()).toMatchObject([
+        { type: 'reply', source: 'transcript', opening: raw },
+        { type: 'reply', source: 'screen', withdrawn: false },
+      ]);
+      expect((items()[1] as { opening: string }).opening).toContain('Text: 9e2b7c4d1a0 kept the line');
     });
   });
 

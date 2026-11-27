@@ -2080,7 +2080,7 @@ The offline startup limitation below is superseded by M145's verified-origin she
   - The letters made the screen copy's key differ from the transcript copy's after the list's start, so neither matched the other. A screen copy held 300 ms (`TRANSCRIPT_WAIT_MS`) while its transcript copy came was then published beside it, and stayed until it was withdrawn: once Claude sat idle 5 s, after 20 s while Claude worked (`CONFIRM_MS`, `CONFIRM_MAX_MS`), or when a later assistant line came. Of transcript replies with a nested ordered list, 39 of 54 had a withdrawn screen copy, against 31 of 1,353 with no ordered list and 11 of 193 with only a top-level one.  - `unwrap` joined a nested item that starts with a letter onto the line before, as it does a wrapped line.
   - Of the 41 other transcript copies with a withdrawn screen copy, 8 held a table. One stored screen copy drew its table as a record per row, each cell after its column's name, so the letters run in another order after the table's start (M130 saw a box).
 - **Not verified:** a list nested four deep, an ordered list that starts at another number, and a table in a terminal wide enough to draw it as a box.
-- **Not fixed:** a table drawn as records still makes its copies' keys differ; a screen copy read after its transcript copy is kept back only when their first 80 letters agree (M130).
+- **Not fixed:** a table drawn as records still makes its copies' keys differ (matched since M175); a screen copy read after its transcript copy is kept back only when their first 80 letters agree (M130).
 - **Current use:** a key leaves out an ordered list item's number at the start of its line, also in code, and `unwrap` keeps a nested item numbered with letters on its own line (architecture.md § Reading a session, Hold).
 
 ## M172. Asking Claude Code for plan usage once, without a session, 2026-11-26
@@ -2112,3 +2112,16 @@ The offline startup limitation below is superseded by M145's verified-origin she
 
 - **Pass criteria:** a token-run session uses the token's account in Code Mode's environment, keeps the shared configuration and can resume another account's transcript. **Passed**, with the losses above: no claude.ai connectors, no plan usage, and no account identity to read back.
 - **Not verified:** an interactive held session under the holder (only `claude -p`); the transcript text of a usage limit reached on a token, which `packages/claude/src/limit.ts` reads; a session through the gateway with the gateway set to forward client credentials; Linux.
+
+## M175. How Claude Code draws a Markdown table and a code block in a Code Mode session's terminal, 2026-11-27
+
+- **Versions:** Claude Code 2.1.332, classic renderer, in the terminal holder's headless terminal; the hub store of 2026-11-27.
+- **Method:** every screen copy in the store (168, all withdrawn, 2026-11-19 to 2026-11-26) was paired with the transcript copies of its session within ten minutes, and the 7 whose transcript copy held a table were compared with it; the table case of the markdown renderer in the Claude Code binary was read.
+- **Result:**
+  - The renderer draws a table as a box (`┌┬┐`, `├┼┤`, `└┴┘`) when it fits: the columns fit the terminal's width less 4, each cell wraps in place and is centred down its row, the column names are centred across, and a rule follows each row but the last. A row's cells take turns on each line, so the box's letters run in another order than the Markdown's.
+  - It draws the table as records instead when the box would be wider than the terminal less 4 or a cell would wrap onto more than 4 lines: each row is a "Column: cell" line per cell, with the name bold and wrapped lines indented two spaces, rows apart by a rule of `─` as wide as the terminal less 4, at most 40. A cell under an empty column name is drawn alone, or left out when it is empty too; a table with no rows is its column names alone.
+  - Of the 7 screen copies, 6 drew a box (2026-11-20 to 2026-11-25, wide terminals) and 1 records (2026-11-25); all 7 showed beside their transcript copies until withdrawn.
+  - A code block is drawn without its fences, so a fence's language (`text`, `powershell`, `css`) made 3 copies' keys differ, one of them with a table.
+  - With box tables read back as Markdown tables, the key with tables as records, and code fences left out, 69 of the 168 screen copies match exactly one transcript copy, against 60 before; none matches two.
+- **Not verified:** a reply with one table drawn as a box and another as records, which is matched for up to three tables (`MIXED_TABLES`) and not beyond; a table of more than 200 rows, drawn with a "more rows not shown" line; a cell that holds `│`, whose box is not read back; a table inside a list item or quote.
+- **Current use:** the screen reader turns a box back into a Markdown table, a transcript copy is also keyed with its tables as records, and a key leaves out a code block's fences (architecture.md § Reading a session, Hold).
