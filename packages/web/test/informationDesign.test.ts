@@ -115,6 +115,12 @@ describe('the marks and buttons that compete', () => {
     expect(rules.filter((rule) => rule.includes('editorWarning'))).toEqual(['.group[data-group="blocked"] .group-count { background: var(--vscode-editorWarning-foreground); color: var(--vscode-editor-background); }']);
   });
 
+  it('GroupCount_ReadyForReview_UsesTheAccentBadgeWhenNotZero', () => {
+    const rules = css.match(/^[^\n{]*\.group-count[^\n{]*\{[^}]*\}/gm)!;
+
+    expect(rules.filter((rule) => rule.includes('badge'))).toEqual(['.group[data-group="review"] .group-count:not(.zero) { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }']);
+  });
+
   it('ReplyDot_Unread_StaysTheMutedBullet', () => {
     expect(css).toContain('.reply .dot {');
     expect(css).not.toMatch(/\.reply\.unread \.dot/);

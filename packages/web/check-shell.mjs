@@ -169,9 +169,9 @@ const orphanNotice = { id: 'orphans:x', class: 'action', text: '2 background ses
 const notices = view === 'notices-1' || view === 'holder' ? [older] : view === 'notices-3' || view === 'notices-open' ? [zohoError, orphanNotice, older] : [];
 const header = { notices, sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
 // The other groups, in the list and conversation views only, so each group's count shows (architecture.md § Web page, Groups): Ready for
-// review and Unstarted empty, Blocked on you with a row, and Snoozed and Done, which start closed, with one each.
+// review and Blocked on you with a row each, Unstarted empty, and Snoozed and Done, which start closed, with one each.
 const everyGroup = view === 'list' || view === 'conversation';
-const ready = { key: 'review', title: 'Ready for review', glyph: '\u{ea70}', empty: 'Nothing to review. Finished work appears here for you to check.', rows: [] };
+const ready = { key: 'review', title: 'Ready for review', glyph: '\u{ea70}', empty: 'Nothing to review. Finished work appears here for you to check.', rows: [row(11, 'Ready to check', { stripe: 'turn' })] };
 const blocked = { key: 'blocked', title: 'Blocked on you', glyph: '\u{eaa2}', empty: null, rows: [row(8, 'Blocked on a decision', { stripe: 'warning' })] };
 const unstarted = { key: 'unstarted', title: 'Unstarted', glyph: '\u{eb09}', empty: 'Nothing to start. New work items wait here until their session starts.', rows: [] };
 const snoozed = { key: 'snoozed', title: 'Snoozed', glyph: '\u{ec75}', empty: null, rows: [row(9, 'Snoozed until Monday')] };
@@ -1280,17 +1280,18 @@ function failures(view, size, m) {
   if (m.line2 !== null) {
     if (m.line2.samples < 3) out.push('line 2 was sampled in ' + m.line2.samples + ' frames, too few to check');
     if (m.line2.ways > 1) out.push('line 2 painted ' + m.line2.ways + ' different ways while the same list was sent again');
-    const keys = view.startsWith('narrow') ? 4 : view === 'list' ? 8 : 7;
+    const keys = view.startsWith('narrow') ? 4 : view === 'list' ? 9 : 7;
 
     if (m.pills.filter((pill) => pill.ticket).length !== keys) out.push('line 2 shows ' + m.pills.filter((pill) => pill.ticket).length + ' ticket keys, not ' + keys);
   }
-  // Only Blocked on you's count stands out, in the warning text colour; the others are neutral, none in the accent badge's colour, which
-  // means unread; a count that is not zero keeps 4.5:1 for its text.
+  // Only Blocked on you's count stands out in the warning text colour, and only Ready for review's, when not zero, in the accent badge's;
+  // the others are neutral; a count that is not zero keeps 4.5:1 for its text.
   if (view === 'list') {
     if (!m.counts.some((one) => one.group === 'blocked')) out.push('no Blocked on you count shows');
+    if (!m.counts.some((one) => one.group === 'review' && !one.zero)) out.push('no Ready for review count above zero shows');
     for (const one of m.counts) {
       if (one.warning !== (one.group === 'blocked')) out.push('the ' + one.group + ' count is ' + (one.warning ? '' : 'not ') + 'in the warning colour');
-      if (one.accent) out.push('the ' + one.group + ' count is in the accent badge colour, which means unread');
+      if (one.accent !== (one.group === 'review' && !one.zero)) out.push('the ' + one.group + ' count is ' + (one.accent ? '' : 'not ') + 'in the accent badge colour');
       if (!one.zero && one.contrast < 4.5) out.push('the ' + one.group + ' count\'s text has ' + one.contrast + ':1 contrast, under 4.5:1');
     }
   }
