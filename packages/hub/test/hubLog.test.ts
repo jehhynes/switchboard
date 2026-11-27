@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, writeFile, appendFile, rename, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, appendFile, rename, rm, truncate } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +13,7 @@ vi.mock('node:fs/promises', async (original) => {
 
 let home: string;
 // Every hub writes the marker at its start; the tests of what it withholds remove or replace it.
-beforeEach(async () => { home = await mkdtemp(join(tmpdir(), 'parity-hub-log-')); markHubLog(home, new Date(0)); });
+beforeEach(async () => { home = await mkdtemp(join(tmpdir(), 'parity-hub-log-')); markHubLog(home); });
 afterEach(async () => { await rm(home, { recursive: true, force: true, maxRetries: 5 }); });
 
 describe('the hub log tail', () => {
@@ -98,38 +98,104 @@ describe('the voice and terminal holder logs', () => {
 });
 
 describe("hub.log's lines from before the cleaned log", () => {
-  it('leaves out lines older builds wrote, with their stack frames, and says so; later lines and a later start keep the marker', async () => {
-    await writeFile(join(home, 'hub.log'), [
-      '2026-11-20T10:00:00.000Z session s1: a message waits, the input box holds a draft: "private draft"',
-      '    at frame (hub.js:1)',
-      '2026-11-26T09:59:59.999Z web page: served as https://pc to the Tailscale login someone@example.com',
-      '2026-11-26T10:00:00.000Z info  hub: started on build b2, listening on 127.0.0.1:1 as pid 1',
-      '2026-11-26T10:00:01.000Z info  page: served on http://127.0.0.1:2/page/',
-      '',
-    ].join('\n'));
-    expect((await readHubLog(home, 10)).earlierWithheld).toBeUndefined();
+  const log = () => join(home, 'hub.log');
+  const marker = () => JSON.parse(readFileSync(join(home, HUB_LOG_MARKER), 'utf8')) as { file: string; cleanFrom: number };
+  const OLD = [
+    '2026-11-20T10:00:00.000Z session s1: a message waits, the input box holds a draft: "private draft"',
+    '    at frame (hub.js:1)',
+    '2026-11-26T09:59:59.999Z web page: served as https://pc to the Tailscale login someone@example.com',
+    '',
+  ].join('\n');
+  const NEW = '2026-11-26T10:00:00.000Z info  hub: started on build b2, listening on 127.0.0.1:1 as pid 1\n2026-11-26T10:00:01.000Z info  page: served on http://127.0.0.1:2/page/\n';
+
+  it('leaves out the bytes before the marker and says so, even for a later line stamped earlier after the clock moved back', async () => {
+    await writeFile(log(), OLD);
     await rm(join(home, HUB_LOG_MARKER));
-    markHubLog(home, new Date('2026-11-26T10:00:00.000Z'));
-    markHubLog(home, new Date('2026-11-27T00:00:00.000Z'));
-    expect(JSON.parse(readFileSync(join(home, HUB_LOG_MARKER), 'utf8'))).toEqual({ cleanSince: '2026-11-26T10:00:00.000Z' });
+    markHubLog(home);
+    expect(marker().cleanFrom).toBe(Buffer.byteLength(OLD));
+    // The clock moved back: by time this line would count as an old build's.
+    await appendFile(log(), NEW + '2026-11-25T00:00:00.000Z info  hub: clock moved back\n');
     const tail = await readHubLog(home, 10);
     expect(tail).toMatchObject({ more: false, earlierWithheld: true });
-    expect(tail.text).toBe('2026-11-26T10:00:00.000Z info  hub: started on build b2, listening on 127.0.0.1:1 as pid 1\n2026-11-26T10:00:01.000Z info  page: served on http://127.0.0.1:2/page/\n');
-    expect(tail.text).not.toMatch(/private draft|someone@example.com/);
-    // A read that holds only new lines is left as it is.
-    expect(await readHubLog(home, 1)).toMatchObject({ text: '2026-11-26T10:00:01.000Z info  page: served on http://127.0.0.1:2/page/\n', more: true });
-    expect((await readHubLog(home, 1)).earlierWithheld).toBeUndefined();
-    // A missing or broken marker gives nothing, rather than every line.
-    await writeFile(join(home, HUB_LOG_MARKER), '{ broken');
-    expect(await readHubLog(home, 10)).toEqual({ text: '', more: false, limited: false, missing: true, file: '', size: 0, withheld: HUB_LOG_WITHHELD });
-    // A hub's start writes a readable marker again, from its own start time.
-    markHubLog(home, new Date('2026-11-27T00:00:00.000Z'));
-    expect(JSON.parse(readFileSync(join(home, HUB_LOG_MARKER), 'utf8'))).toEqual({ cleanSince: '2026-11-27T00:00:00.000Z' });
-    expect(await readHubLog(home, 10)).toMatchObject({ text: '', earlierWithheld: true });
-    await rm(join(home, HUB_LOG_MARKER));
-    expect((await readHubLog(home, 10)).withheld).toBe(HUB_LOG_WITHHELD);
+    expect(tail.text).toBe(NEW + '2026-11-25T00:00:00.000Z info  hub: clock moved back\n');
+    expect(tail.text).not.toMatch(/private draft|someone@example.com|frame/);
+    // A read within the new lines still has more before it.
+    expect(await readHubLog(home, 1)).toMatchObject({ text: '2026-11-25T00:00:00.000Z info  hub: clock moved back\n', more: true, earlierWithheld: true });
+    // A later start keeps the marker.
+    const kept = marker();
+    markHubLog(home);
+    expect(marker()).toEqual(kept);
     // Holder and voice logs are not cut by the hub's marker.
     await writeFile(join(home, 'holder.log'), '2026-11-20T10:00:00.000Z Listening\n');
-    expect((await readLog(home, 'holder', 10)).text).toBe('2026-11-20T10:00:00.000Z Listening\n');
+    expect(await readLog(home, 'holder', 10)).toMatchObject({ text: '2026-11-20T10:00:00.000Z Listening\n' });
+    expect((await readLog(home, 'holder', 10)).earlierWithheld).toBeUndefined();
+  });
+
+  it('gives all of a rotated hub.log, created after the marker, and nothing of one cut shorter, which keeps its start', async () => {
+    await writeFile(log(), OLD);
+    await rm(join(home, HUB_LOG_MARKER));
+    markHubLog(home);
+    await rename(log(), join(home, 'hub.log.1'));
+    await writeFile(log(), NEW);
+    const rotated = await readHubLog(home, 10);
+    expect(rotated.text).toBe(NEW);
+    expect(rotated.earlierWithheld).toBeUndefined();
+    await rm(log());
+    await rename(join(home, 'hub.log.1'), log());
+    expect((await readHubLog(home, 10)).text).toBe('');
+    // Cutting the same file keeps its old start.
+    await truncate(log(), 40);
+    expect(await readHubLog(home, 10)).toMatchObject({ text: '', more: false, earlierWithheld: true });
+    await appendFile(log(), 'after the cut\n');
+    expect((await readHubLog(home, 10)).text).toBe('');
+  });
+
+  it('writes no marker when hub.log cannot be read, so its lines stay withheld', async () => {
+    await mkdir(log());
+    await writeFile(join(home, HUB_LOG_MARKER), JSON.stringify({ cleanSince: '2026-11-26T10:00:00.000Z' }));
+    markHubLog(home);
+    expect(JSON.parse(readFileSync(join(home, HUB_LOG_MARKER), 'utf8'))).toEqual({ cleanSince: '2026-11-26T10:00:00.000Z' });
+    expect((await readHubLog(home, 10)).withheld).toBe(HUB_LOG_WITHHELD);
+  });
+
+  it('writes a marker from byte 0 of a hub.log that does not exist yet', async () => {
+    await rm(join(home, HUB_LOG_MARKER));
+    markHubLog(home);
+    expect(marker()).toEqual({ file: '', cleanFrom: 0 });
+    await writeFile(log(), NEW);
+    expect((await readHubLog(home, 10)).text).toBe(NEW);
+  });
+
+  it('keeps the lines an earlier marker that held a start time showed, then cuts by position', async () => {
+    await writeFile(log(), OLD + NEW);
+    await writeFile(join(home, HUB_LOG_MARKER), JSON.stringify({ cleanSince: '2026-11-26T10:00:00.000Z' }));
+    // Until a hub's start writes the marker again, the earlier form is not read.
+    expect((await readHubLog(home, 10)).withheld).toBe(HUB_LOG_WITHHELD);
+    markHubLog(home);
+    expect(marker().cleanFrom).toBe(Buffer.byteLength(OLD));
+    expect(await readHubLog(home, 10)).toMatchObject({ text: NEW, more: false, earlierWithheld: true });
+    // A line stamped before its time after the cut, written after the clock moved back, moves the cut past it.
+    const back = '2026-11-25T00:00:00.000Z hub: old build, clock moved back\n';
+    await writeFile(log(), OLD + NEW + back + NEW);
+    await writeFile(join(home, HUB_LOG_MARKER), JSON.stringify({ cleanSince: '2026-11-26T10:00:00.000Z' }));
+    markHubLog(home);
+    expect(marker().cleanFrom).toBe(Buffer.byteLength(OLD + NEW + back));
+    // With no line at or after its time, the cut is the end of the file.
+    await writeFile(join(home, HUB_LOG_MARKER), JSON.stringify({ cleanSince: '2026-12-01T00:00:00.000Z' }));
+    markHubLog(home);
+    expect(marker().cleanFrom).toBe(Buffer.byteLength(OLD + NEW + back + NEW));
+  });
+
+  it('gives no lines with a missing or broken marker, and a start writes it again from the end of hub.log', async () => {
+    await writeFile(log(), OLD + NEW);
+    await writeFile(join(home, HUB_LOG_MARKER), '{ broken');
+    expect(await readHubLog(home, 10)).toEqual({ text: '', more: false, limited: false, missing: true, file: '', size: 0, withheld: HUB_LOG_WITHHELD });
+    await writeFile(join(home, HUB_LOG_MARKER), JSON.stringify({ file: 'x', cleanFrom: -1 }));
+    expect((await readHubLog(home, 10)).withheld).toBe(HUB_LOG_WITHHELD);
+    markHubLog(home);
+    expect(marker().cleanFrom).toBe(Buffer.byteLength(OLD + NEW));
+    expect(await readHubLog(home, 10)).toMatchObject({ text: '', more: false, earlierWithheld: true });
+    await rm(join(home, HUB_LOG_MARKER));
+    expect((await readHubLog(home, 10)).withheld).toBe(HUB_LOG_WITHHELD);
   });
 });

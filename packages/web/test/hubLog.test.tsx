@@ -353,6 +353,11 @@ describe('the hub log sheet', () => {
     await flush();
     expect(host.textContent).toContain('Lines from before this build are not shown, since they can hold draft and spoken text.');
     expect(button('Load earlier lines')).toBeUndefined();
+    // A rotated log holds no withheld lines, so the note goes.
+    read.mockResolvedValue(reply('2026-11-27T10:00:00.000Z info  hub: rotated\n', false, { file: 'f2' }));
+    await tick();
+    expect(lines()).toEqual([expect.stringMatching(/hub: rotated$/)]);
+    expect(host.textContent).not.toContain('Lines from before this build are not shown');
   });
 
   it('reads a partial last line again once it is complete', async () => {

@@ -216,7 +216,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
   const store = Store.open(join(home, 'switchboard.db'));
 
-  markHubLog(home, new Date());
+  markHubLog(home);
   const plugins = new PluginRegistry(options.home);
   await plugins.use(filePluginPaths(configDir) ?? []);
   let config = loadConfig(configDir, undefined, store.homeRepos(), plugins.current);

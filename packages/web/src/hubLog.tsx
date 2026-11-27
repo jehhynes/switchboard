@@ -167,7 +167,7 @@ export function HubLog({ fetch: read }: { fetch: typeof fetch }) {
   const apply = (tail: Tail, earlier: boolean): void => {
     const now = model.current;
     const { rows, partial } = splitLines(tail.text);
-    const base = { ...now, limited: tail.limited, missing: tail.missing, loaded: true, file: tail.file ?? '', size: tail.size ?? 0, withheld: tail.withheld ?? null, earlierWithheld: tail.earlierWithheld === true || (now.earlierWithheld && !tail.missing) };
+    const base = { ...now, limited: tail.limited, missing: tail.missing, loaded: true, file: tail.file ?? '', size: tail.size ?? 0, withheld: tail.withheld ?? null, earlierWithheld: tail.earlierWithheld === true };
     const replaced = now.loaded && !now.missing && !tail.missing && ((tail.file ?? '') !== now.file || (tail.size ?? 0) < now.size);
     if (tail.missing || (!now.loaded && !earlier) || replaced) {
       update({ ...base, drawn: rows, latest: rows, partial, waiting: 0, gap: false, atStart: !tail.more, note: replaced && !earlier ? 'The log was replaced or cut; showing the new file.' : null });
