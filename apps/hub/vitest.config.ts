@@ -1,5 +1,8 @@
 import { defineConfig } from 'vitest/config';
+import { lowPriority } from '../../tools/low-priority.mjs';
 import { testTemp } from '../../tools/vitest-temp.js';
+
+lowPriority();
 
 // Spawn tests run the built entry point; package logic has its own coverage floors.
 export default defineConfig({

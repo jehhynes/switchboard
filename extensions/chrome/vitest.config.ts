@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import { lowPriority } from '../../tools/low-priority.mjs';
 import { testTemp } from '../../tools/vitest-temp.js';
 import { ciTimeouts } from '../../tools/vitest-timeouts.js';
+
+lowPriority();
 
 // Board DOM and hub reads run in jsdom; main.ts and background.ts only wire them to Chrome.
 export default defineConfig({

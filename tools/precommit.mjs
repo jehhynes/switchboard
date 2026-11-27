@@ -10,6 +10,7 @@
 // coverage run in GitHub Actions, not here.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { takeSlot } from './check-lock.mjs';
+import { lowPriority } from './low-priority.mjs';
 import { checkPlan, loadWorkspaces } from './check-plan.mjs';
 import { runAll, unitTests, workspaceJobs } from './run-tests.mjs';
 import { cleanGitEnv, guardRepo } from './git-guard.mjs';
@@ -70,6 +71,8 @@ const narrow = {
 };
 
 const { affected, partial, checked, toBuild } = checkPlan(workspaces, touched, narrow);
+
+lowPriority();
 
 // One session's checks at a time across the machine (tools/check-lock.mjs).
 takeSlot();

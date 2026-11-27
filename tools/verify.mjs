@@ -9,6 +9,7 @@
 // repository's shared git config (tools/git-guard.mjs). See docs/testing.md.
 import { spawnSync } from 'node:child_process';
 import { takeSlot } from './check-lock.mjs';
+import { lowPriority } from './low-priority.mjs';
 import { loadWorkspaces } from './check-plan.mjs';
 import { cleanGitEnv, guardRepo } from './git-guard.mjs';
 import { runAll, unitTests, workspaceJobs } from './run-tests.mjs';
@@ -46,6 +47,7 @@ function npm(script) {
   stop(`npm run ${script}`, result.status !== 0);
 }
 
+lowPriority();
 takeSlot();
 
 if (full) {

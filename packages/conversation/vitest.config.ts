@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import { lowPriority } from '../../tools/low-priority.mjs';
 import { testTemp } from '../../tools/vitest-temp.js';
 import { ciTimeouts } from '../../tools/vitest-timeouts.js';
+
+lowPriority();
 
 export default defineConfig({
   test: {

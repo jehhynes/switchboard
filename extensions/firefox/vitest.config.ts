@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import { lowPriority } from '../../tools/low-priority.mjs';
 import { testTemp } from '../../tools/vitest-temp.js';
 import { ciTimeouts } from '../../tools/vitest-timeouts.js';
+
+lowPriority();
 
 // The extension's behavior is tested in extensions/chrome; this package tests only what the Firefox build changes.
 export default defineConfig({

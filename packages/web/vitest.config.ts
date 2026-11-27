@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import { lowPriority } from '../../tools/low-priority.mjs';
 import { testTemp } from '../../tools/vitest-temp.js';
 import { ciTimeouts } from '../../tools/vitest-timeouts.js';
+
+lowPriority();
 
 // The page's model and DOM run in jsdom; the hub's routes are tested in packages/hub.
 export default defineConfig({
