@@ -717,6 +717,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   /** The work items whose conversation took its kept place in this page's life; later the page's own memory of it (`left`) serves. */
   const placedConversations = new Set<string>();
 
+  // WebKit scrolls the document back to a history entry's offset on Back, which iOS lets move the page while its visual viewport is shorter
+  // than the page (mechanics.md M177); the page keeps its panes' places itself. An entry made before this, as by an earlier build, keeps its
+  // own setting, and viewportHold.ts resets what Back scrolls there.
+  history.scrollRestoration = 'manual';
+
   if (firstRoute.w !== null && isPhone() && !conversationEntry(history.state)) {
     // A phone that starts on a conversation puts the list's entry under it, so the browser's back goes to the list as after a row's click. A
     // reload of that entry keeps both and adds none.

@@ -224,6 +224,12 @@ describe('the page', () => {
     tablet.page.close();
   });
 
+  it("leaves the document's scroll on Back to the page, not the browser's history (mechanics.md M177)", () => {
+    history.scrollRestoration = 'auto';
+    start();
+    expect(history.scrollRestoration).toBe('manual');
+  });
+
   it('goes back to the list on a phone with a swipe right over the conversation, as Back does, but not over a menu or from a wider page', async () => {
     history.replaceState(null, '', '#');
     vi.useFakeTimers();
