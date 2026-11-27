@@ -4,7 +4,7 @@ import { startPage } from '../src/main.js';
 import { bareKey, filterGroups, FOLDER_CHECK_MS, isKey, OTHER_MODEL, rangeSince, renderListHeader, renderMoreMenu, RUN_AS_KEY, SEARCH_DELAY_MS } from '../src/listHeader.js';
 import { html } from './html.js';
 import type { SearchView } from '../src/listHeader.js';
-import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
+import type { PageGroup, PageHeader, PageNotice, PageRow, SourceGroup } from '@switchboard/protocol';
 import { drawAtOnce } from './frame.js';
 
 class FakeSource {
@@ -32,7 +32,9 @@ const listRow = (workItemId: number, patch: Partial<PageRow> = {}): PageRow => (
 const listGroup = (key: string, rows: PageRow[], patch: Partial<PageGroup> = {}): PageGroup => ({ key, title: key, glyph: '\u{ea70}', empty: null, rows, ...patch });
 const github: SourceGroup = { kind: 'github', enabled: true, title: 'gh: on\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] };
 const zoho: SourceGroup = { kind: 'zoho', label: 'Zoho Desk', enabled: true, title: 'desk: on\nhelp: off\nClick to choose', sources: [{ name: 'desk', enabled: true }, { name: 'help', enabled: false }] };
-const header = (patch: Partial<PageHeader> = {}): PageHeader => ({ notes: [], sources: [github, zoho], repoRoots: ['D:/w1'], schedules: [], ...patch });
+const header = (patch: Partial<PageHeader> = {}): PageHeader => ({ notices: [], sources: [github, zoho], repoRoots: ['D:/w1'], schedules: [], ...patch });
+const notice = (id: string, patch: Partial<PageNotice> = {}): PageNotice => ({ id, class: 'action', text: `Notice ${id}`, at: 10_000 - 8 * 60_000, dismissible: false, ...patch });
+const orphans = notice('orphans:1', { text: '1 background session without a work item.', dismissible: true, action: { kind: 'held', label: 'Review' } });
 const closed = (): SearchView => ({ open: false, query: '', filter: '', range: 0, older: [], more: false, pending: false, error: null });
 
 describe('the list header (architecture.md § Web page)', () => {
@@ -72,6 +74,11 @@ describe('the list header (architecture.md § Web page)', () => {
   };
   const flush = () => new Promise((resolve) => setImmediate(resolve));
   const click = (selector: string) => root.querySelector<HTMLElement>(selector)!.click();
+  /** The orphans notice's Review, from the bell. */
+  const review = () => {
+    click('.notice-bell');
+    click('[data-action="list-notice-action"][data-kind="held"]');
+  };
   const hello = (source: FakeSource, patch: Record<string, unknown> = {}) => source.emit('hello', { key: 'pk', groups: [listGroup('progress', [listRow(1)])], header: header(), scope: null, ...patch });
 
   it("draws each source kind's logo, grey while off, with the hub's tooltip, and a plug for a kind without a logo", () => {
@@ -99,34 +106,75 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(host.querySelector('.header-sources')).toBeNull();
   });
 
-  it('ListNotes_SeveralNotes_FoldIntoOneLineThatOpensThem', () => {
+  it('shows no bell and nothing above the groups without an action notice, and a bell counting the action notices with one', () => {
     const { page, source } = start();
-    const toggle = () => root.querySelector<HTMLElement>('.list-notes-toggle');
+    const bell = () => root.querySelector<HTMLElement>('.notice-bell');
 
     hello(source);
-    // No notes, no line.
-    expect(toggle()).toBeNull();
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Settings: settings.json is not valid JSON.'], heldNote: '1 background session without a work item', voiceNote: 'Voice is off.' }) });
-    // The first note, how many more, closed; the notes stay in the page, which hides them on a phone while the line is closed.
-    expect(toggle()!.querySelector('.list-notes-first')!.textContent).toBe('Settings: settings.json is not valid JSON.');
-    expect(toggle()!.querySelector('.list-notes-more')!.textContent).toBe('+2');
-    expect(toggle()!.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle()!.getAttribute('aria-controls')).toBe('list-notes');
-    expect(toggle()!.classList.contains('voice-note')).toBe(false);
-    expect(root.querySelector('#list-notes')!.classList.contains('open')).toBe(false);
-    expect([...root.querySelectorAll('#list-notes .list-note')].map((note) => note.textContent)).toEqual(['Settings: settings.json is not valid JSON.', '1 background session without a work item', 'Voice is off.']);
-    click('.list-notes-toggle');
-    expect(toggle()!.getAttribute('aria-expanded')).toBe('true');
-    expect(root.querySelector('#list-notes')!.classList.contains('open')).toBe(true);
-    // Open over the next list, and closed again by the line.
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Settings: settings.json is not valid JSON.'] }) });
-    expect(toggle()!.getAttribute('aria-expanded')).toBe('true');
-    expect(toggle()!.querySelector('.list-notes-more')).toBeNull();
-    click('.list-notes-toggle');
-    expect(root.querySelector('#list-notes')!.classList.contains('open')).toBe(false);
-    // The voice note alone is untoned, and so is its line.
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ voiceNote: 'Voice is off.' }) });
-    expect(toggle()!.classList.contains('voice-note')).toBe(true);
+    expect(bell()).toBeNull();
+    expect(root.querySelector('.list-header')?.nextElementSibling?.matches('.notice-panel, .list-note, .holder-notice')).not.toBe(true);
+    // A transient notice alone is no reason for a bell.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notices: [notice('holder-restarting', { class: 'transient' })] }) });
+    expect(bell()).toBeNull();
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notices: [notice('settings'), notice('holder-restarting', { class: 'transient' }), orphans] }) });
+    expect(bell()?.querySelector('.notice-count')?.textContent).toBe('2');
+    expect(bell()?.getAttribute('aria-label')).toBe('Notices: 2');
+    expect(bell()?.getAttribute('aria-expanded')).toBe('false');
+    // It sits before Search, and nothing is drawn between the header and the list.
+    expect(bell()?.closest('.menu-anchor')?.nextElementSibling?.classList.contains('search-toggle')).toBe(true);
+    expect(root.querySelector('.notice-panel')).toBeNull();
+    page.close();
+  });
+
+  it("opens the bell's notices with each one's time, action and ×, and Dismiss all, and closes them with Escape or once no action notice is left", () => {
+    const { page, source } = start(true);
+    const notices = [notice('settings', { text: 'Settings: bad JSON', action: { kind: 'settings', label: 'Open Settings' } }), orphans, notice('holder-restarting', { class: 'transient', text: 'Restarting…', at: 10_000 - 2 * 3_600_000 })];
+
+    hello(source, { header: header({ notices }) });
+    click('.notice-bell');
+    expect(root.querySelector('.notice-bell')?.getAttribute('aria-expanded')).toBe('true');
+    expect([...root.querySelectorAll('.notice-panel .notice')].map((one) => [one.getAttribute('data-id'), one.querySelector('.notice-text')?.textContent, one.querySelector('time')?.textContent, one.querySelector('[data-action="list-notice-action"]')?.textContent ?? null, one.querySelector('[data-action="list-notice-dismiss"]') !== null])).toEqual([
+      ['settings', 'Settings: bad JSON', '8 min ago', 'Open Settings', false],
+      ['orphans:1', '1 background session without a work item.', '8 min ago', 'Review', true],
+      ['holder-restarting', 'Restarting…', '2 h ago', null, false],
+    ]);
+    expect(root.querySelector('.notice-panel [data-action="list-notice-dismiss-all"]')?.textContent).toBe('Dismiss all');
+    root.querySelector('.notice-panel')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(root.querySelector('.notice-panel')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('.notice-bell'));
+    // Open, then the hub's next list has no action notice: the bell and its notices go.
+    click('.notice-bell');
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notices: [notice('holder-restarting', { class: 'transient' })] }) });
+    expect(root.querySelector('.notice-bell')).toBeNull();
+    expect(root.querySelector('.notice-panel')).toBeNull();
+    // With nothing dismissible, no Dismiss all.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notices: [notice('settings')] }) });
+    click('.notice-bell');
+    expect(root.querySelector('[data-action="list-notice-dismiss-all"]')).toBeNull();
+    page.close();
+  });
+
+  it('posts × and Dismiss all to the hub, which keeps them, and shows its refusal in the toast', async () => {
+    const { page, source } = start();
+
+    hello(source, { header: header({ notices: [notice('settings'), orphans] }) });
+    click('.notice-bell');
+    click('[data-action="list-notice-dismiss"][data-id="orphans:1"]');
+    await flush();
+    answers['/page-notice-dismiss'] = { status: 409, body: { error: 'That notice is gone.' } };
+    click('[data-action="list-notice-dismiss-all"]');
+    await flush();
+    await flush();
+    const sent = posts.filter((one) => one.url === '/v1/conversation/page-notice-dismiss').map((one) => one.body);
+
+    expect(sent).toEqual([expect.objectContaining({ window: 'pk', id: 'orphans:1' }), expect.objectContaining({ window: 'pk', all: true })]);
+    expect(sent[0]).not.toHaveProperty('all');
+    expect(sent[1]).not.toHaveProperty('id');
+    expect(root.querySelector('.toast')?.textContent).toContain('That notice is gone.');
+    // The page hides nothing itself: the notice goes with the hub's next list.
+    expect(root.querySelector('.notice-bell .notice-count')?.textContent).toBe('2');
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notices: [notice('settings')] }) });
+    expect(root.querySelector('.notice-bell .notice-count')?.textContent).toBe('1');
     page.close();
   });
 
@@ -507,19 +555,19 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(location.hash).toBe('#w=1');
   });
 
-  it("shows the hub's notes under the header in the warning colour, and the held-session note, which opens what Held sessions opens", () => {
-    const { source } = start();
+  it("runs a notice's action as More actions runs it: Review opens Background sessions, Check again polls, on a paired device too", async () => {
+    const { page, source } = start(false);
 
-    hello(source);
-    expect(root.querySelector('.list-note')).toBeNull();
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'], heldNote: '1 background session without a work item' }) });
-    expect([...root.querySelectorAll('p.list-note')].map((note) => note.textContent)).toEqual(['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.']);
-    expect(root.querySelector('button.held-note')?.textContent).toBe('1 background session without a work item');
-    click('button.held-note');
+    hello(source, { header: header({ notices: [orphans, notice('source:gh', { action: { kind: 'poll', label: 'Check again' } })] }) });
+    review();
+    expect(root.querySelector('.notice-panel')).toBeNull();
     expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Background sessions');
-    // The notes leave with the hub's next list that has none.
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header() });
-    expect(root.querySelector('.list-note')).toBeNull();
+    click('#list-sheet .sheet-close');
+    click('.notice-bell');
+    click('[data-action="list-notice-action"][data-id="source:gh"]');
+    await flush();
+    expect(posts.some((one) => one.url === '/v1/conversation/page-poll')).toBe(true);
+    page.close();
   });
 
   it('lists held sessions from both entry points, confirms Stop, refreshes, and shows hub refusals verbatim', async () => {
@@ -527,7 +575,7 @@ describe('the list header (architecture.md § Web page)', () => {
     const orphan = { session: 'orphan', item: 'No work item', nativeSessionId: '-', cwd: 'D:/scratch/<folder>', state: 'live', idle: '2h 5m', memory: '128 MB', clients: 0, orphan: true, exited: false, terminal: null };
     const owned = { ...orphan, session: 'owned', item: 'gh 8', nativeSessionId: 'native-8', state: 'idle', clients: 2, orphan: false, terminal: {} };
     answers['/held-list'] = { status: 200, body: { held: [orphan, owned, { ...owned, session: 'exited', state: 'exited', exited: true }] } };
-    hello(source, { header: header({ heldNote: '1 background session without a work item' }) });
+    hello(source, { header: header({ notices: [orphans] }) });
     click('.more-actions');
     click('[data-action="list-later-held"]');
     expect(root.querySelector('.held-sheet')?.textContent).toContain('Loading…');
@@ -566,7 +614,7 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(root.querySelector('.held-sheet')?.textContent).toContain('Stopped background session orphan.');
     expect(root.querySelector('.held-sheet')?.textContent).toContain('No background sessions. Code Mode sessions appear here while they run.');
     click('#list-sheet .sheet-close');
-    click('.held-note');
+    review();
     await flush();
     expect(root.querySelector('.held-sheet')).not.toBeNull();
     page.close();
@@ -613,8 +661,8 @@ describe('the list header (architecture.md § Web page)', () => {
     const { page, source } = start();
     const row = { session: 's', item: 'No work item', nativeSessionId: '-', cwd: 'D:/w', state: 'live', idle: '0m', memory: '-', clients: 0, orphan: true, exited: false, terminal: null };
     answers['/held-list'] = { status: 200, body: { held: [row] } };
-    hello(source, { header: header({ heldNote: '1 background session without a work item' }) });
-    click('.held-note');
+    hello(source, { header: header({ notices: [orphans] }) });
+    review();
     await vi.advanceTimersByTimeAsync(0);
     let release: () => void = () => {};
     answers['/held-list'] = { status: 200, body: { held: [row] }, wait: new Promise<void>((resolve) => { release = resolve; }) };
@@ -635,9 +683,9 @@ describe('the list header (architecture.md § Web page)', () => {
 
   it('recovers from a list refusal and ignores a closed sheet while a new one loads', async () => {
     const { page, source } = start();
-    hello(source, { header: header({ heldNote: '1 background session without a work item' }) });
+    hello(source, { header: header({ notices: [orphans] }) });
     answers['/held-list'] = { status: 500, body: { error: 'The holder did not answer.' } };
-    click('.held-note');
+    review();
     await flush();
     expect(root.querySelector('.sheet-error')?.textContent).toBe('The holder did not answer.');
     answers['/held-list'] = { status: 200, body: { held: [] } };
@@ -649,7 +697,7 @@ describe('the list header (architecture.md § Web page)', () => {
     click('[data-action="list-held-refresh"]');
     click('#list-sheet .sheet-close');
     answers['/held-list'] = { status: 403, body: { error: 'Remote access no longer allows this device.' } };
-    click('.held-note');
+    review();
     await flush();
     expect(root.querySelector('.sheet-error')?.textContent).toBe('Remote access no longer allows this device.');
     release();
@@ -658,21 +706,24 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
   });
 
-  it('shows the note for a lost phone after the warning notes, as an untoned voice note, and nothing while the voice is off by choice (PRD R119)', () => {
-    const { source } = start();
-    const lost = 'Voice stopped unexpectedly on the paired device. Select Voice on this device there, or Talk here on this computer.';
+  it("lists a lost phone's notice with Voice on the computer on this computer's page only, and moves the voice from it (PRD R119)", async () => {
+    const lost = notice('voice-lost', { text: 'Voice stopped unexpectedly on the paired device.', action: { kind: 'voice-computer', label: 'Voice on the computer' } });
+    const computer = start(true);
 
-    hello(source);
-    // Voice off by choice: the hub sends where the voice is, and no note.
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ voiceDevice: 'none' }) });
-    expect(root.querySelector('.list-note')).toBeNull();
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notes: ['Voice: the voice process stopped.'], voiceNote: lost, voiceDevice: 'none' }) });
-    expect([...root.querySelectorAll('.list-note')].map((note) => [note.className, note.textContent])).toEqual([
-      ['list-note', 'Voice: the voice process stopped.'],
-      ['list-note voice-note', lost],
-    ]);
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header() });
-    expect(root.querySelector('.voice-note')).toBeNull();
+    hello(computer.source, { header: header({ notices: [lost], voiceDevice: 'none' }) });
+    click('.notice-bell');
+    click('[data-action="list-notice-action"][data-id="voice-lost"]');
+    await flush();
+    expect(posts.filter((one) => one.url === '/v1/conversation/page-voice-computer')).toHaveLength(1);
+    computer.page.close();
+
+    const phone = start(false);
+
+    hello(phone.source, { header: header({ notices: [lost], voiceDevice: 'none' }) });
+    click('.notice-bell');
+    expect(root.querySelector('.notice[data-id="voice-lost"] .notice-text')?.textContent).toBe('Voice stopped unexpectedly on the paired device.');
+    expect(root.querySelector('[data-action="list-notice-action"]')).toBeNull();
+    phone.page.close();
   });
 
   it('offers Voice on the computer on this computer\'s page only while the voice is not here, and says why it did not move (PRD R119)', async () => {
@@ -833,17 +884,17 @@ describe('the list header (architecture.md § Web page)', () => {
     page.close();
   });
 
-  it('shows the holder notice under the header, asks before Restart and resume, and shows the result until dismissed (architecture.md § Restarting the holder)', async () => {
+  it("asks before the holder notice's Restart and resume, posts the detail it showed, and keeps a refusal in the sheet (architecture.md § Restarting the holder)", async () => {
     const { page, source } = start();
     const confirm = { question: 'Restart the terminal holder?', detail: 'This session is not idle, so the restart interrupts its turn: Issue <8> (gh 108).', action: 'Restart and resume' };
-    const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update (1 session will be resumed).', confirm };
+    const older = notice('holder-older:b1', { text: 'The terminal holder that runs background sessions is out of date.', dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm } });
+    const restart = () => {
+      click('.notice-bell');
+      click('[data-action="list-notice-action"][data-kind="holder-restart"]');
+    };
 
-    hello(source);
-    expect(root.querySelector('.holder-notice')).toBeNull();
-
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderNotice }) });
-    expect(root.querySelector('.holder-notice-text')?.textContent).toBe(holderNotice.text);
-    click('.holder-restart');
+    hello(source, { header: header({ notices: [older] }) });
+    restart();
     expect(root.querySelector('#list-sheet .sheet-title')?.textContent).toBe('Restart the terminal holder?');
     expect(root.querySelector('#list-sheet .sheet-detail')?.textContent).toBe(confirm.detail);
     expect(document.activeElement?.textContent).toBe('Cancel');
@@ -853,7 +904,7 @@ describe('the list header (architecture.md § Web page)', () => {
 
     // A refusal stays in the sheet; a start closes it.
     answers['/page-holder-restart'] = { status: 409, body: { error: 'The terminal holder is already restarting.' } };
-    click('.holder-restart');
+    restart();
     click('#list-sheet [data-action="list-sheet-go"]');
     await flush();
     await flush();
@@ -865,32 +916,32 @@ describe('the list header (architecture.md § Web page)', () => {
     expect(posts.filter((one) => one.url === '/v1/conversation/page-holder-restart').map((one) => one.body['detail'])).toEqual([confirm.detail, confirm.detail]);
     expect(root.querySelector('#list-sheet .sheet')).toBeNull();
 
-    // While it runs there is nothing to press; the result shows until dismissed, and a later one shows again.
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderNotice: { text: 'Restarting the terminal holder and resuming its sessions…', confirm: null } }) });
-    expect(root.querySelector('.holder-restart')).toBeNull();
-
-    const holderResult = { at: 5, text: 'The terminal holder restarted and 1 session resumed. 1 session did not resume: gh 109: Claude Code did not start.', failed: true };
-
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderResult }) });
-    expect(root.querySelector('.holder-notice')).toBeNull();
-    expect(root.querySelector('.holder-result.failed .holder-result-text')?.textContent).toBe(holderResult.text);
-    click('[data-action="list-holder-dismiss"]');
-    expect(root.querySelector('.holder-result')).toBeNull();
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderResult }) });
-    expect(root.querySelector('.holder-result')).toBeNull();
-    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ holderResult: { at: 6, text: 'The terminal holder restarted.', failed: false } }) });
-    expect(root.querySelector('.holder-result:not(.failed)')?.textContent).toBe('The terminal holder restarted.');
-
+    // While it runs there is nothing to press: a restart begun meanwhile leaves the sheet nothing to confirm.
+    source.emit('list', { groups: [listGroup('progress', [listRow(1)])], header: header({ notices: [notice('settings'), notice('holder-restarting', { class: 'transient', text: 'Restarting the terminal holder and resuming its sessions…' })] }) });
+    click('.notice-bell');
+    expect(root.querySelector('[data-action="list-notice-action"]')).toBeNull();
     page.close();
   });
 
-  it('shows the holder notice on a paired device without Restart and resume (architecture.md § Remote access)', () => {
+  it('lists the holder notice on a paired device without Restart and resume (architecture.md § Remote access)', () => {
     const { page, source } = start(false);
-    const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update (1 session will be resumed).', confirm: { question: 'Restart the terminal holder?', detail: 'No session is interrupted.', action: 'Restart and resume' } };
+    const older = notice('holder-older:b1', { text: 'The terminal holder that runs background sessions is out of date.', dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart the terminal holder?', detail: 'No session is interrupted.', action: 'Restart and resume' } } });
 
-    hello(source, { header: header({ holderNotice }) });
-    expect(root.querySelector('.holder-notice-text')?.textContent).toBe(holderNotice.text);
-    expect(root.querySelector('.holder-restart')).toBeNull();
+    hello(source, { header: header({ notices: [older] }) });
+    click('.notice-bell');
+    expect(root.querySelector('.notice[data-id="holder-older:b1"] .notice-text')?.textContent).toBe(older.text);
+    expect(root.querySelector('[data-action="list-notice-action"]')).toBeNull();
+    expect(root.querySelector('[data-action="list-notice-dismiss"][data-id="holder-older:b1"]')).not.toBeNull();
+    page.close();
+  });
+
+  it('shows a one-time notice the hub sends as a toast, and keeps it nowhere', () => {
+    const { page, source } = start();
+
+    hello(source);
+    source.emit('notice', { notice: { id: 'holder-restarted:5', text: 'The terminal holder restarted and 2 sessions resumed.', at: 5 } });
+    expect(root.querySelector('.toast.info .toast-text')?.textContent).toBe('The terminal holder restarted and 2 sessions resumed.');
+    expect(root.querySelector('.notice-bell')).toBeNull();
     page.close();
   });
 

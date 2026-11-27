@@ -16,6 +16,8 @@
 // but for the Changes tree's rows and their controls, History's run rows, links, Details, group headings and chips and the Settings playbooks table and, outside a phone,
 // its navigation, 32 px each way, the latter at least 4 px from any other target, and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
 // task list, whose read-only boxes are not controls; on the desktop a question card's step dots are at least 24 px tall.
+// The list header's bell shows only with an action notice, counting them, at least 44 px by its own box on a touch screen, its dropdown inside the
+// viewport, the list right under the header with or without it, and a one-time notice in the toast.
 // The questions waiting chip floats centred over the composer, clear of its box, at the conversation's end and halfway up. The card's topic is
 // 4.5:1 on the card, and its first question's disabled Back has no border. On a touch screen each of the card's options centres its text in
 // its row, a one-line label and its mark within 1 px.
@@ -53,6 +55,8 @@ const SETTINGS_PAGES = {
 };
 /** The modal sheets, each opened by OPEN's presses and checked by modalFailures: Delete's question, Snooze, an input dialog, the header's sheets. */
 const MODAL_VIEWS = ['sheet', 'snooze', 'comment', 'new-session', 'folders', 'pair', 'held', 'log', 'extension', 'shortcut', 'holder'];
+/** The bell's views: one notice, three, three with the dropdown open, and a one-time notice's toast with none; the list view has none either. */
+const NOTICE_VIEWS = ['notices-1', 'notices-3', 'notices-open', 'notice-toast'];
 /** The modal views whose first text box is filled past its cap, to see it grow and then scroll. */
 const GROWING = ['snooze', 'comment', 'new-session'];
 /**
@@ -64,7 +68,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
@@ -73,7 +77,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
+const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -145,8 +149,13 @@ const many = { ticket: 'gh 9', ticketNumber: '9', playbook: 'dev:x', links: ['1'
 const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, sourceKind: 'adhoc', links: [link('A very long design document title')] };
 // The header's sources: GitHub's and Zoho's logos are the page's own; the DPAF plugin gives its own, a made-up mark here.
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
-// The list's notes, which a phone folds into one line.
-const header = { notes: view === 'list' || view?.startsWith('narrow') ? ['settings.json: sources.zoho.orgId is missing, so Zoho Desk is not polled.', 'Voice: the voice process stopped.'] : [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [], ...(view === 'holder' ? { holderNotice: { text: 'The terminal holder runs an older build.', detail: 'Restart it to run this build.', confirm: { question: 'Restart the terminal holder?', detail: 'Its 2 sessions stop and resume in the new holder. A tool call that is running is cut off.', action: 'Restart and resume' } } } : {}) };
+// The bell's notices (architecture.md § Web page, List header): none on the list, one, or three with the dropdown open.
+const minutesAgo = (minutes) => now - minutes * 60000;
+const older = { id: 'holder-older:b', class: 'action', text: 'The terminal holder that runs background sessions is out of date. Restart it to update; its 2 sessions stop and resume.', at: minutesAgo(3), dismissible: true, action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart the terminal holder?', detail: 'Its 2 sessions stop and resume in the new holder. A tool call that is running is cut off.', action: 'Restart and resume' } } };
+const zohoError = { id: 'source:zoho', class: 'action', text: 'zoho: Zoho Desk refused the token (401), so it is not polled.', at: minutesAgo(8), dismissible: false, action: { kind: 'poll', label: 'Check again' } };
+const orphanNotice = { id: 'orphans:x', class: 'action', text: '2 background sessions without a work item.', at: minutesAgo(125), dismissible: true, action: { kind: 'held', label: 'Review' } };
+const notices = view === 'notices-1' || view === 'holder' ? [older] : view === 'notices-3' || view === 'notices-open' ? [zohoError, orphanNotice, older] : [];
+const header = { notices, sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [] };
 // The other groups, in the list and conversation views only, so each group's count shows (architecture.md § Web page, Groups): Ready for
 // review and Unstarted empty, Blocked on you with a row, and Snoozed and Done, which start closed, with one each.
 const everyGroup = view === 'list' || view === 'conversation';
@@ -159,7 +168,7 @@ const groups = [...(everyGroup ? [ready, blocked] : []), { key: 'progress', titl
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
-const listing = view === 'list' || view === 'more-menu' || view === 'row-menu' || narrow !== null;
+const listing = view === 'list' || view === 'more-menu' || view === 'row-menu' || narrow !== null || ['notices-1', 'notices-3', 'notices-open', 'notice-toast'].includes(view);
 const open = !listing && !view?.startsWith('settings');
 // The opening view asks for work item 1 by its address and the hub never sends its scope, so the placeholder stays (opening.tsx).
 const loading = view === 'opening';
@@ -193,6 +202,8 @@ const artifacts = mic ? [{ path: 'chat/plan.md', owner: 'chat', kind: 'note', ti
 class FakeSource {
   constructor() {
     this.listeners = {};
+    // The one-time notice the hub sends after a holder restart that went well, shown as a toast.
+    if (view === 'notice-toast') setTimeout(() => this.emit('notice', { notice: { id: 'holder-restarted:1', text: 'The terminal holder restarted and 2 sessions resumed.', at: now } }), 120);
     setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open && !loading ? [session] : [], items, more: false, state: view === 'history' ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0, ...(mic ? { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: false, error: null, recognizer: null } } : {}) }), 20);
     // The tabs view's artifacts change after the page first shows them, so each is unread until its tab shows it.
     if (view === 'tabs') setTimeout(() => artifacts.forEach((artifact) => this.emit('artifact', { artifact: { ...artifact, updatedAt: artifact.updatedAt + 60000 } })), 120);
@@ -537,7 +548,7 @@ const measure = `(() => {
       };
     })(),
     // The conversation's heights: its header, the header and tab strip together, the timeline's pane and the composer.
-    heights: (() => { const tall = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().height) : null; }; return { copyOverCode: [...document.querySelectorAll('.code-block')].filter(shown).filter((block) => { const copy = block.querySelector(':scope > .copy'); const pre = block.querySelector(':scope > pre'); if (!copy || !pre || !shown(copy)) return false; const a = copy.getBoundingClientRect(); const b = pre.getBoundingClientRect(); return a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5; }).length, header: tall('.header'), head: tall('#head'), panel: tall('#panel'), composer: tall('#composer'), notesLine: tall('.list-notes-toggle'), notes: tall('#list-notes') }; })(),
+    heights: (() => { const tall = (selector) => { const node = [...document.querySelectorAll(selector)].find(shown); return node ? Math.round(node.getBoundingClientRect().height) : null; }; return { copyOverCode: [...document.querySelectorAll('.code-block')].filter(shown).filter((block) => { const copy = block.querySelector(':scope > .copy'); const pre = block.querySelector(':scope > pre'); if (!copy || !pre || !shown(copy)) return false; const a = copy.getBoundingClientRect(); const b = pre.getBoundingClientRect(); return a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5; }).length, header: tall('.header'), head: tall('#head'), panel: tall('#panel'), composer: tall('#composer') }; })(),
     tops: { header: top('.header'), listHeader: top('.list-header'), settingsHead: top('.settings-head'), tabs: top('.tabs'), panel: top('#panel'), list: top('#list') },
   };
 })()`;
@@ -689,6 +700,67 @@ const PROBES = `(() => {
   document.body.insertAdjacentHTML('beforeend', '<div class="console" style="position: fixed; left: 0; bottom: 0; width: 300px"><div class="console-foot"><p class="console-note">Ended.</p><button type="button" class="console-reconnect">Reconnect</button></div></div>');
 })()`;
 
+/** The bell, its count and dropdown, and where the list starts under the header (architecture.md § Web page, List header). */
+const NOTICES = `(() => {
+  // The list at its top, since the checks before this one scroll it, and with every group a phone on its side scrolls it.
+  const list = document.getElementById('list');
+  if (list) list.scrollTop = 0;
+  const box = (node) => { if (!node) return null; const r = node.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
+  const bell = document.querySelector('.notice-bell');
+  const count = bell?.querySelector('.notice-count');
+  const panel = document.querySelector('.notice-panel');
+  const head = document.querySelector('.list-header');
+  const first = document.querySelector('#list .group-head');
+  const centre = bell ? document.elementFromPoint(bell.getBoundingClientRect().left + bell.getBoundingClientRect().width / 2, bell.getBoundingClientRect().top + bell.getBoundingClientRect().height / 2) : null;
+  return {
+    bell: box(bell),
+    count: count?.textContent ?? null,
+    countBox: box(count),
+    pseudo: bell ? ['::before', '::after'].map((part) => getComputedStyle(bell, part).content).filter((content) => content !== 'none' && content !== 'normal') : [],
+    hit: bell !== null && centre !== null && bell.contains(centre),
+    panel: box(panel),
+    sideways: panel ? panel.scrollWidth > panel.clientWidth + 1 : false,
+    notices: panel ? [...panel.querySelectorAll('.notice')].length : 0,
+    gap: head && first ? first.getBoundingClientRect().top - head.getBoundingClientRect().bottom : null,
+    toast: document.querySelector('#toast .toast .toast-text')?.textContent ?? null,
+    width: innerWidth,
+    height: innerHeight,
+  };
+})()`;
+
+/**
+ * The bell's failures: no bell without an action notice; with one, a count of the action notices on a bell whose own box is at least 44 px
+ * each way on a touch screen and takes a press at its centre, with no pseudo-element taking presses beyond it; the list right under the header
+ * in every case; the dropdown inside the viewport with every notice and no sideways scroll; and the one-time notice in the toast.
+ */
+function noticeFailures(view, size, r) {
+  const out = [];
+  const expected = { 'notices-1': '1', 'notices-3': '3', 'notices-open': '3' }[view] ?? null;
+
+  if (expected === null && r.bell !== null) out.push('a bell shows with no action notice');
+  if (expected !== null) {
+    if (r.bell === null) out.push('no bell shows with ' + expected + ' notices');
+    else {
+      if (r.count !== expected) out.push('the bell counts ' + r.count + ', not ' + expected);
+      if (!size.mouse && (r.bell.width < 43.5 || r.bell.height < 43.5)) out.push('the bell is ' + r.bell.width + 'x' + r.bell.height + ' px, under 44 px');
+      if (r.pseudo.length > 0) out.push('the bell has a pseudo-element: ' + r.pseudo.join(', '));
+      if (!r.hit) out.push('a press at the bell\'s centre reaches something else');
+      if (r.countBox !== null && (r.countBox.left < r.bell.left - 0.5 || r.countBox.right > r.bell.right + 0.5 || r.countBox.top < r.bell.top - 0.5 || r.countBox.bottom > r.bell.bottom + 0.5)) out.push('the bell\'s count passes its box');
+    }
+  }
+  if (r.gap === null || Math.abs(r.gap) > 1) out.push('the list starts ' + r.gap + ' px under its header, not right under it');
+  if (view === 'notices-open') {
+    if (r.panel === null) out.push('the bell opened no notices');
+    else {
+      if (r.panel.left < -0.5 || r.panel.top < -0.5 || r.panel.right > r.width + 0.5 || r.panel.bottom > r.height + 0.5) out.push('the notices pass the viewport: ' + JSON.stringify(r.panel));
+      if (r.notices !== 3) out.push('the notices list ' + r.notices + ', not 3');
+      if (r.sideways) out.push('the notices scroll sideways');
+    }
+  } else if (r.panel !== null) out.push('the notices are open unasked');
+  if (view === 'notice-toast' && r.toast !== 'The terminal holder restarted and 2 sessions resumed.') out.push('the one-time notice shows ' + JSON.stringify(r.toast) + ' in the toast');
+  return out;
+}
+
 /** A step that opens the tab `selector` names, by its tab in a strip or else by its row in that strip's More menu. */
 function openTab(selector) {
   return { name: selector, eval: '(async () => { const tab = document.querySelector(' + JSON.stringify('.tabs ' + selector) + '); if (tab) { tab.click(); return true; } document.querySelector(".tab-more-button")?.click(); await new Promise((done) => setTimeout(done, 150)); const row = document.querySelector(' + JSON.stringify('.tab-menu ' + selector) + '); row?.click(); return row !== null; })()' };
@@ -714,7 +786,9 @@ const OPEN = {
   log: ['[data-action=list-more]', '[data-action=list-log]'],
   extension: ['[data-action=list-more]', '[data-action=list-extension]'],
   shortcut: ['[data-action=list-more]', '[data-action=list-shortcut]'],
-  holder: ['[data-action=list-holder-restart]'],
+  holder: ['[data-action=list-notices]', '[data-action=list-notice-action][data-kind=holder-restart]'],
+  // The bell's dropdown with three notices.
+  'notices-open': ['[data-action=list-notices]'],
   // Devices with a pairing address shown.
   'settings-pair': ['[data-action=list-more]', '[data-action=list-settings]', '.settings-nav-entry[data-key="devices"]', '.settings-devices > .sheet-button'],
   // An artifact chosen from More, so the strip keeps it beside the tabs it always keeps: the oldest, so the newest stays unread where it has room.
@@ -1221,11 +1295,6 @@ function failures(view, size, m) {
   }
   // On a touch screen a code block's Copy, always shown, lies beside its code, not over it.
   if (!size.mouse && m.heights.copyOverCode > 0) out.push(m.heights.copyOverCode + ' code blocks\' Copy lies over their code');
-  // A phone folds the list's notes into one line, closed until tapped; elsewhere they show whole, with no line.
-  if (view === 'list') {
-    if (size.phone && (m.heights.notesLine === null || m.heights.notesLine > 46 || (m.heights.notes ?? 0) > 1)) out.push('the list\'s notes are not one closed line on a phone (line ' + m.heights.notesLine + ' px, notes ' + m.heights.notes + ' px)');
-    if (!size.phone && (m.heights.notesLine !== null || !(m.heights.notes > 0))) out.push('the list\'s notes are folded outside the phone\'s layout');
-  }
   for (const [bar, top] of Object.entries(m.tops)) {
     // Settings, outside the phone's layout, sits inside the dimmed page's margin.
     if ((['header', 'listHeader'].includes(bar) || (bar === 'settingsHead' && size.phone)) && top !== null && top !== 0) out.push('the ' + bar + ' starts ' + top + ' px down');
@@ -1459,6 +1528,13 @@ try {
 
           if (report) console.log(name + ' sheet: ' + JSON.stringify(sheet));
           found.push(...modalFailures(view, sheet === null ? null : { ...sheet, viewport: { width: size.width, height: size.height } }));
+        }
+
+        if ((view === 'list' || NOTICE_VIEWS.includes(view)) && missing.length === 0) {
+          const notices = await evaluate(NOTICES);
+
+          if (report) console.log(name + ' notices: ' + JSON.stringify(notices));
+          found.push(...noticeFailures(view, size, notices));
         }
 
         if (view.endsWith('-menu') && missing.length === 0) {

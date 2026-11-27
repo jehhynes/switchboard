@@ -10,6 +10,8 @@ import { snoozeChoices, wakeText } from '@switchboard/core/snooze';
 import type { SnoozeChoice } from '@switchboard/core/snooze';
 import { heldTexts } from './held.js';
 import type { HeldSession } from './held.js';
+import { noticeHash } from './notices.js';
+import type { InfoNotice, Notice } from './notices.js';
 import {
   age,
   CAPS,
@@ -33,8 +35,8 @@ import {
   rowKeyOf,
   rowTime,
   searchDescription,
-  setupNotes,
-  snapshotErrors,
+  errorNotices,
+  setupNotices,
   staleSince,
   startPromptText,
   stripeOf,
@@ -265,8 +267,13 @@ export interface DockGroup {
 
 /** Everything the list view holds, built whole on each change (PRD R71). */
 export interface DockView {
-  /** Settings, playbook, hook and source errors, then what an unconfigured home lacks. */
-  notes: string[];
+  /**
+   * The bell's notices but the voice's, which the hub adds (architecture.md § Web page, List header): settings, playbook, hook and source
+   * errors, what an unconfigured home lacks, background sessions without a work item, and the terminal holder's.
+   */
+  notices: Notice[];
+  /** One-time notices, which go to the pages as a toast: a holder restart that went well. */
+  info: InfoNotice[];
   groups: DockGroup[];
   /** Snooze's choices with their wake times, (PRD R49); the chosen one's `until` goes with the action. */
   snooze: SnoozeChoice[];
@@ -278,29 +285,6 @@ export interface DockView {
   schedules: { name: string; playbook: string }[];
   /** The snapshot's held sessions, orphans first (PRD R94); absent when the holder holds none. */
   held?: DockHeld[];
-  /** The note above the groups while a held session has no work item, which opens the held sessions window (PRD R94); absent otherwise. */
-  heldNote?: string;
-  /** The neutral note above the groups while no device has the voice because the phone was lost (PRD R119); absent otherwise. */
-  voiceNote?: string;
-  /** The notice above the groups while the terminal holder is from an older build or restarting (architecture.md § Restarting the holder); absent otherwise. */
-  holderNotice?: DockHolderNotice;
-  /** The last holder restart's result, until the hub restarts; each client hides it once dismissed, by its `at`. */
-  holderResult?: DockHolderResult;
-}
-
-/**
- * The holder notice: its text, and `confirm`, what Restart and resume asks before it posts `POST /holder/restart`, null while a restart runs.
- */
-export interface DockHolderNotice {
-  text: string;
-  confirm: { question: string; detail: string; action: string } | null;
-}
-
-/** A holder restart's result: `failed` when the holder did not restart or a session did not resume. */
-export interface DockHolderResult {
-  at: number;
-  text: string;
-  failed: boolean;
 }
 
 /** The rows by group and in list order, as texts the list draws without rules of its own (PRD R27, R71). */
@@ -320,15 +304,13 @@ export function dockView(snapshot: Snapshot, now: number, windows: string): Dock
     dockRow(snapshot, entry, group, now, windows, group === 'review' ? order : null, group === 'done' && 'status' in entry ? doneBand(entry.doneAt ?? entry.createdAt, now) : null);
 
   return {
-    notes: [...snapshotErrors(snapshot), ...setupNotes(snapshot)],
+    ...noticesOf(snapshot),
     groups: keys.map((key) => ({ key, title: GROUP_TITLES[key], glyph: GROUP_GLYPHS[key], empty: GROUP_EMPTY[key] ?? null, rows: groups[key].map(row(key)) })),
     snooze: snoozeChoices(new Date(now)),
     sources: sourceGroups(snapshot.sourceStates),
     repoRoots: snapshot.repoRoots,
     schedules: snapshot.schedules,
     ...(snapshot.held === undefined ? {} : { held: snapshot.held.map((one) => heldRow(snapshot, one, now, windows)) }),
-    ...orphanNote(snapshot.held ?? []),
-    ...holderNotices(snapshot),
   };
 }
 
@@ -358,22 +340,32 @@ function heldRow(snapshot: Snapshot, one: HeldSession, now: number, windows: str
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
+/** The bell's notices and one-time notices the snapshot holds (architecture.md § Web page, List header). */
+export function noticesOf(snapshot: Snapshot): { notices: Notice[]; info: InfoNotice[] } {
+  const holder = holderNotices(snapshot);
+
+  return { notices: [...errorNotices(snapshot), ...setupNotices(snapshot), ...orphanNotices(snapshot.held ?? []), ...holder.notices], info: holder.info };
+}
+
 /**
- * The holder notice and result (architecture.md § Restarting the holder). The sessions a restart resumes are the live held ones whose session the
- * store holds active; one that is starting, running or waiting is in a turn, which the restart interrupts, so the confirmation names it.
+ * The holder's notices (architecture.md § Restarting the holder). The sessions a restart resumes are the live held ones whose session the
+ * store holds active; one that is starting, running or waiting is in a turn, which the restart interrupts, so the confirmation names it. Out
+ * of date is dismissed until the next install, since its ID names the installed build; a restart that went well is a one-time notice, and one
+ * that failed stays until dismissed or the hub restarts.
  */
-export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'workItems'>): { holderNotice?: DockHolderNotice; holderResult?: DockHolderResult } {
+export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'workItems'>): { notices: Notice[]; info: InfoNotice[] } {
   const holder = snapshot.holder;
+  const notices: Notice[] = [];
+  const info: InfoNotice[] = [];
 
   if (holder === undefined) {
-    return {};
+    return { notices, info };
   }
 
   const restart = holder.restart;
-  const shown: { holderNotice?: DockHolderNotice; holderResult?: DockHolderResult } = {};
 
   if (restart?.state === 'running') {
-    shown.holderNotice = { text: 'Restarting the terminal holder and resuming its sessions…', confirm: null };
+    notices.push({ id: 'holder-restarting', class: 'transient', text: 'Restarting the terminal holder and resuming its sessions…', dismiss: null });
   } else if (holder.older) {
     const live = (snapshot.held ?? []).filter((one) => one.exitedAt === null);
     const sessionOf = (id: string) => snapshot.workItems.flatMap((item) => item.sessions.map((session) => ({ item, session }))).find((entry) => entry.session.id === id);
@@ -392,10 +384,13 @@ export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'work
       others === 0 ? '' : `${plural(others, resumed.length === 0 ? 'background session' : 'other background session', resumed.length === 0 ? 'background sessions' : 'other background sessions')} ${others === 1 ? 'ends and is' : 'end and are'} not resumed.`,
     ];
 
-    shown.holderNotice = {
+    notices.push({
+      id: `holder-older:${holder.installed ?? ''}`,
+      class: 'action',
       text: `The terminal holder that runs background sessions is out of date. Restart it to update${resumed.length === 0 ? '' : `; its ${plural(resumed.length, 'session stops and resumes', 'sessions stop and resume')}`}.`,
-      confirm: { question: 'Restart the terminal holder?', detail: parts.filter((part) => part !== '').join(' '), action: 'Restart and resume' },
-    };
+      dismiss: 'kept',
+      action: { kind: 'holder-restart', label: 'Restart and resume', confirm: { question: 'Restart the terminal holder?', detail: parts.filter((part) => part !== '').join(' '), action: 'Restart and resume' } },
+    });
   }
 
   if (restart?.state === 'done') {
@@ -406,16 +401,23 @@ export function holderNotices(snapshot: Pick<Snapshot, 'holder' | 'held' | 'work
         ? `The terminal holder restarted${restart.resumed === 0 ? '' : ` and ${resumed} resumed`}.`
         : `The terminal holder did not restart: ${restart.error}${restart.resumed === 0 ? '' : ` ${resumed} resumed.`}`;
 
-    shown.holderResult = { at: restart.at, text: `${text}${failed}`, failed: restart.error !== null || restart.failed.length > 0 };
+    if (restart.error === null && restart.failed.length === 0) {
+      info.push({ id: `holder-restarted:${restart.at}`, text, at: restart.at });
+    } else {
+      notices.push({ id: `holder-result:${restart.at}`, class: 'action', text: `${text}${failed}`, dismiss: 'memory' });
+    }
   }
 
-  return shown;
+  return { notices, info };
 }
 
-function orphanNote(held: HeldSession[]): { heldNote?: string } {
-  const count = held.filter((one) => one.orphan).length;
+/** Background sessions without a work item, with Review; a dismissal lasts until the set of them changes, since the ID names it. */
+function orphanNotices(held: HeldSession[]): Notice[] {
+  const orphans = held.filter((one) => one.orphan).map((one) => one.session).sort();
 
-  return count === 0 ? {} : { heldNote: `${count} background ${count === 1 ? 'session' : 'sessions'} without a work item` };
+  return orphans.length === 0
+    ? []
+    : [{ id: `orphans:${noticeHash(orphans.join(' '))}`, class: 'action', text: `${plural(orphans.length, 'background session', 'background sessions')} without a work item.`, dismiss: 'kept', action: { kind: 'held', label: 'Review' } }];
 }
 
 /**

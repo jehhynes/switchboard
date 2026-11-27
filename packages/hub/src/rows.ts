@@ -2,6 +2,7 @@ import { activeSession, adhocLabel, blocksOnYou, groupOf, holdsSlot, ownPrompt, 
 import type { Provider, TicketBlocker } from '@switchboard/core';
 import { waitsOnLimit } from '@switchboard/core/limit';
 import type { Group } from '@switchboard/core/group';
+import type { Notice, NoticeAction } from './notices.js';
 import type { PoolView, Snapshot, WorkItemView } from './runtime.js';
 
 // Imports only types and browser-safe core modules, so a browser bundle can import it through `@switchboard/hub/rows`.
@@ -842,30 +843,36 @@ function midnight(time: number, days = 0): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days).getTime();
 }
 
-/** The settings, playbook, hook and source errors the list shows above the groups (PRD R42). */
-export function snapshotErrors(snapshot: Snapshot): string[] {
+/**
+ * The settings, playbook, hook and source errors as the bell's notices (PRD R42): none can be dismissed, since each clears once fixed.
+ */
+export function errorNotices(snapshot: Snapshot): Notice[] {
+  const settings: NoticeAction = { kind: 'settings', label: 'Open Settings' };
+  const error = (id: string, text: string, action?: NoticeAction): Notice => ({ id, class: 'action', text, dismiss: null, ...(action === undefined ? {} : { action }) });
+
   return [
-    snapshot.errors.settings === null ? null : `Settings: ${snapshot.errors.settings}`,
-    ...snapshot.errors.playbooks.map((error) => `Playbook ${error}`),
-    snapshot.errors.hooks === null ? null : `Hooks: ${snapshot.errors.hooks}`,
-    ...Object.entries(snapshot.errors.sources).map(([name, error]) => `${name}: ${error}`),
-    ...(snapshot.notes ?? []),
-  ].filter((line): line is string => line !== null);
+    ...(snapshot.errors.settings === null ? [] : [error('settings', `Settings: ${snapshot.errors.settings}`, settings)]),
+    ...snapshot.errors.playbooks.map((text) => error(`playbook:${text.split(': ')[0]}`, `Playbook ${text}`, settings)),
+    ...(snapshot.errors.hooks === null ? [] : [error('hooks', `Hooks: ${snapshot.errors.hooks}`)]),
+    ...Object.entries(snapshot.errors.sources).map(([name, text]) => error(`source:${name}`, `${name}: ${text}`, { kind: 'poll', label: 'Check again' })),
+  ];
 }
 
-/** What an unconfigured home is missing, said plainly. */
-export function setupNotes(snapshot: Snapshot): string[] {
-  // The webview bundles this module, so the path is joined with the separator the folder already uses, not node:path.
+/** What an unconfigured home is missing, said plainly, as the bell's notices; each clears once configured. */
+export function setupNotices(snapshot: Snapshot): Notice[] {
+  // The path is joined with the separator the folder already uses.
   const settings = `${snapshot.configDir}${snapshot.configDir.includes('\\') ? '\\' : '/'}settings.json`;
+  const open: NoticeAction = { kind: 'settings', label: 'Open Settings' };
+  const notice = (id: string, text: string, action?: NoticeAction): Notice => ({ id, class: 'action', text, dismiss: null, ...(action === undefined ? {} : { action }) });
 
   return [
-    snapshot.sources.length > 0
-      ? null
+    ...(snapshot.sources.length > 0
+      ? []
       : snapshot.sourceStates.length > 0
-        ? 'No source is on. Turn one on in the list header.'
-        : `No source is configured. Add one in ${settings}.`,
-    snapshot.playbooks.length === 0 ? `No task playbooks are loaded. Add them under playbooks in ${settings}.` : null,
-  ].filter((line): line is string => line !== null);
+        ? [notice('setup:sources', 'No source is on. Turn one on in the list header.')]
+        : [notice('setup:sources', `No source is configured. Add one in ${settings}.`, open)]),
+    ...(snapshot.playbooks.length === 0 ? [notice('setup:playbooks', `No task playbooks are loaded. Add them under playbooks in ${settings}.`, open)] : []),
+  ];
 }
 
 /** The row's linked GitHub pull requests and issues as `PR #<n>` and {@link issueKey}, as the row's menu names them (PRD R52). */

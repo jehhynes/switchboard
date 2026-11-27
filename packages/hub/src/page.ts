@@ -8,7 +8,8 @@ import type { IncomingHttpHeaders } from 'node:http';
 import { ARTIFACT_SEGMENT, artifactType } from '@switchboard/conversation';
 import { PAGE_SCRIPT_HASHES } from '@switchboard/web';
 import { hostIsPath, windowOf } from './dock.js';
-import type { DockHolderNotice, DockHolderResult, DockRow, DockSourceGroup, DockView } from './dock.js';
+import type { DockRow, DockSourceGroup, DockView } from './dock.js';
+import type { PageNotice } from './notices.js';
 import { CONTROL_GLYPHS } from './rows.js';
 import type { RowGroup } from './rows.js';
 import type { Snapshot } from './snapshot.js';
@@ -787,39 +788,23 @@ function historyOf(row: Pick<DockRow, 'commands'>): PageRow['history'] {
   return command === undefined || typeof command['ticketId'] !== 'number' ? null : { ticketId: command['ticketId'], key: String(command['key'] ?? '') };
 }
 
-/** What the page's list header shows besides the list (architecture.md § Web page): the source icons and what More Actions offers. */
+/** What the page's list header shows besides the list (architecture.md § Web page): the bell's notices, the source icons and what More Actions offers. */
 export interface PageHeader {
-  /** The notes above the groups: settings, playbook, hook, source and voice errors, then what an unconfigured home lacks (PRD R42). */
-  notes: string[];
-  /** The note while a held session has no work item, "N held sessions without a work item" (PRD R94); absent otherwise. */
-  heldNote?: string;
-  /** The neutral note while no device has the voice because the phone was lost (PRD R119); absent otherwise. */
-  voiceNote?: string;
+  /** The bell's notices not dismissed, oldest first (PRD R42, R94; `Notices` in `notices.ts`). */
+  notices: PageNotice[];
   /** The configured sources but ad-hoc, by kind, as the header's icons show them. */
   sources: DockSourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default (PRD R6). */
   repoRoots: string[];
   /** The schedules the New session form can run now (PRD R82). */
   schedules: { name: string; playbook: string }[];
-  /** The holder notice and restart result (architecture.md § Restarting the holder); absent when there is none. */
-  holderNotice?: DockHolderNotice;
-  holderResult?: DockHolderResult;
   /** Where the voice is while it is not on this computer, with voice on: a paired phone, or none after the phone left (PRD R119); absent otherwise. */
   voiceDevice?: 'phone' | 'none';
 }
 
 /** The page's list header, from the built list view, so the header and the list agree; the New session form asks `page-folders` for its folders. */
-export function pageHeader(dock: Pick<DockView, 'notes' | 'heldNote' | 'voiceNote' | 'sources' | 'repoRoots' | 'schedules' | 'holderNotice' | 'holderResult'>): PageHeader {
-  return {
-    notes: dock.notes,
-    ...(dock.heldNote === undefined ? {} : { heldNote: dock.heldNote }),
-    ...(dock.voiceNote === undefined ? {} : { voiceNote: dock.voiceNote }),
-    sources: dock.sources,
-    repoRoots: dock.repoRoots,
-    schedules: dock.schedules,
-    ...(dock.holderNotice === undefined ? {} : { holderNotice: dock.holderNotice }),
-    ...(dock.holderResult === undefined ? {} : { holderResult: dock.holderResult }),
-  };
+export function pageHeader(dock: Pick<DockView, 'sources' | 'repoRoots' | 'schedules'>, notices: PageNotice[]): PageHeader {
+  return { notices, sources: dock.sources, repoRoots: dock.repoRoots, schedules: dock.schedules };
 }
 
 /** A pool ticket's row in the list view, or null when no group lists it. */

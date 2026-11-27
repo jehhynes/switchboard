@@ -854,9 +854,9 @@ describe('the page in use', () => {
     const icon = { viewBox: '0 0 16 16', path: 'M0 0h16v16H0z' };
 
     expect(sourceIcons(null)).toEqual({});
-    expect(sourceIcons({ notes: [], sources: [{ kind: 'github', enabled: true, title: '', sources: [] }, { kind: 'dpaf', icon, enabled: false, title: '', sources: [] }], repoRoots: [], schedules: [] })).toEqual({ dpaf: icon });
+    expect(sourceIcons({ notices: [], sources: [{ kind: 'github', enabled: true, title: '', sources: [] }, { kind: 'dpaf', icon, enabled: false, title: '', sources: [] }], repoRoots: [], schedules: [] })).toEqual({ dpaf: icon });
     // The same header gives the same object, so the list's rows, which take it, are not drawn again; another header is read anew.
-    const header = { notes: [], sources: [{ kind: 'dpaf', icon, enabled: true, title: '', sources: [] }], repoRoots: [], schedules: [] };
+    const header = { notices: [], sources: [{ kind: 'dpaf', icon, enabled: true, title: '', sources: [] }], repoRoots: [], schedules: [] };
     expect(sourceIcons(header)).toBe(sourceIcons(header));
     expect(sourceIcons({ ...header, sources: [] })).toEqual({});
   });

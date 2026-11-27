@@ -46,6 +46,8 @@ import { githubGhPath, PageStack, pullLinkOf } from './stack.js';
 import { PageTree } from './tree.js';
 import { spawnGh } from '@switchboard/github';
 import { needsMessage, needsReason, newlyNeeding, rowFor } from './needs.js';
+import { keptDismissals, Notices } from './notices.js';
+import type { Notice } from './notices.js';
 import { systemNotifier } from './systemAlerts.js';
 import { installedProviders } from './installed.js';
 import { claudeModelChoices, CODEX_MODELS_MS, codexModelChoices, withConfigured } from './models.js';
@@ -414,6 +416,16 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   const focusedPages = new Set<string>();
   // The page that raises needs-you alerts (architecture.md § Web page).
   const pageTargets = new PageTargets();
+  // The sign-in each page key's stream was opened with, so a one-time notice goes once to each device.
+  const pageSignIns = new Map<string, string | null>();
+  // The bell's notices' first times and dismissals, and the one-time notices (architecture.md § Web page, List header).
+  const notices = new Notices({
+    now: deps.now,
+    ...keptDismissals(store),
+    pages: () => conversation.pages(),
+    signIn: (key) => pageSignIns.get(key) ?? null,
+    send: (key, notice) => conversation.notify(key, 'notice', { notice }),
+  });
   // Each window sees only its own work item (architecture.md § Window scope); views are built off the main thread and published whole.
   const scopes = new WindowScopes({ store, windows });
   const doneSearch = new DoneSearch();
@@ -699,10 +711,19 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     pageHeader: () => {
       const built = views();
 
-      return { ...pageHeader({ ...built.dock, ...withVoiceNotes(built.dock.notes) }), ...(config.settings.voice.enabled && voice.device !== 'computer' ? { voiceDevice: voice.device } : {}) };
+      return { ...pageHeader(built.dock, notices.header(allNotices(built))), ...(config.settings.voice.enabled && voice.device !== 'computer' ? { voiceDevice: voice.device } : {}) };
     },
     pollSources: () => runtime.pollNow(),
     restartHolder: (detail) => restartHolder(detail),
+    dismissNotice: (id) => {
+      const why = notices.dismiss(allNotices(views()), id);
+
+      if (why === null) {
+        conversation.pageListChanged();
+      }
+
+      return why;
+    },
     // The page's Run a schedule now sends the `run-schedule` event; the run is its ticket's newest work item.
     runSchedule: (name) => {
       const { refused } = runtime.send({ type: 'run-schedule', name });
@@ -864,6 +885,8 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
     });
 
     announced = built.snapshot;
+    notices.observe(allNotices(built));
+    notices.announce(built.dock.info);
 
     // Spoken alerts for the live Code Mode sessions' turns and waits; a work item alerted gets no needs-you sound as well (architecture.md § Spoken alerts).
     const alerted = voice.sessionsChanged(
@@ -904,7 +927,9 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
    * asks, so a session that started a turn while the operator read it is never interrupted unnamed. Without one, as from an older client, it runs.
    */
   const restartHolder = (detail: unknown): string | null => {
-    if (typeof detail === 'string' && detail !== views().dock.holderNotice?.confirm?.detail) {
+    const asked = views().dock.notices.flatMap((one) => (one.action?.kind === 'holder-restart' ? [one.action.confirm.detail] : []))[0];
+
+    if (typeof detail === 'string' && detail !== asked) {
       return 'The background sessions changed since you were asked. Press Restart and resume again to see them.';
     }
 
@@ -920,16 +945,17 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
   }
 
   /**
-   * The list's notes with the voice's problem last, and the neutral voice note while the phone was lost, as the page shows them
-   * (architecture.md § Voice). Voice the operator turned off, or a phone left by choice, has no note.
+   * The bell's notices: the dock view's, then the voice's problem and, while the phone was lost, that no device has the voice (architecture.md
+   * § Voice). Voice the operator turned off, or a phone left by choice, has no notice.
    */
-  function withVoiceNotes(notes: string[]): { notes: string[]; voiceNote?: string } {
+  function allNotices(built: Built): Notice[] {
     const voiceError = voice.dockError();
 
-    return {
-      notes: voiceError === null ? notes : [...notes, `Voice: ${voiceError}`],
-      ...(config.settings.voice.enabled && voice.phoneLost ? { voiceNote: PHONE_LOST_NOTE } : {}),
-    };
+    return [
+      ...built.dock.notices,
+      ...(voiceError === null ? [] : [{ id: 'voice', class: 'action' as const, text: `Voice: ${voiceError}`, dismiss: null }]),
+      ...(config.settings.voice.enabled && voice.phoneLost ? [{ id: 'voice-lost', class: 'action' as const, text: PHONE_LOST_NOTE, dismiss: null, action: { kind: 'voice-computer' as const, label: 'Voice on the computer' } }] : []),
+    ];
   }
 
   runtime.onChange(() => builder.schedule());
@@ -1190,6 +1216,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
         return refused === null ? { status: 200, body: { device: 'computer' } } : { status: 409, body: { error: refused } };
       },
       '/v1/conversation/page-holder-restart': async (body) => (isRecord(body) ? conversation.pageHolderRestart(body) : { status: 400, body: { error: 'Expected {window}.' } }),
+      '/v1/conversation/page-notice-dismiss': async (body) => (isRecord(body) ? conversation.pageNoticeDismiss(body) : { status: 400, body: { error: 'Expected {window, id} or {window, all}.' } }),
       '/v1/conversation/page-adhoc': async (body) => (isRecord(body) ? conversation.pageAdhoc(body) : { status: 400, body: { error: 'Expected {window, opId, schedule}.' } }),
       // A changed file ticked viewed, or its tick cleared, for every device (architecture.md § Web page).
       '/v1/conversation/viewed': async (body) => (isRecord(body) ? pageChanges.viewedCommand(body) : { status: 400, body: { error: VIEWED_REFUSED } }),
@@ -1216,6 +1243,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
       focusedPages.delete(key);
       remotePages.delete(key);
+      pageSignIns.delete(key);
       pageTargets.closed(key);
       scopes.close(key);
       conversation.windowClosed();
@@ -1227,8 +1255,10 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
       remote: () => remote,
       hubLog: (lines, name) => readLog(home, name, lines),
       asset: (name) => pageAsset(name, home),
-      opened: (installed, remote) => {
+      opened: (installed, remote, signIn) => {
         const key = scopes.openPage();
+
+        pageSignIns.set(key, signIn ?? null);
 
         if (remote === true) {
           remotePages.add(key);
@@ -1238,6 +1268,7 @@ export async function createHubApp(options: AppOptions): Promise<HubApp & { runt
 
         setImmediate(() => {
           voice.update();
+          notices.pageOpened(key);
         });
         return key;
       },

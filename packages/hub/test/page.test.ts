@@ -446,27 +446,16 @@ describe('pageList', () => {
 });
 
 describe('pageHeader', () => {
-  it("carries the list view's notes and its held-session note, which is absent while every held session has a work item", () => {
-    const notes = ['Settings: settings.json is not valid JSON.', 'Voice: the voice process stopped.'];
-    const header = pageHeader({ notes, heldNote: '2 background sessions without a work item', sources: [], repoRoots: [], schedules: [] });
-
-    expect(header).toMatchObject({ notes, heldNote: '2 background sessions without a work item' });
-    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('heldNote');
-    // The holder's notice and restart result, only when the list view has them.
-    const holderNotice = { text: 'The terminal holder is from an older build. Restart it to update.', confirm: { question: 'Restart the terminal holder?', detail: 'd', action: 'Restart and resume' } };
-    const holderResult = { at: 5, text: 'The terminal holder restarted.', failed: false };
-
-    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [], holderNotice, holderResult })).toMatchObject({ holderNotice, holderResult });
-    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('holderNotice');
-    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('holderResult');
-    // The lost phone's note goes apart from the warning notes, untoned (PRD R119).
-    expect(pageHeader({ notes: [], voiceNote: 'Voice stopped unexpectedly.', sources: [], repoRoots: [], schedules: [] })).toMatchObject({ notes: [], voiceNote: 'Voice stopped unexpectedly.' });
-    expect(pageHeader({ notes: [], sources: [], repoRoots: [], schedules: [] })).not.toHaveProperty('voiceNote');
-    // From the list view itself: a settings error is its note, and the page's.
+  it("carries the notices it is given and the list view's sources, repo roots and schedules", () => {
+    const notices = [{ id: 'settings', class: 'action' as const, text: 'Settings: settings.json is not valid JSON.', at: 5, dismissible: false }];
     const view = snapshot([]);
     const broken = { ...view, errors: { ...view.errors, settings: 'settings.json is not valid JSON.' } };
+    const dock = dockView(broken, NOW, 'C:/sb/windows');
 
-    expect(pageHeader(dockView(broken, NOW, 'C:/sb/windows')).notes).toContain('Settings: settings.json is not valid JSON.');
+    expect(pageHeader(dock, notices)).toEqual({ notices, sources: dock.sources, repoRoots: dock.repoRoots, schedules: dock.schedules });
+    // The list view's own notices reach the page only through `Notices`, which stamps and filters them.
+    expect(dock.notices.map((one) => one.id)).toContain('settings');
+    expect(pageHeader(dock, [])).toMatchObject({ notices: [] });
   });
 });
 

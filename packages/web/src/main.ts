@@ -8,7 +8,7 @@ import { ARTIFACTS_SEEN, artifactShow, artifactUrl, openArtifactsSeen, parseArti
 import type { CardDraft, NewDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
-import type { ArtifactView, ItemView, PageRow, ReplyView, ScreenPrompt } from '@switchboard/protocol';
+import type { ArtifactView, InfoNotice, ItemView, PageRow, ReplyView, ScreenPrompt } from '@switchboard/protocol';
 import { mount, unmount } from './island.js';
 import type { ComponentChild, VNode } from 'preact';
 import { renderList, renderListPane, sourceIcons } from './list.js';
@@ -69,7 +69,7 @@ import type { BrowserIdentity } from './iframeBrowser.js';
 /** How long typing in a card's Comment field pauses before the hub hears it. */
 export const COMMENT_SETTLE_MS = 400;
 
-export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'state', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'questions', 'needs', 'config', 'viewed'];
+export const EVENTS = ['tabs', 'hello', 'list', 'scope', 'conversations', 'session', 'message', 'reply', 'state', 'artifact', 'unread', 'voice', 'settings', 'progress', 'words', 'draft', 'questions', 'needs', 'notice', 'config', 'viewed'];
 /** How long an unread reply or state must be visible on a focused page before it counts as seen (architecture.md § Unread). */
 export const SEEN_MS = 1_000;
 const SEEN_CHECK_MS = 250;
@@ -6243,6 +6243,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         if (data['sound'] === true) {
           playChime();
         }
+      }
+
+      // A one-time notice, such as a holder restart that went well (architecture.md § Web page, List header): a toast, kept nowhere.
+      if (type === 'notice' && typeof (data['notice'] as InfoNotice | undefined)?.text === 'string') {
+        toastBox.show((data['notice'] as InfoNotice).text, 'info');
       }
 
       // The hub's drafts hold what this page changed once they carry the draft it sent last.

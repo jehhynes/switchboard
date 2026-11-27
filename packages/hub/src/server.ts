@@ -65,8 +65,11 @@ export interface PageRoutes {
   hubLog?(lines: number, name: LogName): Promise<LogTail>;
   /** A file of the page itself, by its name under `/page/`, `index.html` for the page; null for none. */
   asset(name: string): { mime: string; body: Buffer | string; immutable?: boolean; gzip?: Buffer } | null;
-  /** Registers a page's conversation stream, `installed` when it runs as the installed app, `remote` from a paired device, and returns its page key. */
-  opened(installed?: boolean, remote?: boolean): string;
+  /**
+   * Registers a page's conversation stream, `installed` when it runs as the installed app, `remote` from a paired device, with the sign-in it was
+   * opened with, and returns its page key.
+   */
+  opened(installed?: boolean, remote?: boolean, signIn?: string | null): string;
   isPage(key: string): boolean;
   list(): unknown;
   /** The `@` picker's files for a page key, or null with no selection. */
@@ -140,7 +143,7 @@ const GZIP_MIN_BYTES = 1024;
  * `held-list`, `held-stop` and `held-open` share the holder routes after the page's origin and key checks.
  * The hub itself answers `page-pair`, `page-devices` and `page-device-revoke` (architecture.md § Remote access).
  */
-export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'page-new-session', 'page-voice-state', 'page-voice-ticket', 'page-device-voice', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'states', 'commands', 'context-details', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-adhoc', 'page-folders', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']);
+export const PAGE_COMMANDS = new Set(['held-list', 'held-stop', 'held-open', 'page-new-session', 'page-voice-state', 'page-voice-ticket', 'page-device-voice', 'viewed', 'send', 'card-draft', 'card-dismiss', 'history', 'seen', 'select', 'states', 'commands', 'context-details', 'answer', 'talk-here', 'stop-speaking', 'speak-replies', 'replay', 'page-focus', 'row-action', 'row-paste', 'row-open', 'row-command', 'row-move', 'pool-action', 'resume', 'prompt', 'prompt-key', 'mic', 'mic-timing', 'composer', 'providers', 'page-conversation', 'console-input', 'page-source', 'page-tabs', 'page-search', 'page-poll', 'page-history', 'page-holder-restart', 'page-notice-dismiss', 'page-adhoc', 'page-folders', 'page-pair', 'page-devices', 'page-device-revoke', 'page-settings-read', 'page-settings-check', 'page-settings-save', 'page-voice-enroll', 'page-voice-computer']);
 
 /**
  * The page commands a device that reaches the page through a remote host may not post (architecture.md § Remote access): pairing and the device
@@ -750,7 +753,7 @@ export function listenHub(options: HubServerOptions): Promise<HubServer> {
     }
 
     if (request.method === 'GET' && path === '/v1/conversation/events') {
-      let key: string | null = page.opened(url.searchParams.get('installed') === '1', origin.host !== null);
+      let key: string | null = page.opened(url.searchParams.get('installed') === '1', origin.host !== null, page.access.sessionOf(request.headers.cookie));
 
       pageKeyOrigins.set(key, originOf(origin));
       pageKeySessions.set(key, page.access.sessionOf(request.headers.cookie));

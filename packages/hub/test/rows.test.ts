@@ -15,8 +15,8 @@ import {
   queueTime,
   rankOf,
   rowTime,
-  setupNotes,
-  snapshotErrors,
+  errorNotices,
+  setupNotices,
   startPromptText,
   stripeOf,
   shownKey,
@@ -502,25 +502,25 @@ describe('priorityTitle', () => {
   });
 });
 
-describe('snapshotErrors and setupNotes', () => {
-  it('lists every configuration error, and what an unconfigured home lacks', () => {
-    expect(snapshotErrors(snapshot([], { errors: { settings: 'bad JSON', playbooks: ['dev/x.md: no description'], hooks: 'malformed', sources: { zoho: 'no token' } } }))).toEqual([
-      'Settings: bad JSON',
-      'Playbook dev/x.md: no description',
-      'Hooks: malformed',
-      'zoho: no token',
+describe('errorNotices and setupNotices', () => {
+  it('lists every configuration error by a stable ID, none dismissible, and what an unconfigured home lacks', () => {
+    expect(errorNotices(snapshot([], { errors: { settings: 'bad JSON', playbooks: ['dev/x.md: no description'], hooks: 'malformed', sources: { zoho: 'no token' } } }))).toEqual([
+      { id: 'settings', class: 'action', text: 'Settings: bad JSON', dismiss: null, action: { kind: 'settings', label: 'Open Settings' } },
+      { id: 'playbook:dev/x.md', class: 'action', text: 'Playbook dev/x.md: no description', dismiss: null, action: { kind: 'settings', label: 'Open Settings' } },
+      { id: 'hooks', class: 'action', text: 'Hooks: malformed', dismiss: null },
+      { id: 'source:zoho', class: 'action', text: 'zoho: no token', dismiss: null, action: { kind: 'poll', label: 'Check again' } },
     ]);
-    expect(snapshotErrors(snapshot([]))).toEqual([]);
-    expect(setupNotes(snapshot([]))).toEqual([]);
-    expect(setupNotes(snapshot([], { sources: [], playbooks: [] }))).toEqual([
-      'No source is on. Turn one on in the list header.',
-      'No task playbooks are loaded. Add them under playbooks in C:\\Users\\me\\.claude\\switchboard\\settings.json.',
+    expect(errorNotices(snapshot([]))).toEqual([]);
+    expect(setupNotices(snapshot([]))).toEqual([]);
+    expect(setupNotices(snapshot([], { sources: [], playbooks: [] })).map(({ id, text, action }) => ({ id, text, action }))).toEqual([
+      { id: 'setup:sources', text: 'No source is on. Turn one on in the list header.', action: undefined },
+      { id: 'setup:playbooks', text: 'No task playbooks are loaded. Add them under playbooks in C:\\Users\\me\\.claude\\switchboard\\settings.json.', action: { kind: 'settings', label: 'Open Settings' } },
     ]);
-    expect(setupNotes(snapshot([], { sources: [], sourceStates: [] }))).toEqual(['No source is configured. Add one in C:\\Users\\me\\.claude\\switchboard\\settings.json.']);
-    expect(setupNotes(snapshot([], { sources: [], sourceStates: [], configDir: '/home/me/.claude/switchboard' }))).toEqual(['No source is configured. Add one in /home/me/.claude/switchboard/settings.json.']);
+    expect(setupNotices(snapshot([], { sources: [], sourceStates: [] })).map((one) => one.text)).toEqual(['No source is configured. Add one in C:\\Users\\me\\.claude\\switchboard\\settings.json.']);
+    expect(setupNotices(snapshot([], { sources: [], sourceStates: [], configDir: '/home/me/.claude/switchboard' })).map((one) => one.text)).toEqual(['No source is configured. Add one in /home/me/.claude/switchboard/settings.json.']);
+    expect(setupNotices(snapshot([], { sources: [], playbooks: [] })).every((one) => one.dismiss === null)).toBe(true);
   });
 });
-
 
 describe('limitTexts (architecture.md § Rate limits)', () => {
   const RESET = NOW + 2 * 3_600_000;

@@ -308,6 +308,8 @@ export interface ConversationServiceDeps {
   pollSources?(): string | null;
   /** Restarts a terminal holder from an older build and resumes its sessions: why not, or null once it started. */
   restartHolder?(detail?: string): string | null;
+  /** Dismisses the bell's notice `id`, or with null every dismissible one, for every page (architecture.md § Web page, List header); returns why not, or null. */
+  dismissNotice?(id: string | null): string | null;
   /** Runs a schedule now (PRD R82) with the `run-schedule` event: the run's work item, or why not. */
   runSchedule?(name: string): { workItemId: number } | { refused: string };
   /** Makes a standalone conversation (PRD R122), empty or with `prompt` as its first message, and starts it: its work item, or why not. */
@@ -2183,6 +2185,26 @@ export class ConversationService {
     const why = this.deps.restartHolder === undefined ? 'This hub cannot restart the terminal holder from the page.' : this.deps.restartHolder(detail);
 
     return why === null ? { status: 200, body: { started: true } } : { status: 409, body: { error: why } };
+  }
+
+  /**
+   * `page-notice-dismiss {window, id}` or `{window, all: true}` (architecture.md § Web page, List header): the bell's × or Dismiss all, kept by
+   * the hub so it holds on every device and after a reload. 403 for a key that is not a page's, 409 with the hub's refusal.
+   */
+  pageNoticeDismiss(body: Record<string, unknown>): { status: number; body: unknown } {
+    const all = body['all'] === true;
+
+    if (typeof body['window'] !== 'string' || (!all && (typeof body['id'] !== 'string' || body['id'] === ''))) {
+      return { status: 400, body: { error: 'Expected {window, id} or {window, all}.' } };
+    }
+
+    if (!this.deps.windows.isPage(body['window'])) {
+      return this.#outside(body['window']);
+    }
+
+    const why = this.deps.dismissNotice === undefined ? 'This hub cannot dismiss notices.' : this.deps.dismissNotice(all ? null : (body['id'] as string));
+
+    return why === null ? { status: 200, body: { done: true } } : { status: 409, body: { error: why } };
   }
 
   /** Each `page-adhoc` that created, by page key and `opId`, so a retried one creates once; the last 100. A refusal is not kept, so a retry after it runs again. */

@@ -10,6 +10,7 @@ import type { ArtifactView, ConversationEntry, MessageView, ReplyView, ScopeView
 import type { DockSourceGroup } from './dock.js';
 import type { CATEGORIES, Entry, HistoryView, Section } from './history.js';
 import type { PageAction, PageHeader, PageListGroup, PageRow } from './page.js';
+import type { InfoNotice, PageNotice } from './notices.js';
 import type { VoiceView } from './voice.js';
 import type { ChangeRow, ChangesView, DiffView, FileView } from './changes.js';
 
@@ -30,6 +31,8 @@ export type PageProtocolChecks = [
   Carries<PageAction, Page.PageAction>,
   Carries<PageListGroup, Page.PageGroup>,
   Carries<PageHeader, Page.PageHeader>,
+  Carries<PageNotice, Page.PageNotice>,
+  Carries<InfoNotice, Page.InfoNotice>,
   Carries<DockSourceGroup, Page.SourceGroup>,
   Carries<(typeof CATEGORIES)[number], Page.HistoryCategory>,
   Carries<HistoryView, Page.HistoryView>,

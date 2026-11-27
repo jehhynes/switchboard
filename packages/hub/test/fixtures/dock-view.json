@@ -1,5 +1,38 @@
 {
-  "notes": [],
+  "notices": [
+    {
+      "id": "orphans:8xnr0d",
+      "class": "action",
+      "text": "1 background session without a work item.",
+      "dismiss": "kept",
+      "action": {
+        "kind": "held",
+        "label": "Review"
+      }
+    },
+    {
+      "id": "holder-older:bbbbbbbbbbbbbbbb",
+      "class": "action",
+      "text": "The terminal holder that runs background sessions is out of date. Restart it to update; its 1 session stops and resumes.",
+      "dismiss": "kept",
+      "action": {
+        "kind": "holder-restart",
+        "label": "Restart and resume",
+        "confirm": {
+          "question": "Restart the terminal holder?",
+          "detail": "Restarting stops the background session and resumes it in a holder of the installed build. This session is not idle, so the restart interrupts its turn: Issue <15> (gh 115). 1 other background session ends and is not resumed.",
+          "action": "Restart and resume"
+        }
+      }
+    },
+    {
+      "id": "holder-result:1791028740000",
+      "class": "action",
+      "text": "The terminal holder restarted and 1 session resumed. 1 session did not resume: gh 109: Claude Code did not start.",
+      "dismiss": "memory"
+    }
+  ],
+  "info": [],
   "groups": [
     {
       "key": "review",
@@ -1375,19 +1408,5 @@
         "codeMode": true
       }
     }
-  ],
-  "heldNote": "1 background session without a work item",
-  "holderNotice": {
-    "text": "The terminal holder that runs background sessions is out of date. Restart it to update; its 1 session stops and resumes.",
-    "confirm": {
-      "question": "Restart the terminal holder?",
-      "detail": "Restarting stops the background session and resumes it in a holder of the installed build. This session is not idle, so the restart interrupts its turn: Issue <15> (gh 115). 1 other background session ends and is not resumed.",
-      "action": "Restart and resume"
-    }
-  },
-  "holderResult": {
-    "at": 1791028740000,
-    "text": "The terminal holder restarted and 1 session resumed. 1 session did not resume: gh 109: Claude Code did not start.",
-    "failed": true
-  }
+  ]
 }

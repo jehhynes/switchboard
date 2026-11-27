@@ -361,7 +361,7 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     let pollRefusal: string | null = null;
     const refusePoll = (why: string | null) => void (pollRefusal = why);
     const restarts: Array<string | undefined> = [];
-    let header: PageHeader = { notes: [], sources: [{ kind: 'github', label: 'GitHub', enabled: true, title: 'gh: on\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
+    let header: PageHeader = { notices: [], sources: [{ kind: 'github', label: 'GitHub', enabled: true, title: 'gh: on\nClick to stop polling gh', sources: [{ name: 'gh', enabled: true }] }], repoRoots: ['D:/w1'], schedules: [{ name: 'nightly', playbook: 'dev:sweep' }] };
     const setHeader = (next: typeof header) => void (header = next);
     const opens: Array<[string, string]> = [];
     const pools: Array<[number, string, unknown]> = [];
@@ -504,15 +504,16 @@ describe('the web page in the window scope rule (architecture.md § Web page)', 
     expect(page.frames.filter((frame) => frame.type === 'list')).toEqual([]);
 
     // A source turned off changes only the header, which still reaches the page.
-    setHeader({ notes: [], sources: [{ kind: 'github', label: 'GitHub', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }], repoRoots: [], schedules: [] });
+    setHeader({ notices: [], sources: [{ kind: 'github', label: 'GitHub', enabled: false, title: 'gh: not polled', sources: [{ name: 'gh', enabled: false }] }], repoRoots: [], schedules: [] });
     service.conversationsChanged();
     expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { sources: [{ enabled: false }] } });
     expect(page.frames.at(-1)!['groups']).toBeInstanceOf(Array);
 
-    // A voice problem changes the list's notes outside a build; `pageListChanged` sends it, and nothing when nothing changed.
-    setHeader({ notes: ['Voice: the voice process stopped.'], heldNote: '1 background session without a work item', sources: [], repoRoots: [], schedules: [] });
+    // A voice problem changes the bell's notices outside a build; `pageListChanged` sends it, and nothing when nothing changed.
+    const voice = { id: 'voice', class: 'action' as const, text: 'Voice: the voice process stopped.', at: 1, dismissible: false };
+    setHeader({ notices: [voice], sources: [], repoRoots: [], schedules: [] });
     service.pageListChanged();
-    expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { notes: ['Voice: the voice process stopped.'], heldNote: '1 background session without a work item' } });
+    expect(page.frames.at(-1)).toMatchObject({ type: 'list', header: { notices: [voice] } });
     const sent = page.frames.length;
 
     service.pageListChanged();

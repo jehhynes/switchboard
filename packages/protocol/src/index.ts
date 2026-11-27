@@ -324,23 +324,41 @@ export interface SourceGroup {
   sources: Array<{ name: string; enabled: boolean }>;
 }
 
+/** What a notice's button does (`NoticeAction` in the hub's `notices.ts`); `settings`, `voice-computer` and `holder-restart` work on this computer's page only. */
+export type NoticeAction =
+  | { kind: 'settings' | 'held' | 'poll' | 'voice-computer'; label: string }
+  | { kind: 'holder-restart'; label: string; confirm: { question: string; detail: string; action: string } };
+
+/**
+ * A notice the list header's bell lists (`PageNotice` in the hub's `notices.ts`): `action` asks the operator to act and is counted on the
+ * bell; `transient` is a state that ends by itself, listed but not counted. `at` is when the hub first showed it; `dismissible` notices
+ * take ×, which the hub keeps for every device.
+ */
+export interface PageNotice {
+  id: string;
+  class: 'action' | 'transient';
+  text: string;
+  at: number;
+  dismissible: boolean;
+  action?: NoticeAction;
+}
+
+/** A one-time notice, the `notice` event's `notice`, which the page shows as a toast and never keeps. */
+export interface InfoNotice {
+  id: string;
+  text: string;
+  at: number;
+}
+
 /** What the list's header shows besides the list (`PageHeader` in the hub's `page.ts`). */
 export interface PageHeader {
-  /** The notes above the list's groups: settings, playbook, hook, source and voice errors, then what an unconfigured home lacks. */
-  notes: string[];
-  /** "N held sessions without a work item", while a held session has none. */
-  heldNote?: string;
-  /** The neutral note while no device has the voice because the phone was lost; absent otherwise. */
-  voiceNote?: string;
+  /** The bell's notices, oldest first; empty with none. */
+  notices: PageNotice[];
   sources: SourceGroup[];
   /** The repos an ad-hoc prompt can run in, the first being the default. */
   repoRoots: string[];
   /** The schedules the New session form can run now. */
   schedules: Array<{ name: string; playbook: string }>;
-  /** The notice while the terminal holder is from an older build or restarting, and what Restart and resume asks; `confirm` is null while it runs. */
-  holderNotice?: { text: string; confirm: { question: string; detail: string; action: string } | null };
-  /** The last holder restart's result, which the page hides once dismissed, by `at`. */
-  holderResult?: { at: number; text: string; failed: boolean };
   /** Where the voice is while it is not on this computer: a paired phone, or none after the phone left; absent otherwise. */
   voiceDevice?: 'phone' | 'none';
 }

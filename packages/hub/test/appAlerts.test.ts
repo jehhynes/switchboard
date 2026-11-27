@@ -118,7 +118,7 @@ describe('createHubApp', () => {
     expect(await app.post['/v1/conversation/page-new-session']!({ window: page, folder: temp.home, opId: 'd1', provider: 'claude' })).toEqual({ status: 409, body: { error: 'Claude sessions need Install hooks turned on in Settings › Advanced.' } });
     expect(app.runtime.snapshot().workItems).toHaveLength(1);
   });
-  it("shows the page no mic mark while no session is the voice target, and a voice problem as a note in the list's header (architecture.md § Voice)", async () => {
+  it("shows the page no mic mark while no session is the voice target, and a voice problem as a notice in the list's header (architecture.md § Voice)", async () => {
     writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } }, voice: { enabled: true } });
     const app = await start(() => {});
 
@@ -130,7 +130,7 @@ describe('createHubApp', () => {
     const notes = () =>
       frames
         .filter((frame) => frame.includes('event: list\n') || frame.includes('event: hello\n'))
-        .flatMap((frame) => (JSON.parse(frame.slice(frame.indexOf('data: ') + 6)) as { header?: { notes: string[] } }).header?.notes ?? []);
+        .flatMap((frame) => (JSON.parse(frame.slice(frame.indexOf('data: ') + 6)) as { header?: { notices: Array<{ text: string }> } }).header?.notices.map((one) => one.text) ?? []);
 
     app.conversation!(key, (frame) => frames.push(frame));
     // No session is the voice target, so no row has the mic mark.
@@ -141,6 +141,28 @@ describe('createHubApp', () => {
     for (const path of ['/dock/select', '/dock/focus', '/dock/page', '/dock/click', '/dock/search', '/dock/show']) {
       expect(app.post[path]).toBeUndefined();
     }
+  });
+
+  it("sends the bell's notices with their times, and refuses to dismiss an error, a notice that is gone, a bad body and a key that is not a page's", async () => {
+    writeSettings({ sessions: { installHooks: false }, sources: { adhoc: { repoRoot: 'D:/scratch' } } });
+    const app = await start(() => {});
+    const key = app.page!.opened();
+    const frames: string[] = [];
+    const dismiss = app.post['/v1/conversation/page-notice-dismiss']!;
+
+    app.conversation!(key, (frame) => frames.push(frame));
+
+    const hello = JSON.parse(frames[0]!.slice(frames[0]!.indexOf('data: ') + 6)) as { header: { notices: Array<Record<string, unknown>> } };
+
+    // An unconfigured home: no source and no playbook, each an error the bell counts, which × cannot dismiss.
+    expect(hello.header.notices.map((one) => one['id'])).toEqual(['setup:sources', 'setup:playbooks']);
+    expect(hello.header.notices[0]).toMatchObject({ class: 'action', dismissible: false, at: expect.any(Number) });
+    expect(await dismiss({ window: key, id: 'setup:sources' })).toEqual({ status: 409, body: { error: 'This notice clears once its cause is fixed, so it cannot be dismissed.' } });
+    expect(await dismiss({ window: key, id: 'holder-older:x' })).toEqual({ status: 409, body: { error: 'That notice is gone.' } });
+    expect(await dismiss({ window: key, all: true })).toEqual({ status: 409, body: { error: 'No notice can be dismissed.' } });
+    expect(await dismiss({ window: key })).toEqual({ status: 400, body: { error: 'Expected {window, id} or {window, all}.' } });
+    expect(await dismiss({ window: key, id: '' })).toEqual({ status: 400, body: { error: 'Expected {window, id} or {window, all}.' } });
+    expect((await dismiss({ window: 'not-a-page', id: 'setup:sources' })).status).toBe(403);
   });
 
   it('attaches to a held session through the server, refusing a request without the token, a bad body and an unknown session (PRD R95)', async () => {

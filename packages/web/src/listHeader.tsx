@@ -8,7 +8,7 @@ import { GrowingText } from './grow.js';
 import { AppShortcut } from './appShortcut.js';
 import { trusted } from './trusted.js';
 import type { SourceIcon } from '@switchboard/core';
-import type { PageGroup, PageHeader, PageRow, SourceGroup } from '@switchboard/protocol';
+import type { NoticeAction, PageGroup, PageHeader, PageNotice, PageRow, SourceGroup } from '@switchboard/protocol';
 import type { PhoneVoiceState } from './phoneVoice.js';
 import { ConnectionDot } from './connectionView.js';
 import type { DotView } from './connectionView.js';
@@ -282,15 +282,13 @@ export type HeaderSheet =
   | { kind: 'devices'; pairing: Pairing | null; copied: boolean | null; devices: Device[] | null; busy: boolean; error: string | null };
 
 /**
- * What the header has open: a source kind's menu (`source:<kind>`), the range menu (`range`), More Actions (`more`), or nothing; and a sheet over
- * the page.
+ * What the header has open: a source kind's menu (`source:<kind>`), the range menu (`range`), More Actions (`more`), the bell's notices
+ * (`notices`), or nothing; and a sheet over the page.
  */
 export interface HeaderView {
   menu: string | null;
   search: SearchView;
   sheet: HeaderSheet | null;
-  /** The `at` of the holder restart result dismissed last, which stays hidden. */
-  holderDismissed?: number | null;
   /** Whether the page is this computer's, which offers Pair a device, Open Settings and Restart and resume; false on a paired device. */
   local?: boolean;
   /** Voice on this phone in More Actions, on a paired device's page; null or left out where it is not offered. */
@@ -299,92 +297,117 @@ export interface HeaderView {
   connection?: DotView | null;
   /** Whether the list is pinned, for the pin button at the header's end; left out, the header has no pin. */
   pinned?: boolean;
-  /** Whether the notes folded into one line in the phone's layout are open. */
-  notesOpen?: boolean;
+}
+
+/** The notice actions only this computer's page runs (architecture.md § Remote access); a paired device's page leaves their buttons out. */
+const LOCAL_ACTIONS: ReadonlySet<NoticeAction['kind']> = new Set(['settings', 'voice-computer', 'holder-restart']);
+
+/** A notice's action as this page offers it, or null where it offers none. */
+export function noticeAction(notice: PageNotice, local: boolean): NoticeAction | null {
+  return notice.action === undefined || (!local && LOCAL_ACTIONS.has(notice.action.kind)) ? null : notice.action;
+}
+
+/** The holder notice's Restart and resume, with what it asks first, while the hub offers it; null otherwise. */
+export function holderRestart(header: PageHeader | null): Extract<NoticeAction, { kind: 'holder-restart' }> | null {
+  for (const notice of header?.notices ?? []) {
+    if (notice.action?.kind === 'holder-restart') {
+      return notice.action;
+    }
+  }
+
+  return null;
+}
+
+/** When a notice first showed, as the bell lists it: `Just now`, `8 min ago`, `2 h ago`, else its date and time. */
+export function noticeTime(at: number, now: number): string {
+  const minutes = Math.floor(Math.max(0, now - at) / 60_000);
+
+  if (minutes < 1) {
+    return 'Just now';
+  }
+
+  if (minutes < 60) {
+    return `${minutes} min ago`;
+  }
+
+  if (minutes < 24 * 60) {
+    return `${Math.floor(minutes / 60)} h ago`;
+  }
+
+  return new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 /**
- * The notes above the list's groups, in the warning colour: settings, playbook, hook, source and voice errors and setup notes, then the held
- * sessions without a work item, whose click opens what Held sessions in More Actions opens; then, untoned, why no device has the voice when
- * the phone was lost. In the phone's layout they fold into one line, which opens them (page.css).
+ * The bell (architecture.md § Web page, List header): shown only while an action notice is there, with their count; it opens the notices, each
+ * with its time, its action and, where the hub allows it, ×, then Dismiss all. A transient notice is listed but not counted.
  */
-function HeaderNotes({ header, open }: { header: PageHeader | null; open: boolean }) {
-  const texts = [...(header?.notes ?? []), ...(header?.heldNote === undefined ? [] : [header.heldNote]), ...(header?.voiceNote === undefined ? [] : [header.voiceNote])];
+function NoticeBell({ header, view, now }: { header: PageHeader | null; view: HeaderView; now: number }) {
+  const notices = header?.notices ?? [];
+  const count = notices.filter((one) => one.class === 'action').length;
 
-  if (texts.length === 0) {
+  if (count === 0) {
     return null;
   }
 
-  // Only the voice note is untoned, so the line takes the warning colour while any other note is folded into it.
-  const toned = texts.length > (header?.voiceNote === undefined ? 0 : 1);
+  const open = view.menu === 'notices';
+  const label = `Notices: ${count}`;
 
   return (
-    <>
-      {/* Shown only in the phone's layout (page.css): the notes folded into one line, the first cut short, which opens them all. */}
-      <button type="button" class={`list-notes-toggle${toned ? '' : ' voice-note'}`} data-action="list-notes" aria-expanded={open} aria-controls="list-notes" title={open ? 'Hide the notes' : 'Show the notes'}>
-        <span class="list-notes-first">{texts[0]}</span>
-        {texts.length > 1 ? <span class="list-notes-more">{`+${texts.length - 1}`}</span> : null}
-        <span class={`codicon codicon-chevron-${open ? 'up' : 'down'}`} aria-hidden="true"></span>
+    <div class="menu-anchor notice-anchor" data-key="notices">
+      <button type="button" class="icon notice-bell" data-action="list-notices" aria-haspopup="dialog" aria-expanded={open} title={label} aria-label={label}>
+        <span class="codicon codicon-bell" aria-hidden="true"></span>
+        <span class="notice-count" aria-hidden="true">
+          {count}
+        </span>
       </button>
-      <div class={`list-notes${open ? ' open' : ''}`} id="list-notes">
-        <NoteList header={header} />
-      </div>
-    </>
+      {open ? <NoticePanel notices={notices} local={view.local === true} now={now} /> : null}
+    </div>
   );
 }
 
-/** The notes themselves, each on its own lines. */
-function NoteList({ header }: { header: PageHeader | null }) {
+/** The bell's dropdown: its title and Dismiss all, then each notice. */
+function NoticePanel({ notices, local, now }: { notices: PageNotice[]; local: boolean; now: number }) {
   return (
-    <>
-      {(header?.notes ?? []).map((note) => (
-        <p class="list-note" role="status">
-          {note}
-        </p>
-      ))}
-      {header?.heldNote === undefined ? null : (
-        <button type="button" class="list-note held-note" data-action="list-later-held" title="Open background sessions">
-          {header.heldNote}
-        </button>
-      )}
-      {header?.voiceNote === undefined ? null : (
-        <p class="list-note voice-note" role="status">
-          {header.voiceNote}
-        </p>
-      )}
-    </>
-  );
-}
-
-/**
- * The terminal holder's notice under the header while it is from an older build or restarting, with Restart and resume on this computer's page
- * only, and the last restart's result until dismissed (architecture.md § Restarting the holder), above the list's groups.
- */
-function HolderNotices({ header, view }: { header: PageHeader | null; view: HeaderView }) {
-  const notice = header?.holderNotice;
-  const result = header?.holderResult;
-
-  return (
-    <>
-      {notice === undefined ? null : (
-        <div class="holder-notice" role="status">
-          <span class="holder-notice-text">{notice.text}</span>
-          {notice.confirm == null || view.local !== true ? null : (
-            <button type="button" class="holder-restart" data-action="list-holder-restart">
-              {notice.confirm.action}
-            </button>
-          )}
-        </div>
-      )}
-      {result === undefined || result.at === view.holderDismissed ? null : (
-        <p class={`holder-result${result.failed ? ' failed' : ''}`} role="status">
-          <span class="holder-result-text">{result.text}</span>
-          <button type="button" class="icon dismiss" data-action="list-holder-dismiss" title="Dismiss" aria-label="Dismiss">
-            <span class="codicon codicon-close" aria-hidden="true"></span>
+    <div class="glass menu notice-panel" role="dialog" aria-label="Notices">
+      <div class="notice-head">
+        <span class="codicon codicon-bell" aria-hidden="true"></span>
+        <h2 class="notice-title">Notices</h2>
+        {notices.some((one) => one.dismissible) ? (
+          <button type="button" class="notice-link" data-action="list-notice-dismiss-all">
+            Dismiss all
           </button>
-        </p>
-      )}
-    </>
+        ) : null}
+      </div>
+      <ul class="notice-list">
+        {notices.map((notice) => {
+          const action = noticeAction(notice, local);
+
+          return (
+            <li key={notice.id} class={`notice ${notice.class}`} data-id={notice.id}>
+              <span class={`codicon codicon-${notice.class === 'transient' ? 'sync' : 'warning'} notice-icon`} aria-hidden="true"></span>
+              <div class="notice-body">
+                <p class="notice-text">{notice.text}</p>
+                <p class="notice-meta">
+                  <time dateTime={new Date(notice.at).toISOString()} title={new Date(notice.at).toLocaleString()}>
+                    {noticeTime(notice.at, now)}
+                  </time>
+                  {action === null ? null : (
+                    <button type="button" class="notice-link" data-action="list-notice-action" data-id={notice.id} data-kind={action.kind}>
+                      {action.label}
+                    </button>
+                  )}
+                </p>
+              </div>
+              {notice.dismissible ? (
+                <button type="button" class="icon dismiss" data-action="list-notice-dismiss" data-id={notice.id} title="Dismiss" aria-label="Dismiss">
+                  <span class="codicon codicon-close" aria-hidden="true"></span>
+                </button>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -423,7 +446,7 @@ function SourceButton({ group, view }: { group: SourceGroup; view: HeaderView })
  * The list's header (architecture.md § Web page), as one title row: the title, which takes what is left and ends in an ellipsis, then
  * the source icons; a refusal shows under it.
  */
-export function renderListHeader(header: PageHeader | null, view: HeaderView): VNode {
+export function renderListHeader(header: PageHeader | null, view: HeaderView, now = Date.now()): VNode {
   const sources = header?.sources ?? [];
   const search = view.search;
 
@@ -446,6 +469,7 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
             <span class="header-separator" aria-hidden="true"></span>
           </>
         )}
+        <NoticeBell header={header} view={view} now={now} />
         <button type="button" class="icon search-toggle" data-action="list-search" aria-pressed={search.open} title="Search" aria-label="Search">
           <span class="codicon codicon-search" aria-hidden="true"></span>
         </button>
@@ -494,8 +518,6 @@ export function renderListHeader(header: PageHeader | null, view: HeaderView): V
           </div>
         </div>
       ) : null}
-      <HeaderNotes header={header} open={view.notesOpen === true} />
-      <HolderNotices header={header} view={view} />
     </>
   );
 }
@@ -819,11 +841,11 @@ export function renderHeaderSheet(sheet: HeaderSheet | null, header: PageHeader 
 
   // Restart and resume asks the hub's question, which follows each list, so a restart begun elsewhere leaves nothing to confirm.
   if (sheet.kind === 'holder') {
-    const confirm = header?.holderNotice?.confirm ?? null;
+    const confirm = holderRestart(header)?.confirm ?? null;
 
     return confirm === null ? (
       <Frame title="Restart the terminal holder" close>
-        <p class="sheet-detail">{header?.holderNotice?.text ?? 'The terminal holder runs the installed build.'}</p>
+        <p class="sheet-detail">{header?.notices.find((one) => one.id === 'holder-restarting')?.text ?? 'The terminal holder runs the installed build.'}</p>
         {error}
       </Frame>
     ) : (
@@ -1159,7 +1181,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     redraw();
 
     if (focusOpener && menu !== null) {
-      const opener = menu === 'range' ? host.querySelector<HTMLElement>('.search-range') : menu === 'more' ? host.querySelector<HTMLElement>('.more-actions') : [...host.querySelectorAll<HTMLElement>('[data-action="list-source"]')].find((one) => `source:${one.dataset['kind']}` === menu);
+      const opener = menu === 'range' ? host.querySelector<HTMLElement>('.search-range') : menu === 'more' ? host.querySelector<HTMLElement>('.more-actions') : menu === 'notices' ? host.querySelector<HTMLElement>('.notice-bell') : [...host.querySelectorAll<HTMLElement>('[data-action="list-source"]')].find((one) => `source:${one.dataset['kind']}` === menu);
 
       opener?.focus();
     }
@@ -1558,7 +1580,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     redraw();
 
     if (sheet.kind === 'holder') {
-      const answer = await deps.post('page-holder-restart', { detail: shown?.holderNotice?.confirm?.detail ?? '' });
+      const answer = await deps.post('page-holder-restart', { detail: holderRestart(shown)?.confirm.detail ?? '' });
 
       sheet.busy = false;
       sheet.error = answer.status === 200 ? null : String(answer.body['error'] ?? 'Switchboard did not answer.');
@@ -1766,6 +1788,41 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
     redraw();
     sheetHost.querySelector<HTMLElement>('.sheet-button.primary')?.focus();
   };
+  /** Background sessions' sheet, from More actions or a notice's Review. */
+  const openHeld = (): void => {
+    view.menu = null;
+    const sheet: Extract<HeaderSheet, { kind: 'held' }> = { kind: 'held', rows: null, busy: false, refreshing: false, listError: null, error: null, result: null, stopping: null };
+    view.sheet = sheet;
+    redraw();
+    void refreshHeld(sheet);
+    sheetHost.querySelector<HTMLElement>('.sheet-close')?.focus();
+  };
+  const openSettings = (): void => {
+    view.menu = null;
+    redraw();
+    deps.openSettings?.();
+  };
+  const voiceToComputer = (): void => {
+    view.menu = null;
+    deps.refused(null);
+    redraw();
+    void deps.post('page-voice-computer', {}).then((answer) => {
+      if (answer.status !== 200) {
+        deps.refused(String(answer.body['error'] ?? 'The voice did not move to this computer.'));
+      }
+    });
+  };
+  /** The bell's × or Dismiss all: the hub keeps it for every device and its next list leaves the notice out; a refusal shows in the toast. */
+  const dismissNotice = async (body: { id: string } | { all: true }): Promise<void> => {
+    deps.refused(null);
+    redraw();
+
+    const answer = await deps.post('page-notice-dismiss', body);
+
+    if (answer.status !== 200) {
+      deps.refused(String(answer.body['error'] ?? 'The notice was not dismissed.'));
+    }
+  };
   const clicked = (event: Event): void => {
     const button = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
 
@@ -1797,18 +1854,40 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
         break;
       }
-      case 'list-holder-restart':
-        view.sheet = { kind: 'holder', busy: false, error: null };
-        redraw();
-        sheetHost.querySelector<HTMLElement>('.sheet-button')?.focus();
-        break;
-      case 'list-notes':
-        view.notesOpen = view.notesOpen !== true;
+      case 'list-notices':
+        view.menu = view.menu === 'notices' ? null : 'notices';
         redraw();
         break;
-      case 'list-holder-dismiss':
-        view.holderDismissed = shown?.holderResult?.at ?? null;
-        redraw();
+      case 'list-notice-action': {
+        const notice = shown?.notices.find((one) => one.id === button.dataset['id']);
+        const action = notice === undefined ? null : noticeAction(notice, view.local === true);
+
+        view.menu = null;
+
+        if (action?.kind === 'holder-restart') {
+          view.sheet = { kind: 'holder', busy: false, error: null };
+          redraw();
+          sheetHost.querySelector<HTMLElement>('.sheet-button')?.focus();
+        } else if (action?.kind === 'settings') {
+          openSettings();
+        } else if (action?.kind === 'held') {
+          openHeld();
+        } else if (action?.kind === 'poll') {
+          void refresh();
+        } else if (action?.kind === 'voice-computer') {
+          voiceToComputer();
+        } else {
+          redraw();
+        }
+
+        break;
+      }
+      case 'list-notice-dismiss':
+        void dismissNotice({ id: button.dataset['id'] ?? '' });
+        break;
+      case 'list-notice-dismiss-all':
+        view.menu = null;
+        void dismissNotice({ all: true });
         break;
       case 'list-search':
         setOpen(!search.open);
@@ -1868,29 +1947,14 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         redraw();
         sheetHost.querySelector<HTMLElement>('input')?.focus();
         break;
-      case 'list-later-held': {
-        view.menu = null;
-        const sheet: Extract<HeaderSheet, { kind: 'held' }> = { kind: 'held', rows: null, busy: false, refreshing: false, listError: null, error: null, result: null, stopping: null };
-        view.sheet = sheet;
-        redraw();
-        void refreshHeld(sheet);
-        sheetHost.querySelector<HTMLElement>('.sheet-close')?.focus();
+      case 'list-later-held':
+        openHeld();
         break;
-      }
       case 'list-settings':
-        view.menu = null;
-        redraw();
-        deps.openSettings?.();
+        openSettings();
         break;
       case 'list-voice-computer':
-        view.menu = null;
-        deps.refused(null);
-        redraw();
-        void deps.post('page-voice-computer', {}).then((answer) => {
-          if (answer.status !== 200) {
-            deps.refused(String(answer.body['error'] ?? 'The voice did not move to this computer.'));
-          }
-        });
+        voiceToComputer();
         break;
       case 'list-phone-voice':
         // Called in the tap itself, which iOS needs to let the page start audio.
@@ -1963,6 +2027,11 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
         view.menu = null;
       }
 
+      // The bell goes with its last action notice, and its dropdown with it.
+      if (view.menu === 'notices' && !(header?.notices ?? []).some((one) => one.class === 'action')) {
+        view.menu = null;
+      }
+
       view.phoneVoice = view.local === true ? null : (deps.phoneVoice?.state() ?? null);
 
       const pinned = deps.pinned?.();
@@ -1982,7 +2051,7 @@ export function listHeader(host: HTMLElement, list: HTMLElement, sheetHost: HTML
 
       shownVoiceError = voiceError;
       view.connection = deps.connection?.() ?? null;
-      mount(host, renderListHeader(header, view));
+      mount(host, renderListHeader(header, view, deps.now()));
       mount(sheetHost, renderHeaderSheet(view.sheet, header, deps.now(), deps.fetch, view.local === true));
     },
     list: (listed) => ({ groups: filterGroups(listed, search.filter, search.older), filtering: search.filter.trim() !== '' }),
