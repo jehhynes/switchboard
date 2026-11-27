@@ -699,6 +699,9 @@ const TOUCH = `(() => {
       if (reaches(target, { left, top, right, bottom })) past.push(name(node));
       if (free) return [];
       const compact = target.matches(COMPACT);
+      // A Settings switch's target is its whole row, which shows as one control (operator decision 2026-11-27, settings.css), not a box round the
+      // switch that is larger than the switch it shows.
+      if (node.matches('input[role="switch"]') && !target.matches('.settings-switch-row')) return [name(node) + ', a switch whose row is not its target'];
       boxes.push({ node: target, layer: layer(target), left, top, right, bottom, compact });
       // The Changes tree's rows and the controls in them (changes.css) and the COMPACT controls are held to 32 px each way by the box they show.
       if (compact || target.closest('.changes-tree .tree-item:not(.section)') !== null) return width >= 31.5 && height >= 31.5 ? [] : [name(node) + ' ' + Math.round(width) + 'x' + Math.round(height) + ', under 32 px'];

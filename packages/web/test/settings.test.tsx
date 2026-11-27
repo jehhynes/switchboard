@@ -208,7 +208,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sessions');
     expect(host.querySelector('.settings-lede')?.textContent).toBe('How playbook and ad-hoc sessions run. A playbook can set its own agent, model and permission mode.');
     expect(headings()).toEqual(['All agents', 'Claude', 'Codex']);
-    expect(texts('.settings-caption label')).toEqual(['Default agent', 'Sessions at once', 'Model', 'Permission mode', 'Model', 'Permission mode']);
+    expect(texts('.settings-caption :is(label, .settings-switch-label)')).toEqual(['Default agent', 'Sessions at once', 'Model', 'Permission mode', 'Model', 'Permission mode']);
     // A clean file has nothing to say, so the bar and its Save and Discard do not show.
     expect(host.querySelector('.settings-bar')).toBeNull();
     expect(button('Save')).toBeUndefined();
@@ -226,7 +226,7 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
 
     const shown = async (page: string) => {
       await go(page);
-      return { title: host.querySelector('.settings-page-title h2')?.textContent, headings: headings(), labels: texts('.settings-section:not(.advanced) .settings-caption label') };
+      return { title: host.querySelector('.settings-page-title h2')?.textContent, headings: headings(), labels: texts('.settings-section:not(.advanced) .settings-caption :is(label, .settings-switch-label)') };
     };
 
     expect(await shown('triage')).toEqual({ title: 'Triage', headings: ['Classifier', 'Advanced'], labels: ['Model', 'Triages at once'] });
@@ -768,10 +768,21 @@ describe('Settings on the web page (architecture.md § Web page)', () => {
     await settle();
     expect(host.querySelector('[data-path="triage.concurrency"] .settings-help')).toBeNull();
     expect(field<HTMLInputElement>('triage.concurrency').hasAttribute('aria-describedby')).toBe(false);
-    // An on/off setting is a switch on its row's right.
+    // An on/off setting is a switch on its row's right, and the whole row is its label, so a press anywhere on the row flips it.
     await go('advanced');
-    expect(field<HTMLInputElement>('sessions.codeMode').getAttribute('role')).toBe('switch');
-    expect(field<HTMLInputElement>('sessions.codeMode').closest('.settings-input')?.previousElementSibling?.classList.contains('settings-caption')).toBe(true);
+    const codeMode = field<HTMLInputElement>('sessions.codeMode');
+    const row = codeMode.closest('label.settings-switch-row')!;
+
+    expect(codeMode.getAttribute('role')).toBe('switch');
+    // Its name is the label alone, the help its description, though both lie inside the row's label.
+    expect(document.getElementById(codeMode.getAttribute('aria-labelledby')!)?.textContent).toBe('Code Mode');
+    expect(document.getElementById(codeMode.getAttribute('aria-describedby')!)?.textContent).toBe(row.querySelector('.settings-help')!.textContent);
+    expect(codeMode.closest('.settings-switch')?.previousElementSibling?.classList.contains('settings-caption')).toBe(true);
+    expect(row.closest('[data-path="sessions.codeMode"]')).not.toBeNull();
+    const was = codeMode.checked;
+
+    row.querySelector<HTMLElement>('.settings-help')!.click();
+    expect(codeMode.checked).toBe(!was);
   });
 });
 
@@ -852,7 +863,7 @@ describe('Settings sources (architecture.md § Web page)', () => {
 
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('GitHub');
     expect(headings()).toEqual(['Connection', 'Work', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption label')).toEqual(['Repository', 'Logins', 'Require assignee', 'Wait for blockers', 'Include closed issues', 'Project owner', 'Project number', 'Status field', 'Assigned statuses', 'Repo root', 'Namespace', 'Triage playbook', 'Setup prompt', 'Poll every']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption :is(label, .settings-switch-label)')).toEqual(['Repository', 'Logins', 'Require assignee', 'Wait for blockers', 'Include closed issues', 'Project owner', 'Project number', 'Status field', 'Assigned statuses', 'Repo root', 'Namespace', 'Triage playbook', 'Setup prompt', 'Poll every']);
     expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Kind, Roles file, Branch pattern, gh path, Page limit');
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
     await settle();

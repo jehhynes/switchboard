@@ -1464,18 +1464,15 @@ function SpeakRepliesRow({ on, handlers }: { on: boolean | null; handlers: Handl
 
   return (
     <div class="settings-row boolean settings-speak-replies">
-      <div class="settings-caption">
-        <label for={id}>Speak replies</label>
-        <p class="settings-help" id={`${id}-help`}>
-          {on === null ? 'Available once the voice runs: turn on Use voice and save.' : 'Switchboard speaks the replies to messages you send to the session the voice is on. Applies at once, with no save; off when Switchboard starts, though an update to a new build keeps it.'}
-        </p>
-      </div>
-      <div class="settings-input">
-        <label class="settings-box settings-switch">
-          <input type="checkbox" role="switch" id={id} checked={on === true} disabled={on === null} aria-describedby={`${id}-help`} onChange={(event) => handlers.speakReplies((event.currentTarget as HTMLInputElement).checked)} />
-          <span class="settings-switch-track" aria-hidden="true"></span>
-        </label>
-      </div>
+      <SwitchRow
+        id={id}
+        label="Speak replies"
+        required={false}
+        help={on === null ? 'Available once the voice runs: turn on Use voice and save.' : 'Switchboard speaks the replies to messages you send to the session the voice is on. Applies at once, with no save; off when Switchboard starts, though an update to a new build keeps it.'}
+        checked={on === true}
+        disabled={on === null}
+        onChange={(checked) => handlers.speakReplies(checked)}
+      />
     </div>
   );
 }
@@ -1607,6 +1604,19 @@ function FieldRow({ field: shown, view, on }: { field: FieldView; view: View; on
   const { field } = shown;
   const id = inputId(field.path);
 
+  if (field.kind === 'boolean') {
+    return (
+      <div class="settings-row boolean" data-path={field.path}>
+        <SwitchRow id={id} label={field.label} required={field.required === true} help={field.help} checked={shown.checked} disabled={false} onChange={(checked) => on.edit(field, '', checked)} />
+        {shown.errors.length === 0 ? null : (
+          <div class="settings-row-errors">
+            <Errors errors={shown.errors} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div class={`settings-row ${field.kind}`} data-path={field.path}>
       <div class="settings-caption">
@@ -1632,18 +1642,35 @@ function FieldRow({ field: shown, view, on }: { field: FieldView; view: View; on
   );
 }
 
+/**
+ * An on/off setting: the whole row, its label, help and switch, is one label and so one target, highlighted as one on hover, press and focus
+ * (operator decision 2026-11-27), with no area that takes presses beyond the box it shows.
+ */
+function SwitchRow({ id, label, required, help, checked, disabled, onChange }: { id: string; label: string; required: boolean; help: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label class="settings-switch-row">
+      <span class="settings-caption">
+        <span class="settings-switch-label" id={`${id}-label`}>
+          {label}
+          {required ? <span class="settings-required">Required</span> : null}
+        </span>
+        {help === '' ? null : (
+          <span class="settings-help" id={`${id}-help`}>
+            {help}
+          </span>
+        )}
+      </span>
+      <span class="settings-switch">
+        <input type="checkbox" role="switch" id={id} checked={checked} disabled={disabled} aria-labelledby={`${id}-label`} aria-describedby={help === '' ? undefined : `${id}-help`} onChange={(event) => onChange((event.currentTarget as HTMLInputElement).checked)} />
+        <span class="settings-switch-track" aria-hidden="true"></span>
+      </span>
+    </label>
+  );
+}
+
 function Input({ shown, id, typed, on }: { shown: FieldView; id: string; typed: string | undefined; on: Handlers }) {
   const { field } = shown;
   const described = field.help === '' ? undefined : `${id}-help`;
-
-  if (field.kind === 'boolean') {
-    return (
-      <label class="settings-box settings-switch">
-        <input type="checkbox" role="switch" id={id} checked={shown.checked} aria-describedby={described} onChange={(event) => on.edit(field, '', (event.currentTarget as HTMLInputElement).checked)} />
-        <span class="settings-switch-track" aria-hidden="true"></span>
-      </label>
-    );
-  }
 
   if (field.kind === 'select') {
     const options = field.options ?? [];

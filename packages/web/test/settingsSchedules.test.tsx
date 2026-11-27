@@ -96,7 +96,7 @@ describe('Settings schedules (architecture.md § Web page)', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     // The fields the hub needs say so after their labels, and an example shows as one.
-    expect(texts('.settings-caption label')).toEqual(['PlaybookRequired', 'Repo rootRequired', 'Runs', 'DayRequired', 'TimeRequired']);
+    expect(texts('.settings-caption :is(label, .settings-switch-label)')).toEqual(['PlaybookRequired', 'Repo rootRequired', 'Runs', 'DayRequired', 'TimeRequired']);
     expect(control<HTMLInputElement>('schedules.weekly.at').placeholder).toBe('e.g. 09:00');
     // Only task playbooks run on a schedule.
     expect([...control<HTMLSelectElement>('schedules.weekly.playbook').options].map((one) => one.value)).toEqual(['', 'dev:clean']);
@@ -106,13 +106,13 @@ describe('Settings schedules (architecture.md § Web page)', () => {
 
     pick('schedules.weekly.every', 'month');
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
-    expect(texts('.settings-caption label')).toEqual(['PlaybookRequired', 'Repo rootRequired', 'Runs', 'Day of the monthRequired', 'TimeRequired']);
+    expect(texts('.settings-caption :is(label, .settings-switch-label)')).toEqual(['PlaybookRequired', 'Repo rootRequired', 'Runs', 'Day of the monthRequired', 'TimeRequired']);
     expect(control<HTMLInputElement>('schedules.weekly.day').value).toBe('');
     expect(checked().schedules['weekly']).toEqual({ playbook: 'dev:clean', repoRoot: 'D:/r', every: 'month', at: '09:00' });
 
     pick('schedules.weekly.every', '');
     await vi.advanceTimersByTimeAsync(CHECK_DELAY_MS);
-    expect(texts('.settings-caption label')).toEqual(['PlaybookRequired', 'Repo rootRequired', 'Runs']);
+    expect(texts('.settings-caption :is(label, .settings-switch-label)')).toEqual(['PlaybookRequired', 'Repo rootRequired', 'Runs']);
     expect(checked().schedules['weekly']).toEqual({ playbook: 'dev:clean', repoRoot: 'D:/r' });
 
     // A playbook the file no longer has stays chosen, marked missing.

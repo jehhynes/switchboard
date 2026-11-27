@@ -118,7 +118,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-experimental-note')?.textContent).toBe('Spoken replies may be unreliable. Replies are spoken only while Speak replies is on; spoken alerts have their own switch below.');
     expect(host.querySelector('.settings-lede')?.textContent).toBe('Switchboard speaks replies and alerts to you.');
     expect(headings()).toEqual(['Voice', 'Replies', 'Spoken alerts']);
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Use voice', 'Speaker', 'Speak replies', 'Voice', 'Style', 'Speed', 'Expressive delivery', 'Stop speaking when you are away for', 'Spoken alerts', 'Your name', 'Alert when', 'Answer window']);
+    expect(texts('.settings-caption > :is(label, span):not(.settings-help)')).toEqual(['Use voice', 'Speaker', 'Speak replies', 'Voice', 'Style', 'Speed', 'Expressive delivery', 'Stop speaking when you are away for', 'Spoken alerts', 'Your name', 'Alert when', 'Answer window']);
     // The three Alert when boxes are one row.
     expect(texts('.settings-row.group .settings-check label:not(.settings-box)')).toEqual(['A turn finishes', 'A question', 'A permission prompt']);
     expect(control<HTMLSelectElement>('voice.voice').value).toBe('cedar');
@@ -175,7 +175,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
 
     expect(host.querySelector('.settings-lede')?.textContent).toBe('You speak to Switchboard: the microphone, dictation and your voice.');
     expect(headings()).toEqual(['Microphone', 'Dictation', 'When you speak over a spoken reply', 'Another person speaks near the mic', 'Advanced']);
-    expect(texts('.settings-section:not(.advanced) .settings-caption > label, .settings-section:not(.advanced) .settings-caption > span')).toEqual(['Microphone', 'Your voice', 'End of message after', 'Stop dictation after', 'On this computer', 'Over Remote Desktop', 'Resume dictation after', 'Hold dictation', 'Hold for']);
+    expect(texts('.settings-section:not(.advanced) .settings-caption > :is(label, span):not(.settings-help)')).toEqual(['Microphone', 'Your voice', 'End of message after', 'Stop dictation after', 'On this computer', 'Over Remote Desktop', 'Resume dictation after', 'Hold dictation', 'Hold for']);
     expect([...control<HTMLSelectElement>('voice.duplex.local').options].map((one) => one.textContent)).toEqual(['Auto', 'Keep dictation on', 'Pause dictation']);
     expect(texts('[data-path="voice.endPauseMs"] .settings-unit')).toEqual(['ms']);
     expect(host.querySelector('.settings-enroll')?.closest('.settings-section')?.querySelector('.settings-section-heading')?.textContent).toBe('Microphone');
@@ -185,7 +185,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     expect(host.querySelectorAll('.settings-card.dimmed')).toHaveLength(4);
     host.querySelector<HTMLButtonElement>('.settings-toggle')!.click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(texts('.settings-section.advanced .settings-caption label')).toEqual(['Voice match threshold']);
+    expect(texts('.settings-section.advanced .settings-caption :is(label, .settings-switch-label)')).toEqual(['Voice match threshold']);
     // The pitch check's factors are settings.json only.
     expect(host.querySelector('[data-path^="voice.pitch"]')).toBeNull();
   });
@@ -257,7 +257,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     await go2('personas');
 
     expect(headings()).toEqual(['dev', 'Missing playbooks']);
-    expect(texts('.settings-caption label')).toEqual(['build', 'review', 'dev:gone (missing)']);
+    expect(texts('.settings-caption :is(label, .settings-switch-label)')).toEqual(['build', 'review', 'dev:gone (missing)']);
     expect([...control<HTMLSelectElement>('voice.playbookPersonas.dev:build').options].map((one) => one.textContent)).toEqual(['None', 'Nova', 'Sage', 'x']);
     // A persona shows by its name alone, its ID in the tooltip.
     expect([...control<HTMLSelectElement>('voice.playbookPersonas.dev:build').options].map((one) => one.title)).toEqual(['', 'nova', 'sage-1', 'x']);
@@ -361,7 +361,7 @@ describe('Settings voice and personas (architecture.md § Web page)', () => {
     // The page is titled by the persona's one name, its ID under it, and lists the playbooks that take it.
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('Sage');
     expect(host.querySelector('.settings-lede')?.textContent).toBe('ID sage-1, by which sessions and playbooks name it.');
-    expect(texts('.settings-caption label')).toEqual(['Name', 'Voice', 'Style', 'Personality']);
+    expect(texts('.settings-caption :is(label, .settings-switch-label)')).toEqual(['Name', 'Voice', 'Style', 'Personality']);
     expect(texts('.settings-section-heading')).toEqual(['Used by']);
     expect(texts('.settings-used-by .settings-help')).toEqual(['No playbook takes this persona. Give it one on the Personas page or a playbook\'s page.']);
     expect([...control<HTMLSelectElement>('voice.personas[1].voice').options][0]!.textContent).toBe('From Spoken replies: Cedar');

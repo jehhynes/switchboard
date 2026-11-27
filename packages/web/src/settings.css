@@ -62,15 +62,28 @@
 .settings-input { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; }
 .settings-row.list .settings-input, .settings-row.prompt .settings-input, .settings-row.group .settings-input { align-items: stretch; }
 .settings-help { margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
-/* An on/off setting's switch: a checkbox drawn as a track and a knob, in a label as large as a touch target needs. */
-.settings-switch { position: relative; flex: none; }
-.settings-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+/* An on/off setting (SwitchRow in settings.tsx): the whole row is one label, so one target, highlighted as one on hover, press and focus, and at
+   least 44 px tall on a touch screen (operator decision 2026-11-27). Its checkbox is drawn as a track and a knob; the input itself is clipped to
+   nothing, so no box but the row's takes presses. */
+.settings-row.boolean { display: block; padding: 0; }
+.settings-switch-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 16px; padding: 9px 14px; cursor: pointer; }
+.settings-switch-row:hover { background: var(--vscode-list-hoverBackground); }
+.settings-switch-row:active { background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-list-activeSelectionForeground, inherit); }
+.settings-switch-row:active .settings-help { color: inherit; }
+.settings-switch-row:has(input:focus-visible) { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.settings-switch-row:has(input:disabled) { cursor: default; background: transparent; }
+.settings-card > .settings-row.boolean:first-child > .settings-switch-row { border-radius: 5px 5px 0 0; }
+.settings-card > .settings-row.boolean:last-child > .settings-switch-row { border-radius: 0 0 5px 5px; }
+.settings-card > .settings-row.boolean:only-child > .settings-switch-row { border-radius: 5px; }
+.settings-row.boolean > .settings-row-errors { padding: 0 14px 9px; }
+.settings-help { display: block; }
+.settings-switch { position: relative; flex: none; display: inline-flex; }
+.settings-switch input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; clip-path: inset(50%); pointer-events: none; }
 /* Off, the track's edge is 60% of the text colour, 3:1 or more on the row in both themes, so an off switch reads as one. */
 .settings-switch-track { position: relative; box-sizing: border-box; width: 34px; height: 18px; border: 1px solid color-mix(in srgb, var(--vscode-foreground) 60%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); pointer-events: none; transition: background-color 0.12s; }
 .settings-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--vscode-descriptionForeground); transition: transform 0.12s; }
 .settings-switch input:checked + .settings-switch-track { border-color: var(--vscode-button-background); background: var(--vscode-button-background); }
 .settings-switch input:checked + .settings-switch-track::after { transform: translateX(16px); background: var(--vscode-button-foreground); }
-.settings-switch input:focus-visible + .settings-switch-track { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .settings-text { box-sizing: border-box; width: 240px; max-width: 100%; min-height: 26px; padding: 3px 6px; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent)); border-radius: 2px; }
 .settings-text:focus, .settings-select:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 /* A number field fits "Default: " and its value; its unit follows it. */
@@ -160,6 +173,7 @@ textarea.settings-text.prompt { font-family: var(--vscode-editor-font-family, mo
   .settings-table input[type="checkbox"] { width: 20px; height: 20px; margin: 0; }
   /* A checkbox's 20 px mark sits in a 44 px label, which takes the press. */
   .settings-box { min-width: 44px; min-height: 44px; }
+  .settings-switch-row { min-height: 44px; }
   .settings-table .settings-box { min-width: 32px; min-height: 32px; }
   .settings-table td { padding-top: 3px; padding-bottom: 3px; }
 }

@@ -139,7 +139,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     expect(host.querySelector('.settings-page-title h2')?.textContent).toBe('dev:build');
     // Start and Reports are sections of switch rows, each with its description; Kind, Return of and Focus page wait under Advanced.
     expect([...host.querySelectorAll('.settings-section-heading')].map((node) => (node.querySelector('.settings-toggle-label') ?? node).textContent)).toEqual(['About', 'Start', 'Reports', 'Run as', 'Prompt', 'Advanced']);
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Start automatically', 'Needs a worktree', 'Done', 'Approval', 'Worktree', 'Playbook', 'Paste', 'Approve sends the work', 'Agent', 'Permission mode', 'Model', 'Working directory', 'Prompt']);
+    expect(texts('.settings-caption > :is(label, span):not(.settings-help)')).toEqual(['Description', 'Start automatically', 'Needs a worktree', 'Done', 'Approval', 'Worktree', 'Playbook', 'Paste', 'Approve sends the work', 'Agent', 'Permission mode', 'Model', 'Working directory', 'Prompt']);
     expect(host.querySelector('.settings-toggle-summary')?.textContent).toBe('Kind, Return of, Focus page');
     expect(host.querySelector('.settings-check')).toBeNull();
     expect([...host.querySelectorAll('input[role="switch"]')].map((one) => one.id)).toEqual(['settings-field-autoStart', 'settings-field-requiresWorktree', 'settings-field-reports_done', 'settings-field-reports_approval', 'settings-field-reports_worktree', 'settings-field-reports_playbook', 'settings-field-reports_paste', 'settings-field-approvalSends']);
@@ -176,7 +176,7 @@ describe('Settings playbooks (architecture.md § Web page)', () => {
     await open();
     entry('triage').click();
     await settle();
-    expect(texts('.settings-caption > label, .settings-caption > span')).toEqual(['Description', 'Rates importance', 'Classifier instructions']);
+    expect(texts('.settings-caption > :is(label, span):not(.settings-help)')).toEqual(['Description', 'Rates importance', 'Classifier instructions']);
 
     entry('build').click();
     await settle();
