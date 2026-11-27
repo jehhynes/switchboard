@@ -1,7 +1,7 @@
 // A Markdown file in the Changes tab's file view (architecture.md § Web page, Changes): its links and pictures resolve to files of the worktree
 // and are read only through the Changes routes, `file` and `file-raw`; any other target is text that says why, never a local file tab's link.
 import { linkTarget } from './localLinks.js';
-import { escape, renderMarkdown } from './markdown.js';
+import { escape, markdownBody, renderMarkdown } from './markdown.js';
 import type { LinkAnswer } from './markdown.js';
 
 /**
@@ -51,5 +51,5 @@ export function worktreeMarkdown(file: string, text: string, raw: (path: string)
     return target === null ? null : raw(target.path);
   };
 
-  return renderMarkdown(text, picture, link);
+  return renderMarkdown(markdownBody(text), picture, link);
 }

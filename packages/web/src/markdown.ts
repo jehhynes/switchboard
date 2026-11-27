@@ -649,3 +649,8 @@ function picture(to: string | null, src: string, alt: string, rest: string): str
 
   return to === null ? `<span class="picture broken">${note}</span>` : `<span class="picture"><img src="${to}" alt="${alt}"${rest} data-picture="">${note}</span>`;
 }
+
+/** Front matter dropped from a Markdown file before it is drawn, as the VS Code preview does not show it either. */
+export function markdownBody(text: string): string {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+}

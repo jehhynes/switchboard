@@ -177,8 +177,8 @@ describe('the Changes file view', () => {
     expect(codes.at(-1)).toEqual({ path: 'docs/a.md', side: 'disk', line: 1 });
     // The bar names the file and holds Source just before Wrap; the code view draws no header of its own.
     expect(headers.at(-1)).toBe(false);
-    expect(bar()!.querySelector('.changes-file-title bdi')!.textContent).toBe('docs/a.md');
-    expect([...bar()!.querySelectorAll<HTMLElement>('[data-action]')].map((one) => one.dataset['action']).slice(-2)).toEqual(['file-source', 'changes-wrap']);
+    expect(bar()!.querySelector('.file-path bdi')!.textContent).toBe('docs/a.md');
+    expect([...bar()!.querySelectorAll<HTMLElement>('[data-action]')].map((one) => one.dataset['action']).slice(-3)).toEqual(['file-source', 'changes-wrap', 'viewer-copy-path']);
     expect(bar()!.querySelector('[data-action="file-source"]')!.getAttribute('aria-pressed')).toBe('true');
 
     bar()!.querySelector<HTMLElement>('[data-action="file-source"]')!.click();
@@ -233,7 +233,7 @@ describe('the Changes file view', () => {
     await openLine('src/new.ts', 'old', 3);
     expect(codes.at(-1)).toEqual({ path: 'src/old.ts', side: 'base', line: 3 });
     expect(overlay()!.querySelector('[data-action="file-diff"]')).toBeNull();
-    expect(bar()!.querySelector('.changes-file-title bdi')!.textContent).toBe('src/old.ts');
+    expect(bar()!.querySelector('.file-path bdi')!.textContent).toBe('src/old.ts');
 
     bar()!.querySelector<HTMLElement>('[data-action="file-diff"]')!.click();
     await flush();
@@ -247,8 +247,8 @@ describe('the Changes file view', () => {
     await openLine('src/new.ts', 'new', 1);
     expect(overlay()!.querySelector('.empty')!.textContent).toBe('This page now shows another work item or session, so that was not done.');
     expect(root.querySelector('.changes-bar [data-action="changes-back"]')).not.toBeNull();
-    // The diffs' controls leave the bar while a file shows; Diff and Wrap stay, as they still apply to the file.
-    expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['changes-back', 'file-diff', 'changes-wrap']);
+    // The diffs' controls leave the bar while a file shows; Diff and Copy path stay, as they still apply to the file, and Wrap waits for its code.
+    expect([...root.querySelectorAll<HTMLElement>('.changes-bar [data-action]')].map((one) => one.dataset['action'])).toEqual(['changes-back', 'file-diff', 'viewer-copy-path']);
 
     root.querySelector<HTMLElement>('.changes-bar [data-action="changes-back"]')!.click();
     await flush();

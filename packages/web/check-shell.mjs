@@ -60,6 +60,13 @@ const SETTINGS_PAGES = {
 // History's State reports sheet: opened from the pinned state at the latest, paged back two, and opened from a timeline entry.
 const REPORT_VIEWS = ['history-report', 'history-report-back', 'history-report-entry'];
 const MODAL_VIEWS = ['sheet', 'snooze', 'comment', 'new-session', 'folders', 'pair', 'held', 'log', 'extension', 'shortcut', 'holder', ...REPORT_VIEWS, 'row-snooze', 'row-comment'];
+/**
+ * One file of each kind the viewer draws (docs/plan.md, docs/renew.ts, docs/shot.png, docs/spec.pdf), a tagged artifact, opened each way the page
+ * opens a file: its artifact's tab, a link's file tab, and the Changes tab's Explore, which shows it inside the tab; and a link to the docs
+ * folder, which opens Explore there (architecture.md § Web page, File viewer).
+ */
+const FILE_KINDS = { md: 'plan.md', code: 'renew.ts', image: 'shot.png', pdf: 'spec.pdf' };
+const FILE_VIEWS = [...Object.keys(FILE_KINDS).flatMap((kind) => ['artifact', 'tab', 'explore'].map((way) => `file-${way}-${kind}`)), 'file-folder'];
 /** The bell's views: one notice, three, three with the dropdown open, and a one-time notice's toast with none; the list view has none either. */
 const NOTICE_VIEWS = ['notices-1', 'notices-3', 'notices-open', 'notice-toast'];
 /** A row menu's controls chosen in the list for a work item not open, which act in place: Snooze…'s and Add comment…'s sheets, and Mark done. */
@@ -75,7 +82,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-closed', 'history-filters', 'changes', 'changes-options', 'changes-explore', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: [...FILE_VIEWS, 'conversation', 'opening', 'history', 'history-closed', 'history-filters', 'changes', 'changes-options', 'changes-explore', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
   // A common 1920 px desktop, for the column's strip and its maximize button, in the tabs view also with the column narrowed a pixel at a time.
   { device: 'desktop', label: '1920', orientation: 'landscape', width: 1920, height: 1080, screen: [1920, 1080], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
 ];
@@ -86,7 +93,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'history-closed', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'changes-explore', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one)), 'row-done'];
+const VIEWS = ['list', ...FILE_VIEWS, ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'history-closed', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'changes-explore', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one)), 'row-done'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -216,7 +223,14 @@ history.replaceState(null, '', location.search + (open ? (view?.endsWith('-chang
 // The tabs view's work item has more artifacts, with long titles but the newest's, than any strip here fits.
 // The mic views' work item has one long Markdown artifact.
 const mic = view?.startsWith('mic-') === true;
-const artifacts = mic ? [{ path: 'chat/plan.md', owner: 'chat', kind: 'note', title: 'Plan', ext: 'md', type: 'markdown', updatedAt: now - 1000 }] : view === 'tabs' || view === 'tab-menu' ? Array.from({ length: view === 'tab-menu' ? 20 : 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: i === 9 ? 'Plan' : 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
+// The file views' work item has one file of docs/ as an external artifact, which a tag named (FILE_VIEWS).
+const fileKind = view?.startsWith('file-') ? (view.split('-')[2] ?? 'md') : null;
+const FILES = { md: { name: 'plan.md', type: 'markdown', local: 'markdown', media: null }, code: { name: 'renew.ts', type: 'file', local: 'text', media: null }, image: { name: 'shot.png', type: 'image', local: 'image', media: 'image/png' }, pdf: { name: 'spec.pdf', type: 'file', local: 'pdf', media: 'application/pdf' } };
+const viewed = FILES[fileKind] ?? FILES.md;
+const codeText = Array.from({ length: 60 }, (_, i) => 'export const step' + i + ' = () => renew(' + i + ', { lead: 30, check: "the inbound route again, which is a long line to wrap" });').join('\\n');
+// Read when asked, after planText is set.
+const viewedText = () => (fileKind === 'code' ? codeText : viewed.media === null ? planText : null);
+const artifacts = fileKind !== null ? [{ path: '@1/' + viewed.name, owner: '@1', kind: 'plan', title: viewed.name === 'plan.md' ? 'Plan' : viewed.name, ext: viewed.name.slice(viewed.name.lastIndexOf('.') + 1), type: viewed.type, updatedAt: now - 60000, file: 'D:/w/docs/' + viewed.name }] : mic ? [{ path: 'chat/plan.md', owner: 'chat', kind: 'note', title: 'Plan', ext: 'md', type: 'markdown', updatedAt: now - 1000 }] : view === 'tabs' || view === 'tab-menu' ? Array.from({ length: view === 'tab-menu' ? 20 : 10 }, (_, i) => ({ path: 'chat/a' + i + '.md', owner: 'chat', kind: 'note', title: i === 9 ? 'Plan' : 'A long artifact title number ' + i, ext: 'md', type: 'markdown', updatedAt: now - (10 - i) * 1000 })) : [];
 class FakeSource {
   constructor() {
     this.listeners = {};
@@ -284,9 +298,9 @@ const newSide = 'export function renew() {\\n  register();\\n  schedule();\\n}\\
 const diffOf = (path) => ({ path, status: 'M', patch: 'diff --git a/' + path + ' b/' + path + '\\n--- a/' + path + '\\n+++ b/' + path + '\\n@@ -1,3 +1,4 @@\\n export function renew() {\\n   register();\\n+  schedule();\\n }\\n', old: oldSide, new: newSide, binary: false, tooLarge: null });
 const planText = '# Plan\\n\\n' + Array.from({ length: 40 }, (_, i) => 'Step ' + (i + 1) + ': renew the registration 30 s before it lapses, and check the inbound route again.').join('\\n\\n');
 const stackData = { scopeGen: 3, repo: 'switchboard', root: 'D:/w', branch: 'fix/dialer-registration', head: 'c1', commitIds: ['c1'], more: false, incomplete: false, github: { state: 'none', observedAt: null }, links: [], main: { ref: 'origin/main', behind: 0, fetchedAt: now } };
-const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? treeOf(new URL(url, location.href).searchParams.get('dir')) : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
+const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? treeOf(new URL(url, location.href).searchParams.get('dir')) : url.includes('/v1/conversation/file?') ? { path: 'docs/' + viewed.name, side: 'disk', contents: viewedText(), binary: false, tooLarge: false, bytes: 1000, media: viewed.media } : url.includes('/v1/conversation/local-file?') ? (new URL(url, location.href).searchParams.get('path') === 'docs/' ? { path: 'D:/w/docs', name: 'docs', kind: 'dir', contents: null, tooLarge: false, size: null, entries: [], more: false, modified: null } : { path: 'D:/w/docs/' + viewed.name, name: viewed.name, kind: viewed.local, contents: viewedText(), tooLarge: false, size: 1000, entries: null, more: false, modified: now - 60000 }) : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
 // The worktree's files with what git ignores that Explore shows (.wip, out on the way to a shown out/reports, and a log beside the code), and .wip's entries.
-const treeOf = (dir) => (dir === '.wip' ? { scopeGen: 3, dir, paths: [], ignored: ['.wip/artifacts/', '.wip/notes.md', '.wip/registration-trace.txt'], more: false } : dir !== null ? { scopeGen: 3, dir, paths: [], ignored: [], more: false } : { scopeGen: 3, paths: [...changesList.rows.map((row) => row.path), 'README.md', 'package.json'], ignored: ['.wip/', 'out/', 'src/dialer/registration.log'], more: false });
+const treeOf = (dir) => (dir === '.wip' ? { scopeGen: 3, dir, paths: [], ignored: ['.wip/artifacts/', '.wip/notes.md', '.wip/registration-trace.txt'], more: false } : dir !== null ? { scopeGen: 3, dir, paths: [], ignored: [], more: false } : { scopeGen: 3, paths: [...changesList.rows.map((row) => row.path), 'README.md', 'package.json', 'docs/' + viewed.name], ignored: ['.wip/', 'out/', 'src/dialer/registration.log'], more: false });
 // Background sessions: one of a work item and one without.
 const heldRows = [{ session: 'h1', item: 'gh 1', nativeSessionId: '2f1c0a7e-1d2b-4c3d-9e8f-0a1b2c3d4e5f', cwd: 'D:/git/switchboard.worktrees/some-long-branch-name', state: 'idle', idle: '4m', memory: '182 MB', clients: 1, orphan: false, exited: false, terminal: {} }, { session: 'h2', item: '(no work item)', nativeSessionId: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', cwd: 'D:/git/r', state: 'running', idle: '0s', memory: '240 MB', clients: 0, orphan: true, exited: false, terminal: null }];
 // The selects and controls posted, and in the IN_PLACE views a select's work item soon after its answer, as the hub sends it.
@@ -296,7 +310,7 @@ window.fetch = async (url, init) => {
   if (inPlace && String(url).endsWith('/select')) setTimeout(() => window.__source.emit('hello', { key: 'pk', groups, header, scope: { kind: 'page', key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 4, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' }, sessions: [session], items: [], more: false, state: null, artifacts: [], unread: 0 }), 30);
   return answer(url);
 };
-const answer = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/held-list') ? { held: heldRows } : String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : String(url).endsWith('/context-details') ? { details: contextDetails } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? planText : '') });
+const answer = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/held-list') ? { held: heldRows } : String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : String(url).endsWith('/context-details') ? { details: contextDetails } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? (fileKind === 'code' ? codeText : planText) : '') });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -810,6 +824,11 @@ function noticeFailures(view, size, r) {
   return out;
 }
 
+/** A step that clicks a link to `target` as a reply draws one, put at the end of the conversation (localLinks.ts). */
+function replyLink(target) {
+  return { name: 'a link to ' + target, eval: '(() => { const link = document.createElement("a"); link.className = "path-link"; link.dataset.action = "local-file"; link.dataset.target = ' + JSON.stringify(target) + '; link.textContent = "link"; const host = document.querySelector("#panel .body") ?? document.querySelector("#panel") ?? document.getElementById("root"); host?.append(link); const placed = link.isConnected; link.click(); return placed; })()' };
+}
+
 /** A step that opens the tab `selector` names, by its tab in a strip or else by its row in that strip's More menu. */
 function openTab(selector) {
   return { name: selector, eval: '(async () => { const tab = document.querySelector(' + JSON.stringify('.tabs ' + selector) + '); if (tab) { tab.click(); return true; } document.querySelector(".tab-more-button")?.click(); await new Promise((done) => setTimeout(done, 150)); const row = document.querySelector(' + JSON.stringify('.tab-menu ' + selector) + '); row?.click(); return row !== null; })()' };
@@ -883,6 +902,13 @@ const OPEN = {
   context: ['[data-context=toggle]'],
   // The context meter's menu with its details shown.
   'context-details': ['.context-ring', '[data-context=details]'],
+  // Each file each way it opens (FILE_VIEWS): its artifact's tab, a link to it in a reply, and Explore in the Changes tab's tree; and the docs folder by a link.
+  ...Object.fromEntries(Object.entries(FILE_KINDS).flatMap(([kind, name]) => [
+    ['file-artifact-' + kind, [openTab('[data-action="artifact"][data-path="@1/' + name + '"]')]],
+    ['file-tab-' + kind, [replyLink('docs/' + name)]],
+    ['file-explore-' + kind, ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-files][data-mode=all]', '[data-action=tree-toggle][data-key="dir:docs"]', '[data-action=tree-disk][data-path="docs/' + name + '"]']],
+  ])),
+  'file-folder': [replyLink('docs/')],
 };
 
 /** The context menu's failures: no details, a menu past the viewport or scrolled, or a row whose value wraps under its name. */

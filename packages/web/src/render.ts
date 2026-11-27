@@ -403,10 +403,7 @@ export function framed(artifact: ArtifactView): boolean {
   return artifact.type === 'html' || artifact.ext.toLowerCase() === 'svg' || artifact.ext.toLowerCase() === '.svg';
 }
 
-/** Front matter dropped from an artifact's Markdown, as the VS Code preview does not show it either. */
-export function markdownBody(text: string): string {
-  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
-}
+export { markdownBody } from './markdown.js';
 
 /** The composer footer's voice controls and mic, drawn by the renderer in packages/conversation, for the page (architecture.md § Web page). */
 export function renderVoice(voice: VoiceView | null): string {

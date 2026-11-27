@@ -5,7 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyEvent, awaitingReply, EMPTY, inTurn, mentionOf, mentionQuery, commandQuery, timeline, withEarlier } from '../src/model.js';
 import { parseQuestions, resolveAnswers } from '@switchboard/conversation/questions';
 import { artifactUrl, newView, renderMicButton, renderVoice, markdownBody } from '../src/render.js';
-import { renderArtifactView } from '../src/side.js';
+import { artifactFileSpec } from '../src/side.js';
+import { FileViews } from '../src/fileView.js';
+import type { ArtifactView } from '@switchboard/protocol';
+
+/** An open artifact as the file viewer draws it into a pane of its own. */
+const drawArtifact = (one: ArtifactView, doc?: { html: string | null | undefined; text?: string | null }, now = 1500): string => {
+  const pane = document.createElement('div');
+
+  new FileViews({ loadDiff: async () => null, takePane: () => {}, draw: () => {}, drawDiagrams: () => {}, wrapped: () => false, toggleWrap: () => {}, quote: () => {}, now: () => now }).draw(pane, artifactFileSpec('key', one, doc, null));
+  return pane.innerHTML;
+};
 import { renderHistory } from '../src/history.js';
 import { backgroundRow, renderTimeline, turnRow } from '../src/timeline.js';
 import { renderHeader, renderSideSwitch, renderTabs } from '../src/header.js';
@@ -575,24 +585,24 @@ describe('drawing', () => {
   });
 
   it('opens a page or an SVG artifact in a sandboxed frame with an opaque origin, and media in the page', () => {
-    const page = html(renderArtifactView('key', artifact('chat/p.html', 'html', 'html')));
-    const svg = html(renderArtifactView('key', artifact('chat/p.svg', 'image', 'svg')));
+    const page = drawArtifact(artifact('chat/p.html', 'html', 'html'));
+    const svg = drawArtifact(artifact('chat/p.svg', 'image', 'svg'));
 
     expect(page).toContain('sandbox="allow-scripts"');
     expect(page).not.toContain('allow-same-origin');
     expect(page).toContain(`src="${artifactUrl('key', 'chat/p.html')}?v=1500"`);
     expect(svg).toContain('<iframe');
-    expect(html(renderArtifactView('key', artifact('chat/p.png', 'image', 'png')))).toContain('<img class="media"');
-    expect(html(renderArtifactView('key', artifact('chat/v.mp4', 'video', 'mp4')))).toContain('<video');
+    expect(drawArtifact(artifact('chat/p.png', 'image', 'png'))).toContain('<img class="media"');
+    expect(drawArtifact(artifact('chat/v.mp4', 'video', 'mp4'))).toContain('<video');
     // Only a file of another kind is a download, in place of a preview.
-    expect(html(renderArtifactView('key', artifact('chat/d.pdf', 'file', 'pdf')))).not.toContain('download');
-    expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).toContain('This kind of file cannot be shown here.');
-    expect(html(renderArtifactView('key', artifact('chat/d.bin', 'file', 'bin')))).not.toContain('download');
+    expect(drawArtifact(artifact('chat/d.pdf', 'file', 'pdf'))).not.toContain('download');
+    expect(drawArtifact(artifact('chat/d.bin', 'file', 'bin'))).toContain('This kind of file cannot be shown here.');
+    expect(drawArtifact(artifact('chat/d.bin', 'file', 'bin'))).not.toContain('download');
 
     // The head: the type's icon, named, the title, when it changed and Open in new window, no kind and no Download; each version's file loads afresh.
     const head = document.createElement('div');
 
-    head.innerHTML = html(renderArtifactView('key', { ...artifact('chat/v.mp4', 'video', 'mp4'), kind: 'demo', title: 'Demo' }, undefined, 1500 + 5 * 60_000));
+    head.innerHTML = drawArtifact({ ...artifact('chat/v.mp4', 'video', 'mp4'), kind: 'demo', title: 'Demo' }, undefined, 1500 + 5 * 60_000);
     expect(head.querySelector('.artifact-head > .artifact-type.codicon-device-camera-video')!.getAttribute('aria-label')).toBe('Video');
     expect(head.querySelector('.artifact-head > .artifact-age')!.textContent).toBe('5 min ago');
     expect(head.querySelector('.artifact-head > .artifact-age')!.getAttribute('datetime')).toBe(new Date(1500).toISOString());
@@ -605,7 +615,7 @@ describe('drawing', () => {
     expect(head.querySelector('a[title="Open in new window"]')!.getAttribute('href')).toBe('/v1/conversation/artifact/key/chat/v.mp4?v=1500');
     expect(head.querySelector('.artifact-head a[download], .artifact-head [title="Download"]')).toBeNull();
     // Markdown, which the page draws itself, opens as drawn rather than as its source text.
-    head.innerHTML = html(renderArtifactView('key', artifact('chat/a.md', 'markdown', 'md')));
+    head.innerHTML = drawArtifact(artifact('chat/a.md', 'markdown', 'md'));
     expect(head.querySelector('a[title="Open in new window"]')).toBeNull();
     expect(head.querySelector('button[data-action="artifact-window"]')).not.toBeNull();
     expect(artifactUrl('k y', 'chat/a b.md')).toBe('/v1/conversation/artifact/k%20y/chat/a%20b.md');

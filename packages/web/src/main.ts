@@ -4,7 +4,7 @@ import { BROWSER_EXTENSION_ID } from '@switchboard/core/hubRecord';
 import type { PageState } from './model.js';
 import { markScroll, MENU_MAX_WIDTH, menuPlace, placeMenus } from '@switchboard/conversation/menuPlace';
 import { escape, renderMarkdown, webLink } from './markdown.js';
-import { ARTIFACTS_SEEN, artifactShow, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unknownSeen, unreadArtifacts, textArtifactHtml, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
+import { ARTIFACTS_SEEN, artifactShow, artifactUrl, openArtifactsSeen, parseArtifactsSeen, unknownSeen, unreadArtifacts, bandOpen, closedArtifacts, collapsedGroups, firstSnoozeDay, GROUPS_KEY, inputReady, renderMicButton, markdownBody, newView, rowKey, renderVoice, snoozeDateUntil, TABS, consoleNote, hasConsole, SIDE_TABS } from './render.js';
 import type { CardDraft, NewDraft, SideTab, Tab, View } from './render.js';
 import type { ConsoleOptions, MountedConsole } from './console.js';
 import { LIGHT_SCHEME } from './console.js';
@@ -22,7 +22,7 @@ import { fitFade } from './replyFade.js';
 import { cardSteps, currentStep, draftAnswers, moveStep, pickLetter, picked, sendLabel, setComment } from '@switchboard/conversation/questions';
 import type { CardDraft as SharedDraft, LedgerCard } from '@switchboard/conversation/questions';
 import { cardKeyAction, isAnswerMessage, questionsWaiting } from '@switchboard/conversation/questionCard';
-import { renderArtifacts, renderArtifactView, renderEmpty, renderNoWorkItem } from './side.js';
+import { artifactFileSpec, renderArtifacts, renderEmpty, renderNoWorkItem } from './side.js';
 import { renderSheet } from './sheet.js';
 import { toast } from './toast.js';
 import { composerOptionId, renderComposer, renderComposerMenu, renderDraftNote, renderEndedNote, renderFrame, renderShared } from './composer.js';
@@ -57,8 +57,11 @@ import { EMPTY_HISTORY_UI, expandable, historyReports, needsYou, renderHistory, 
 import type { HistoryHead, HistoryOpen, HistoryUi } from './history.js';
 import type { HistoryCategory, HistoryView } from '@switchboard/protocol';
 import { askForNotifications, notificationsAllowed, notifyNeeds, playChime } from './alerts.js';
-import { ChangesController } from './changes.js';
+import { ChangesController, diffLayout, quoteText } from './changes.js';
 import { LocalFilesController } from './localFiles.js';
+import { FileViews } from './fileView.js';
+import type { FileSpec } from './fileView.js';
+import { keepWrap, storedWrap } from './wrapPref.js';
 import { artifactTarget, decodedTarget, fileTabLink, localFileUrl, watchPictures } from './localLinks.js';
 import type { DiffModule } from './diff/types.js';
 import { useFileIcons } from './fileIcons.js';
@@ -639,17 +642,52 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     local: () => localPage(),
     inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (mainTab() === 'diff' || (wide() && sideTab() === 'diff')),
     drawDiagrams: (element) => drawDiagrams(element),
-    // A quote of lines joins the end of the message being written, after a blank line, and the box takes the focus.
-    quote: (text) => {
-      input.value = input.value.trim() === '' ? text : `${input.value.replace(/\s+$/, '')}\n\n${text}`;
-      input.setSelectionRange(input.value.length, input.value.length);
-      box.changed(input.value);
-      grow();
-      refresh();
-      keepDraft();
-      input.focus();
-    },
+    quote: (text) => quoteInMessage(text),
   });
+  /** A quote of lines joins the end of the message being written, after a blank line, and the box takes the focus. */
+  function quoteInMessage(text: string): void {
+    input.value = input.value.trim() === '' ? text : `${input.value.replace(/\s+$/, '')}\n\n${text}`;
+    input.setSelectionRange(input.value.length, input.value.length);
+    box.changed(input.value);
+    grow();
+    refresh();
+    keepDraft();
+    input.focus();
+  }
+  // The file viewer of file tabs and artifact tabs (fileView.tsx), whose code follows this device's Wrap as the Changes tab's does.
+  const fileViews = new FileViews({
+    loadDiff: () => deps.loadDiff?.() ?? Promise.resolve(null),
+    takePane: (pane) => takePane(pane),
+    draw: () => draw(),
+    drawDiagrams: (element) => drawDiagrams(element),
+    wrapped: (pane) => diffLayout(state.diffLayout, storedWrap() ?? state.diffWrap, pane?.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0)).wrap,
+    toggleWrap: (wrapped) => keepWrap(wrapped ? 'off' : 'on'),
+    quote: (path, start, end, lines) => quoteInMessage(quoteText(shownPath(path), start, end, null, null, lines)),
+    now: () => deps.now(),
+  });
+  /** A path as a file's head shows it: relative to the session's working folder inside it, else as it is. */
+  const shownPath = (path: string): string => {
+    const folder = (state.scope?.cwd ?? '').replaceAll('\\', '/').replace(/\/$/, '');
+    const inside = folder !== '' && path.length > folder.length + 1 && path[folder.length] === '/' && path.slice(0, folder.length).toLowerCase() === folder.toLowerCase();
+
+    return inside ? path.slice(folder.length + 1) : path;
+  };
+  /**
+   * Opens a folder a link named, by its real path, in the Changes tab's explorer: a folder of the worktree only, which the explorer lists; any
+   * other says so in the toast.
+   */
+  const openFolder = (path: string): void => {
+    const folder = (state.scope?.cwd ?? '').replaceAll('\\', '/').replace(/\/$/, '');
+    const relative = shownPath(path);
+    const root = folder !== '' && path.replace(/\/$/, '').toLowerCase() === folder.toLowerCase();
+
+    if (!root && relative === path) {
+      toastBox.show('Only folders in this worktree open in the explorer');
+      return;
+    }
+
+    changes.exploreFolder(root ? '' : relative);
+  };
   let changesSession: string | null = null;
   /** Whether the Changes tab is open only as the column's fallback (`sideFallback`), so the work item's kept tabs do not open it, and read it, again. */
   let changesFallback = false;
@@ -676,13 +714,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       draw();
     },
     closeDoc: (id) => closeDoc(id),
-    loadDiff: () => deps.loadDiff?.() ?? Promise.resolve(null),
-    takePane: (pane) => takePane(pane),
-    drawPane: (pane, tree) => drawPane(pane, tree),
-    drawDiagrams: (pane) => drawDiagrams(pane),
+    openFolder: (path) => openFolder(path),
+    views: fileViews,
+    shownPath: (path) => shownPath(path),
     inView: () => document.visibilityState === 'visible' && !(isPhone() && root.classList.contains('listing')) && (mainTab() === 'file' || (wide() && sideTab() === 'file')),
     shown: () => `${state.key ?? ''} ${state.scope?.scopeGen ?? ''}`,
-    diffSettings: () => ({ layout: state.diffLayout, wrap: state.diffWrap }),
   });
   // An open file tab, and the Changes tab's file view of a file on disk, are read again while in view, so a file the session changes shows its new version.
   const filePoll = setInterval(() => (localFiles.refresh(true), changes.refreshFile(true)), deps.filePollMs ?? FILE_POLL_MS);
@@ -2123,7 +2159,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     { signal: listening.signal },
   );
   /** Each open Markdown artifact's drawn HTML by its path and version (null when it could not be read, undefined while it loads), and where it scrolls to once drawn. */
-  const artifactDocs = new Map<string, { updatedAt: number; html: string | null | undefined; top: number | null }>();
+  const artifactDocs = new Map<string, { updatedAt: number; html: string | null | undefined; text?: string | null; top: number | null }>();
   /** An open artifact's key in `artifactDocs`: the page key, the selection's work item and `scopeGen`, and the path, so another work item's artifact of the same path and time is never shown. */
   const docKey = (path: string): string => `${state.key ?? ''} ${state.scope?.workItemId ?? ''} ${state.scope?.scopeGen ?? ''} ${path}`;
   /**
@@ -2155,6 +2191,9 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
    * another artifact opening that one in place, to another file in the folder in a new tab, and to a file elsewhere in a file tab; Mermaid included. Only an artifact's latest version is kept (`artifactDocs`), with `top`,
    * the scroll position to keep when it replaces the version shown, which the next draw restores; an answer for a version replaced since is dropped.
    */
+  const artifactSpec = (key: string, artifact: ArtifactView, doc: { html: string | null | undefined; text?: string | null } | undefined): FileSpec => artifactFileSpec(key, artifact, doc, state.artifactsDir ?? null, shownPath);
+  /** Whether an open artifact shows as code: text, data and code, or Markdown showing its source. */
+  const artifactCode = (artifact: ArtifactView): boolean => artifactShow(artifact) === 'text' || (artifactShow(artifact) === 'markdown' && fileViews.source(`artifact:${artifact.path}`));
   const fillArtifact = async (artifact: ArtifactView, top: number): Promise<void> => {
     if (state.key === null) {
       return;
@@ -2163,7 +2202,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     const key = state.key;
     const path = artifact.path;
     const kept = docKey(path);
-    const entry = { updatedAt: artifact.updatedAt, html: undefined as string | null | undefined, top };
+    const entry = { updatedAt: artifact.updatedAt, html: undefined as string | null | undefined, text: undefined as string | null | undefined, top };
 
     keepDoc(kept, entry);
     const response = await readFetch(artifactUrl(key, path), { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
@@ -2197,15 +2236,19 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       return;
     }
 
-    entry.html = text === null ? null : artifactShow(artifact) === 'text' ? textArtifactHtml(text, artifact.ext.toLowerCase().replace(/^\./, '') || path.slice(path.lastIndexOf('.') + 1).toLowerCase()) : renderMarkdown(markdownBody(text), base, link);
+    entry.text = text;
+    entry.html = text === null ? null : artifactShow(artifact) === 'text' ? '' : renderMarkdown(markdownBody(text), base, link);
 
     if (view.artifact === path) {
       draw();
     }
   };
-  /** Opens the shown Markdown artifact, as drawn, in a window of its own, with the page's styles and without its buttons. */
-  const artifactWindow = (): void => {
-    const shown = root.querySelector<HTMLElement>('.artifact-view');
+  /**
+   * Opens the Markdown document of the view whose Open in new window was pressed, as drawn, in a window of its own, with the page's styles and
+   * without its buttons: a file tab's, an artifact's or the Changes tab's.
+   */
+  const artifactWindow = (button: HTMLElement): void => {
+    const shown = button.closest<HTMLElement>('.artifact-view, .diff-view');
     const doc = shown?.querySelector<HTMLElement>('.artifact-doc');
 
     if (shown === null || shown === undefined || doc === null || doc === undefined) {
@@ -2235,7 +2278,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     });
 
     // The window's document is built from nodes, so the title and the copied Markdown go in as they are, escaped by the serializer.
-    const page = document.implementation.createHTMLDocument(shown.querySelector('.artifact-title')?.textContent ?? '');
+    const page = document.implementation.createHTMLDocument(button.dataset['title'] ?? shown.querySelector('.artifact-title')?.textContent ?? '');
     const meta = (attributes: Record<string, string>): void => {
       const node = page.createElement('meta');
 
@@ -2910,7 +2953,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       pane.classList.toggle('console-pane', tab === 'console');
       pane.classList.toggle('browser-pane', tab === 'browser');
       pane.classList.toggle('history-pane', tab === 'history');
-      pane.classList.toggle('diff-pane', tab === 'diff' || (tab === 'file' && localFiles.codeShown()));
+      pane.classList.toggle('diff-pane', tab === 'diff' || (tab === 'file' && localFiles.codeShown()) || (tab === 'artifacts' && artifact !== undefined && artifactCode(artifact)));
 
       if (tab !== 'file') {
         filePlaced.delete(pane);
@@ -2948,7 +2991,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
         const doc = artifactDocs.get(docKey(artifact.path));
 
-        drawPane(pane, renderArtifactView(state.key, artifact, doc?.updatedAt === artifact.updatedAt ? doc.html : undefined, now));
+        fileViews.draw(pane, artifactSpec(state.key, artifact, doc?.updatedAt === artifact.updatedAt ? doc : undefined));
 
         if (doc?.updatedAt === artifact.updatedAt && doc.html !== undefined && doc.top !== null) {
           const shown = pane.querySelector<HTMLElement>('.artifact-doc');
@@ -2978,7 +3021,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         drawDiagrams(pane);
       }
 
-      pane.classList.toggle('framed', (tab === 'artifacts' && artifact !== undefined) || (tab === 'file' && !localFiles.codeShown()));
+      pane.classList.toggle('framed', (tab === 'artifacts' && artifact !== undefined && !artifactCode(artifact)) || (tab === 'file' && !localFiles.codeShown()));
     };
 
     drawTab(panel, mainTab());
@@ -3456,7 +3499,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     return w == null || shown === null ? null : `${w} file:${shown.target}`;
   };
-  const fileScroller = (pane: HTMLElement): HTMLElement => pane.querySelector<HTMLElement>(':scope > .local-view > .artifact-doc, :scope > .local-view > .local-entries') ?? pane;
+  const fileScroller = (pane: HTMLElement): HTMLElement => pane.querySelector<HTMLElement>(':scope > .file-viewer > .file-body > .artifact-doc') ?? pane;
   /** Brings a file tab drawn anew in a pane, once read, back to where it was left. */
   const placeFile = (pane: HTMLElement): void => {
     const key = fileKey();
@@ -5141,7 +5184,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         break;
       }
       case 'artifact-window':
-        artifactWindow();
+        artifactWindow(button!);
         break;
       case 'iframe-open':
         openDoc(`link:${button?.dataset['url'] ?? ''}`);

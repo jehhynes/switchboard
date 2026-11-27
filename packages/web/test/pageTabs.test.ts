@@ -4,6 +4,7 @@ import { renderList, sourceIcons } from '../src/list.js';
 import { html } from './html.js';
 import { CHAT_MAX, CHAT_MIN, loadMermaid, SIDE_MAX, SIDE_MIN, startPage } from '../src/main.js';
 import { drawAtOnce } from './frame.js';
+import type { DiffModule } from '../src/diff/types.js';
 import { message, reply, session, scope, listRow, listGroup, artifact, FakeSource } from './pageFixtures.js';
 
 describe('the page in use', () => {
@@ -28,7 +29,7 @@ describe('the page in use', () => {
     vi.useRealTimers();
   });
 
-  const start = (loadDiagrams: () => Promise<boolean> = async () => false) => {
+  const start = (loadDiagrams: () => Promise<boolean> = async () => false, loadDiff?: () => Promise<DiffModule | null>) => {
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       posts.push({ url, body: init?.body === undefined ? {} : (JSON.parse(init.body) as Record<string, unknown>) });
 
@@ -41,7 +42,7 @@ describe('the page in use', () => {
     });
     const mermaid = vi.fn(loadDiagrams);
     const opened: string[] = [];
-    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadMermaid: mermaid, openUrl: (url) => opened.push(url), standalone: () => installed });
+    const page = startPage(root, { fetch: fetch as unknown as typeof globalThis.fetch, EventSource: FakeSource as unknown as typeof EventSource, frame: drawAtOnce, now: () => 10_000, loadMermaid: mermaid, openUrl: (url) => opened.push(url), standalone: () => installed, ...(loadDiff === undefined ? {} : { loadDiff }) });
 
     return { page, source: FakeSource.last!, mermaid, opened };
   };
@@ -800,19 +801,29 @@ describe('the page in use', () => {
     page.close();
   });
 
-  it('shows text, data and code preformatted, JSON indented, a PDF in the browser viewer, and only an unknown file as a download', async () => {
-    const { page, source } = start();
+  it('ArtifactTab_TextDataOrCode_ShowsInTheFileViewersCodeViewWithItsHead', async () => {
+    const mounted: Array<{ path: string; contents: string | null }> = [];
+    const module = {
+      mountFile: (host: HTMLElement, data: { path: string; contents: string | null }) => {
+        mounted.push({ path: data.path, contents: data.contents });
+        host.textContent = data.contents;
+        return { set: () => {}, update: () => {}, dispose: () => {} };
+      },
+    } as unknown as DiffModule;
+    const { page, source } = start(undefined, async () => module);
     const artifact = (path: string, ext: string, updatedAt: number) => ({ path, owner: 'chat', kind: 'report', title: path, ext, type: 'file', updatedAt });
 
     answers['/artifact/'] = { status: 200, body: {}, text: '{"a":1,"b":"<x>"}' };
-    hello(source, { artifacts: [artifact('chat/data.json', 'json', 4), artifact('chat/notes.txt', 'txt', 3), artifact('chat/report.pdf', 'pdf', 2), artifact('chat/blob.bin', 'bin', 1)] });
+    hello(source, { artifactsDir: 'D:/w/.wip/artifacts/w1', artifacts: [artifact('chat/data.json', 'json', 4), artifact('chat/notes.txt', 'txt', 3), artifact('chat/report.pdf', 'pdf', 2), artifact('chat/blob.bin', 'bin', 1)] });
     click('#head .artifact-tab[data-path="chat/data.json"]');
     await flush();
     await flush();
-    const json = root.querySelector('.artifact-doc pre.artifact-text code')!;
-
-    expect(json.textContent).toBe('{\n  "a": 1,\n  "b": "<x>"\n}');
-    expect(json.innerHTML).toContain('&lt;x&gt;');
+    // Text, data and code go through the diff viewer's file mode as written, under the file viewer's head with its type, Wrap and Copy path.
+    expect(mounted).toEqual([{ path: 'D:/w/.wip/artifacts/w1/chat/data.json', contents: '{"a":1,"b":"<x>"}' }]);
+    expect(root.querySelector('.file-viewer .file-body[data-mode="code"]')!.textContent).toBe('{"a":1,"b":"<x>"}');
+    expect(root.querySelector('.file-viewer .artifact-head .artifact-type')!.getAttribute('aria-label')).toBe('Text or data');
+    expect(root.querySelector('.file-viewer [data-action="viewer-wrap"]')).not.toBeNull();
+    expect(root.querySelector('.file-viewer [data-action="viewer-copy-path"]')!.getAttribute('data-path')).toBe('D:/w/.wip/artifacts/w1/chat/data.json');
     expect(root.querySelector('.artifact-view a[download]')).toBeNull();
     expect(root.querySelector('.artifact-view [title="Open in new window"]')).not.toBeNull();
 
@@ -820,8 +831,8 @@ describe('the page in use', () => {
     click('#head .artifact-tab[data-path="chat/notes.txt"]');
     await flush();
     await flush();
-    expect(root.querySelector('.artifact-doc pre.artifact-text')!.textContent).toBe('plain <b>text</b>');
-    expect(root.querySelector('.artifact-doc b')).toBeNull();
+    expect(mounted.at(-1)!.contents).toBe('plain <b>text</b>');
+    expect(root.querySelector('.file-viewer .file-body b')).toBeNull();
 
     click('#head .artifact-tab[data-path="chat/report.pdf"]');
     const pdf = root.querySelector('iframe.artifact-pdf')!;

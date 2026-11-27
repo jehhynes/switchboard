@@ -665,14 +665,17 @@ button.picker > .codicon-chevron-down { order: 2; }
 .body a.path-link { cursor: default; }
 /* A local file link opens in a file tab (architecture.md § Web page); a paired device's page gets only files in the session's working folder. */
 #root .body a.path-link[data-action="local-file"] { cursor: pointer; }
-.local-entries { list-style: none; margin: 0; padding: 6px 0 60px; overflow-y: auto; overscroll-behavior: contain; flex: 1; }
-.local-entry { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 20px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.local-entry:hover, .local-entry:focus-visible { background: var(--vscode-list-hoverBackground); }
-.local-entry-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.local-entries li.empty { padding: 3px 20px; }
-.local-view .artifact-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+/* The file viewer (fileView.tsx): its head names the file, its title then its path cut from the start, muted, so the name stays; its body fills
+   the rest, code edge to edge. */
+.file-name { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; }
+.file-name > .artifact-title { flex: 0 1 auto; }
+.file-path { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; color: var(--vscode-descriptionForeground); font-size: 0.92em; }
+.file-path > * { direction: ltr; }
+.file-tools { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+.file-viewer > .file-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.file-body > .diff-view.local-code { flex: 1; height: auto; min-height: 0; }
+.file-body > .empty { padding: 0 12px; }
 /* Why a file does not show, such as a paired device's refusal, in line with the head. */
-.local-view > .empty { padding: 0 12px; }
 .body code { font-family: var(--vscode-editor-font-family); font-size: 0.9em; color: var(--vscode-textPreformat-foreground); background: var(--vscode-textPreformat-background); border-radius: 3px; padding: 2px 4px; }
 .body pre { margin: 8px 0; padding: 8px; border-radius: 4px; overflow-x: auto; touch-action: pan-x pan-y pinch-zoom; background: var(--vscode-textCodeBlock-background); }
 .body pre code { background: none; padding: 0; color: inherit; }
@@ -714,7 +717,6 @@ button.picker > .codicon-chevron-down { order: 2; }
 .artifact-doc { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 8px 20px calc(60px + var(--sb-end)); max-width: 900px; width: 100%; box-sizing: border-box; margin: 0 auto; }
 /* The head shows the type's icon before the title and when it changed after it. A file's tab shows what it is as a badge. A Markdown document, a state's and an artifact's or a file's alike (`md-doc`), is
    typeset as claude-collab's artifact viewer does, in the theme's colours: 15 px text, headings, code, tables and quotes as there. */
-.artifact-badge { flex: none; font-size: 12px; font-weight: 600; line-height: 16px; padding: 1px 6px; border: 1px solid currentColor; border-radius: 4px; color: var(--vscode-editorWarning-foreground); }
 .artifact-head .artifact-title { font-weight: 600; }
 .body.md-doc { font-size: 15px; line-height: 1.55; }
 .body.md-doc p, .body.md-doc ul, .body.md-doc ol { margin: 1em 0; }
@@ -724,7 +726,6 @@ button.picker > .codicon-chevron-down { order: 2; }
 .body.md-doc pre { margin: 1em 0; padding: 10px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; overflow-x: auto; background: var(--vscode-editor-background); }
 .body.md-doc pre code { background: none; padding: 0; }
 /* Text, data and code shown as they are, wrapped at the pane's width. */
-.body.artifact-doc pre.artifact-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.45; }
 .artifact-frame.artifact-pdf { background: none; }
 .body.md-doc pre.mermaid { text-align: center; }
 .body.md-doc table { border-collapse: collapse; margin: 0 0 12px; font-size: 14px; display: block; overflow-x: auto; }

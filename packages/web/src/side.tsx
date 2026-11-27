@@ -1,10 +1,10 @@
-// The Artifacts tab and an open artifact (architecture.md § Web page), in the tab strip or the column right of the conversation.
+// The Artifacts tab and an open artifact (architecture.md § Web page), in the tab strip or the column right of the conversation; the file viewer
+// (fileView.tsx) draws an open one.
 import type { VNode } from 'preact';
-import { fullTime } from '@switchboard/conversation/messageMeta';
 import { ArtifactIcon } from './artifactIcon.js';
 import type { PageState } from './model.js';
 import { ago, artifactShow, artifactUrl } from './render.js';
-import { trusted } from './trusted.js';
+import type { FileSpec, ViewKind } from './fileView.js';
 import type { ArtifactView } from '@switchboard/protocol';
 
 /** The Artifacts tab: the work item's artifacts newest first, each by its type's icon, its title and when it changed; a click opens one in the page. */
@@ -51,52 +51,34 @@ export function renderEmpty(text: string): VNode {
 }
 
 /**
- * An open artifact (architecture.md § Web page), in place in its pane: a page or an SVG in a sandboxed frame with an opaque origin, pictures,
- * audio and video in the page, Markdown as the page drew it from its text (`doc`: its HTML, null when it could not be read, undefined while it
- * loads), and for anything else a note that it cannot be shown. Its head has its type's icon, its title, when it changed, with the full time as its
- * tooltip, and Open in new window.
- * Each version is drawn afresh, so its files load again (`?v=`), and an unchanged one is left as it is, so a frame or a video is not
- * reloaded.
+ * An open artifact as the file viewer shows it (architecture.md § Web page, File viewer): a page or an SVG in a frame sandboxed to scripts with
+ * an opaque origin, pictures, recordings and videos in the page, Markdown as the page drew it from its text (`doc`, undefined while it loads),
+ * text, data and code in the diff viewer's file mode, and for anything else a note that it cannot be shown. Each version loads its files again
+ * (`?v=`). Its path is its real path, an external artifact's `file` or its place in `artifactsDir`, which the head shows by `shown`.
  */
-export function renderArtifactView(key: string, artifact: ArtifactView, doc?: string | null, now: number = Date.now()): VNode {
-  const file = artifactUrl(key, artifact.path);
-  const url = `${file}?v=${artifact.updatedAt}`;
+export function artifactFileSpec(key: string, artifact: ArtifactView, doc: { html: string | null | undefined; text?: string | null } | undefined, artifactsDir: string | null, shown: (path: string) => string = (path) => path): FileSpec {
   const show = artifactShow(artifact);
-  const body = show === 'frame' ? (
-    <iframe class="artifact-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" src={url} title={artifact.title}></iframe>
-  ) : show === 'pdf' ? (
-    <iframe class="artifact-frame artifact-pdf" referrerpolicy="no-referrer" src={url} title={artifact.title}></iframe>
-  ) : show === 'image' ? (
-    <img class="media" alt={artifact.title} src={url} />
-  ) : show === 'audio' ? (
-    <audio class="media" controls preload="metadata" src={url}></audio>
-  ) : show === 'video' ? (
-    <video class="media" controls preload="metadata" src={url}></video>
-  ) : show === 'markdown' || show === 'text' ? (
-    <div class="artifact-doc md-doc body">{doc === undefined ? <p class="empty">Loading…</p> : doc === null ? <p class="empty">This artifact could not be read.</p> : trusted(doc)}</div>
-  ) : (
-    <p class="empty">This kind of file cannot be shown here. Open it in a new window.</p>
-  );
+  const kind: ViewKind = show === 'text' ? 'code' : show === 'download' ? 'none' : show;
+  const url = `${artifactUrl(key, artifact.path)}?v=${artifact.updatedAt}`;
+  const folder = (artifactsDir ?? '').replaceAll('\\', '/').replace(/\/$/, '');
+  const path = (artifact.file ?? (folder === '' ? artifact.path : `${folder}/${artifact.path}`)).replaceAll('\\', '/');
+  const read = kind === 'code' || kind === 'markdown';
 
-  return (
-    <div class="artifact-view" data-artifact={artifact.path} data-version={String(artifact.updatedAt)} key={`${artifact.path}@${artifact.updatedAt}`}>
-      <div class="artifact-head">
-        <ArtifactIcon artifact={artifact} named />
-        <span class="artifact-title" title={artifact.file}>{artifact.title}</span>
-        <time class="artifact-age" dateTime={new Date(artifact.updatedAt).toISOString()} title={fullTime(artifact.updatedAt)}>
-          {ago(artifact.updatedAt, now)}
-        </time>
-        {artifact.type === 'markdown' ? (
-          <button class="icon" type="button" data-action="artifact-window" title="Open in new window" aria-label="Open in new window">
-            <span class="codicon codicon-link-external"></span>
-          </button>
-        ) : (
-          <a class="icon" href={url} target="_blank" rel="noopener noreferrer" title="Open in new window" aria-label="Open in new window">
-            <span class="codicon codicon-link-external"></span>
-          </a>
-        )}
-      </div>
-      {body}
-    </div>
-  );
+  return {
+    id: `artifact:${artifact.path}`,
+    version: String(artifact.updatedAt),
+    kind,
+    html: artifact.type === 'html',
+    title: artifact.title,
+    path,
+    shown: shown(path),
+    line: null,
+    changed: artifact.updatedAt,
+    contents: doc?.text ?? null,
+    markdown: kind === 'markdown' ? doc?.html : undefined,
+    ...(read ? {} : { rawUrl: url }),
+    note: kind !== 'code' ? null : doc === undefined ? 'Loading…' : doc.text == null ? 'This artifact could not be read.' : null,
+    open: artifact.type === 'markdown' ? { action: 'artifact-window' } : { href: url },
+    artifact: artifact.path,
+  };
 }

@@ -210,12 +210,10 @@
 .file-toggle { display: inline-flex; border: 1px solid var(--vscode-panel-border); border-radius: 4px; overflow: hidden; font-size: 11px; vertical-align: middle; }
 /* The file's own view scrolls (a Markdown preview), or fits (a picture or a PDF). */
 .file-page { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-/* The file shown, in the bar after the way back: its icon, then its path cut from the start so its name stays; at least 120 px, so on a narrow
-   bar the file's tools wrap to a line of their own rather than hide the name. */
-.changes-file-head { flex: 1 1 0; min-width: min(120px, 100%); display: inline-flex; align-items: center; gap: 6px; padding-left: 4px; color: var(--vscode-foreground); }
-.changes-file-head > span:first-child { flex: none; font-size: 16px; }
-.changes-file-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.changes-file-title > * { direction: ltr; }
+/* The file shown, in the bar after the way back: the file viewer's head (page.css), at least 120 px, so on a narrow bar its tools wrap to a line
+   of their own rather than hide the name. */
+.changes-file-head { flex: 1 1 0; min-width: min(120px, 100%); display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 4px; color: var(--vscode-foreground); }
+.changes-file-head > .file-name { min-width: min(120px, 100%); }
 .file-page > .artifact-doc, .file-page > .artifact-frame { flex: 1 1 auto; min-height: 0; }
 .file-page > .media { flex: 1 1 auto; min-height: 0; object-fit: contain; }
 .body a.path-link.denied, .artifact-doc a.path-link.denied { color: var(--vscode-descriptionForeground); text-decoration: none; cursor: not-allowed; }
@@ -242,8 +240,6 @@
     .changes-more-menu .more-phone { display: flex; }
   }
 }
-/* A file's bar has no ⋯, so its Wrap stays in the bar at every width. */
-.changes-bar > button.changes-file-wrap[data-action="changes-wrap"] { display: inline-flex; }
 /* A bar under 440 px, as in the side column, has no room for the toggles beside Files, the scope and ⋯, so they move into ⋯ there too. */
 @container (max-width: 439px) {
   .changes-bar > button[data-action="changes-hide-viewed"], .changes-bar > button[data-action="changes-collapse-all"], .changes-bar > button[data-action="changes-expand-all"], .changes-bar > button[data-action="changes-wrap"], .changes-bar > button[data-action="changes-refresh"] { display: none; }

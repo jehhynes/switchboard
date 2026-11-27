@@ -11,7 +11,7 @@ import { ago, LINK_LABEL_MAX, rowKey, TABS } from './render.js';
 import type { SideTab, Tab, View } from './render.js';
 import { changesTab, changesUnviewed } from './changes.js';
 import type { ChangesView } from './changes.js';
-import { LocalTabButton, localTabName } from './localFiles.js';
+import { FileTab, LocalTabButton, localTabName } from './localFiles.js';
 import type { LocalFilesView } from './localFiles.js';
 import { fitTabs, stripTabs, UNMEASURED } from './tabs.js';
 import type { DocTab, StripLayout, TabFit } from './tabs.js';
@@ -360,18 +360,18 @@ function HistoryTab({ selected, unread, attr }: { selected: boolean; unread: boo
  * dot on its icon's corner while this device has not shown its version (`unreadArtifacts`). Its tooltip names its title, its type and when it changed.
  */
 function ArtifactTab({ artifact, selected, unread, now }: { artifact: ArtifactView; selected: boolean; unread: boolean; now: number }) {
-  return (
-    <span class={`tab artifact-tab${selected ? ' selected' : ''}`} role="presentation" data-action="artifact" data-path={artifact.path}>
-      <button class="tab-open" type="button" role="tab" aria-selected={selected} tabindex={selected ? 0 : -1} title={`${artifact.title} · ${artifactType(artifact).name} · ${ago(artifact.updatedAt, now)}`} aria-label={unread ? `${artifact.title}, unread` : artifact.title}>
-        <FileIcon path={artifact.path} />
-        {unread ? <UnreadDot /> : null}
-        <span class="tab-label">{artifact.title}</span>
-      </button>
-      <button class="tab-close" type="button" data-action="close-artifact" data-path={artifact.path} aria-label={`Close ${artifact.title}`} title="Close" tabindex={selected ? 0 : -1}>
-        <span class="codicon codicon-close" aria-hidden="true"></span>
-      </button>
-    </span>
-  );
+  // Called rather than drawn as a component, so the strip's `data-id` lands on the tab's own element.
+  return FileTab({
+    attrs: { 'data-action': 'artifact', 'data-path': artifact.path },
+    open: {},
+    close: { 'data-action': 'close-artifact', 'data-path': artifact.path },
+    path: artifact.path,
+    label: artifact.title,
+    title: `${artifact.title} · ${artifactType(artifact).name} · ${ago(artifact.updatedAt, now)}`,
+    selected,
+    unread,
+    className: 'artifact-tab',
+  });
 }
 
 /** A row of the More menu: its icon, its label, with the unread dot while `unread`, and its age in a column; `type`, what it opens, names it for screen readers only. */

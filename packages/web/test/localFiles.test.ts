@@ -337,7 +337,9 @@ describe('local file tabs', () => {
       gets.push(url);
 
       const path = new URLSearchParams(url.slice(url.indexOf('?'))).get('path') ?? '';
-      const answer = url.startsWith('/v1/conversation/local-file?') ? (answers[path] ?? { status: 404, body: { error: 'none' } }) : { status: 200, body: {} };
+      // The Changes tab's routes answer an empty list and a tree of one picture, for a folder link that opens the explorer.
+      const changes = url.startsWith('/v1/conversation/changes?') ? { scopeGen: 3, base: 'b0', head: 'c1', from: 'base', to: 'worktree', commits: [], commitsMore: false, rows: [], total: 0, shown: 0 } : url.startsWith('/v1/conversation/tree?') ? { scopeGen: 3, paths: ['.wip/shots/a.png', 'src/a.ts'], more: false } : {};
+      const answer = url.startsWith('/v1/conversation/local-file?') ? (answers[path] ?? { status: 404, body: { error: 'none' } }) : { status: 200, body: changes };
       if (url.startsWith('/v1/conversation/local-file?')) {
         validators.push((init?.headers as Record<string, string> | undefined)?.['If-None-Match'] ?? null);
       }
@@ -376,59 +378,109 @@ describe('local file tabs', () => {
 
     expect(localGets()).toEqual([localFileUrl('pk', '.wip/review.md')]);
     expect(tabs()).toEqual([['review.md', true]]);
-    expect(root.querySelector('.local-view .artifact-title')!.textContent).toBe('D:/w/.wip/review.md');
-    expect(root.querySelector('.local-view .artifact-doc h1')!.textContent).toBe('Review');
+    // The file viewer's head: its type, its name, and its path inside the session's folder.
+    expect(root.querySelector('.file-viewer .artifact-type')!.getAttribute('aria-label')).toBe('Markdown document');
+    expect(root.querySelector('.file-viewer .artifact-title')!.textContent).toBe('review.md');
+    expect(root.querySelector('.file-viewer .file-path bdi')!.textContent).toBe('.wip/review.md');
+    expect(root.querySelector('.file-viewer [data-action="viewer-copy-path"]')!.getAttribute('data-path')).toBe('D:/w/.wip/review.md');
+    expect(root.querySelector('.file-viewer .artifact-doc h1')!.textContent).toBe('Review');
 
     // The same link shows the same tab, read again with its ETag, which an unchanged file answers with 304.
     link('Review').click();
     await flush();
     expect(localGets()).toEqual([localFileUrl('pk', '.wip/review.md'), localFileUrl('pk', '.wip/review.md')]);
     expect(tabs()).toEqual([['review.md', true]]);
-    expect(root.querySelector('.local-view .artifact-doc h1')!.textContent).toBe('Review');
+    expect(root.querySelector('.file-viewer .artifact-doc h1')!.textContent).toBe('Review');
 
-    root.querySelector<HTMLElement>('.local-view a.path-link')!.click();
+    root.querySelector<HTMLElement>('.file-viewer a.path-link')!.click();
     await flush();
     expect(localGets()[2]).toBe(localFileUrl('pk', 'D:/w/.wip/shots/a.png'));
     expect(tabs()).toEqual([['review.md', false], ['a.png', true]]);
-    expect(root.querySelector('.local-view img.media')!.getAttribute('src')).toBe(localFileUrl('pk', 'D:/w/.wip/shots/a.png', true));
+    expect(root.querySelector('.file-viewer img.media')!.getAttribute('src')).toBe(localFileUrl('pk', 'D:/w/.wip/shots/a.png', true));
 
     // Closing the tab shown shows its neighbour, and closing the last leaves the file tabs.
     root.querySelector<HTMLElement>('.local-tab.selected [data-action="local-close"]')!.click();
     expect(tabs()).toEqual([['review.md', true]]);
     root.querySelector<HTMLElement>('.local-tab.selected [data-action="local-close"]')!.click();
     expect(tabs()).toEqual([]);
-    expect(root.querySelector('.local-view')).toBeNull();
+    expect(root.querySelector('.file-viewer')).toBeNull();
   });
 
-  it('shows code at the line the link names in the file view, a folder as its entries, a PDF in a frame, and why a file does not show', async () => {
+  it('shows code at the line the link names in the file view, a folder in the explorer, a PDF in a frame, and why a file does not show', async () => {
     start();
     link('code').click();
     await flush();
     await flush();
     expect(files).toEqual([{ path: 'D:/w/src/a.ts', contents: 'const a = 1;', line: 42 }]);
-    expect(root.querySelector('.diff-host.file-view .diff-at')!.textContent).toBe(':42');
+    expect(root.querySelector('.file-viewer .file-path bdi')!.textContent).toBe('src/a.ts');
+    expect(root.querySelector('.file-viewer .file-path .diff-at')!.textContent).toBe(':42');
     expect(root.querySelector('.local-tab.selected .tab-open')!.getAttribute('title')).toBe('D:/w/src/a.ts:42');
 
+    // A folder of the worktree opens in the Changes tab's explorer, at that folder, and gets no tab.
     link('9 screenshots').click();
     await flush();
-    expect([...root.querySelectorAll('.local-entry')].map((one) => one.textContent)).toEqual(['old', 'a.png']);
-    expect(root.querySelector('.local-view .artifact-badge')!.textContent).toBe('Folder');
-    root.querySelector<HTMLElement>('.local-entry[title="a.png"]')!.click();
+    expect(tabs().map(([name]) => name)).toEqual(['a.ts']);
+    expect(root.querySelector('#detail .changes-tab.selected')).not.toBeNull();
+    expect(root.querySelector('.file-viewer')).toBeNull();
     await flush();
-    expect(localGets().at(-1)).toBe(localFileUrl('pk', 'D:/w/.wip/shots/a.png'));
+    await flush();
+    // Every file as folders, the folder and those above it open, its row focused.
+    expect(root.querySelector('[data-action="tree-files"][data-mode="all"]')!.getAttribute('aria-pressed')).toBe('true');
+    expect((document.activeElement as HTMLElement | null)?.dataset['key']).toBe('dir:.wip/shots');
+    expect(root.querySelector('[data-action="tree-toggle"][data-key="dir:.wip"]')!.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('.changes-tree [data-action="tree-disk"][data-path=".wip/shots/a.png"]')).not.toBeNull();
 
     link('pdf').click();
     await flush();
-    expect(root.querySelector('.local-view iframe.artifact-pdf')!.getAttribute('src')).toBe(localFileUrl('pk', 'D:/w/doc.pdf', true));
-    expect(root.querySelector('.local-view iframe')!.hasAttribute('sandbox')).toBe(false);
+    expect(root.querySelector('.file-viewer iframe.artifact-pdf')!.getAttribute('src')).toBe(localFileUrl('pk', 'D:/w/doc.pdf', true));
+    expect(root.querySelector('.file-viewer iframe')!.hasAttribute('sandbox')).toBe(false);
 
     link('log').click();
     await flush();
-    expect(root.querySelector('.local-view .empty')!.textContent).toBe('This file is too large to show here.');
+    expect(root.querySelector('.file-viewer .empty')!.textContent).toBe('This file is too large to show here.');
 
     link('out').click();
     await flush();
-    expect(root.querySelector('.local-view .empty')!.textContent).toBe('No such file in this conversation’s folders.');
+    expect(root.querySelector('.file-viewer .empty')!.textContent).toBe('No such file in this conversation’s folders.');
+  });
+
+  it('FolderLink_OutsideTheWorktree_SaysSoAndOpensNoTab', async () => {
+    answers['E:/other/'] = { status: 200, body: file({ path: 'E:/other', name: 'other', kind: 'dir', entries: [] }) };
+    start();
+    root.querySelector('#panel .body')!.insertAdjacentHTML('beforeend', '<a class="path-link" data-action="local-file" data-target="E:/other/">other</a>');
+    link('other').click();
+    await flush();
+
+    expect(tabs()).toEqual([]);
+    expect(root.querySelector('.toast-text')!.textContent).toBe('Only folders in this worktree open in the explorer');
+    expect(root.querySelector('#detail .changes-tab.selected')).toBeNull();
+  });
+
+  it('FolderLink_TheWorktreeItself_OpensTheExplorerAtItsRoot', async () => {
+    answers['./'] = { status: 200, body: file({ path: 'D:/w', name: 'w', kind: 'dir', entries: [] }) };
+    start();
+    root.querySelector('#panel .body')!.insertAdjacentHTML('beforeend', '<a class="path-link" data-action="local-file" data-target="./">here</a>');
+    link('here').click();
+    await flush();
+
+    expect(tabs()).toEqual([]);
+    expect(root.querySelector('.toast-text')).toBeNull();
+    expect(root.querySelector('#detail .changes-tab.selected')).not.toBeNull();
+  });
+
+  it('FileLink_RecordingOrVideo_PlaysInTheFileViewer', async () => {
+    answers['note.mp3'] = { status: 200, body: file({ path: 'D:/w/note.mp3', name: 'note.mp3', kind: 'audio', modified: 5 }) };
+    answers['demo.mp4'] = { status: 200, body: file({ path: 'D:/w/demo.mp4', name: 'demo.mp4', kind: 'video', modified: 6 }) };
+    start();
+    root.querySelector('#panel .body')!.insertAdjacentHTML('beforeend', '<a class="path-link" data-action="local-file" data-target="note.mp3">note</a><a class="path-link" data-action="local-file" data-target="demo.mp4">demo</a>');
+    link('note').click();
+    await flush();
+    expect(root.querySelector('.file-viewer audio.media')!.getAttribute('src')).toBe(`${localFileUrl('pk', 'D:/w/note.mp3', true)}&v=5`);
+    expect(root.querySelector('.file-viewer .artifact-type')!.getAttribute('aria-label')).toBe('Recording');
+    link('demo').click();
+    await flush();
+    expect(root.querySelector('.file-viewer video.media')!.getAttribute('src')).toBe(`${localFileUrl('pk', 'D:/w/demo.mp4', true)}&v=6`);
+    expect(root.querySelector('.file-viewer a[title="Open in new window"]')!.getAttribute('href')).toBe(`${localFileUrl('pk', 'D:/w/demo.mp4', true)}&v=6`);
   });
 
   it("wraps a code tab's long lines as the Changes tab's diffs do, by this device's choice, which its Wrap toggles for both", async () => {
@@ -437,7 +489,7 @@ describe('local file tabs', () => {
     await flush();
     await flush();
 
-    const wrap = () => root.querySelector<HTMLElement>('.diff-host.file-view [data-action="file-wrap"]')!;
+    const wrap = () => root.querySelector<HTMLElement>('.file-viewer [data-action="viewer-wrap"]')!;
 
     // Wide, with web.diffWrap's default (auto): side by side, so long lines do not wrap.
     expect(wraps[0]).toBe(false);
@@ -508,23 +560,23 @@ describe('local file tabs', () => {
     link('Review').click();
     await flush();
     expect(localGets()).toEqual([localFileUrl('pk', '.wip/review.md')]);
-    expect(root.querySelector('.local-view .artifact-doc h1')!.textContent).toBe('Review');
-    expect(root.querySelector('.local-view a.path-link')).not.toBeNull();
+    expect(root.querySelector('.file-viewer .artifact-doc h1')!.textContent).toBe('Review');
+    expect(root.querySelector('.file-viewer a.path-link')).not.toBeNull();
 
     link('9 screenshots').click();
     await flush();
     expect(root.querySelector('.local-entries')).toBeNull();
-    expect(root.querySelector('.local-view .empty')!.textContent).toBe(refusal.body.error);
+    expect(root.querySelector('.file-viewer .empty')!.textContent).toBe(refusal.body.error);
 
     link('out').click();
     await flush();
-    expect(root.querySelector('.local-view .empty')!.textContent).toBe(refusal.body.error);
+    expect(root.querySelector('.file-viewer .empty')!.textContent).toBe(refusal.body.error);
 
     // A file: URI outside what the device may read is still a link, and its tab says why.
     answers['E:/other/x.ts'] = refusal;
     link('far').click();
     await flush();
-    expect(root.querySelector('.local-view .empty')!.textContent).toBe(refusal.body.error);
+    expect(root.querySelector('.file-viewer .empty')!.textContent).toBe(refusal.body.error);
     expect(tabs()).toEqual([['review.md', false], ['shots', false], ['secret.txt', false], ['x.ts', true]]);
   });
 
@@ -540,7 +592,7 @@ describe('local file tabs', () => {
       await flush();
     };
     const review = (contents: string) => ({ status: 200, body: file({ path: 'D:/w/.wip/review.md', name: 'review.md', kind: 'markdown', contents }) });
-    const heading = () => root.querySelector('.local-view .artifact-doc h1')?.textContent;
+    const heading = () => root.querySelector('.file-viewer .artifact-doc h1')?.textContent;
 
     beforeEach(() => vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] }));
     afterEach(() => {
@@ -592,7 +644,7 @@ describe('local file tabs', () => {
 
       answers['.wip/review.md'] = { status: 404, body: { error: 'No such file in this conversation’s folders.' } };
       await tick();
-      expect(root.querySelector('.local-view .empty')!.textContent).toBe('No such file in this conversation’s folders.');
+      expect(root.querySelector('.file-viewer .empty')!.textContent).toBe('No such file in this conversation’s folders.');
 
       answers['.wip/review.md'] = review('# Back');
       await tick();
@@ -621,7 +673,7 @@ describe('local file tabs', () => {
       held = { path: '.wip/review.md', release: () => {} };
       link('Review').click();
       await flush();
-      expect(root.querySelector('.local-view .empty')!.textContent).toBe('Reading the file…');
+      expect(root.querySelector('.file-viewer .empty')!.textContent).toBe('Reading the file…');
       source.emit('scope', { scope: { ...scope(4), sessionId: 's2' } });
       await flush();
       const release = held.release;
@@ -722,15 +774,16 @@ describe('local file tabs', () => {
     it('loads a picture again when its time changes', async () => {
       answers['D:/w/.wip/shots/a.png'] = { status: 200, body: file({ path: 'D:/w/.wip/shots/a.png', name: 'a.png', kind: 'image', modified: 1 }) };
       start(true, 10);
-      link('9 screenshots').click();
+      const page = pages.at(-1)!;
+      void page;
+      root.querySelector('#panel .body')!.insertAdjacentHTML('beforeend', '<a class="path-link" data-action="local-file" data-target="D:/w/.wip/shots/a.png">a.png</a>');
+      link('a.png').click();
       await flush();
-      root.querySelector<HTMLElement>('.local-entry[title="a.png"]')!.click();
-      await flush();
-      expect(root.querySelector('.local-view img.media')!.getAttribute('src')).toBe(`${localFileUrl('pk', 'D:/w/.wip/shots/a.png', true)}&v=1`);
+      expect(root.querySelector('.file-viewer img.media')!.getAttribute('src')).toBe(`${localFileUrl('pk', 'D:/w/.wip/shots/a.png', true)}&v=1`);
 
       answers['D:/w/.wip/shots/a.png'] = { status: 200, body: file({ path: 'D:/w/.wip/shots/a.png', name: 'a.png', kind: 'image', modified: 2 }) };
       await tick();
-      expect(root.querySelector('.local-view img.media')!.getAttribute('src')).toBe(`${localFileUrl('pk', 'D:/w/.wip/shots/a.png', true)}&v=2`);
+      expect(root.querySelector('.file-viewer img.media')!.getAttribute('src')).toBe(`${localFileUrl('pk', 'D:/w/.wip/shots/a.png', true)}&v=2`);
     });
   });
 });

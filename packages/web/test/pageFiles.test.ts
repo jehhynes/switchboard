@@ -638,7 +638,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     click(link);
     await settle();
     expect(shown()).toBe(`file:${plan}`);
-    expect(root.querySelector('#detail .local-view .empty')?.textContent).toBe('This device can only open files in the work item’s folders.');
+    expect(root.querySelector('#detail .file-viewer .empty')?.textContent).toBe('This device can only open files in the work item’s folders.');
     page.close();
   });
 
@@ -696,7 +696,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const { page, source } = start();
     const items = [reply('r1', 2, { opening: 'See [notes](notes.md).' })];
     const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/local-file?')).length;
-    const text = () => root.querySelector('#detail .detail-body .local-view > .artifact-doc')?.textContent?.trim();
+    const text = () => root.querySelector('#detail .detail-body .file-viewer .artifact-doc')?.textContent?.trim();
     let release = (): void => {};
 
     answers['local-file'] = { status: 403, body: { error: 'Not this page.' }, wait: new Promise((resolve) => (release = resolve)) };
@@ -719,7 +719,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     await flush();
     expect(reads()).toBe(2);
     expect(text()).toBe('Fresh');
-    expect(root.querySelector('#detail .local-view .empty')).toBeNull();
+    expect(root.querySelector('#detail .file-viewer .empty')).toBeNull();
 
     // A loaded tab read again as a turn ends, its read still on its way at a reconnect, is read again then, and the earlier answer never shows.
     answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Stale', tooLarge: false, size: 7, entries: null, more: false }, wait: new Promise((resolve) => (release = resolve)) };
@@ -810,7 +810,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     const { page, source } = start();
     const read = (contents: string, wait?: Promise<void>) => ({ status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents, tooLarge: false, size: 7, entries: null, more: false }, ...(wait === undefined ? {} : { wait }) });
     const items = [reply('r1', 2, { opening: 'See [notes](notes.md).' })];
-    const doc = () => root.querySelector<HTMLElement>('#detail .detail-body .local-view > .artifact-doc');
+    const doc = () => root.querySelector<HTMLElement>('#detail .detail-body .file-viewer .artifact-doc');
     const text = () => doc()?.textContent?.trim();
     const reads = () => posts.filter((post) => post.url.startsWith('/v1/conversation/local-file?')).length;
     const settle = async () => {
@@ -918,7 +918,7 @@ it("opens an artifact's file link by a fresh read each time: a link retargeted s
     release();
     await flush();
     await flush();
-    expect(root.querySelector('#detail .local-view > .artifact-doc')?.textContent?.trim()).toBe('Now');
+    expect(root.querySelector('#detail .file-viewer .artifact-doc')?.textContent?.trim()).toBe('Now');
     again.page.close();
   });
 

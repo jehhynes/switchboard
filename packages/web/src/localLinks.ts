@@ -1,18 +1,18 @@
 // Local file links (architecture.md § Web page): reading a link's target and line, the hub's routes for a local file, and a local Markdown
 // file drawn as HTML, its relative links and pictures resolved against its own folder.
-import { escape, renderMarkdown } from './markdown.js';
+import { escape, markdownBody, renderMarkdown } from './markdown.js';
 
 /** What the hub answers for a local file or folder (`LocalFileView` in packages/hub/src/localFiles.ts). */
 export interface LocalFileData {
   path: string;
   name: string;
-  kind: 'text' | 'markdown' | 'image' | 'pdf' | 'binary' | 'dir';
+  kind: 'text' | 'markdown' | 'image' | 'pdf' | 'audio' | 'video' | 'binary' | 'dir';
   contents: string | null;
   tooLarge: boolean;
   size: number | null;
   entries: Array<{ name: string; dir: boolean }> | null;
   more: boolean;
-  /** A picture's or PDF's modification time, so a new version loads again; null or absent otherwise. */
+  /** The file's modification time, which a picture's or PDF's address carries so a new version loads again; null or absent for a folder. */
   modified?: number | null;
   /** The work item's artifact this file is, by real path: the page shows that artifact's tab in place of a file tab. */
   artifact?: string;
@@ -206,6 +206,6 @@ export function localMarkdown(key: string, data: LocalFileData): string {
     return fileTabLink(target);
   };
 
-  return renderMarkdown(data.contents ?? '', base, link);
+  return renderMarkdown(markdownBody(data.contents ?? ''), base, link);
 }
 

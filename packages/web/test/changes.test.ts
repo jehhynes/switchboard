@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compareValid, emptyNote, fileAt, listBase, listNote, listRef, rowTitle, scopeKind, scopeLabel, tickScope } from '../src/changes.js';
+import { fileKind, compareValid, emptyNote, fileAt, listBase, listNote, listRef, rowTitle, scopeKind, scopeLabel, tickScope } from '../src/changes.js';
 import type { ChangesList } from '../src/changes.js';
 import { diffLayout, diffNote, fileNote } from '../src/changes.js';
 import type { DiffModule } from '../src/diff/types.js';
@@ -591,8 +591,19 @@ describe('the Changes list text', () => {
     const file = { path: 'a.ts', contents: null, binary: false, tooLarge: true } as never;
 
     expect(diffNote({ state: 'ok', version: '1', data }, false)).toBe('This change is too large to show here.');
-    expect(fileNote({ state: 'ok', version: '1', etag: null, data: file }, true)).toBe('This file is too large to show here. Open it in VS Code.');
-    expect(fileNote({ state: 'ok', version: '1', etag: null, data: file }, false)).toBe('This file is too large to show here.');
+    // No single file opens in VS Code, so the note points nowhere else (operator decision 2026-11-27).
+    expect(fileNote({ state: 'ok', version: '1', etag: null, data: file })).toBe('This file is too large to show here.');
+  });
+
+  it('FileKind_RecordingOrVideoSentAsBytes_PlaysAsTheFileTabDoes', () => {
+    const data = (path: string, media: string | null, contents: string | null = null) => ({ path, side: 'disk' as const, contents, binary: contents === null, tooLarge: false, media });
+
+    expect(fileKind(data('a.mp3', 'audio/mpeg'))).toBe('audio');
+    expect(fileKind(data('a.mp4', 'video/mp4'))).toBe('video');
+    expect(fileKind(data('a.png', 'image/png'))).toBe('image');
+    expect(fileKind(data('a.mp4', null))).toBe('code');
+    expect(fileNote({ state: 'ok', version: '1', etag: null, data: data('a.mp3', 'audio/mpeg') })).toBeNull();
+    expect(fileNote({ state: 'ok', version: '1', etag: null, data: data('a.mp4', null) })).toBe('Binary file not shown.');
   });
 
   it('says the file count, the lines changed and a cut list, leaving the viewed count to the tab, and the base in its tooltip', () => {

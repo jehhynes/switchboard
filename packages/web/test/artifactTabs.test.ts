@@ -81,7 +81,7 @@ describe('the artifact tabs', () => {
 
     expect(paths(markup, 'data-side')).toEqual(['history', 'browser']);
     expect(tabPaths(markup)).toEqual(['chat/a7.md', 'chat/a2.md']);
-    expect(markup).toMatch(/class="tab artifact-tab selected"[^>]*data-path="chat\/a2.md"/);
+    expect(markup).toMatch(/class="tab file-tab artifact-tab selected"[^>]*data-path="chat\/a2.md"/);
     // Each artifact tab has its own close button beside the tab's, so each takes the keyboard; the open one's is in the tab order.
     expect(markup.match(/<button class="tab-close" type="button" data-action="close-artifact"/g)).toHaveLength(2);
     expect(markup).toContain('data-path="chat/a2.md" aria-label="Close Note 2" title="Close" tabindex="0"');

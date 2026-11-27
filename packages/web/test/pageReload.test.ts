@@ -986,7 +986,7 @@ describe('the page in use', () => {
     const groups = [listGroup('progress', [listRow(1, { title: 'Fix it' }), listRow(2, { title: 'Other' })])];
     const both = [1, 2].map((id) => ({ ...scope.conversations[0]!, workItemId: id, title: `Item ${id}`, primary: id === 1 }));
     const helloFor = (source: FakeSource, workItemId: number) => source.emit('hello', { key: 'pk', groups, scope: { ...scope, workItemId, scopeGen: 3 + workItemId, conversations: both }, sessions: [session()], items: [reply('r1', 2, { opening: 'See [notes](notes.md).' })], more: false, state: null, artifacts: [artifact('chat/plan.md', 'markdown', 'md'), artifact('chat/p.html', 'html', 'html')] });
-    const doc = () => root.querySelector<HTMLElement>('#detail .detail-body .local-view > .artifact-doc')!;
+    const doc = () => root.querySelector<HTMLElement>('#detail .detail-body .file-viewer .artifact-doc')!;
 
     answers['local-file'] = { status: 200, body: { path: 'D:/w/notes.md', name: 'notes.md', kind: 'markdown', contents: '# Notes', tooLarge: false, size: 7, entries: null, more: false } };
     answers['artifact'] = { status: 200, body: {}, text: '# Plan' };
@@ -999,7 +999,7 @@ describe('the page in use', () => {
     doc().scrollTop = 380;
     doc().dispatchEvent(new Event('scroll'));
     click('#detail [data-side="console"]');
-    expect(root.querySelector('#detail .local-view')).toBeNull();
+    expect(root.querySelector('#detail .file-viewer')).toBeNull();
     // Back on the file tab, and after another work item and back, it is where it was left.
     click('#detail [data-action="local-tab"]');
     expect(doc().scrollTop).toBe(380);
@@ -1014,20 +1014,6 @@ describe('the page in use', () => {
     resizeTo(1000);
     resizeTo(1440);
     expect(doc().scrollTop).toBe(380);
-
-    // A folder's list scrolls in its own element, and comes back the same way.
-    answers['local-file'] = { status: 200, body: { path: 'D:/w/src', name: 'src', kind: 'dir', contents: null, tooLarge: false, size: null, entries: [{ name: 'a.ts', dir: false }], more: false } };
-    const entries = () => root.querySelector<HTMLElement>('#detail .detail-body .local-view > .local-entries')!;
-
-    source.emit('reply', { reply: reply('r2', 3, { opening: 'And [src](src/).' }) });
-    click('#panel a.path-link[data-target="src/"]');
-    await flush();
-    await flush();
-    entries().scrollTop = 120;
-    entries().dispatchEvent(new Event('scroll'));
-    resizeTo(1000);
-    resizeTo(1440);
-    expect(entries().scrollTop).toBe(120);
 
     // An artifact shown on work item 1 stays its tab after a conversation of its dropdown and back.
     click('#detail .artifact-tab[data-path="chat/p.html"] .tab-open');

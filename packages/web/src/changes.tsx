@@ -9,7 +9,7 @@ import { mount } from './island.js';
 import { ago } from './render.js';
 import { readVersion } from './readVersion.js';
 import { keepWrap, storedWrap } from './wrapPref.js';
-import { CodeDraw, FileBody, sayIn } from './fileView.js';
+import { CodeDraw, FileBody, FileHead, sayIn } from './fileView.js';
 import { worktreeMarkdown } from './changesMarkdown.js';
 import { ChangesTreeView, ignoredSet, isIgnored, newTree, PEEKS_KEPT } from './changesTree.js';
 import type { TreeState } from './changesTree.js';
@@ -377,8 +377,8 @@ export interface BarTree {
   pinned: boolean;
   /** A file shows over the diffs, so the bar's back closes it before it changes the range. */
   fileOpen: boolean;
-  /** The file shown: its icon and path after the way back, and its tools before Wrap. */
-  file?: { head: ComponentChildren; tools: ComponentChildren } | null;
+  /** The file shown, after the way back: the file viewer's head (`FileHead`) for the bar's Wrap state. */
+  file?: ((wrapped: boolean) => ComponentChildren) | null;
   flyout: boolean;
   compare: { label: string; points: ComparePoint[] } | null;
   layout: 'auto' | 'split' | 'stacked';
@@ -462,17 +462,15 @@ export function renderChangesBar(changes: ChangesView, wrapped: boolean, now = D
     </button>
   );
 
-  // A file shown over the diffs keeps only what applies to it: the tree's button, the way back, the file's icon and path, its tools, and Wrap.
-  // The diffs' controls return with the diffs.
+  // A file shown over the diffs keeps only what applies to it: the tree's button, the way back, then the file viewer's head, as a file tab
+  // shows it. The diffs' controls return with the diffs.
   if (tree.fileOpen) {
     return [
       treeButton,
       <button class="changes-back" type="button" data-action="changes-back" title="Back to the diffs (Escape)" aria-label="Back to the diffs">
         <span class="codicon codicon-arrow-left" aria-hidden="true"></span>
       </button>,
-      tree.file?.head ?? <span class="changes-spacer"></span>,
-      tree.file?.tools ?? null,
-      <WrapButton className="icon changes-file-wrap" wrapped={wrapped} disabled={false} />,
+      tree.file?.(wrapped) ?? <span class="changes-spacer"></span>,
     ];
   }
 
@@ -558,9 +556,11 @@ export interface FileOpen {
   source: boolean;
 }
 
-/** How the file view draws a file: code and text, Markdown, a picture or a PDF. */
-export function fileKind(data: FileData): 'code' | 'markdown' | 'image' | 'pdf' {
-  return data.media === 'application/pdf' ? 'pdf' : typeof data.media === 'string' && data.media.startsWith('image/') && data.contents === null ? 'image' : /\.(md|markdown)$/i.test(data.path) && data.contents !== null ? 'markdown' : 'code';
+/** How the file view draws a file: code and text, Markdown, a picture, a PDF, a recording or a video. */
+export function fileKind(data: FileData): 'code' | 'markdown' | 'image' | 'pdf' | 'audio' | 'video' {
+  const media = typeof data.media === 'string' && data.contents === null ? data.media.split('/')[0] : null;
+
+  return data.media === 'application/pdf' ? 'pdf' : media === 'image' || media === 'audio' || media === 'video' ? media : /\.(md|markdown)$/i.test(data.path) && data.contents !== null ? 'markdown' : 'code';
 }
 
 /** Whether a file view shows the file on disk, which can change while it shows and is read again; a commit's or the base's cannot. */
@@ -579,11 +579,8 @@ export function fileAt(list: ChangesList | null, side: 'disk' | 'base'): string 
   return point === 'worktree' ? null : point === 'base' && list.base === null ? ' at HEAD' : point === 'base' || point === list.base ? ' at the base' : point === 'HEAD' ? ' at HEAD' : ` at ${short(point)}`;
 }
 
-/**
- * What the file view says in place of the file: a read on its way, why it failed, a binary file or one too large, pointing to VS Code on this
- * computer's page (`local`) only; a picture or PDF shows.
- */
-export function fileNote(entry: FileOpen['entry'], local = true): string | null {
+/** What the file view says in place of the file: a read on its way, why it failed, a binary file or one too large; a picture, PDF, recording or video shows. */
+export function fileNote(entry: FileOpen['entry']): string | null {
   if (entry.state === 'loading') {
     return 'Reading the file…';
   }
@@ -594,11 +591,11 @@ export function fileNote(entry: FileOpen['entry'], local = true): string | null 
 
   const kind = fileKind(entry.data);
 
-  if (kind === 'image' || kind === 'pdf') {
+  if (kind !== 'code' && kind !== 'markdown') {
     return null;
   }
 
-  return entry.data.binary ? 'Binary file not shown.' : entry.data.tooLarge ? `This file is too large to show here.${local ? ' Open it in VS Code.' : ''}` : null;
+  return entry.data.binary ? 'Binary file not shown.' : entry.data.tooLarge ? 'This file is too large to show here.' : null;
 }
 
 /** A point of a range as a quote names it: on disk, the base, HEAD or a commit, by short ID. */
@@ -681,17 +678,6 @@ function rowShape(row: ChangeRow): string {
   return JSON.stringify([row.path, row.from ?? null, row.status, row.additions, row.deletions, row.binary]);
 }
 
-
-/** A Markdown file's switch between its preview and its source. */
-function SourceButton({ source }: { source: boolean }): VNode {
-  const label = source ? 'Show the preview' : 'Show the source';
-
-  return (
-    <button class="diff-wrap file-source" type="button" data-action="file-source" title={label} aria-label={label} aria-pressed={source}>
-      <span class={`codicon codicon-${source ? 'open-preview' : 'code'}`} aria-hidden="true"></span>
-    </button>
-  );
-}
 
 /** Diff | File, in a file view whose file is a side of a change row the list shows: Diff goes to that row's diff. */
 function FileToggle(): VNode {
@@ -821,10 +807,11 @@ export class ChangesController {
   }
 
   /**
-   * The bar's part for the file shown: its icon and path with the line and revision after it, then Quote while lines are selected, Diff | File
-   * for a side of a listed change row, and a Markdown file's Source; null with no file shown.
+   * The bar's part for the file shown: the file viewer's head (`FileHead`), with its path and line and the revision after them, then Quote
+   * while lines are selected, Diff | File for a side of a listed change row, a Markdown file's Source, Wrap, Copy path and Open in new window;
+   * null with no file shown.
    */
-  #fileBar(): { head: ComponentChildren; tools: ComponentChildren } | null {
+  #fileBar(): ((wrapped: boolean) => ComponentChildren) | null {
     const file = this.#file;
 
     if (file === null) {
@@ -834,30 +821,29 @@ export class ChangesController {
     const entry = file.entry;
     const kind = entry.state === 'ok' && fileNote(entry) === null ? fileKind(entry.data) : null;
     const at = file.range.to === 'worktree' && file.side === 'disk' ? null : fileAt(this.view.list === null ? null : { ...this.view.list, from: file.range.from, to: file.range.to }, file.side);
-    const head = (
-      <span class="changes-file-head" title={file.path}>
-        <FileIcon path={file.path} />
-        <span class="changes-file-title">
-          <bdi dir="ltr">{file.path}</bdi>
-          <span class="diff-at">
-            {file.line === null ? null : `:${file.line}`}
-            {at === null ? null : <span class="diff-from">{at}</span>}
-          </span>
-        </span>
+    const code = kind === 'code' || (kind === 'markdown' && file.source);
+    const quote = code && this.#selection?.in === 'file';
+    const root = (this.tree.stack?.root ?? '').replaceAll('\\', '/').replace(/\/$/, '');
+    const key = this.deps.key() ?? '';
+    const raw = entry.state === 'ok' && kind !== null && kind !== 'code' && kind !== 'markdown' ? `${this.#rawUrl(key, file, file.path)}&v=${encodeURIComponent(entry.version)}` : null;
+
+    return (wrapped) => (
+      <span class="changes-file-head">
+        <FileHead
+          kind={kind}
+          title={file.path.slice(file.path.lastIndexOf('/') + 1)}
+          path={file.path}
+          pathTitle={root === '' ? file.path : `${root}/${file.path}`}
+          line={file.line}
+          at={at}
+          quote={quote ? { action: 'diff-quote' } : null}
+          extra={file.rowPath === null ? null : <FileToggle />}
+          source={kind === 'markdown' ? { on: file.source, action: 'file-source' } : null}
+          wrap={code ? { on: wrapped, action: 'changes-wrap', className: 'icon changes-file-wrap' } : null}
+          open={kind === 'markdown' && !file.source ? { action: 'artifact-window' } : raw === null ? null : { href: raw }}
+        />
       </span>
     );
-    const quote = kind === 'code' || (kind === 'markdown' && file.source) ? this.#selection?.in === 'file' : false;
-
-    return {
-      head,
-      tools: (
-        <>
-          {quote ? <QuoteButton /> : null}
-          {file.rowPath === null ? null : <FileToggle />}
-          {kind === 'markdown' ? <SourceButton source={file.source} /> : null}
-        </>
-      ),
-    };
   }
 
   /** How the bar shows the tree. */
@@ -1771,6 +1757,42 @@ export class ChangesController {
     this.deps.showDiff();
   }
 
+  /** The folder the tree scrolls to and focuses once its row draws (`exploreFolder`). */
+  #reveal: string | null = null;
+
+  /**
+   * Opens the tree's explorer at a folder of the worktree (`dir`, worktree-relative), as a link to that folder does: every file as folders,
+   * the folder and those above it open, the tree shown, pinned or as a flyout, and the folder's row scrolled to and focused once it draws.
+   */
+  exploreFolder(dir: string): void {
+    const parts = dir.split('/').filter((part) => part !== '' && part !== '.');
+
+    this.tree.files = 'all';
+    this.tree.closed.delete('files');
+
+    for (let at = 1; at <= parts.length; at++) {
+      this.tree.open.add(`dir:${parts.slice(0, at).join('/')}`);
+    }
+
+    this.#reveal = parts.join('/');
+    this.#flyout = true;
+    this.openChanges(null);
+  }
+
+  /** Scrolls the tree to the folder `exploreFolder` asked for and focuses its row, once the tree is read; a folder it does not list is let go. */
+  #revealFolder(view: HTMLElement): void {
+    if (this.#reveal === null || this.tree.tree === null) {
+      return;
+    }
+
+    const key = `dir:${this.#reveal}`;
+    const row = [...view.querySelectorAll<HTMLElement>('.changes-tree [data-action="tree-toggle"]')].find((one) => one.dataset['key'] === key);
+
+    this.#reveal = null;
+    row?.scrollIntoView?.({ block: 'center' });
+    row?.focus({ preventScroll: true });
+  }
+
   #scrollToJump(): void {
     if (this.#jump !== null && this.#mount !== null) {
       this.#mount.mount.scrollToFile(this.#jump);
@@ -2303,6 +2325,7 @@ export class ChangesController {
     }
 
     mount(view.querySelector(':scope > .changes-tree')!, <ChangesTreeView state={this.tree} list={this.view.list} shown={this.view.range} now={Date.now()} pinned={pinned} canPin={!this.#phone() && (this.#width === 0 || this.#width >= TREE_FLYOUT_MAX_WIDTH)} />);
+    this.#revealFolder(view);
 
     const host = view.querySelector<HTMLElement>(':scope > .diff-host')!;
     const list = this.view.list;
@@ -2522,7 +2545,7 @@ export class ChangesController {
     overlay.style.top = `${bar?.offsetHeight ?? 0}px`;
 
     const place = `${file.side} ${file.path} ${file.range.from} ${file.range.to} ${file.line ?? ''}`;
-    const note = fileNote(file.entry, this.deps.local?.() ?? true);
+    const note = fileNote(file.entry);
     const entry = file.entry;
     const wrap = this.#shownLayout(view.closest<HTMLElement>('.diff-pane') ?? view).wrap;
 

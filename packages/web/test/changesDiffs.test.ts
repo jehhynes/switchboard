@@ -960,7 +960,7 @@ describe('the Changes list', () => {
     expect(files.at(-1)).toEqual({ path: 'src/new.ts', side: 'disk', line: 12 });
     // The bar has the file's name and the line after it, beside the way back; the file has no header of its own.
     expect(root.querySelector('.file-overlay .fake')!.textContent).toBe('file src/new.ts at 12');
-    expect(root.querySelector('.changes-bar .changes-file-title bdi')!.textContent).toBe('src/new.ts');
+    expect(root.querySelector('.changes-bar .file-path bdi')!.textContent).toBe('src/new.ts');
     expect(root.querySelector('.changes-bar .diff-at')!.textContent).toBe(':12');
     expect(root.querySelector('.file-overlay .diff-head')).toBeNull();
     expect(root.querySelector('[data-action="diff-open-vscode"]')).toBeNull();
@@ -1127,7 +1127,7 @@ describe('the Changes list', () => {
     await flush();
     await flush();
     // The file view lies under the bar, whose Wrap wraps the file too; the file's header has no Wrap of its own.
-    const fileWrap = () => root.querySelector<HTMLElement>('.changes-bar > [data-action="changes-wrap"]')!;
+    const fileWrap = () => root.querySelector<HTMLElement>('.changes-bar [data-action="changes-wrap"]')!;
 
     expect(root.querySelector('.file-overlay [data-action="changes-wrap"]')).toBeNull();
 

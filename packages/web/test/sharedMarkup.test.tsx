@@ -5,7 +5,7 @@ import { mount } from '../src/island.js';
 import { EMPTY } from '../src/model.js';
 import type { PageState } from '../src/model.js';
 import { newView, renderMicButton, renderVoice } from '../src/render.js';
-import { renderArtifactView } from '../src/side.js';
+import { FileBody } from '../src/fileView.js';
 import { renderHistory } from '../src/history.js';
 import type { HistoryHead } from '../src/history.js';
 import { renderTimeline } from '../src/timeline.js';
@@ -87,6 +87,6 @@ describe('HTML from the shared renderers', () => {
     expect(markupText(renderShared(renderVoice(voice)))).toEqual([]);
     expect(markupText(renderShared(renderVoice({ ...voice, here: false })))).toEqual([]);
     expect(markupText(renderShared(renderMicButton(voice)))).toEqual([]);
-    expect(markupText(renderArtifactView('k', { path: 'chat/a.md', owner: 'chat', kind: 'doc', title: 'A', ext: 'md', type: 'markdown', updatedAt: 1 }, renderMarkdown('# A\n\n\`\`\`\ncode\n\`\`\`')))).toEqual([]);
+    expect(markupText(<FileBody kind="markdown" name="A" html={renderMarkdown('# A\n\n\`\`\`\ncode\n\`\`\`')} />)).toEqual([]);
   });
 });

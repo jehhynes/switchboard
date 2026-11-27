@@ -1,7 +1,6 @@
-// Local file links (architecture.md § Web page): a reply's or a status's link to a file or folder on this computer, relative to the session's
-// working folder or a file: URI, often with #L<line>, opens in a closable tab of its own, as a diff does: Markdown drawn as an artifact is,
-// pictures and PDFs in the page, code and text in the diff viewer's file view at the line, a folder as a list of its entries.
-import type { ComponentChild, ComponentChildren, VNode } from 'preact';
+// Local file links (architecture.md § Web page): a reply's or a status's link to a file on this computer, relative to the session's working
+// folder or a file: URI, often with #L<line>, opens in a closable file tab of its own, drawn by the file viewer (fileView.tsx) as an artifact's
+// tab is; a link to a folder opens the Changes tab's explorer at that folder instead.
 import { FileIcon } from './fileIcons.js';
 
 export { linkTarget, localFileUrl } from './localLinks.js';
@@ -9,11 +8,7 @@ export type { LocalFileData } from './localLinks.js';
 import { linkTarget, localFileUrl, localMarkdown } from './localLinks.js';
 import type { LocalFileData } from './localLinks.js';
 import { readVersion } from './readVersion.js';
-import type { DiffModule } from './diff/types.js';
-import { CodeDraw, FileBody, WrapButton } from './fileView.js';
-import { diffLayout } from './changes.js';
-import type { DiffLayout, DiffWrap } from './changes.js';
-import { keepWrap, storedWrap } from './wrapPref.js';
+import type { FileViews, ViewKind } from './fileView.js';
 import { filePath } from './tabs.js';
 
 type LocalEntry = { state: 'loading' } | { state: 'ok'; data: LocalFileData; version: string; etag: string | null } | { state: 'error'; error: string };
@@ -35,9 +30,6 @@ export interface LocalFilesView {
 /** The most file tabs a conversation keeps; opening another closes the oldest. */
 export const LOCAL_TABS_MAX = 12;
 
-/** The file tab's type badge, by the kind the hub read. */
-const KIND_NAMES: Record<LocalFileData['kind'], string> = { text: 'Text', markdown: 'Markdown', image: 'Image', pdf: 'PDF', binary: 'File', dir: 'Folder' };
-
 const baseName = (path: string): string => path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || path;
 
 /** A tab's name: the file's, once read, else the last part of the target. */
@@ -45,23 +37,31 @@ export function localTabName(tab: LocalTab): string {
   return tab.entry.state === 'ok' ? tab.entry.data.name : baseName(tab.target);
 }
 
-/** A file's tab, after the artifact tabs and before Changes (tabs.ts), with its file's icon and a close mark. */
-export function LocalTabButton({ tab, selected }: { tab: LocalTab; selected: boolean }) {
-  const name = localTabName(tab);
-  const dir = tab.entry.state === 'ok' && tab.entry.data.kind === 'dir';
-  const title = tab.entry.state === 'ok' ? tab.entry.data.path : tab.target;
-
+/**
+ * A file's tab, the same for a file tab and an artifact's (header.tsx): its file's icon, with the unread dot on its corner while `unread`, its
+ * label and a close mark beside it in one cell, so each takes the keyboard on its own.
+ */
+export function FileTab({ attrs = {}, open, close, path, label, title, selected, unread = false, className = '' }: { attrs?: Record<string, string>; open: Record<string, string>; close: Record<string, string>; path: string; label: string; title: string; selected: boolean; unread?: boolean; className?: string }) {
   return (
-    <span class={`tab diff-tab local-tab${selected ? ' selected' : ''}`} role="presentation">
-      <button class="tab-open" type="button" role="tab" data-action="local-tab" data-local={String(tab.id)} aria-selected={selected} tabindex={selected ? 0 : -1} title={tab.line === null ? title : `${title}:${tab.line}`}>
-        {dir ? <span class="codicon codicon-folder" aria-hidden="true"></span> : <FileIcon path={name} />}
-        <span class="tab-label">{name}</span>
+    <span class={`tab file-tab ${className}${selected ? ' selected' : ''}`} role="presentation" {...attrs}>
+      <button class="tab-open" type="button" role="tab" {...open} aria-selected={selected} tabindex={selected ? 0 : -1} title={title} aria-label={unread ? `${label}, unread` : label}>
+        <FileIcon path={path} />
+        {unread ? <span class="unread-dot" aria-hidden="true"></span> : null}
+        <span class="tab-label">{label}</span>
       </button>
-      <button class="tab-close" type="button" data-action="local-close" data-local={String(tab.id)} aria-label={`Close ${name}`} title="Close" tabindex={selected ? 0 : -1}>
+      <button class="tab-close" type="button" {...close} aria-label={`Close ${label}`} title="Close" tabindex={selected ? 0 : -1}>
         <span class="codicon codicon-close" aria-hidden="true"></span>
       </button>
     </span>
   );
+}
+
+/** A file tab, after the artifact tabs (tabs.ts). */
+export function LocalTabButton({ tab, selected }: { tab: LocalTab; selected: boolean }) {
+  const name = localTabName(tab);
+  const title = tab.entry.state === 'ok' ? tab.entry.data.path : tab.target;
+
+  return FileTab({ open: { 'data-action': 'local-tab', 'data-local': String(tab.id) }, close: { 'data-action': 'local-close', 'data-local': String(tab.id) }, path: name, label: name, title: tab.line === null ? title : `${title}:${tab.line}`, selected, className: 'diff-tab local-tab' });
 }
 
 /** What the file tab says in place of the file: a read on its way, why it failed, a binary file or one too large. */
@@ -96,19 +96,16 @@ export interface LocalFilesDeps {
   keepArtifact(path: string): void;
   /** Closes a tab and shows its neighbour when it showed (`closeDoc` in main.ts): `file:<path>`. */
   closeDoc(id: string): void;
-  loadDiff(): Promise<DiffModule | null>;
-  /** Empties a pane Preact drew into, before the file view draws into it itself. */
-  takePane(pane: HTMLElement): void;
-  /** Draws a Preact tree into a pane. */
-  drawPane(pane: HTMLElement, tree: ComponentChild): void;
-  /** Draws the Mermaid diagrams in a pane. */
-  drawDiagrams(pane: HTMLElement): void;
+  /** Opens a folder a link named, by its real path, in the Changes tab's explorer, or says why it cannot. */
+  openFolder(path: string): void;
+  /** The page's file viewer, which draws the tab shown. */
+  views: FileViews;
+  /** A path as the head shows it: worktree-relative inside the worktree, else as it is. */
+  shownPath?(path: string): string;
   /** Whether the file tab is in view: the tab shown in its strip, on a page the operator can see. */
   inView(): boolean;
   /** What the page shows: its page key and scope generation, so an answer read for an earlier one, as before a reconnect or a change of session, is dropped. */
   shown(): string;
-  /** The diff viewer's layout and wrapping, from the settings (`web.diffLayout`, `web.diffWrap`), which a code tab's Wrap follows until this device toggles it. */
-  diffSettings?(): { layout: DiffLayout; wrap: DiffWrap };
 }
 
 /** The page's side of local file links: opens and closes their tabs, reads each file from the hub and draws the one shown. */
@@ -118,16 +115,12 @@ export class LocalFilesController {
   #ids = 0;
   /** The tabs a restore put back, until the operator opens one, whose giving way to an artifact is no choice of the operator's. */
   readonly #restored = new WeakSet<LocalTab>();
-  /** The file views it draws code into, each dropped once its host leaves the page. */
-  readonly #code: CodeDraw;
   /** The tabs being read, so a tab is never read twice at once. */
   readonly #reading = new Set<LocalTab>();
   /** The tabs asked to be read again while a read was on its way: that read's answer is dropped and the tab read again at once. */
   readonly #newer = new WeakSet<LocalTab>();
 
-  constructor(private readonly deps: LocalFilesDeps) {
-    this.#code = new CodeDraw({ loadDiff: () => deps.loadDiff(), takePane: (pane) => deps.takePane(pane) });
-  }
+  constructor(private readonly deps: LocalFilesDeps) {}
 
   /** Follows the page's work item (`followed` in main.ts): another one closes every file tab; a new session of the same one does not. */
   follow(id: string | null): void {
@@ -147,7 +140,7 @@ export class LocalFilesController {
   codeShown(): boolean {
     const tab = this.shown();
 
-    return tab?.entry.state === 'ok' && tab.entry.data.kind === 'text' && tab.entry.data.contents !== null;
+    return tab?.entry.state === 'ok' && tab.entry.data.contents !== null && localNote(tab.entry) === null && (tab.entry.data.kind === 'text' || (tab.entry.data.kind === 'markdown' && this.deps.views.source(`file:${filePath(tab)}`)));
   }
 
   /**
@@ -324,12 +317,23 @@ export class LocalFilesController {
       return;
     }
 
+    // A folder opens in the Changes tab's explorer, not in a tab; one a restore or a read again finds gives way unseen.
+    if (entry.state === 'ok' && entry.data.kind === 'dir') {
+      this.deps.closeDoc(`file:${filePath(tab)}`);
+
+      if (!again && !this.#restored.has(tab)) {
+        this.deps.openFolder(entry.data.path);
+      }
+
+      return;
+    }
+
     tab.entry = entry;
     this.deps.draw();
   }
 
   /**
-   * Handles a click on a local file link, a file tab or a folder's entry; false for any other click. A paired device's page opens links too: the
+   * Handles a click on a local file link or a file tab; false for any other click. A paired device's page opens links too: the
    * hub sends it only files in the session's working folder and its work item's checkouts, and says why it refuses any other (architecture.md § Remote access).
    */
   click(target: HTMLElement): boolean {
@@ -361,22 +365,10 @@ export class LocalFilesController {
       return true;
     }
 
-    if (action === 'file-wrap') {
-      // The opposite of what the tab shows, kept on this device for the Changes tab's diffs too.
-      keepWrap(this.#wrapped(target.closest<HTMLElement>('.diff-pane')) ? 'off' : 'on');
-      this.deps.draw();
-      return true;
-    }
-
-    if (action === 'local-entry') {
-      this.deps.openDoc(`file:${button!.dataset['path'] ?? ''}`, null);
-      return true;
-    }
-
-    return false;
+    return this.deps.views.click(target);
   }
 
-  /** Draws the tab shown into a pane: the file view for code and text, else the page's own drawing of the file or folder. */
+  /** Draws the tab shown into a pane through the file viewer. */
   draw(pane: HTMLElement): void {
     const tab = this.shown();
     const key = this.deps.key();
@@ -385,34 +377,52 @@ export class LocalFilesController {
       return;
     }
 
-    const note = localNote(tab.entry);
+    const data = tab.entry.state === 'ok' ? tab.entry.data : null;
+    const path = data?.path ?? tab.target;
+    const kind = viewKind(data);
+    const raw = data !== null && (kind === 'image' || kind === 'pdf' || kind === 'audio' || kind === 'video') ? rawUrl(key, data) : undefined;
 
-    if (note === null && tab.entry.state === 'ok' && tab.entry.data.kind === 'text') {
-      this.#drawCode(pane, tab, tab.entry.data, tab.entry.version);
-      return;
-    }
-
-    this.drop(true);
-    this.deps.drawPane(pane, <LocalView key={`${tab.id}`} tab={tab} note={note} pageKey={key} />);
-    this.deps.drawDiagrams(pane);
-  }
-
-  /** Whether a code tab's long lines wrap in `pane`: this device's Wrap choice, else `web.diffWrap`, as the Changes tab's file view decides. */
-  #wrapped(pane: HTMLElement | null): boolean {
-    const settings = this.deps.diffSettings?.() ?? { layout: 'auto', wrap: 'off' };
-
-    return diffLayout(settings.layout, storedWrap() ?? settings.wrap, pane?.clientWidth || (typeof innerWidth === 'number' ? innerWidth : 0)).wrap;
-  }
-
-  #drawCode(pane: HTMLElement, tab: LocalTab, data: LocalFileData, version: string): void {
-    const wrap = this.#wrapped(pane);
-
-    this.#code.draw(pane, { place: `${tab.id}\u0000${tab.line ?? ''}`, version, path: data.path, contents: data.contents ?? '', line: tab.line, wrap, suffix: tab.line === null ? null : <span class="diff-at">:{tab.line}</span>, meta: <WrapButton wrapped={wrap} action="file-wrap" /> }, 'diff-view local-code');
+    this.deps.views.draw(pane, {
+      id: `file:${filePath(tab)}`,
+      version: tab.entry.state === 'ok' ? tab.entry.version : tab.entry.state,
+      kind,
+      title: localTabName(tab),
+      path,
+      shown: this.deps.shownPath?.(path) ?? path,
+      line: tab.line,
+      changed: data?.modified ?? null,
+      contents: data?.contents ?? null,
+      markdown: kind === 'markdown' && data !== null ? localMarkdown(key, data) : undefined,
+      ...(raw === undefined ? {} : { rawUrl: raw }),
+      note: localNote(tab.entry),
+      open: kind === 'markdown' ? { action: 'artifact-window' } : raw === undefined ? null : { href: raw },
+    });
   }
 
   /** Ends the file views whose host has left the page, or every one with `all`. */
   drop(all = false): void {
-    this.#code.drop(all);
+    this.deps.views.drop(all);
+  }
+}
+
+/** How the viewer shows a file the hub read: Markdown, code and text, a picture, a PDF, a recording or a video, else nothing but a note. */
+export function viewKind(data: LocalFileData | null): ViewKind {
+  if (data === null) {
+    return 'code';
+  }
+
+  switch (data.kind) {
+    case 'markdown':
+      return 'markdown';
+    case 'text':
+      return 'code';
+    case 'image':
+    case 'pdf':
+    case 'audio':
+    case 'video':
+      return data.kind;
+    default:
+      return 'none';
   }
 }
 
@@ -421,49 +431,4 @@ function rawUrl(pageKey: string, data: LocalFileData): string {
   const url = localFileUrl(pageKey, data.path, true);
 
   return data.modified == null ? url : `${url}&v=${data.modified}`;
-}
-
-function LocalView({ tab, note, pageKey }: { tab: LocalTab; note: string | null; pageKey: string }): VNode {
-  const data = tab.entry.state === 'ok' ? tab.entry.data : null;
-  const path = data?.path ?? tab.target;
-  let body: ComponentChildren;
-
-  if (note !== null || data === null) {
-    body = <p class="empty">{note}</p>;
-  } else if (data.kind === 'dir') {
-    body = (
-      <ul class="local-entries" aria-label={`Files in ${data.name}`}>
-        {(data.entries ?? []).map((entry) => (
-          <li>
-            <button class="local-entry" type="button" data-action="local-entry" data-path={`${data.path.replace(/\/$/, '')}/${entry.name}`} title={entry.name}>
-              {entry.dir ? <span class="codicon codicon-folder" aria-hidden="true"></span> : <FileIcon path={entry.name} />}
-              <span class="local-entry-name">{entry.name}</span>
-            </button>
-          </li>
-        ))}
-        {(data.entries ?? []).length === 0 ? <li class="empty">This folder is empty.</li> : null}
-        {data.more ? <li class="empty">Only the first {data.entries?.length} entries are listed.</li> : null}
-      </ul>
-    );
-  } else if (data.kind === 'image' || data.kind === 'pdf') {
-    body = <FileBody kind={data.kind} name={data.name} rawUrl={rawUrl(pageKey, data)} />;
-  } else {
-    body = <FileBody kind="markdown" name={data.name} html={localMarkdown(pageKey, data)} />;
-  }
-
-  return (
-    <div class="artifact-view local-view" data-local={String(tab.id)}>
-      <div class="artifact-head">
-        <span class="artifact-badge">{KIND_NAMES[data?.kind ?? 'binary']}</span>
-        <span class="artifact-title" title={path}>
-          {/* The title cuts its start, right to left; the path itself reads left to right, so `../a` stays `../a`. */}
-          <bdi dir="ltr">
-            {path}
-            {tab.line === null ? null : `:${tab.line}`}
-          </bdi>
-        </span>
-      </div>
-      {body}
-    </div>
-  );
 }
