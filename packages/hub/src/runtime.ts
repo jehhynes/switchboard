@@ -48,6 +48,8 @@ export const WAKE_MS = 60_000;
 export const MARKER_PRUNE_MS = 24 * 60 * 60 * 1000;
 /** The roster, marker, wake and marker prune timers `start` sets before the poll timers. */
 const FIXED_TIMERS = 4;
+/** How many failed polls in a row show a source's error (architecture.md § Web page, List header). */
+export const POLL_FAILURES_SHOWN = 2;
 /** How long a done or link report waits for the source read that checks it (PRD R10, R52). */
 export const REPORT_CHECK_MS = 6_000;
 /** When the source is read again after a done report it lists as assigned; GitHub issue search lags an unassignment by seconds (mechanics M34). */
@@ -159,8 +161,10 @@ export class Runtime {
   private config: Config;
   private sources = new Map<string, Source>();
   private sourceErrors: Record<string, string> = {};
-  /** What each source's last poll left out, such as an issue another source owns (PRD R44). */
-  private sourceNotes: Record<string, string[]> = {};
+  /** Each source's failed polls in a row; its error shows from `POLL_FAILURES_SHOWN`. */
+  private pollFailures: Record<string, number> = {};
+  /** The issues a source left out because another source owns them (PRD R44), each logged once, as `<source> <url>`. */
+  private readonly ownersLogged = new Set<string>();
   /** The pull requests of open work items' tickets, by URL, as their sources last read them (PRD R92). */
   private readonly pullRequests = new Map<string, PullRequestStatus>();
   /** When a window's focus last asked for the pull requests again. */
@@ -953,8 +957,7 @@ export class Runtime {
         if (assignment === null || 'error' in assignment) {
           const error = assignment === null ? `The ${name} source cannot read the assignment of ${ticket.ref}.` : assignment.error;
           if (this.sources.get(name) === source) {
-            this.sourceErrors[name] = error;
-            this.send({ type: 'poll-failed', source: name, error });
+            this.pollFailed(name, error);
           }
           return null;
         }
@@ -971,20 +974,21 @@ export class Runtime {
     }
 
     if ('error' in result) {
-      this.sourceErrors[name] = result.error;
-      this.send({ type: 'poll-failed', source: name, error: result.error });
+      this.pollFailed(name, result.error);
       return null;
     }
 
     // An issue on two boards belongs to the source that stored it first (PRD R44). Checked after the last await, so another source's poll
-    // cannot store the issue between this check and this poll's event.
-    const notes: string[] = [];
-
+    // cannot store the issue between this check and this poll's event. It is logged once per issue, not shown, since nothing needs doing.
     result.tickets = result.tickets.filter((entry) => {
       const owner = entry.url === '' ? null : this.deps.store.ticketByUrl(entry.url);
 
       if (owner !== null && owner.source !== name) {
-        notes.push(`${entry.url} belongs to ${owner.source}.`);
+        if (!this.ownersLogged.has(`${name} ${entry.url}`)) {
+          this.ownersLogged.add(`${name} ${entry.url}`);
+          this.deps.log(`${name}: ${entry.url} belongs to ${owner.source}, so ${name} leaves it out.`);
+        }
+
         return false;
       }
 
@@ -992,12 +996,30 @@ export class Runtime {
     });
 
     delete this.sourceErrors[name];
-    this.sourceNotes[name] = notes;
+    delete this.pollFailures[name];
     this.send({ type: 'poll', source: name, tickets: result.tickets, assignments });
     await this.findWorktrees(name, source);
     await this.readPullRequests(name, source);
 
     return result.tickets;
+  }
+
+  /**
+   * A failed poll: the flow hears of each, and its error shows from the `POLL_FAILURES_SHOWN`th in a row, so a failure the next poll clears
+   * never shows; the first is logged.
+   */
+  private pollFailed(name: string, error: string): void {
+    const failures = (this.pollFailures[name] ?? 0) + 1;
+
+    this.pollFailures[name] = failures;
+
+    if (failures >= POLL_FAILURES_SHOWN) {
+      this.sourceErrors[name] = error;
+    } else {
+      this.deps.log(`${name}: poll failed; shown if the next poll fails too: ${error}`, 'warn');
+    }
+
+    this.send({ type: 'poll-failed', source: name, error });
   }
 
   /**
@@ -1979,7 +2001,6 @@ export class Runtime {
       nodeError: this.nodeError,
       hookErrors: { ...this.hookErrors },
       sourceErrors: { ...this.sourceErrors },
-      sourceNotes: { ...this.sourceNotes },
       pullRequests: Object.fromEntries(this.pullRequests),
       kinds: Object.fromEntries(Object.values(settings.sources).map(({ kind }) => [kind, this.deps.kindInfo?.(kind) ?? { label: kind }])),
       now: this.deps.now(),
@@ -2002,7 +2023,7 @@ export class Runtime {
   private buildSources(): void {
     this.sources.clear();
     this.sourceErrors = {};
-    this.sourceNotes = {};
+    this.pollFailures = {};
 
     // Only a valid file lists the configured sources; with an invalid one the previous settings stay in force.
     if (this.config.settingsError === null) {

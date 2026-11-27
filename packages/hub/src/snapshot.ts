@@ -27,7 +27,6 @@ export interface SnapshotInputs {
   nodeError: string | null;
   hookErrors: Record<Provider, string | null>;
   sourceErrors: Record<string, string>;
-  sourceNotes: Record<string, string[]>;
   /** The pull requests of open work items, by URL, as their sources last read them (PRD R92). */
   pullRequests: Record<string, PullRequestStatus>;
   /** Each source kind's plugin label. */
@@ -102,8 +101,6 @@ export interface Snapshot {
   /** The folder holding settings.json. */
   configDir: string;
   errors: { settings: string | null; playbooks: string[]; hooks: string | null; sources: Record<string, string> };
-  /** What the enabled sources' last polls left out, such as `personal: <url> belongs to github.` (PRD R44); absent from an older hub's. */
-  notes?: string[];
   /** How rows shorten other repositories' keys (PRD R27); absent from an older hub's. */
   repoKeys?: RepoKeys;
   /** The pull requests of open work items, by URL, as their sources last read them (PRD R92); absent from an older hub. */
@@ -231,7 +228,6 @@ export function buildSnapshot(store: Store, inputs: SnapshotInputs): Snapshot {
       hooks: [inputs.nodeError, ...PROVIDERS.map((provider) => inputs.hookErrors[provider])].filter((error) => error !== null).join(' ') || null,
       sources: { ...inputs.sourceErrors },
     },
-    notes: [...sources].flatMap((name) => (inputs.sourceNotes[name] ?? []).map((note) => `${name}: ${note}`)),
     repoKeys: repoKeysOf(settings, store.reposBySource()),
     pullRequests: { ...inputs.pullRequests },
     ...(held.length > 0 ? { held } : {}),

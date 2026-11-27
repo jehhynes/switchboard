@@ -30,7 +30,6 @@ const inputs = (now = T0): SnapshotInputs => ({
   nodeError: null,
   hookErrors: { claude: null, codex: null },
   sourceErrors: {},
-  sourceNotes: {},
   pullRequests: {},
   kinds: {},
   now,

@@ -313,10 +313,24 @@ describe('Runtime', () => {
     expect(store.triage(1)).toMatchObject({ playbook: 'dev:develop', error: null });
   });
 
-  it('records a failed poll and a failed triage', async () => {
-    const { store, cli, source, runtime } = setup();
+  it('records a failed poll from the second in a row, and a failed triage', async () => {
+    const { store, cli, source, runtime, logs } = setup();
 
+    // One failed poll is logged, not shown, and a good poll after it starts the count again.
+    source.result = { error: 'GitHub is down.' };
+    await runtime.pollSource('github');
+    expect(runtime.snapshot().errors.sources).toEqual({});
+    expect(logs).toContain('github: poll failed; shown if the next poll fails too: GitHub is down.');
+    source.result = { tickets: [] };
+    await runtime.pollSource('github');
+    source.result = { error: 'GitHub is down.' };
+    await runtime.pollSource('github');
+    expect(runtime.snapshot().errors.sources).toEqual({});
+
+    // A second failure in a row shows, with the latest error.
     source.result = { error: 'The GitHub CLI is not signed in. Run gh auth login.' };
+    await runtime.pollSource('github');
+    expect(runtime.snapshot().errors.sources).toEqual({ github: 'The GitHub CLI is not signed in. Run gh auth login.' });
     await runtime.pollSource('github');
     expect(runtime.snapshot().errors.sources).toEqual({ github: 'The GitHub CLI is not signed in. Run gh auth login.' });
 

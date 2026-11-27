@@ -324,11 +324,12 @@ describe('Runtime', () => {
     expect(runtime.snapshot().errors.sources).toEqual({});
   });
 
-  it('leaves an issue on two boards with the source that stored it first and notes it, even after that source is turned off (PRD R44)', async () => {
+  it('leaves an issue on two boards with the source that stored it first and logs it once, even after that source is turned off (PRD R44)', async () => {
     const cfg = config();
     cfg.settings.sources['personal'] = { ...cfg.settings.sources['github']! };
     const personal = new FakeSource();
-    const { runtime, store, source } = setup(cfg, undefined, undefined, undefined, { personal });
+    const { runtime, store, source, logs } = setup(cfg, undefined, undefined, undefined, { personal });
+    const owned = (line: string) => line.includes('belongs to');
     const shared = { ...issue('63'), url: 'https://github.com/Acme/Widgets/issues/63' };
 
     source.result = { tickets: [{ ...shared, url: 'https://github.com/acme/widgets/issues/63' }] };
@@ -337,18 +338,21 @@ describe('Runtime', () => {
     await runtime.pollSource('personal');
 
     expect(store.tickets('personal').map((ticket) => ticket.sourceKey)).toEqual(['4']);
-    expect(runtime.snapshot().notes).toEqual(['personal: https://github.com/Acme/Widgets/issues/63 belongs to github.']);
+    expect(logs.filter(owned)).toEqual(['personal: https://github.com/Acme/Widgets/issues/63 belongs to github, so personal leaves it out.']);
+    expect(runtime.snapshot().errors.sources).toEqual({});
 
     expect(runtime.setSourceEnabled('github', false)).toBeNull();
     await runtime.pollSource('personal');
     expect(store.tickets('personal').map((ticket) => ticket.sourceKey)).toEqual(['4']);
+    // Logged once per issue, not on every poll.
+    expect(logs.filter(owned)).toHaveLength(1);
   });
 
   it('keeps one ticket for an issue two overlapping polls list, whichever stores it first (PRD R44)', async () => {
     const cfg = config();
     cfg.settings.sources['personal'] = { ...cfg.settings.sources['github']! };
     const personal = new FakeSource();
-    const { runtime, store, source } = setup(cfg, undefined, undefined, undefined, { personal });
+    const { runtime, store, source, logs } = setup(cfg, undefined, undefined, undefined, { personal });
     const shared = { ...issue('63'), url: 'https://github.com/acme/widgets/issues/63' };
     const slow = deferred();
 
@@ -362,7 +366,7 @@ describe('Runtime', () => {
     await first;
 
     expect([...store.tickets('github'), ...store.tickets('personal')].map((ticket) => `${ticket.source} ${ticket.sourceKey}`)).toEqual(['personal acme/widgets#63']);
-    expect(runtime.snapshot().notes).toEqual(['github: https://github.com/acme/widgets/issues/63 belongs to personal.']);
+    expect(logs.filter((line) => line.includes('belongs to'))).toEqual(['github: https://github.com/acme/widgets/issues/63 belongs to personal, so github leaves it out.']);
   });
 
   it("fails a start in a pattern's folder that holds no clone, naming the repository, and starts one that does (PRD R21)", async () => {

@@ -209,6 +209,9 @@ describe('Runtime', () => {
     source.result = { error: 'GitHub is down.' };
     expect(await runtime.report({ sessionId: 's1', kind: 'done' })).toEqual({ refused: null });
     expect(store.workItem(1)?.status).toBe('done');
+    // One failed read is not yet shown (POLL_FAILURES_SHOWN); the next poll that fails shows it.
+    expect(runtime.snapshot().errors.sources).toEqual({});
+    await runtime.pollSource('github');
     expect(runtime.snapshot().errors.sources).toEqual({ github: 'GitHub is down.' });
   });
 

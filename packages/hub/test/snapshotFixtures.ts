@@ -16,7 +16,6 @@ export const inputs = (): SnapshotInputs => ({
   nodeError: null,
   hookErrors: { claude: null, codex: null },
   sourceErrors: {},
-  sourceNotes: {},
   pullRequests: {},
   kinds: {},
   now: T0,
