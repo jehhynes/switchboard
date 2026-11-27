@@ -3941,9 +3941,10 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
   };
   /**
    * Opens a work item; `sameHead` for a conversation the shown work item's dropdown made, which opens under its head. `sessionId` names an earlier
-   * session of it to show read-only; null shows its current session.
+   * session of it to show read-only; null shows its current session. `behind` selects it for a row menu's control that acts in place: a phone's
+   * list and a drawer stay shown, and a refusal shows in the toast.
    */
-  const select = async (workItemId: number, sameHead = false, sessionId: string | null = null): Promise<void> => {
+  const select = async (workItemId: number, sameHead = false, sessionId: string | null = null, behind = false): Promise<void> => {
     const left = leaveComments();
 
     if (left !== true && !(await left)) {
@@ -3952,6 +3953,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
     if (hostSelection !== null && hostSelection.item !== workItemId) hostSelection = null;
     const listing = view.list || wanted === null;
+    // The phone's list stays in the conversation's place.
+    const stay = behind && listing && isPhone();
 
     listFocus = `item:${workItemId}`;
     if (pendingRowControl?.key !== listFocus) pendingRowControl = null;
@@ -3961,14 +3964,16 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     keepScroll();
     rememberTabs();
 
-    // Choosing a work item hides the drawer.
-    closeDrawer();
+    // Choosing a work item hides the drawer, unless the control acts in place.
+    if (!behind) closeDrawer();
     wanted = workItemId;
     wantedSession = sessionId;
     showError(null);
     // Another work item shows its own head and a placeholder at once, not the one shown before (opening.tsx).
     // A conversation of the shown work item's dropdown opens under the same head, as before.
-    opening = !sameHead && (state.scope === null || !state.scope.conversations.some((entry) => entry.workItemId === workItemId)) ? { workItemId, title: rowTitle(workItemId), error: null } : null;
+    // Behind a phone's list or a drawer it opens as under the shown head, so a refusal shows in the toast rather than in the conversation the
+    // list hides.
+    opening = !sameHead && !behind && (state.scope === null || !state.scope.conversations.some((entry) => entry.workItemId === workItemId)) ? { workItemId, title: rowTitle(workItemId), error: null } : null;
     hostPending = opening === null ? workItemId : null;
 
     // Asked again after its open failed.
@@ -3976,7 +3981,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       acked = null;
     }
 
-    view.list = false;
+    view.list = stay;
     view.picker = false;
     view.actions = false;
     view.sheet = null;
@@ -3985,10 +3990,11 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
     closeMenu();
     view.artifact = null;
     // On a phone, a conversation opened from the list is a history entry of its own, which the browser's back, as Android's back button, leaves.
-    if (listing && isPhone() && !conversationEntry(history.state)) {
+    // Behind the phone's list the address stays the list's (keepRoute).
+    if (!stay && listing && isPhone() && !conversationEntry(history.state)) {
       history.replaceState(history.state, '', LIST_HASH);
       history.pushState({ [CONVERSATION_ENTRY]: true }, '', `#w=${workItemId}`);
-    } else {
+    } else if (!stay) {
       history.replaceState(history.state, '', `#w=${workItemId}`);
     }
 
@@ -4125,7 +4131,8 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         listFocus = wanted === null ? null : `item:${wanted}`;
         pendingRowControl = null;
         if (view.rowMenu === `item:${asked}`) closeMenus();
-        history.replaceState(history.state, '', wanted === null ? '#' : `#w=${wanted}`);
+        // A phone's list keeps its own address.
+        history.replaceState(history.state, '', isPhone() && view.list ? LIST_HASH : wanted === null ? '#' : `#w=${wanted}`);
         showError(String(answer.body['error'] ?? FAILURE_TEXT.bad));
         draw();
       }
@@ -4478,12 +4485,32 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
 
   // ---- Clicks ----
   /** Scope-bound menu controls select their row only when chosen, and wait for the hub's matching scope before running. */
-  const forRow = (key: string, run: () => void): void => {
+  /**
+   * Scope-bound menu controls select their row only when chosen, and wait for the hub's matching scope before running, since the hub runs a work
+   * item's controls only on the page's selected one. `opens` for a control that shows the work item (History, Open report, a link in its Browser
+   * tab); any other acts in place, selecting the row behind a phone's list or a drawer, which stay shown.
+   */
+  const forRow = (key: string, run: () => void, opens = false): void => {
     const row = rowByKey(key);
     if (row === null) return;
-    if (row.workItemId === null || (row.workItemId === state.scope?.workItemId && (wanted === null || wanted === row.workItemId))) { run(); return; }
+    if (row.workItemId === null || (row.workItemId === state.scope?.workItemId && (wanted === null || wanted === row.workItemId))) {
+      // The shown work item behind a phone's list comes forward for a control that shows it, which runs once select has drawn it, after any
+      // card comment it sends first, unless another choice came meanwhile.
+      if (opens && row.workItemId !== null && isPhone() && view.list) {
+        const id = row.workItemId;
+        // select() takes the next token at once; a later select takes another.
+        const token = selecting + 1;
+
+        void select(id).then(() => {
+          if (selecting === token && wanted === id && state.scope?.workItemId === id) run();
+        });
+        return;
+      }
+      run();
+      return;
+    }
     pendingRowControl = { key, run };
-    void select(row.workItemId);
+    void select(row.workItemId, false, null, !opens);
   };
   /** Selects the open work item's History tab and gives it the focus. */
   const openHistory = (): void => {
@@ -4851,7 +4878,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         openLink(button!.dataset['row'] ?? '', button!.dataset['link'] ?? '', event.ctrlKey || event.metaKey);
         break;
       case 'row-history':
-        // The menu's work item's History tab: the header's menu names the open work item; a row's menu in the list selects its row first (forRow).
+        // The menu's work item's History tab: the header's menu names the open work item; a row's menu in the list opens its row first (forRow).
         forRow(button!.dataset['row'] ?? '', () => {
           closeMenus();
 
@@ -4862,7 +4889,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
           } else {
             openHistory();
           }
-        });
+        }, true);
         break;
       case 'history-chip':
         if (shownHistory !== null) {
@@ -4958,7 +4985,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
         forRow(button!.dataset['row'] ?? '', () => {
           closeMenus();
           openDoc(`file:${button!.dataset['file'] ?? ''}`);
-        });
+        }, true);
         break;
       case 'row-menu':
       case 'pool-menu': {
@@ -5769,7 +5796,7 @@ export function startPage(root: HTMLElement, deps: PageDeps): { state(): PageSta
       } else openNewTab(target);
       return;
     }
-    if (state.iframeBrowser === true && iframe.available && row.workItemId !== null && frameUrl(target)) { forRow(key, () => openBrowserLink(target)); return; }
+    if (state.iframeBrowser === true && iframe.available && row.workItemId !== null && frameUrl(target)) { forRow(key, () => openBrowserLink(target), true); return; }
     openTab(target, () => {
       if (standalone() && localPage()) {
         void post('row-open', { ...rowTarget(row), url }).then((answer) => answer.status === 200 || showError(String(answer.body['error'] ?? `The link did not open (status ${answer.status}).`)));

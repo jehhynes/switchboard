@@ -72,6 +72,103 @@ it('selects only when a scope-bound menu control is chosen, waits for its matchi
   expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ workItemId: 2, scopeGen: 2, label: 'Mark done' });
 });
 
+it('RowMenuControl_PhoneList_ActsInPlaceWithTheListShown', async () => {
+  window.innerWidth = 375;
+  history.replaceState(null, '', '#list');
+  const actions = [
+    { label: 'Mark done', action: 'mark-done', icon: 'check', group: 'state' as const, confirm: null, input: null },
+    { label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state' as const, confirm: null, input: null },
+    { label: 'Add comment…', action: 'comment', icon: 'comment', group: 'notes' as const, confirm: null, input: { question: 'Add a comment', detail: '', action: 'Add comment', text: null, choice: null } },
+  ];
+  const source = start([group('review', [row(1, { actions }), row(2, { actions, history: { ticketId: 2, key: 'gh 2' } })])]);
+  const scope = (id: number) => ({ kind: 'page', key: 'k', folder: 'D:/scratch', title: `Item ${id}`, scopeGen: id, conversations: [], workItemId: id, cwd: 'D:/scratch', sessionId: null });
+  const choose = (id: number, label: string): void => {
+    key(el(`.row[data-row="item:${id}"]`), 'ContextMenu');
+    el(label === 'History' ? '.row-menu [data-action="row-history"]' : `.row-menu [data-label="${label}"]`).click();
+  };
+  const listing = (): boolean => root.classList.contains('listing');
+  const selects = (): unknown[] => posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body['workItemId']);
+  expect(document.documentElement.classList.contains('phone')).toBe(true);
+
+  // Snooze… selects its row behind the list and opens its sheet over the list once the row's scope comes; Cancel leaves the list shown.
+  choose(2, 'Snooze…');
+  expect(listing()).toBe(true);
+  await flush();
+  expect(selects()).toEqual([2]);
+  source.emit('scope', { scope: scope(2) });
+  await flush();
+  expect(el('.sheet-title').textContent).toBe('Snooze Item 2');
+  expect(listing()).toBe(true);
+  el('.sheet-foot [data-action="sheet-cancel"]').click();
+  expect(root.querySelector('.sheet')).toBeNull();
+  expect(listing()).toBe(true);
+  // The focus goes back to the row in the list.
+  expect(document.activeElement).toBe(el('.row[data-row="item:2"]'));
+  // No history entry of a conversation, so the browser's back does not land in one.
+  expect(history.state).not.toEqual({ switchboardConversation: true });
+  expect(location.hash).toBe('#list');
+
+  // Mark done runs on its row's scope, the list still shown.
+  choose(1, 'Mark done');
+  await flush();
+  source.emit('scope', { scope: scope(1) });
+  await flush();
+  expect(posts.filter((post) => post.url.endsWith('/row-action')).map((post) => post.body)).toEqual([expect.objectContaining({ workItemId: 1, scopeGen: 1, label: 'Mark done' })]);
+  expect(listing()).toBe(true);
+  expect(document.activeElement).toBe(el('.row[data-row="item:1"]'));
+
+  // Add comment…'s text sheet opens over the list too.
+  choose(2, 'Add comment…');
+  await flush();
+  source.emit('scope', { scope: scope(2) });
+  await flush();
+  expect(root.querySelector('.sheet .sheet-input')).not.toBeNull();
+  expect(listing()).toBe(true);
+  el('.sheet-foot [data-action="sheet-cancel"]').click();
+
+  // On the row whose work item is already selected behind the list, a control runs at once and the list stays.
+  choose(2, 'Snooze…');
+  expect(el('.sheet-title').textContent).toBe('Snooze Item 2');
+  expect(listing()).toBe(true);
+  el('.sheet-foot [data-action="sheet-cancel"]').click();
+
+  // History shows the work item, so it leaves the list.
+  choose(2, 'History');
+  await flush();
+  expect(listing()).toBe(false);
+  expect(history.state).toEqual({ switchboardConversation: true });
+});
+
+it('RowMenuControl_Drawer_StaysOpenAndShowsARefusalInTheToast', async () => {
+  window.innerWidth = 1024;
+  localStorage.setItem('switchboard.listCollapsed', '1');
+  history.replaceState(null, '', '#w=1');
+  const action = { label: 'Mark done', action: 'mark-done', icon: 'check', group: 'state' as const, confirm: null, input: null };
+  const source = start([group('review', [row(1, { actions: [action] }), row(2, { actions: [action] }), row(3, { actions: [action] })])]);
+  const scope = (id: number) => ({ kind: 'page', key: 'k', folder: 'D:/scratch', title: `Item ${id}`, scopeGen: id, conversations: [], workItemId: id, cwd: 'D:/scratch', sessionId: null });
+  source.emit('scope', { scope: scope(1) });
+  await flush();
+  el('.header > .list-toggle').click();
+  expect(root.classList.contains('drawer-open')).toBe(true);
+  key(el('.row[data-row="item:2"]'), 'ContextMenu');
+  el('.row-menu [data-label="Mark done"]').click();
+  await flush();
+  source.emit('scope', { scope: scope(2) });
+  await flush();
+  expect(posts.find((post) => post.url.endsWith('/row-action'))?.body).toMatchObject({ workItemId: 2, scopeGen: 2, label: 'Mark done' });
+  expect(root.classList.contains('drawer-open')).toBe(true);
+  // A refused select shows in the toast, not in the conversation the drawer covers.
+  refused = true;
+  key(el('.row[data-row="item:3"]'), 'ContextMenu');
+  el('.row-menu [data-label="Mark done"]').click();
+  await flush();
+  await flush();
+  expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('No longer available.');
+  expect(root.querySelector('#panel .opening-why')).toBeNull();
+  expect(root.classList.contains('drawer-open')).toBe(true);
+  expect(posts.filter((post) => post.url.endsWith('/row-action'))).toHaveLength(1);
+});
+
 it('keeps clipped link pills out of Tab order and restores them when they fit', () => {
   const links = [{ label: 'Notes', url: 'https://example.test/notes', kind: 'url' as const, badge: 'Notes', glyph: null, mentioned: false }];
   start([group('review', [row(1, { links })])]);
@@ -279,6 +376,7 @@ it.each(['ContextMenu', 'F10', 'right-click'])('opens a work-item menu with %s, 
 
 it('keeps a phone list and its menu shown without opening a conversation, and reports a refused menu control selection', async () => {
   window.innerWidth = 700;
+  history.replaceState(null, '', '#list');
   start([group('progress', [row(1, { url: 'https://example.test/1', actions: [{ label: 'Mark done', action: 'done', icon: 'check', group: 'state', confirm: null, input: null }] })])]);
   refused = true;
   key(el('.row'), 'ContextMenu');
@@ -288,8 +386,12 @@ it('keeps a phone list and its menu shown without opening a conversation, and re
   el('.row-menu [data-label="Mark done"]').click();
   await flush();
   await flush();
-  // The refused select shows in the work item's own opening place (opening.tsx).
-  expect(el('#panel .opening-why').textContent).toContain('No longer available.');
+  // The refused select behind the list shows in the toast, and the list stays, with no control run.
+  expect(root.querySelector('.toast.warning .toast-text')?.textContent).toBe('No longer available.');
+  expect(root.classList.contains('listing')).toBe(true);
+  expect(root.querySelector('#panel .opening-why')).toBeNull();
+  expect(location.hash).toBe('#list');
+  expect(posts.filter((post) => post.url.endsWith('/row-action'))).toEqual([]);
 });
 
 it('restores focus when keyed rows reorder inside the same group and closes the menu when its work-item row is clicked', () => {

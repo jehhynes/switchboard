@@ -686,6 +686,50 @@ describe('the page in use', () => {
     }
   });
 
+  it('OpeningControlsFromRowMenu_PhoneListWhileACardCommentIsSent_RunOnlyTheLatestAfterTheComment', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    try {
+      history.replaceState(null, '', '#w=1');
+      const { page, source } = start();
+      const questions = { sessionId: 's', since: 0, open: 1, oldest: 'reply:r1', drafts: {}, dismissed: [] };
+      let release = (): void => {};
+
+      hello(source, { groups: [listGroup('progress', [listRow(1, { title: 'Fix it', history: { ticketId: 1, key: 'gh 1' }, opens: [{ label: 'Open report', icon: 'file', file: 'D:/w/report.md' }] })])], items: [reply('r1', 2, { opening: '1. Which port? {#port-choice}\n   - A) 1\n   - B) 2' })], questions });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(root.classList.contains('listing')).toBe(false);
+      // A comment typed in the card, still in its pause, and then Back to the list: the work item stays shown behind it.
+      const field = root.querySelector<HTMLTextAreaElement>('textarea.qc-comment[data-card="reply:r1"]')!;
+
+      field.value = 'later';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      click('.header > button.back-toggle');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(root.classList.contains('listing')).toBe(true);
+
+      // The comment's send waits; Open report and then History from the row's menu open the work item on its History tab once it is sent, and
+      // the report, chosen first, never opens.
+      answers['/card-draft'] = { status: 200, body: {}, wait: new Promise<void>((done) => (release = done)) };
+      const menu = () => root.querySelector('.row[data-row="item:1"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true, cancelable: true }));
+
+      menu();
+      click('.row-menu [data-action="row-report"]');
+      menu();
+      click('.row-menu [data-action="row-history"]');
+      await vi.advanceTimersByTimeAsync(0);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(posts.some((post) => post.url.endsWith('/card-draft'))).toBe(true);
+      expect(root.classList.contains('listing')).toBe(false);
+      expect(root.querySelector('.tabs [data-tab="history"]')?.getAttribute('aria-selected')).toBe('true');
+      expect(posts.filter((post) => post.url.includes('/local-file'))).toEqual([]);
+      page.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps the newest Other text through a questions event from before the hub took it, so Send sends it', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 

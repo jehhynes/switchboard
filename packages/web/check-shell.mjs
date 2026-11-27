@@ -11,6 +11,7 @@
 // its text kept for screen readers; the key never drops out; a link pill is whole, its icon alone or left out whole, never cut, the last
 // first; a pill left out is no keyboard stop, and a pill shown is one only in the list's Tab stop row; the pills change with the list's width alone, without a redraw; and line 2 paints the same while
 // the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them.
+// A row menu's Snooze…, Add comment… and Mark done chosen in the list select their row once and leave the list shown, a phone's in the conversation's place.
 // Only Blocked on you's group count is in the warning text colour and none is in the accent badge's, each one not zero at 4.5:1 contrast.
 // A usage-limited session's hourglass, in its list row and, also on a desktop, the header, draws from the extra icons' face as its SVG does, not as tofu. Every control shown is a touch target of at least 44 px each way,
 // but for the Changes tree's rows and their controls, History's run rows, links, Details, group headings and chips, the Settings playbooks table and, outside a phone,
@@ -56,9 +57,11 @@ const SETTINGS_PAGES = {
 /** The modal sheets, each opened by OPEN's presses and checked by modalFailures: Delete's question, Snooze, an input dialog, the header's sheets. */
 // History's State reports sheet: opened from the pinned state at the latest, paged back two, and opened from a timeline entry.
 const REPORT_VIEWS = ['history-report', 'history-report-back', 'history-report-entry'];
-const MODAL_VIEWS = ['sheet', 'snooze', 'comment', 'new-session', 'folders', 'pair', 'held', 'log', 'extension', 'shortcut', 'holder', ...REPORT_VIEWS];
+const MODAL_VIEWS = ['sheet', 'snooze', 'comment', 'new-session', 'folders', 'pair', 'held', 'log', 'extension', 'shortcut', 'holder', ...REPORT_VIEWS, 'row-snooze', 'row-comment'];
 /** The bell's views: one notice, three, three with the dropdown open, and a one-time notice's toast with none; the list view has none either. */
 const NOTICE_VIEWS = ['notices-1', 'notices-3', 'notices-open', 'notice-toast'];
+/** A row menu's controls chosen in the list for a work item not open, which act in place: Snooze…'s and Add comment…'s sheets, and Mark done. */
+const IN_PLACE = ['row-snooze', 'row-comment', 'row-done'];
 /** The modal views whose first text box is filled past its cap, to see it grow and then scroll. */
 const GROWING = ['snooze', 'comment', 'new-session'];
 /**
@@ -70,7 +73,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['conversation', 'opening', 'history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
@@ -79,7 +82,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
+const VIEWS = ['list', ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one)), 'row-done'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -135,7 +138,8 @@ const control = (label, action, icon, group) => ({ label, action, icon, group, c
 const asking = (label, action, icon) => ({ ...control(label, action, icon, 'asking'), confirm: { question: label + ' Fix it?', detail: 'It cannot be undone.', action } });
 // The modal views' work item offers Snooze… and an input dialog beside Delete.
 const comment = { ...control('Add comment…', 'comment', 'comment', 'notes'), input: { question: 'Add a comment to Fix it', detail: 'The comment shows in the tooltip of the row and in History.', action: 'Add comment', text: null, choice: null } };
-const modalActions = ['snooze', 'comment'].includes(view) ? { actions: [approve, control('Snooze…', 'snooze', 'clock', 'state'), comment, remove] } : {};
+const inPlace = ${JSON.stringify(IN_PLACE)}.includes(view);
+const modalActions = ['snooze', 'comment'].includes(view) ? { actions: [approve, control('Snooze…', 'snooze', 'clock', 'state'), comment, remove] } : inPlace ? { actions: [approve, control('Snooze…', 'snooze', 'clock', 'state'), control('Mark done', 'done', 'pass', 'state'), comment, remove] } : {};
 const crowdedMenu = view?.endsWith('-menu') ? { actions: [approve, control('Snooze…', 'snooze', 'clock', 'state'), control('Mark done', 'done', 'pass', 'state'), control('Add comment…', 'comment', 'comment', 'notes'), asking('Stop session', 'stop', 'debug-stop'), { ...remove, group: 'asking' }], pastes: ['report', 'comment'], opens: [{ label: 'Open in VS Code', icon: 'vscode' }, { label: 'Open report', icon: 'file', file: 'D:/w/report.md' }], url: 'https://github.com/o/r/issues/1' } : {};
 const snooze = { label: 'Snooze…', action: 'snooze', icon: 'clockface', group: 'state', confirm: null, input: null };
 // The second row's line 2 holds more pills than fit beside its long playbook, so some drop out.
@@ -172,7 +176,7 @@ const groups = [...(everyGroup ? [ready, blocked] : []), { key: 'progress', titl
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
-const listing = view === 'list' || view === 'more-menu' || view === 'row-menu' || narrow !== null || ['notices-1', 'notices-3', 'notices-open', 'notice-toast'].includes(view);
+const listing = view === 'list' || view === 'more-menu' || view === 'row-menu' || inPlace || narrow !== null || ['notices-1', 'notices-3', 'notices-open', 'notice-toast'].includes(view);
 const open = !listing && !view?.startsWith('settings');
 // The opening view asks for work item 1 by its address and the hub never sends its scope, so the placeholder stays (opening.tsx).
 const loading = view === 'opening';
@@ -206,6 +210,7 @@ const artifacts = mic ? [{ path: 'chat/plan.md', owner: 'chat', kind: 'note', ti
 class FakeSource {
   constructor() {
     this.listeners = {};
+    window.__source = this;
     // The one-time notice the hub sends after a holder restart that went well, shown as a toast.
     if (view === 'notice-toast') setTimeout(() => this.emit('notice', { notice: { id: 'holder-restarted:1', text: 'The terminal holder restarted and 2 sessions resumed.', at: now } }), 120);
     setTimeout(() => this.emit('hello', { key: 'pk', groups, header, scope, sessions: open && !loading ? [session] : [], items, more: false, state: view === 'history' || view?.startsWith('history-report') ? { id: 'st', sessionId: 's', shortId: 'a3f9', endedAt: hcase === 'ended' ? now - 60000 : null, at: now - 240000, headline: 'Fix built; two tests still failing', body: 'Rebuilt the dialer registration refresh so a lapsed SIP registration renews itself.\\n\\n- **Done:** \`RegistrationMonitor\` renews 30 s before expiry; 14 of 16 tests pass.\\n- **Next:** fix \`Reconnect_AfterLapse_RestoresInbound\` and \`Renew_DuringCall_KeepsCall\`.\\n- **Needs you:** nothing yet.', stale: hcase === 'ended' ? 'session' : hcase === 'turn' ? 'turn' : null, unread: hcase !== 'ended' && hcase !== 'turn' } : view === 'tabs' ? { id: 'st', sessionId: 's', at: now, headline: 'Built', body: 'Built.', stale: null, unread: true } : null, artifacts, unread: 0, ...(mic ? { voice: { enabled: true, here: true, mic: 'listening', speaking: null, speakReplies: false, error: null, recognizer: null } } : {}) }), 20);
@@ -272,7 +277,14 @@ const stackData = { scopeGen: 3, repo: 'switchboard', root: 'D:/w', branch: 'fix
 const changeRoute = (url) => (url.includes('/v1/conversation/changes') ? changesList : url.includes('/v1/conversation/stack') ? stackData : url.includes('/v1/conversation/tree') ? { scopeGen: 3, paths: changesList.rows.map((row) => row.path), more: false } : url.includes('/v1/conversation/diff?') ? diffOf(new URL(url, location.href).searchParams.get('path')) : null);
 // Background sessions: one of a work item and one without.
 const heldRows = [{ session: 'h1', item: 'gh 1', nativeSessionId: '2f1c0a7e-1d2b-4c3d-9e8f-0a1b2c3d4e5f', cwd: 'D:/git/switchboard.worktrees/some-long-branch-name', state: 'idle', idle: '4m', memory: '182 MB', clients: 1, orphan: false, exited: false, terminal: {} }, { session: 'h2', item: '(no work item)', nativeSessionId: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d', cwd: 'D:/git/r', state: 'running', idle: '0s', memory: '240 MB', clients: 0, orphan: true, exited: false, terminal: null }];
-window.fetch = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/held-list') ? { held: heldRows } : String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : String(url).endsWith('/context-details') ? { details: contextDetails } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? planText : '') });
+// The selects and controls posted, and in the IN_PLACE views a select's work item soon after its answer, as the hub sends it.
+window.__posts = [];
+window.fetch = async (url, init) => {
+  if (String(url).endsWith('/select') || String(url).endsWith('/row-action')) window.__posts.push({ url: String(url), body: JSON.parse(init.body) });
+  if (inPlace && String(url).endsWith('/select')) setTimeout(() => window.__source.emit('hello', { key: 'pk', groups, header, scope: { kind: 'page', key: 'k', folder: 'D:/w', title: 'Fix it', scopeGen: 4, conversations: [{ workItemId: 1, title: 'Fix it', primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0 }], workItemId: 1, cwd: 'D:/w', sessionId: 's' }, sessions: [session], items: [], more: false, state: null, artifacts: [], unread: 0 }), 30);
+  return answer(url);
+};
+const answer = async (url) => ({ status: 200, ok: true, headers: new Headers(), json: async () => (changeRoute(String(url)) ?? (String(url).endsWith('/held-list') ? { held: heldRows } : String(url).endsWith('/page-devices') ? { devices: pairDevices } : String(url).endsWith('/page-pair') ? pairing : String(url).endsWith('/page-voice-enroll') ? { enrollment: { state: 'idle', endsAt: null, error: null, enrolledAt: '2026-10-02T10:00:00.000Z' } } : String(url).endsWith('/page-history') ? { view: historyView, categories: [{ key: 'state', label: 'States', icon: 'pulse' }, { key: 'you', label: 'You', icon: 'account' }, { key: 'session', label: 'Sessions', icon: 'terminal' }, { key: 'report', label: 'Reports', icon: 'comment' }, { key: 'triage', label: 'Triage', icon: 'filter' }, { key: 'ticket', label: 'Ticket', icon: 'issues' }] } : String(url).endsWith('/page-settings-read') ? settingsRead : String(url).endsWith('/page-settings-check') ? { errors: [] } : String(url).endsWith('/context-details') ? { details: contextDetails } : {})), text: async () => (String(url).includes('/v1/conversation/artifact/') ? planText : '') });
 const matchMedia = window.matchMedia.bind(window);
 window.matchMedia = (query) => (query.includes('display-mode: standalone') ? { matches: true, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : matchMedia(query));
 </script>`;
@@ -827,6 +839,10 @@ const OPEN = {
   'actions-menu': ['[data-action=actions]'],
   'more-menu': ['[data-action=list-more]'],
   'row-menu': [{ contextmenu: '#list .row[data-work-item="1"]' }],
+  // A row menu's control for the work item not open, chosen in the list (IN_PLACE).
+  'row-snooze': [{ contextmenu: '#list .row[data-work-item="1"]' }, '.row-menu [data-action=row-action][data-label="Snooze…"]'],
+  'row-comment': [{ contextmenu: '#list .row[data-work-item="1"]' }, '.row-menu [data-action=row-action][data-label="Add comment…"]'],
+  'row-done': [{ contextmenu: '#list .row[data-work-item="1"]' }, '.row-menu [data-action=row-action][data-label="Mark done"]'],
   // The tab strip's More menu, a grid rather than a list, with 20 artifacts.
   'tab-menu': ['.tab-more-button'],
   // The Changes tab's diffs, each file's header with its collapse chevron and Viewed tick.
@@ -1075,6 +1091,31 @@ const modalMeasure = (grow) => `(async () => {
   }
   return out;
 })()`;
+
+/** Where a row menu's control left the page: the list shown, the selects and the controls posted. */
+const IN_PLACE_STATE = `(() => {
+  const list = document.getElementById('list');
+  const box = list.getBoundingClientRect();
+  return {
+    listing: document.getElementById('root').classList.contains('listing'),
+    list: box.width > 100 && box.height > 100 && getComputedStyle(list).visibility !== 'hidden' && list.checkVisibility(),
+    selects: window.__posts.filter((post) => post.url.endsWith('/select')).map((post) => post.body.workItemId),
+    actions: window.__posts.filter((post) => post.url.endsWith('/row-action')).map((post) => post.body.workItemId + ' ' + post.body.label),
+    sheet: document.querySelector('.sheet-title')?.textContent ?? null,
+  };
+})()`;
+
+/** A row menu's control that acts in place: its row selected behind the list, which stays shown, a phone's in the conversation's place, and its sheet open or its control run. */
+function inPlaceFailures(view, size, s) {
+  const out = [];
+  if (size.phone && !s.listing) out.push('the phone left the list for the conversation');
+  if (!s.list) out.push('the list is not shown');
+  if (s.selects.join() !== '1') out.push('the control selected ' + JSON.stringify(s.selects) + ', not work item 1 once');
+  if (view === 'row-done' && s.actions.join() !== '1 Mark done') out.push('Mark done posted ' + JSON.stringify(s.actions));
+  if (view === 'row-snooze' && s.sheet !== 'Snooze Fix it') out.push('the sheet is ' + JSON.stringify(s.sheet) + ', not Snooze Fix it');
+  if (view === 'row-comment' && s.sheet === null) out.push('no Add comment sheet');
+  return out;
+}
 
 /** A sheet's failures: outside the viewport, no title bar at its top, under 44 px, no dismiss control in view, a body wider than the sheet, a text box that does not grow to its cap and scroll. */
 function modalFailures(view, m) {
@@ -1578,6 +1619,13 @@ try {
 
           if (report) console.log(name + ' notices: ' + JSON.stringify(notices));
           found.push(...noticeFailures(view, size, notices));
+        }
+
+        if (IN_PLACE.includes(view) && missing.length === 0) {
+          const where = await evaluate(IN_PLACE_STATE);
+
+          if (report) console.log(name + ' in place: ' + JSON.stringify(where));
+          found.push(...inPlaceFailures(view, size, where));
         }
 
         if (view.endsWith('-menu') && missing.length === 0) {
