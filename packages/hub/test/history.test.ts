@@ -379,7 +379,7 @@ describe('History model', () => {
       [event('move-cancelled', 'hub', null, []), { text: 'Session abc12345 stayed in its tab, whose process did not exit', lines: [], category: 'session' }],
       [
         event('marker', 'hub', { state: 'failed', detail: 'rate_limit', limit: { kind: 'usage', window: 'five_hour', resetsAt: 1795198800000, cli: true } }, [change('session', 'update', { state: ['running', 'failed'], stateDetail: [null, 'rate_limit'] }, { sessionId: 's1' })]),
-        { text: 'Session abc12345 stopped at a usage limit', detail: expect.stringMatching(/^Resets .+; Claude Code continues on its own$/), category: 'session', tone: 'warning' },
+        { text: 'Session abc12345 stopped at a usage limit', detail: expect.stringMatching(/^Resets .+; Claude Code continues on its own$/), category: 'session', icon: 'sb-hourglass', tone: 'warning' },
       ],
       [
         event('marker', 'hub', { state: 'failed', detail: 'rate_limit' }, [change('session', 'update', { state: ['running', 'failed'], stateDetail: [null, 'rate_limit'] }, { sessionId: 's1' })]),
@@ -389,7 +389,7 @@ describe('History model', () => {
         event('marker', 'hub', { state: 'failed', detail: 'overloaded' }, [change('session', 'update', { state: ['running', 'failed'], stateDetail: [null, 'overloaded'] }, { sessionId: 's1' })]),
         { text: "Session abc12345's turn failed", detail: 'overloaded', category: 'session', tone: 'error' },
       ],
-      [event('limit-found', 'hub', { limit: { kind: 'usage', window: null, resetsAt: null, cli: false } }, []), { text: 'Session abc12345 stopped at a usage limit', detail: 'No reset time given', category: 'session', tone: 'warning' }],
+      [event('limit-found', 'hub', { limit: { kind: 'usage', window: null, resetsAt: null, cli: false } }, []), { text: 'Session abc12345 stopped at a usage limit', detail: 'No reset time given', category: 'session', icon: 'sb-hourglass', tone: 'warning' }],
       [event('limit-attempt', 'hub', { attempt: 2 }, []), { text: 'Switchboard sent continue to session abc12345 after its usage limit', detail: 'Attempt 2', category: 'session' }],
       [event('limit-attempt', 'hub', { attempt: 3, error: 'The session has ended.' }, []), { text: 'Switchboard could not continue session abc12345 after its usage limit', detail: 'The session has ended.', tone: 'warning' }],
       [

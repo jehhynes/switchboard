@@ -231,7 +231,10 @@ export const MARK_TITLES: Record<Mark, string> = {
   'done-unassigned': DONE_WORDS.unassigned,
 };
 
-/** Each mark's codicon glyph in codicon.ttf, for the Chrome extension's pills; Queued's `clock` is an alias of `history`. */
+/**
+ * Each mark's glyph in codicon.ttf, or in switchboard-icons.ttf for an extra icon (`icons.ts`), for the Chrome extension's pills; Queued's `clock`
+ * is an alias of `history`.
+ */
 export const MARK_GLYPHS: Record<Mark, string> = {
   question: '\u{eb32}',
   permission: '\u{eb53}', // shield
@@ -243,7 +246,7 @@ export const MARK_GLYPHS: Record<Mark, string> = {
   queued: '\u{ea82}', // clock
   setup: '\u{eb6d}', // tools
   running: '\u{eb19}', // loading
-  limited: '\u{eb7c}', // watch
+  limited: '\u{f700}', // sb-hourglass
   idle: '\u{ebb5}', // circle-large-outline
   triaging: '\u{eb19}', // loading
   'done-session': '\u{eab2}', // check
@@ -266,7 +269,7 @@ export const MARK_ICONS: Record<Mark, string> = {
   queued: 'clock',
   setup: 'tools',
   running: 'loading',
-  limited: 'watch',
+  limited: 'sb-hourglass',
   idle: 'circle-large-outline',
   triaging: 'loading',
   'done-session': 'check',

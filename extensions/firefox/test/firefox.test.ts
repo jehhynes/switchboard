@@ -84,14 +84,15 @@ describe('signingRefusal', () => {
 });
 
 describe('firefoxCss', () => {
-  it('loads the codicon font from the moz-extension URL and changes nothing else', () => {
-    const [before, after, ...more] = chromeCss.split("url('chrome-extension://__MSG_@@extension_id__/codicon.ttf')");
+  it('loads the codicon font and the extra icons\' font from the moz-extension URL and changes nothing else', () => {
+    const [before, middle, after, ...more] = chromeCss.split(/url\('chrome-extension:\/\/__MSG_@@extension_id__\/(?:codicon|switchboard-icons)\.ttf'\)/);
 
     expect(more).toEqual([]);
-    expect(firefoxCss(chromeCss)).toBe(`${before}url('moz-extension://__MSG_@@extension_id__/codicon.ttf')${after}`);
+    expect(firefoxCss(chromeCss)).toBe(`${before}url('moz-extension://__MSG_@@extension_id__/codicon.ttf')${middle}url('moz-extension://__MSG_@@extension_id__/switchboard-icons.ttf')${after}`);
   });
 
-  it('refuses CSS that no longer loads the font from the Chrome URL', () => {
-    expect(() => firefoxCss(chromeCss.replace('chrome-extension://', 'other://'))).toThrow('no longer loads the font');
+  it('refuses CSS that no longer loads either font from the Chrome URL', () => {
+    expect(() => firefoxCss(chromeCss.replace("chrome-extension://__MSG_@@extension_id__/codicon.ttf", 'other://codicon.ttf'))).toThrow('no longer loads the font from url(\'chrome-extension://__MSG_@@extension_id__/codicon.ttf\')');
+    expect(() => firefoxCss(chromeCss.replace("chrome-extension://__MSG_@@extension_id__/switchboard-icons.ttf", 'other://switchboard-icons.ttf'))).toThrow('no longer loads the font from url(\'chrome-extension://__MSG_@@extension_id__/switchboard-icons.ttf\')');
   });
 });

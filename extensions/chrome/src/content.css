@@ -74,6 +74,14 @@
   src: url('chrome-extension://__MSG_@@extension_id__/codicon.ttf') format('truetype');
 }
 
+/* Switchboard's extra icons (packages/core/icons, Fluent UI System Icons under the MIT License, switchboard-icons-LICENSE.txt), a second face of
+   the family for their code points only, so a mark's character draws from whichever face holds it. */
+@font-face {
+  font-family: switchboard-codicon;
+  src: url('chrome-extension://__MSG_@@extension_id__/switchboard-icons.ttf') format('truetype');
+  unicode-range: U+F700-F7FF;
+}
+
 .switchboard-pill .switchboard-mark {
   display: inline-block;
   margin-right: 4px;

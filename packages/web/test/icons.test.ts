@@ -1,11 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MARK_GLYPHS, MARK_ICONS } from '@switchboard/core/group';
+import { EXTRA_RANGE, ICON_FONT, ICONS_DIR } from '@switchboard/core/icons';
 import { PAGE_ASSETS } from '../dist/index.js';
 import type { Mark } from '@switchboard/core/group';
 
-const css = readFileSync(createRequire(import.meta.url).resolve('@vscode/codicons/dist/codicon.css'), 'utf8');
+const codicons = createRequire(import.meta.url).resolve('@vscode/codicons/dist/codicon.css');
+/** The codicon.css the page serves: Codicons' own, then Switchboard's extra icons. */
+const css = PAGE_ASSETS['codicon.css']!.body;
 
 /** A codicon's glyph by its class name, from the codicon.css the page serves. */
 function glyphOf(name: string): string | null {
@@ -17,13 +21,38 @@ function glyphOf(name: string): string | null {
 describe('the shared mark icons', () => {
   it('name the codicon whose glyph MARK_GLYPHS gives each mark, so the page and the browser extension pills cannot drift', () => {
     // The codicon the panel shows for each mark, which the extension's pills draw by its glyph.
-    expect(MARK_ICONS).toEqual({ question: 'question', permission: 'shield', send: 'send', review: 'eye', finished: 'eye', blocked: 'debug-pause', failed: 'error', queued: 'clock', setup: 'tools', running: 'loading', limited: 'watch', idle: 'circle-large-outline', triaging: 'loading', 'done-session': 'check', 'done-operator': 'account', 'done-unassigned': 'sign-out' });
+    expect(MARK_ICONS).toEqual({ question: 'question', permission: 'shield', send: 'send', review: 'eye', finished: 'eye', blocked: 'debug-pause', failed: 'error', queued: 'clock', setup: 'tools', running: 'loading', limited: 'sb-hourglass', idle: 'circle-large-outline', triaging: 'loading', 'done-session': 'check', 'done-operator': 'account', 'done-unassigned': 'sign-out' });
 
     for (const mark of Object.keys(MARK_ICONS) as Mark[]) {
       expect([mark, glyphOf(MARK_ICONS[mark])]).toEqual([mark, MARK_GLYPHS[mark]]);
     }
 
     expect(Object.keys(MARK_GLYPHS).sort()).toEqual(Object.keys(MARK_ICONS).sort());
+  });
+});
+
+describe("the page's extra icons", () => {
+  it('add the extra font as a codicon face for their range only, after Codicons\' own face, from the committed font', () => {
+    const faces = [...css.matchAll(/@font-face \{([^}]*)\}/g)].map((face) => face[1]!.replace(/\s+/g, ' ').trim());
+
+    expect(faces).toEqual([
+      `font-family: "codicon"; font-display: block; src: url("./${PAGE_ASSETS['codicon.ttf']!.hashed!}") format("truetype");`,
+      `font-family: "codicon"; font-display: block; src: url("./${PAGE_ASSETS[ICON_FONT]!.hashed!}") format("truetype"); unicode-range: U+F700-F7FF;`,
+    ]);
+    expect(PAGE_ASSETS[ICON_FONT]!.hashed).toMatch(/^switchboard-icons-[0-9a-f]{16}\.ttf$/);
+    expect(Buffer.from(PAGE_ASSETS[ICON_FONT]!.body, 'base64').equals(readFileSync(join(ICONS_DIR, ICON_FONT)))).toBe(true);
+    expect(PAGE_ASSETS[ICON_FONT]!.mime).toBe('font/ttf');
+    expect(css).toContain('Copyright (c) 2020 Microsoft Corporation');
+  });
+
+  it('collide with no codicon by name or code point', () => {
+    const own = readFileSync(codicons, 'utf8');
+    const codes = [...own.matchAll(/:before \{ content: "\\([0-9a-f]+)" \}/g)].map((match) => parseInt(match[1]!, 16));
+
+    expect(codes.length).toBeGreaterThan(500);
+    expect(codes.filter((code) => code >= EXTRA_RANGE.first && code <= EXTRA_RANGE.last)).toEqual([]);
+    expect(own).not.toMatch(/\.codicon-sb-/);
+    expect(glyphOf('sb-hourglass')).toBe('\u{f700}');
   });
 });
 

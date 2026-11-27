@@ -1,7 +1,7 @@
 // The History view's model (PRD R59), which the web page's History tab draws. Imports only types and browser-safe modules, so a browser
 // bundle can import it through `@switchboard/hub/history`.
 import type { ConversationState, HistoryChange, HistoryEvent, Session, TicketHistory, WorkItemStatus } from '@switchboard/core';
-import { adhocLabel, DONE_WORDS, PERMISSION_PROMPT, resumesHeld, START_PROMPT } from '@switchboard/core/group';
+import { adhocLabel, DONE_WORDS, MARK_ICONS, PERMISSION_PROMPT, resumesHeld, START_PROMPT } from '@switchboard/core/group';
 import { shownKey, ticketKey } from './rows.js';
 
 /** The stored start of a done report waiting for the second read (`UNCONFIRMED_DONE` in core's flow.ts, which the flow matches), and its words. */
@@ -615,7 +615,7 @@ class Builder {
         if (event.type === 'marker' && ((typeof detail['limit'] === 'object' && detail['limit'] !== null) || (after === 'failed' && said === 'rate_limit'))) {
           const limit = typeof detail['limit'] === 'object' && detail['limit'] !== null ? (detail['limit'] as Record<string, unknown>) : {};
 
-          return { category: 'session', icon: 'watch', text: `${name} stopped at a usage limit`, detail: limitDetail(limit), tone: 'warning' };
+          return { category: 'session', icon: MARK_ICONS.limited, text: `${name} stopped at a usage limit`, detail: limitDetail(limit), tone: 'warning' };
         }
 
         const known = texts[str(after)] ?? { text: `${name}: ${str(after)}`, icon: 'terminal' };
@@ -656,7 +656,7 @@ class Builder {
       case 'move-cancelled':
         return { category: 'session', icon: 'circle-slash', text: `${capital(session)} stayed in its tab, whose process did not exit` };
       case 'limit-found':
-        return { category: 'session', icon: 'watch', text: `${capital(session)} stopped at a usage limit`, detail: limitDetail(detail['limit'] as Record<string, unknown>), tone: 'warning' };
+        return { category: 'session', icon: MARK_ICONS.limited, text: `${capital(session)} stopped at a usage limit`, detail: limitDetail(detail['limit'] as Record<string, unknown>), tone: 'warning' };
       case 'limit-attempt':
         return detail['error'] == null
           ? { category: 'session', icon: 'debug-continue', text: `Switchboard sent continue to ${session} after its usage limit`, detail: `Attempt ${str(detail['attempt'])}` }

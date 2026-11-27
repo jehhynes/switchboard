@@ -2,6 +2,7 @@ import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ICON_FONT, ICON_LICENSE, ICONS_DIR } from '@switchboard/core/icons';
 import { buildNumber, firefoxCss, firefoxManifest } from './src/firefox.mjs';
 
 // dist/ is the unpacked extension that Firefox loads, built from the Chrome extension's source.
@@ -19,6 +20,8 @@ export function writeCopied() {
   writeFileSync('dist/manifest.json', `${JSON.stringify(firefoxManifest(JSON.parse(readFileSync(`${chrome}/src/manifest.json`, 'utf8')), buildNumber(Date.now())), null, 2)}\n`);
   writeFileSync('dist/content.css', firefoxCss(readFileSync(`${chrome}/src/content.css`, 'utf8')));
   copyFileSync(createRequire(import.meta.url).resolve('@vscode/codicons/dist/codicon.ttf'), 'dist/codicon.ttf');
+  copyFileSync(join(ICONS_DIR, ICON_FONT), `dist/${ICON_FONT}`);
+  copyFileSync(join(ICONS_DIR, ICON_LICENSE), 'dist/switchboard-icons-LICENSE.txt');
 
   for (const size of [16, 32, 48, 128]) {
     copyFileSync(`${chrome}/assets/icon-${size}.png`, `dist/icon-${size}.png`);

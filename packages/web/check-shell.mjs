@@ -9,7 +9,8 @@
 // where it does not fit beside the comment icon and the key; a key shows its source's logo, GitHub's, Zoho's or a plugin's, in place of its source's label; every pill, the key included, shows its text where line 2 is 300 px wide or more and its icon alone under that,
 // its text kept for screen readers; the key never drops out; a link pill is whole, its icon alone or left out whole, never cut, the last
 // first; a pill left out is no keyboard stop, and a pill shown is one only in the list's Tab stop row; the pills change with the list's width alone, without a redraw; and line 2 paints the same while
-// the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them. Every control shown is a touch target of at least 44 px each way,
+// the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them.
+// A usage-limited session's hourglass, in its list row and, also on a desktop, the header, draws from the extra icons' face as its SVG does, not as tofu. Every control shown is a touch target of at least 44 px each way,
 // and no two overlap, also in the Changes tab's diffs, the context meter's popover, Snooze, a question card and its questions-waiting chip, and a reply's
 // task list, whose read-only boxes are not controls; on the desktop a question card's step dots are at least 24 px tall.
 // The questions waiting chip floats centred over the composer, clear of its box, at the conversation's end and halfway up. The card's topic is
@@ -59,7 +60,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['history', 'history-filters', 'changes', 'changes-options', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS] },
 ];
 /** Settings' views that show switches or checkboxes, so their touch targets are measured. */
 const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'settings-display', 'settings-devices', 'settings-advanced', 'settings-spoken-replies', 'settings-dictation'];
@@ -68,7 +69,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
+const VIEWS = ['list', 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'empty', 'history', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one))];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -140,7 +141,7 @@ const adhoc = { ticket: 'switchboard-worktrees 1234', ticketNumber: undefined, s
 const source = (kind, label, icon) => ({ kind, label, ...(icon ? { icon } : {}), enabled: true, title: label, sources: [{ name: kind, enabled: true }] });
 // The list's notes, which a phone folds into one line.
 const header = { notes: view === 'list' || view?.startsWith('narrow') ? ['settings.json: sources.zoho.orgId is missing, so Zoho Desk is not polled.', 'Voice: the voice process stopped.'] : [], sources: [source('github', 'GitHub'), source('zoho', 'Zoho Desk'), source('dpaf', 'DPAF', { viewBox: '0 0 16 16', path: 'M1 3h14v10H1z', color: '#2f6fb0' })], repoRoots: [], schedules: [], ...(view === 'holder' ? { holderNotice: { text: 'The terminal holder runs an older build.', detail: 'Restart it to run this build.', confirm: { question: 'Restart the terminal holder?', detail: 'Its 2 sessions stop and resume in the new holder. A tool call that is running is cut off.', action: 'Restart and resume' } } } : {}) };
-const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, view === 'snooze' ? 'Call Center dialer stops receiving incoming calls when its registration lapses after the carrier rotates its SIP proxy and the softphone keeps the stale binding' : 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, snooze, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu, ...modalActions }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
+const groups = [{ key: 'progress', title: 'In progress', glyph: '\u{ea70}', empty: null, rows: [row(1, view === 'snooze' ? 'Call Center dialer stops receiving incoming calls when its registration lapses after the carrier rotates its SIP proxy and the softphone keeps the stale binding' : 'Fix it', { history: { ticketId: 1, key: 'gh 1' }, ...(hcase === 'waiting' ? { mark: { kind: 'permission', glyph: '\u{eb53}', title: 'Approve a permission' } } : {}), actions: [approve, snooze, remove], details: [state('2/5 fixing tests · 4m', 'dim')], ...crowdedMenu, ...modalActions }), row(2, 'Another thing with questions waiting on the operator and a long title', { ...crowded, questions: 12 }), row(3, 'Hosted', { mark: { kind: 'limited', glyph: '\u{f700}', title: 'Usage limit' }, host: 'a-very-long-host-name.example.com', ticket: 'zoho 21510', ticketNumber: '21510', sourceKind: 'zoho', url: 'https://desk.zoho.com/t/21510', comment: { glyph: '\u{ea6b}', title: 'A comment' }, details: [state('reviewing the comments · 1m', null)] }), row(4, 'Short playbook', { ...short, questions: 1 }), ...(view?.startsWith('narrow') ? [] : [row(5, 'Many links', many)]), row(6, 'Ad hoc', adhoc), ...(view?.startsWith('narrow') ? [] : [row(7, 'Long key', { ticket: 'a-very-long-ad-hoc-repository-folder-name-for-testing 12345', ticketNumber: undefined, sourceKind: 'adhoc', comment: { glyph: '\u{ea6b}', title: 'A comment' }, playbook: 'dev:address-pr-review' })])].filter((one) => !(view?.startsWith('narrow') && one.workItemId === 1)) }];
 // The list at its narrowest, 200 px, at 260 and 300 px, where line 2's pills show their icons alone, and at 330 and 420 px, where they show
 // their texts. Only its width is set: it keeps page.css's flex: 1 in the side column, which bounds its height so it scrolls.
 const narrow = view === 'narrow' ? 200 : view?.startsWith('narrow-') ? Number(view.slice(7)) : null;
@@ -150,7 +151,7 @@ if (narrow !== null) document.head.insertAdjacentHTML('beforeend', '<style>#list
 // A title longer than any header here fits, so the header shows how much of it is left beside the main control.
 const longTitle = 'Call Center dialer stops receiving incoming calls when its registration lapses';
 const scope = open ? { kind: 'page', key: 'k', folder: 'D:/w', title: longTitle, scopeGen: 3, conversations: [{ workItemId: 1, title: longTitle, primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0, sessionTitle: 'switchboard · dev:build · github 1' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
-const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, ...(view === 'context' ? { provider: 'claude', context: { used: 120000, window: 200000, compactAt: 167000, model: 'claude-opus-4-5' } } : { context: { used: 618_000, window: 1_000_000, compactAt: 967_000, model: 'claude-opus-5-5' } }) };
+const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, ...(view === 'limited' ? { limit: { until: now + 5_400_000, retry: false } } : {}), ...(view === 'context' ? { provider: 'claude', context: { used: 120000, window: 200000, compactAt: 167000, model: 'claude-opus-4-5' } } : { context: { used: 618_000, window: 1_000_000, compactAt: 967_000, model: 'claude-opus-5-5' } }) };
 // The context meter's details (architecture.md § Context meter), as the hub answers them for a Claude session.
 const contextDetails = { provider: 'claude', model: 'claude-opus-5-5', effort: 'medium', parts: { cacheRead: 598_000, cacheWrite: 14_000, input: 2_000, output: 4_000, reasoning: null }, compacted: { at: Date.now() - 7_200_000, trigger: 'auto' }, windows: [{ minutes: 300, limit: null, usedPercent: 79, resetsAt: Date.now() + 9_000_000 }, { minutes: 10_080, limit: null, usedPercent: 63, resetsAt: Date.now() + 120_000_000 }, { minutes: 10_080, limit: 'Fable', usedPercent: 4, resetsAt: Date.now() + 120_000_000 }], limit: null };
 const items = [];
@@ -660,6 +661,44 @@ const CONTEXT_DETAILS = `(() => {
     if (row.getBoundingClientRect().height > 2 * parseFloat(getComputedStyle(row).lineHeight || '20') - 1) out.push('the row ' + row.textContent + ' wraps');
   }
   return out;
+})()`;
+
+/** The hourglass's outline, from the SVG the extra icons' font is built from (packages/core/icons). */
+const HOURGLASS_PATH = /<path d="([^"]+)"/.exec(readFileSync(new URL('../core/icons/f700-hourglass.svg', import.meta.url), 'utf8'))[1];
+
+/**
+ * The usage limit's hourglass (architecture.md § Web page, Extra icons): the extra icons' face of the codicon family loaded, U+F700 drawn through
+ * that family as the SVG's outline draws it, not tofu, a blank or another glyph, and where each shown hourglass is, with its ::before.
+ */
+const HOURGLASS = `(async () => {
+  const out = [];
+  const glass = String.fromCodePoint(0xf700);
+  // A face that fails to load rejects; the face's status says so below.
+  await document.fonts.load('64px codicon', glass).catch(() => undefined);
+  const face = [...document.fonts].find((one) => one.family.replaceAll('"', '') === 'codicon' && one.unicodeRange === 'U+F700-F7FF');
+  if (!face || face.status !== 'loaded') out.push("the extra icons' codicon face is " + (face ? face.status : 'missing'));
+  // Each pixel's coverage over half, drawn on a 64 px canvas.
+  const ink = (draw) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const context = canvas.getContext('2d');
+    draw(context);
+    return Array.from(context.getImageData(0, 0, 64, 64).data).filter((_, index) => index % 4 === 3).map((alpha) => alpha > 127);
+  };
+  // The face's ascent is its em and its descent 0, so the glyph's em square sits on the canvas with its baseline at the bottom.
+  const font = ink((context) => { context.font = '64px codicon'; context.fillText(glass, 0, 64); });
+  const svg = ink((context) => { context.scale(4, 4); context.fill(new Path2D(${JSON.stringify(HOURGLASS_PATH)})); });
+  const both = font.filter((on, index) => on && svg[index]).length;
+  const either = font.filter((on, index) => on || svg[index]).length;
+  const overlap = either === 0 ? 0 : Math.round((both / either) * 100) / 100;
+  if (overlap < 0.9) out.push('U+F700 in the codicon family covers ' + overlap + ' of the hourglass SVG with it, under 0.9');
+  const places = [...document.querySelectorAll('.codicon-sb-hourglass')].filter((icon) => { const box = icon.getBoundingClientRect(); return box.width > 8 && box.height > 8 && box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth && getComputedStyle(icon).visibility === 'visible'; }).map((icon) => {
+    const where = icon.closest('#list') ? 'list' : icon.closest('.header') ? 'header' : 'elsewhere';
+    const before = getComputedStyle(icon, '::before');
+    if (before.content !== '"' + glass + '"' || !/codicon/.test(before.fontFamily)) out.push('the hourglass in the ' + where + ' draws ' + before.content + ' in ' + before.fontFamily);
+    return where;
+  });
+  return { out, overlap, places };
 })()`;
 
 /** The search views: the field, and the bar whose controls must not cover it. */
@@ -1220,6 +1259,17 @@ try {
 
         // The context meter's menu shows its details whole inside the viewport, each row on one line with its value beside its name.
         if (view === 'context-details' && missing.length === 0) found.push(...(await evaluate(CONTEXT_DETAILS)));
+
+        // The usage limit's hourglass draws from the extra icons' face where the view shows a limited session: the list row's mark, and the
+        // header's session state where a work item is open, beside the list where the list is a column.
+        if ((view === 'list' || view === 'limited') && missing.length === 0) {
+          const glass = await evaluate(HOURGLASS);
+          const expected = view === 'list' ? ['list'] : size.phone ? ['header'] : ['list', 'header'];
+
+          if (report) console.log(name + ' hourglass: ' + JSON.stringify(glass));
+          found.push(...glass.out);
+          for (const place of expected) if (!glass.places.includes(place)) found.push('no hourglass drawn in the ' + place);
+        }
 
         // The questions chip floats centred over the composer's box, clear of it and on top of what it floats over, at the conversation's end
         // and halfway up.

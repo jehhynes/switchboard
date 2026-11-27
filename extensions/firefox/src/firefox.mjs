@@ -16,7 +16,14 @@ const VERSION_PART = /^(0|[1-9]\d{0,8})$/;
  */
 const CHROME_PERMISSIONS = ['downloads', 'storage', 'tabs', 'tabGroups', 'alarms', 'declarativeNetRequestWithHostAccess'];
 
-const CHROME_FONT = "url('chrome-extension://__MSG_@@extension_id__/codicon.ttf')";
+/** The fonts content.css loads from the extension: the codicons and Switchboard's extra icons. */
+const FONTS = ['codicon.ttf', 'switchboard-icons.ttf'];
+
+/**
+ * A font's URL in the Chrome extension, as content.css writes it.
+ * @param {string} name
+ */
+const chromeFont = (name) => `url('chrome-extension://__MSG_@@extension_id__/${name}')`;
 
 /**
  * The Chrome manifest changed for Firefox, which runs a background script instead of a service worker, needs an add-on ID, and
@@ -135,14 +142,16 @@ function compareVersions(a, b) {
 }
 
 /**
- * The content CSS with the codicon font loaded from the extension's own URL in Firefox.
+ * The content CSS with each font loaded from the extension's own URL in Firefox.
  * @param {string} css
  * @returns {string}
  */
 export function firefoxCss(css) {
-  if (!css.includes(CHROME_FONT)) {
-    throw new Error(`content.css no longer loads the font from ${CHROME_FONT}.`);
+  const missing = FONTS.find((name) => !css.includes(chromeFont(name)));
+
+  if (missing !== undefined) {
+    throw new Error(`content.css no longer loads the font from ${chromeFont(missing)}.`);
   }
 
-  return css.replaceAll(CHROME_FONT, "url('moz-extension://__MSG_@@extension_id__/codicon.ttf')");
+  return FONTS.reduce((out, name) => out.replaceAll(chromeFont(name), `url('moz-extension://__MSG_@@extension_id__/${name}')`), css);
 }

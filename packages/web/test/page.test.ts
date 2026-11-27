@@ -711,7 +711,7 @@ describe('drawing', () => {
     expect([...line2!.querySelector('.row-links')!.children].map((child) => child.className)).toEqual(['pill link pr', 'pill link issue mentioned', 'pill returned']);
     // Line 3: the mark, then each detail in its tone with a muted separator between them, never before the first.
     expect(line3!.className).toBe('row-line row-details');
-    expect(line3!.firstElementChild!.className).toBe('codicon codicon-watch mark');
+    expect(line3!.firstElementChild!.className).toBe('codicon codicon-sb-hourglass mark');
     expect([...line3!.querySelectorAll('.row-detail')].map((one) => [one.className, one.textContent, one.getAttribute('title')])).toEqual([
       ['row-detail warning', 'Usage limit · resumes 1:20 PM', 'Resets at 1:20 PM'],
       ['row-detail error', 'Setup <failed>', null],

@@ -20,7 +20,7 @@
       "run_at": "document_idle"
     }
   ],
-  "web_accessible_resources": [{ "resources": ["codicon.ttf"], "matches": ["https://github.com/*"] }],
+  "web_accessible_resources": [{ "resources": ["codicon.ttf", "switchboard-icons.ttf"], "matches": ["https://github.com/*"] }],
   "externally_connectable": { "matches": ["http://127.0.0.1/*", "http://localhost/*"] },
   "permissions": ["downloads", "storage", "tabs", "tabGroups", "alarms", "declarativeNetRequestWithHostAccess"],
   "host_permissions": ["http://*/*", "https://*/*"]

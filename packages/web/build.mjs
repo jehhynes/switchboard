@@ -5,6 +5,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import esbuild from 'esbuild';
+import { extraIconCss, ICON_FONT, ICONS_DIR } from '@switchboard/core/icons';
 
 const require = createRequire(import.meta.url);
 
@@ -100,8 +101,10 @@ const hashOf = (body) => createHash('sha256').update(body).digest('hex').slice(0
 /** A shell file's name with its content's hash, as `page-<hash>.js`: the hub serves it gzipped for good under that name (architecture.md § Web page). */
 const hashedName = (name, body) => name.replace(/(\.[a-z]+)$/, `-${hashOf(body)}$1`);
 const ttf = readFileSync(join(codicons, 'codicon.ttf'));
-const shell = { 'codicon.ttf': hashedName('codicon.ttf', ttf) };
-const codiconCss = readFileSync(join(codicons, 'codicon.css'), 'utf8').replace(/url\("\.\/codicon\.ttf(\?[^"]*)?"\)/, `url("./${shell['codicon.ttf']}")`);
+// Switchboard's extra icons (architecture.md § Web page, Extra icons): their font is a second face of the codicon family, added to codicon.css.
+const extraTtf = readFileSync(join(ICONS_DIR, ICON_FONT));
+const shell = { 'codicon.ttf': hashedName('codicon.ttf', ttf), [ICON_FONT]: hashedName(ICON_FONT, extraTtf) };
+const codiconCss = readFileSync(join(codicons, 'codicon.css'), 'utf8').replace(/url\("\.\/codicon\.ttf(\?[^"]*)?"\)/, `url("./${shell['codicon.ttf']}")`) + extraIconCss(`./${shell[ICON_FONT]}`);
 // The page imports the diff viewer from the build it was built with (`__DIFF_BUILD__`), and the audio worklet by its name (`__VOICE_WORKLET__`).
 const pageJs = await bundle('src/entry.ts', { __DIFF_BUILD__: JSON.stringify(diffBuild), __VOICE_WORKLET__: JSON.stringify(workletName) });
 // The bubbles' and the composer's styles the Conversation view shares come first, so the page's own rules can build on them.
@@ -132,6 +135,7 @@ const assets = {
   'theme.css': shellText('theme.css', 'text/css; charset=utf-8', theme),
   'codicon.css': shellText('codicon.css', 'text/css; charset=utf-8', codiconCss),
   'codicon.ttf': { ...binary('font/ttf', join(codicons, 'codicon.ttf')), hashed: shell['codicon.ttf'] },
+  [ICON_FONT]: { ...binary('font/ttf', join(ICONS_DIR, ICON_FONT)), hashed: shell[ICON_FONT] },
   // VS Code's Seti file icons (src/seti/LICENSE.txt), which the page loads the first time it draws a file's icon (src/fileIcons.tsx).
   'file-icons.json': text('application/json', JSON.stringify({ ...JSON.parse(readFileSync('src/seti/file-icons.json', 'utf8')), license: readFileSync('src/seti/LICENSE.txt', 'utf8') })),
   'seti.woff': binary('font/woff', 'src/seti/seti.woff'),

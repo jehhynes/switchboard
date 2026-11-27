@@ -35,6 +35,10 @@
     "./limit": {
       "types": "./dist/limit.d.ts",
       "default": "./dist/limit.js"
+    },
+    "./icons": {
+      "types": "./dist/icons.d.ts",
+      "default": "./dist/icons.js"
     }
   },
   "scripts": {
@@ -46,6 +50,8 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^3.2.0",
+    "svg2ttf": "^6.1.0",
+    "svgpath": "^2.6.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
   }
