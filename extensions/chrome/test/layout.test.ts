@@ -9,8 +9,8 @@ const PULL = fixture('pull');
 const COMMITS = fixture('pull-commits');
 const CSS = readFileSync(join(import.meta.dirname, '..', 'src', 'content.css'), 'utf8');
 
-const ISSUE_PATH = '/ownerrez/orez/issues/22338';
-const PULL_PATH = '/ownerrez/orez/pull/22336';
+const ISSUE_PATH = '/acme/app/issues/101';
+const PULL_PATH = '/acme/app/pull/102';
 const html = () => document.documentElement;
 const group = () => document.querySelector<HTMLElement>(`.${LAYOUT_BUTTONS}`);
 const buttonFor = (setting: string) => document.querySelector<HTMLButtonElement>(`[data-switchboard-layout="${setting}"]`)!;
@@ -54,11 +54,11 @@ describe('isConversationPage', () => {
   });
 
   it('refuses lists, projects and other pages', () => {
-    expect(isConversationPage('/ownerrez/orez/issues')).toBe(false);
-    expect(isConversationPage('/ownerrez/orez/pulls')).toBe(false);
-    expect(isConversationPage('/ownerrez/orez/issues/new')).toBe(false);
-    expect(isConversationPage('/ownerrez/orez/pull/22336x')).toBe(false);
-    expect(isConversationPage('/orgs/ownerrez/projects/1')).toBe(false);
+    expect(isConversationPage('/acme/app/issues')).toBe(false);
+    expect(isConversationPage('/acme/app/pulls')).toBe(false);
+    expect(isConversationPage('/acme/app/issues/new')).toBe(false);
+    expect(isConversationPage('/acme/app/pull/102x')).toBe(false);
+    expect(isConversationPage('/orgs/acme/projects/1')).toBe(false);
     expect(isConversationPage('/')).toBe(false);
   });
 });
@@ -99,7 +99,7 @@ describe('applyLayout', () => {
 
   it('removes both on any other page, so a project board keeps its width', () => {
     applyLayout(document, ISSUE_PATH, { sidebar: true, wide: true });
-    applyLayout(document, '/orgs/ownerrez/projects/1', { sidebar: true, wide: true });
+    applyLayout(document, '/orgs/acme/projects/1', { sidebar: true, wide: true });
 
     expect(html().hasAttribute(LAYOUT_ATTRIBUTES.sidebar)).toBe(false);
     expect(html().hasAttribute(LAYOUT_ATTRIBUTES.wide)).toBe(false);
@@ -208,7 +208,7 @@ describe('placeButtons', () => {
   it('removes the buttons on another page, and adds none without a tab row or issue header', () => {
     document.body.innerHTML = PULL;
     placeButtons(document, PULL_PATH, { sidebar: false, wide: false });
-    placeButtons(document, '/ownerrez/orez/pulls', { sidebar: false, wide: false });
+    placeButtons(document, '/acme/app/pulls', { sidebar: false, wide: false });
 
     expect(group()).toBeNull();
 
@@ -312,7 +312,7 @@ describe('watchLayout', () => {
 
     expect(group()).not.toBeNull();
 
-    path = '/ownerrez/orez/issues';
+    path = '/acme/app/issues';
     document.body.append(document.createElement('div'));
     await vi.advanceTimersByTimeAsync(50);
 
