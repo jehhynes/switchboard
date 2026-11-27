@@ -11,6 +11,7 @@
 // its text kept for screen readers; the key never drops out; a link pill is whole, its icon alone or left out whole, never cut, the last
 // first; a pill left out is no keyboard stop, and a pill shown is one only in the list's Tab stop row; the pills change with the list's width alone, without a redraw; and line 2 paints the same while
 // the same list is sent again. A row's waiting questions show on line 1 after the title as their icon alone, whole, visible in the warning text colour, the title cut before them.
+// The Changes tab's ⋯ menu offers Show commit dates as committed, unchecked, inside the viewport, and a commit row's tooltip names its author date, then its committer date.
 // A row menu's Snooze…, Add comment… and Mark done chosen in the list select their row once and leave the list shown, a phone's in the conversation's place.
 // Only Blocked on you's group count is in the warning text colour and none is in the accent badge's, each one not zero at 4.5:1 contrast.
 // A usage-limited session's hourglass, in its list row and, also on a desktop, the header, draws from the extra icons' face as its SVG does, not as tofu. Every control shown is a touch target of at least 44 px each way,
@@ -83,7 +84,7 @@ const SIZES = [
   { device: 'iphone', orientation: 'landscape', width: 852, height: 393, screen: [852, 393], insets: { top: 0, bottom: 21, left: 59, right: 59 }, phone: true },
   { device: 'ipad', orientation: 'landscape', width: 1180, height: 796, screen: [1180, 820], insets: { top: 0, bottom: 20, left: 0, right: 0 }, phone: false },
   // A desktop with a mouse, for the tabs view, whose close marks are the small ones, not touch targets, a question card's step dots, and Settings' pages.
-  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: [...FILE_VIEWS, 'conversation', 'opening', 'history', 'history-closed', 'history-filters', 'changes', 'changes-options', 'changes-explore', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
+  { device: 'desktop', orientation: 'landscape', width: 1800, height: 1000, screen: [1800, 1000], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: [...FILE_VIEWS, 'conversation', 'opening', 'history', 'history-closed', 'history-filters', 'changes', 'changes-options', 'changes-more', 'changes-explore', 'tabs', 'questions', 'questions-ended', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'context-details', 'limited', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...NOTICE_VIEWS, ...MODAL_VIEWS, 'row-done'] },
   // A common 1920 px desktop, for the column's strip and its maximize button, in the tabs view also with the column narrowed a pixel at a time.
   { device: 'desktop', label: '1920', orientation: 'landscape', width: 1920, height: 1080, screen: [1920, 1080], insets: { top: 0, bottom: 0, left: 0, right: 0 }, phone: false, mouse: true, views: ['tabs', 'mic-max-history', 'mic-max-changes', 'mic-max-artifact'] },
 ];
@@ -94,7 +95,7 @@ const SWITCHED = ['settings-source', 'settings-playbook', 'settings-table', 'set
  * maximized column (`mic-max-`), so the composer shows under the tab.
  */
 const MIC_VIEWS = ['mic-history', 'mic-changes', 'mic-artifact', 'mic-console'];
-const VIEWS = ['list', ...FILE_VIEWS, ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'history-closed', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'changes-explore', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one)), 'row-done'];
+const VIEWS = ['list', ...FILE_VIEWS, ...NOTICE_VIEWS, 'narrow', 'narrow-260', 'narrow-300', 'narrow-330', 'narrow-420', 'conversation', 'attachments', 'empty', 'opening', 'history', 'history-closed', 'settings-nav', ...Object.keys(SETTINGS_PAGES), 'settings-pair', 'settings-table', 'drawer', 'sheet', 'pair', 'tabs', 'diffs', 'context', 'snooze', 'changes', 'changes-options', 'changes-more', 'changes-explore', 'history-filters', 'questions', 'questions-ended', 'actions-menu', 'more-menu', 'row-menu', 'tab-menu', 'context-details', 'limited', ...MIC_VIEWS, 'mic-max-history', 'mic-max-changes', 'mic-max-artifact', ...MODAL_VIEWS.filter((one) => !['sheet', 'pair', 'snooze'].includes(one)), 'row-done'];
 const report = process.argv.includes('--report');
 /** --views <a,b> checks only those views; --shots <dir> saves a screenshot of each view there. */
 const only = process.argv.includes('--views') ? process.argv[process.argv.indexOf('--views') + 1].split(',') : null;
@@ -295,7 +296,7 @@ const settingsRead = { settings: { path: 'C:/Users/someone/.switchboard/settings
 const pairDevices = [{ id: 'a1', label: 'Windows · Edge', host: null, login: null, createdAt: now, usedAt: now, current: true }, { id: 'b2', label: 'iPhone · Safari', host: 'pc.tailnet.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now, current: false, voice: true }, ...['Android · Chrome', 'iPad · Safari', 'Mac · Safari', 'Windows · Chrome', 'Linux · Firefox', 'Android · Firefox'].map((label, i) => ({ id: 'c' + i, label, host: 'some-long-computer-name.tail1234ab.ts.net', login: 'someone@example.com', createdAt: now, usedAt: now - i * 86400000, current: false }))];
 const pairing = { url: 'https://some-long-computer-name.tail1234ab.ts.net/page?t=' + 'a'.repeat(64), code: 'ABCD-EFGH', host: 'some-long-computer-name.tail1234ab.ts.net', expiresAt: now + 5 * 60000 };
 // The Changes views' routes: three changed files of a branch of one commit, the worktree's files, and each file's patch and sides.
-const changesList = { scopeGen: 3, base: 'b0', head: 'c1', from: 'base', to: 'worktree', commits: [{ sha: 'c1', parent: 'b0', subject: 'Renew the registration before it lapses', time: Math.floor(now / 1000) - 600 }], commitsMore: false, rows: [{ path: 'src/dialer/registration.ts', status: 'M', stages: ['committed'], additions: 30, deletions: 4, binary: false, hash: 'h1', viewed: false }, { path: 'src/dialer/monitor.ts', status: 'M', stages: ['working'], additions: 3, deletions: 1, binary: false, hash: 'h2', viewed: false }, { path: 'src/dialer/timer.ts', status: 'M', stages: ['working'], additions: 1, deletions: 0, binary: false, hash: 'h3', viewed: false }], stages: { committed: 1, staged: 0, working: 2, untracked: 0 }, shown: 3, total: 3 };
+const changesList = { scopeGen: 3, base: 'b0', head: 'c1', from: 'base', to: 'worktree', commits: [{ sha: 'c1', parent: 'b0', subject: 'Renew the registration before it lapses', authored: Math.floor(now / 1000) - 600, committed: Math.floor(now / 1000) - 120 }], commitsMore: false, rows: [{ path: 'src/dialer/registration.ts', status: 'M', stages: ['committed'], additions: 30, deletions: 4, binary: false, hash: 'h1', viewed: false }, { path: 'src/dialer/monitor.ts', status: 'M', stages: ['working'], additions: 3, deletions: 1, binary: false, hash: 'h2', viewed: false }, { path: 'src/dialer/timer.ts', status: 'M', stages: ['working'], additions: 1, deletions: 0, binary: false, hash: 'h3', viewed: false }], stages: { committed: 1, staged: 0, working: 2, untracked: 0 }, shown: 3, total: 3 };
 const oldSide = 'export function renew() {\\n  register();\\n}\\n';
 const newSide = 'export function renew() {\\n  register();\\n  schedule();\\n}\\n';
 const diffOf = (path) => ({ path, status: 'M', patch: 'diff --git a/' + path + ' b/' + path + '\\n--- a/' + path + '\\n+++ b/' + path + '\\n@@ -1,3 +1,4 @@\\n export function renew() {\\n   register();\\n+  schedule();\\n }\\n', old: oldSide, new: newSide, binary: false, tooLarge: null });
@@ -874,6 +875,8 @@ const OPEN = {
   changes: ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search'],
   // Its search's options menu open, Regular expression chosen, which keeps the menu open.
   'changes-options': ['[data-action=diff-tab]', '[data-action=tree-flyout], .tree-pinned .tree-search', '[data-action=tree-options]', '.tree-options-menu [data-option=regex]'],
+  // The bar's ⋯ menu open, with Show commit dates as committed among its check rows.
+  'changes-more': ['[data-action=diff-tab]', '[data-action=changes-more]'],
   // Explore with what git ignores muted: .wip opened, read when it opens, and src/dialer opened beside its ignored log.
   'changes-explore': [openTab('[data-side="files"], .tabs [data-tab="files"]'), '[data-action=tree-flyout], .tree-pinned .tree-search', '.tree-row[data-key="dir:.wip"]', '.tree-row[data-key="dir:src"]', '.tree-row[data-key="dir:src/dialer"]'],
   // The Files tab's view of a changed file, with its Diff, and that Diff's way to the file's diff in Changes.
@@ -971,6 +974,20 @@ const HOURGLASS = `(async () => {
 })()`;
 
 /** Explore's ignored rows' labels and their colours, and the colours of the file and folder rows git does not ignore. */
+/** The ⋯ menu's commit date item, and the first commit row's tooltip where the tree shows. */
+const COMMIT_DATES = `(() => {
+  const button = document.querySelector('.changes-more-menu [data-action=changes-commit-date]');
+  // A phone held sideways scrolls the menu to its last rows.
+  button?.scrollIntoView({ block: 'nearest' });
+  const box = button?.getBoundingClientRect();
+  const row = document.querySelector('.changes-tree .tree-item.commit .tree-row');
+
+  return {
+    item: button ? { text: button.querySelector('.scope-text').textContent, pressed: button.getAttribute('aria-pressed'), inside: box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth && box.height > 0 } : null,
+    title: row ? row.getAttribute('title') : null,
+  };
+})()`;
+
 const EXPLORE_MUTED = `(() => {
   const rows = [...document.querySelectorAll('.changes-tree .tree-item.file, .changes-tree .tree-item.folder')].filter((row) => row.getBoundingClientRect().height > 0);
   const label = (row) => row.querySelector('.tree-label');
@@ -1676,6 +1693,22 @@ try {
           if (muted.ignored.join() !== '.wip,artifacts,notes.md,registration-trace.txt,out,registration.log') found.push('Explore marks ' + muted.ignored.join(', ') + ' ignored, not .wip and its entries, out and registration.log');
           muted.colours.filter((one) => one !== want).forEach((one) => found.push('an ignored row is ' + one + ', not ' + want));
           if (muted.plain.includes(want)) found.push('a row git does not ignore is drawn in the ignored colour');
+        }
+
+        // The ⋯ menu offers Show commit dates as committed, unchecked by default, inside the viewport; a commit row's tooltip names its author
+        // date first and gives the committer date after it, since the fixture's commit was rewritten after it was authored.
+        if (view === 'changes-more' && missing.length === 0) {
+          const dates = await evaluate(COMMIT_DATES);
+
+          if (report) console.log(name + ' commit dates: ' + JSON.stringify(dates));
+          if (dates.item === null) found.push('the ⋯ menu has no Show commit dates as committed');
+          else {
+            if (dates.item.text !== 'Show commit dates as committed') found.push('the ⋯ menu names the commit date item ' + JSON.stringify(dates.item.text));
+            if (dates.item.pressed !== 'false') found.push('Show commit dates as committed starts ' + (dates.item.pressed === 'true' ? 'checked' : 'with no checked state'));
+            if (!dates.item.inside) found.push('Show commit dates as committed lies outside the viewport');
+          }
+          if (dates.title !== null && !/\nAuthored .+ · Committed .+$/.test(dates.title)) found.push("a commit row's tooltip does not name its author date then its committer date: " + JSON.stringify(dates.title));
+          if (dates.title === null && !size.phone) found.push('the Changes tree showed no commit row');
         }
 
         // The context meter's menu shows its details whole inside the viewport, each row on one line with its value beside its name.

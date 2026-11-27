@@ -8,6 +8,7 @@ import { FileIcon } from './fileIcons.js';
 import { mount } from './island.js';
 import { ago } from './render.js';
 import { readVersion } from './readVersion.js';
+import { commitTime, keepCommitted, showsCommitted } from './commitDate.js';
 import { keepWrap, storedWrap } from './wrapPref.js';
 import { CodeDraw, FileBody, FileHead, sayIn } from './fileView.js';
 import { worktreeMarkdown } from './changesMarkdown.js';
@@ -384,6 +385,8 @@ export interface BarTree {
   flyout: boolean;
   compare: { label: string; points: ComparePoint[] } | null;
   layout: 'auto' | 'split' | 'stacked';
+  /** Commits show their committer dates rather than their author dates. */
+  committed?: boolean;
 }
 
 /** The Compare picker under the bar: every other commit and base of the branch, filtered as typed; choosing one shows the changes between them. */
@@ -411,7 +414,7 @@ function CompareMenu({ query, label, points }: { query: string; label: string; p
   );
 }
 
-/** The bar's `⋯` menu: the layout, Ignore whitespace, and on a phone the bar's toggles, which the bar has no room for there. */
+/** The bar's `⋯` menu: the layout, Ignore whitespace, which date commits show, and on a phone the bar's toggles, which the bar has no room for there. */
 function MoreMenu({ changes, wrapped, tree, empty }: { changes: ChangesView; wrapped: boolean; tree: BarTree; empty: boolean }): VNode {
   const layout = (value: 'auto' | 'split' | 'stacked', label: string) => (
     <button type="button" class="scope-item" data-action="changes-layout" data-layout={value} aria-pressed={tree.layout === value}>
@@ -442,6 +445,11 @@ function MoreMenu({ changes, wrapped, tree, empty }: { changes: ChangesView; wra
       {item('changes-expand-all', 'Expand all', undefined, empty)}
       {item('changes-wrap', 'Wrap long lines', wrapped, empty)}
       {item('changes-refresh', 'Refresh', undefined, changes.loading)}
+      <div class="scope-heading">Commits</div>
+      <button type="button" class="scope-item" data-action="changes-commit-date" aria-pressed={tree.committed === true} title="Unchecked, commits show their author dates, which a rebase or amend keeps">
+        <span class={`codicon codicon-${tree.committed === true ? 'check' : 'blank'}`} aria-hidden="true"></span>
+        <span class="scope-text">Show commit dates as committed</span>
+      </button>
     </div>
   );
 }
@@ -955,7 +963,7 @@ export class ChangesController {
   #barTree(): BarTree {
     const layout = storedLayout();
 
-    return { mode: this.#mode, pinned: this.pinned, fileOpen: this.#file !== null, file: this.#fileBar(), flyout: this.#flyout, compare: this.view.compare === null ? null : this.#comparePoints(this.view.compare.point), layout: layout ?? 'auto' };
+    return { mode: this.#mode, pinned: this.pinned, fileOpen: this.#file !== null, file: this.#fileBar(), flyout: this.#flyout, compare: this.view.compare === null ? null : this.#comparePoints(this.view.compare.point), layout: layout ?? 'auto', committed: showsCommitted() };
   }
 
   /**
@@ -971,6 +979,7 @@ export class ChangesController {
     const all: ComparePoint[] = [];
     const seen = new Set<string>();
     const now = Date.now();
+    const committed = showsCommitted();
     const add = (one: Omit<ComparePoint, 'valid'>) => {
       if (seen.has(one.point)) {
         return;
@@ -982,7 +991,7 @@ export class ChangesController {
     const commit = (sha: string) => {
       const info = infos.get(sha);
 
-      add({ point: sha, kind: 'commit', label: info?.subject ?? short(sha), sub: info === undefined ? short(sha) : `${short(sha)} · ${ago(info.time * 1000, now)}` });
+      add({ point: sha, kind: 'commit', label: info?.subject ?? short(sha), sub: info === undefined ? short(sha) : `${short(sha)} · ${ago(commitTime(info, committed), now)}` });
     };
 
     (stack?.commitIds ?? list?.commits.map((one) => one.sha) ?? []).forEach(commit);
@@ -1711,6 +1720,13 @@ export class ChangesController {
       const choice = target.closest<HTMLElement>('[data-action]')!.dataset['layout'];
 
       keep(LAYOUT_KEY, choice === 'split' || choice === 'stacked' ? choice : 'auto');
+      this.deps.draw();
+      return true;
+    }
+
+    if (action === 'changes-commit-date') {
+      keepCommitted(!showsCommitted());
+      this.view.more = false;
       this.deps.draw();
       return true;
     }
@@ -2541,7 +2557,7 @@ export class ChangesController {
       view.style.setProperty('--tree-width', `${Math.round(width)}px`);
     }
 
-    mount(view.querySelector(':scope > .changes-tree')!, <ChangesTreeView state={this.tree} list={this.view.list} shown={this.view.range} now={Date.now()} pinned={pinned} canPin={!this.#phone() && (this.#width === 0 || this.#width >= TREE_FLYOUT_MAX_WIDTH)} mode={mode} loading={this.view.loading} />);
+    mount(view.querySelector(':scope > .changes-tree')!, <ChangesTreeView state={this.tree} list={this.view.list} shown={this.view.range} now={Date.now()} pinned={pinned} canPin={!this.#phone() && (this.#width === 0 || this.#width >= TREE_FLYOUT_MAX_WIDTH)} mode={mode} loading={this.view.loading} committed={showsCommitted()} />);
     this.#revealFolder(view);
 
     const host = view.querySelector<HTMLElement>(':scope > .diff-host')!;

@@ -205,7 +205,8 @@
 .compare-list .scope-item:disabled { opacity: 0.5; cursor: default; }
 .compare-sub { flex: none; color: var(--vscode-descriptionForeground); font-size: 11px; }
 @media (hover: none), (pointer: coarse) { .compare-filter { height: 44px; } }
-.changes-more-menu { left: auto; right: 4px; width: min(260px, calc(100% - 8px)); }
+/* On a phone held sideways its rows pass its height, so it scrolls. */
+.changes-more-menu { left: auto; right: 4px; width: min(260px, calc(100% - 8px)); overflow-y: auto; overscroll-behavior: contain; }
 .changes-more-menu .more-phone { display: none; }
 .file-toggle { display: inline-flex; border: 1px solid var(--vscode-panel-border); border-radius: 4px; overflow: hidden; font-size: 11px; vertical-align: middle; }
 /* The file's own view scrolls (a Markdown preview), or fits (a picture or a PDF). */

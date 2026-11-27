@@ -5,6 +5,8 @@ import { folderEntries, ignoredSet, isIgnored, linkInfo, newTree } from '../src/
 import type { DiffModule } from '../src/diff/types.js';
 import { startPage } from '../src/main.js';
 import type { StackData, StackLink } from '@switchboard/protocol';
+import { fullTime } from '@switchboard/conversation/messageMeta';
+import { keepCommitted, showsCommitted } from '../src/commitDate.js';
 import { drawAtOnce } from './frame.js';
 
 class FakeSource {
@@ -33,9 +35,11 @@ const BASE = sha('0');
 const [C1, C2, C3, FORK] = [sha('1'), sha('2'), sha('3'), sha('f')];
 const NOW = Math.floor(Date.now() / 1000);
 const COMMITS = [
-  { sha: C3, parent: C2, subject: 'query the match pool by exact distance', time: NOW - 3 * 3600 },
-  { sha: C2, parent: C1, subject: 'drop HNSW rebuild job', time: NOW - 4 * 3600 },
-  { sha: C1, parent: BASE, subject: 'add match table', time: NOW - 5 * 3600 },
+  // Rebased an hour ago: its committer date is later than its author date.
+  { sha: C3, parent: C2, subject: 'query the match pool by exact distance', authored: NOW - 3 * 3600, committed: NOW - 3600 },
+  { sha: C2, parent: C1, subject: 'drop HNSW rebuild job', authored: NOW - 4 * 3600, committed: NOW - 4 * 3600 },
+  // The stacked base's commit, amended two hours later.
+  { sha: C1, parent: BASE, subject: 'add match table', authored: NOW - 5 * 3600, committed: NOW - 3 * 3600 },
 ];
 const LIST: ChangesList = {
   scopeGen: 3,
@@ -704,7 +708,7 @@ describe('the Changes tree', () => {
     start();
     await openTab();
     root.querySelector<HTMLElement>('[data-action="changes-more"]')!.click();
-    expect([...root.querySelectorAll('.changes-more-menu .scope-text')].map((one) => one.textContent)).toEqual(['Auto', 'Split', 'Stacked', 'Ignore whitespace', 'Hide viewed files', 'Collapse all', 'Expand all', 'Wrap long lines', 'Refresh']);
+    expect([...root.querySelectorAll('.changes-more-menu .scope-text')].map((one) => one.textContent)).toEqual(['Auto', 'Split', 'Stacked', 'Ignore whitespace', 'Hide viewed files', 'Collapse all', 'Expand all', 'Wrap long lines', 'Refresh', 'Show commit dates as committed']);
 
     root.querySelector<HTMLElement>('[data-action="changes-layout"][data-layout="stacked"]')!.click();
     expect(localStorage.getItem('switchboard.diffLayoutChoice')).toBe('stacked');
@@ -712,6 +716,86 @@ describe('the Changes tree', () => {
     expect(root.querySelector('.changes-more-menu')).toBeNull();
     root.querySelector<HTMLElement>('[data-action="changes-more"]')!.click();
     expect(root.querySelector('[data-action="changes-whitespace"]')!.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('CommitDates_Default_ShowAuthorDatesWithBothDatesInTheTooltip', async () => {
+    start();
+    await openTab();
+
+    const at = (seconds: number) => fullTime(seconds * 1000);
+
+    expect(rows().find(([label]) => label === 'query the match pool by exact distance')![1]).toBe('3 h ago');
+    expect(row('query the match pool by exact distance').querySelector('.tree-row')!.getAttribute('title')).toBe(`${C3}\nquery the match pool by exact distance\nAuthored ${at(NOW - 3 * 3600)} · Committed ${at(NOW - 3600)}`);
+    // Dates that agree are named once.
+    expect(row('drop HNSW rebuild job').querySelector('.tree-row')!.getAttribute('title')).toBe(`${C2}\ndrop HNSW rebuild job\nAuthored ${at(NOW - 4 * 3600)}`);
+    root.querySelector<HTMLElement>('[data-action="changes-more"]')!.click();
+    expect(root.querySelector('[data-action="changes-commit-date"]')!.getAttribute('aria-pressed')).toBe('false');
+    expect(localStorage.getItem('switchboard.commitDate')).toBeNull();
+  });
+
+  it('CommitDatesToggle_Checked_ShowsCommitterDatesEverywhereAndKeepsTheChoiceOnTheDevice', async () => {
+    start();
+    await openTab();
+
+    const at = (seconds: number) => fullTime(seconds * 1000);
+    const compareSub = (label: string) => [...root.querySelectorAll<HTMLElement>('.changes-bar .compare-menu [data-action="tree-compare-pick"]')].find((one) => one.querySelector('.scope-text')!.textContent === label)!.querySelector('.compare-sub')!.textContent;
+    const openCompare = () => {
+      row('drop HNSW rebuild job').querySelector<HTMLElement>('[data-action="tree-menu"]')!.click();
+      tree().querySelector<HTMLElement>('.tree-menu [data-action="tree-compare"]')!.click();
+    };
+
+    openCompare();
+    expect(compareSub('query the match pool by exact distance')).toBe('3333333 · 3 h ago');
+    root.querySelector<HTMLElement>('.changes-bar .compare-menu input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+    root.querySelector<HTMLElement>('[data-action="changes-more"]')!.click();
+    root.querySelector<HTMLElement>('[data-action="changes-commit-date"]')!.click();
+    expect(root.querySelector('.changes-more-menu')).toBeNull();
+    expect(localStorage.getItem('switchboard.commitDate')).toBe('committed');
+    expect(rows().find(([label]) => label === 'query the match pool by exact distance')![1]).toBe('1 h ago');
+    expect(row('query the match pool by exact distance').querySelector('.tree-row')!.getAttribute('title')).toBe(`${C3}\nquery the match pool by exact distance\nCommitted ${at(NOW - 3600)} · Authored ${at(NOW - 3 * 3600)}`);
+    expect(row('drop HNSW rebuild job').querySelector('.tree-row')!.getAttribute('title')).toBe(`${C2}\ndrop HNSW rebuild job\nCommitted ${at(NOW - 4 * 3600)}`);
+    openCompare();
+    expect(compareSub('query the match pool by exact distance')).toBe('3333333 · 1 h ago');
+    root.querySelector<HTMLElement>('.changes-bar .compare-menu input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    root.querySelector<HTMLElement>('[data-action="changes-more"]')!.click();
+    expect(root.querySelector('[data-action="changes-commit-date"]')!.getAttribute('aria-pressed')).toBe('true');
+    root.querySelector<HTMLElement>('[data-action="changes-more"]')!.click();
+
+    // A stacked base's commit follows the choice too.
+    row('200-match-table').querySelector<HTMLElement>('.tree-row')!.click();
+    expect(rows().find(([label]) => label === 'add match table')![1]).toBe('3 h ago');
+    expect(row('add match table').querySelector('.tree-row')!.getAttribute('title')).toBe(`${C1}\nadd match table\nCommitted ${at(NOW - 3 * 3600)} · Authored ${at(NOW - 5 * 3600)}`);
+
+    // Unchecked, author dates again.
+    root.querySelector<HTMLElement>('[data-action="changes-more"]')!.click();
+    root.querySelector<HTMLElement>('[data-action="changes-commit-date"]')!.click();
+    expect(localStorage.getItem('switchboard.commitDate')).toBe('authored');
+    expect(rows().find(([label]) => label === 'query the match pool by exact distance')![1]).toBe('3 h ago');
+    expect(rows().find(([label]) => label === 'add match table')![1]).toBe('5 h ago');
+  });
+
+  it('CommitDatesToggle_StorageRefusesTheWrite_KeepsTheChoiceUntilReload', () => {
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError');
+    });
+
+    try {
+      keepCommitted(true);
+      expect(showsCommitted()).toBe(true);
+      keepCommitted(false);
+      expect(showsCommitted()).toBe(false);
+    } finally {
+      write.mockRestore();
+      keepCommitted(false);
+    }
+  });
+
+  it('CommitDatesToggle_StoredChoice_StartsTheNextPageWithCommitterDates', async () => {
+    localStorage.setItem('switchboard.commitDate', 'committed');
+    start();
+    await openTab();
+    expect(rows().find(([label]) => label === 'query the match pool by exact distance')![1]).toBe('1 h ago');
   });
 
   it('reads the diffs again ignoring whitespace, as a held diff of the other mode is not this one', async () => {

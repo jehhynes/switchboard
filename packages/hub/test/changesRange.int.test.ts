@@ -12,15 +12,30 @@ afterAll(() => removeRepos());
 const gitTimeout = { timeout: process.platform === 'win32' ? 15_000 : 5_000 };
 
 describe('readChanges with a range', gitTimeout, () => {
-  it('ReadChanges_CommitsSinceTheBase_ListsThemNewestFirstWithParentSubjectAndTime', async () => {
+  it('ReadChanges_CommitsSinceTheBase_ListsThemNewestFirstWithParentSubjectAndDates', async () => {
     const { repo, base, first, second } = twoCommits();
     const view = ((await readChanges(repo.root)) as WorktreeChanges).view;
+    const date = (format: string, sha: string) => Number(repo.git('log', '-1', `--format=${format}`, sha).trim());
 
     expect(view.commits).toEqual([
-      { sha: second, parent: first, subject: 'second: more lines', time: Number(repo.git('log', '-1', '--format=%ct', second).trim()) },
-      { sha: first, parent: base, subject: 'work', time: Number(repo.git('log', '-1', '--format=%ct', first).trim()) },
+      { sha: second, parent: first, subject: 'second: more lines', authored: date('%at', second), committed: date('%ct', second), time: date('%ct', second) },
+      { sha: first, parent: base, subject: 'work', authored: date('%at', first), committed: date('%ct', first), time: date('%ct', first) },
     ]);
     expect(view.commitsMore).toBe(false);
+  });
+
+  it('ReadChanges_AmendedCommit_KeepsTheAuthorDateApartFromTheCommitterDate', async () => {
+    const repo = makeRepo({ 'a.txt': 'a\n' });
+    const at = (date: number, ...args: string[]) => execFileSync('git', ['-C', repo.root, ...args], { encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_DATE: `${date} +0000`, GIT_COMMITTER_DATE: `${date} +0000` } });
+
+    repo.write('a.txt', 'b\n');
+    at(1_800_000_000, 'commit', '-qam', 'work: first try');
+    // An amend, as a rebase does, keeps the author date and writes a new committer date.
+    at(1_800_005_400, 'commit', '-q', '--amend', '-m', 'work: amended');
+
+    const view = ((await readChanges(repo.root)) as WorktreeChanges).view;
+
+    expect(view.commits).toEqual([{ sha: repo.git('rev-parse', 'HEAD').trim(), parent: repo.git('rev-parse', 'origin/main').trim(), subject: 'work: amended', authored: 1_800_000_000, committed: 1_800_005_400, time: 1_800_005_400 }]);
   });
 
   it('ReadChanges_OneCommit_ListsOnlyItsFilesHashedInTheCommitAndReadsItsSides', async () => {

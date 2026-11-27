@@ -412,12 +412,17 @@ export interface ChangeRow {
   viewed?: boolean;
 }
 
-/** A commit since the merge base, for the Changes tab's scope menu: its first parent, subject and commit time in seconds. */
+/** A commit since the merge base, for the Changes tab's scope menu: its first parent, subject, and author and committer dates in seconds. */
 export interface CommitInfo {
   sha: string;
   parent: string | null;
   subject: string;
-  time: number;
+  /** git's author date (`%at`), which a rebase, amend or cherry-pick keeps; the page shows it unless set to show the committer date. */
+  authored: number;
+  /** git's committer date (`%ct`), which those rewrite. */
+  committed: number;
+  /** The committer date again, for a page of an earlier build until it reloads; read nothing from it. */
+  time?: number;
 }
 
 /** The `changes` answer. */
@@ -500,7 +505,7 @@ export interface StackData {
   branch: string | null;
   head: string;
   commitIds: string[];
-  /** Each listed commit's first parent, subject and time, and the paths it changes. */
+  /** Each listed commit's first parent, subject and dates, and the paths it changes. */
   infos?: (CommitInfo & { files?: string[] })[];
   more: boolean;
   incomplete: boolean;

@@ -5,7 +5,7 @@
 // opened as a flyout from the bar. Read-only: nothing here writes to git or GitHub.
 import type { ComponentChildren, VNode } from 'preact';
 import type { ChangeRow, ChangesList, CommitInfo, SearchData, StackData, StackLink, TreeData } from '@switchboard/protocol';
-import { fullTime } from '@switchboard/conversation/messageMeta';
+import { commitDates, commitTime } from './commitDate.js';
 import { FileIcon } from './fileIcons.js';
 import { ago } from './render.js';
 
@@ -211,7 +211,7 @@ function MenuButton({ point, state, label }: { point: string; state: TreeState; 
 }
 
 /** A commit's row: subject, age and the diff icon, which shows its whole diff; open, its files, each showing its diff in the commit. */
-function CommitRow({ sha, info, depth, state, now, shown }: { sha: string; info: CommitInfo | undefined; depth: number; state: TreeState; now: number; shown: TreeRange }): VNode | null {
+function CommitRow({ sha, info, depth, state, now, shown, committed }: { sha: string; info: CommitInfo | undefined; depth: number; state: TreeState; now: number; shown: TreeRange; committed: boolean }): VNode | null {
   const subject = info?.subject ?? short(sha);
 
   if (!commitMatches(state, sha, info)) {
@@ -227,7 +227,7 @@ function CommitRow({ sha, info, depth, state, now, shown }: { sha: string; info:
 
   return (
     <>
-      <TreeRow depth={depth} action="tree-toggle" data={{ key: `commit:${sha}`, sha }} open={open} label={subject} sub={info === undefined ? '' : ago(info.time * 1000, now)} title={info === undefined ? sha : `${sha}\n${subject}\n${fullTime(info.time * 1000)}`} selected={chosen} className="commit">
+      <TreeRow depth={depth} action="tree-toggle" data={{ key: `commit:${sha}`, sha }} open={open} label={subject} sub={info === undefined ? '' : ago(commitTime(info, committed), now)} title={info === undefined ? sha : `${sha}\n${subject}\n${commitDates(info, committed)}`} selected={chosen} className="commit">
         <RangeLink range={range} title={`Show the whole diff of ${short(sha)}`} />
         <MenuButton point={sha} state={state} label={short(sha)} />
       </TreeRow>
@@ -295,7 +295,7 @@ export function linkInfo(link: StackLink): string {
 export type TreeMode = 'changes' | 'files';
 
 /** The tree's sections drawn from what has been read; `list` is the list the diffs show. */
-export function ChangesTreeView({ state, list, shown, now, pinned, canPin, mode = 'changes', loading = false }: { state: TreeState; list: ChangesList | null; shown: TreeRange; now: number; pinned: boolean; canPin: boolean; mode?: TreeMode; loading?: boolean }): VNode {
+export function ChangesTreeView({ state, list, shown, now, pinned, canPin, mode = 'changes', loading = false, committed = false }: { state: TreeState; list: ChangesList | null; shown: TreeRange; now: number; pinned: boolean; canPin: boolean; mode?: TreeMode; loading?: boolean; /** Commits show their committer dates rather than their author dates. */ committed?: boolean }): VNode {
   const stack = state.stack;
   // The stack names every commit it groups, past the list's 200 too.
   const commits = new Map<string, CommitInfo & { files?: string[] }>([...(list?.commits ?? []), ...(stack?.infos ?? [])].map((commit) => [commit.sha, commit]));
@@ -331,7 +331,7 @@ export function ChangesTreeView({ state, list, shown, now, pinned, canPin, mode 
       </div>
       <SearchBox state={state} mode={mode} />
       {/* The header and search stay put; everything under them scrolls as one. */}
-      <div class="tree-scroll">{mode === 'files' ? (state.text && state.query.trim() !== '' ? <SearchResults state={state} /> : <Explorer state={state} />) : <Sections state={state} list={list} shown={shown} now={now} commits={commits} />}</div>
+      <div class="tree-scroll">{mode === 'files' ? (state.text && state.query.trim() !== '' ? <SearchResults state={state} /> : <Explorer state={state} />) : <Sections state={state} list={list} shown={shown} now={now} commits={commits} committed={committed} />}</div>
     </div>
   );
 }
@@ -423,7 +423,7 @@ function SearchResults({ state }: { state: TreeState }): VNode {
   );
 }
 
-function Sections({ state, list, shown, now, commits }: { state: TreeState; list: ChangesList | null; shown: TreeRange; now: number; commits: Map<string, CommitInfo & { files?: string[] }> }): VNode {
+function Sections({ state, list, shown, now, commits, committed }: { state: TreeState; list: ChangesList | null; shown: TreeRange; now: number; commits: Map<string, CommitInfo & { files?: string[] }>; committed: boolean }): VNode {
   const stack = state.stack;
   const uncommitted = state.uncommitted;
   const filesOpen = isOpen(state, 'files');
@@ -459,10 +459,10 @@ function Sections({ state, list, shown, now, commits }: { state: TreeState; list
               No commits on this branch yet. They appear here when the session commits.
             </p>
           ) : (
-            own.map((sha) => <CommitRow sha={sha} info={commits.get(sha)} depth={ownDepth} state={state} now={now} shown={shown} />)
+            own.map((sha) => <CommitRow sha={sha} info={commits.get(sha)} depth={ownDepth} state={state} now={now} shown={shown} committed={committed} />)
           )}
           {below.map((link) => (
-            <LinkRows link={link} state={state} now={now} shown={shown} commits={commits} />
+            <LinkRows link={link} state={state} now={now} shown={shown} commits={commits} committed={committed} />
           ))}
           {stack?.incomplete === true ? <p style="--depth: 1" class="tree-note">The stack is incomplete: a base could not be found or measured, so it ends at the default branch.</p> : null}
           {stack?.github.state === 'stale' || stack?.github.state === 'unavailable' ? (
@@ -594,7 +594,7 @@ function AllFiles({ state, dir, depth, all, ignored }: { state: TreeState; dir: 
   );
 }
 
-function LinkRows({ link, state, now, shown, commits }: { link: StackLink; state: TreeState; now: number; shown: TreeRange; commits: Map<string, CommitInfo & { files?: string[] }> }): VNode {
+function LinkRows({ link, state, now, shown, commits, committed }: { link: StackLink; state: TreeState; now: number; shown: TreeRange; commits: Map<string, CommitInfo & { files?: string[] }>; committed: boolean }): VNode {
   const key = `link:${link.name}`;
   // While filtering, a base opens to show its commits that match, as their branch's do.
   const open = link.actions.expand && (state.open.has(key) || (filtering(state) && link.commitIds.some((sha) => commitMatches(state, sha, commits.get(sha)))));
@@ -610,7 +610,7 @@ function LinkRows({ link, state, now, shown, commits }: { link: StackLink; state
           </a>
         )}
       </TreeRow>
-      {open ? link.commitIds.map((sha) => <CommitRow sha={sha} info={commits.get(sha)} depth={2} state={state} now={now} shown={shown} />) : null}
+      {open ? link.commitIds.map((sha) => <CommitRow sha={sha} info={commits.get(sha)} depth={2} state={state} now={now} shown={shown} committed={committed} />) : null}
       {open && link.more ? (
         <p class="tree-note" style="--depth: 2">
           Only the latest {link.commitIds.length} commits are listed.

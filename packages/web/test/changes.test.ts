@@ -33,8 +33,8 @@ const FIRST = '1111111111111111111111111111111111111111';
 const HEAD = 'fedcba9876543210fedcba9876543210fedcba98';
 /** The commits since the base, newest first: HEAD, then the first, an hour and two hours ago. */
 const COMMITS = [
-  { sha: HEAD, parent: FIRST, subject: 'Second change', time: Math.floor(Date.now() / 1000) - 3600 },
-  { sha: FIRST, parent: BASE, subject: 'First change', time: Math.floor(Date.now() / 1000) - 7200 },
+  { sha: HEAD, parent: FIRST, subject: 'Second change', authored: Math.floor(Date.now() / 1000) - 3600, committed: Math.floor(Date.now() / 1000) - 3600 },
+  { sha: FIRST, parent: BASE, subject: 'First change', authored: Math.floor(Date.now() / 1000) - 7200, committed: Math.floor(Date.now() / 1000) - 7200 },
 ];
 
 const LIST: ChangesList = {

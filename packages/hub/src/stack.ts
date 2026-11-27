@@ -54,8 +54,8 @@ export interface StackView {
   head: string;
   /** The current branch's own commits, from its nearest base's fork point, newest first. */
   commitIds: string[];
-  /** Each listed commit's first parent, subject and time, for commits past the `changes` answer's 200, and the paths it changes, at most {@link MAX_INFO_FILES}, so the tree's filter finds a commit by a file. */
-  infos: { sha: string; parent: string | null; subject: string; time: number; files: string[] }[];
+  /** Each listed commit's first parent, subject and author and committer dates, for commits past the `changes` answer's 200, and the paths it changes, at most {@link MAX_INFO_FILES}, so the tree's filter finds a commit by a file. */
+  infos: { sha: string; parent: string | null; subject: string; authored: number; committed: number; time: number; files: string[] }[];
   more: boolean;
   /** A link was unknown, could not be measured, or the chain hit its bound. */
   incomplete: boolean;
@@ -739,7 +739,7 @@ export class PageStack {
     const own = await this.#ids(repo, below.find((link) => link.forkPoint !== null)?.forkPoint ?? repo.base, 'HEAD');
     const listed = [...own.ids, ...below.flatMap((link) => link.commitIds)];
     // Each record starts with a record separator: the commit's fields, then the paths it changes, NUL-separated.
-    const logged = listed.length === 0 ? null : await git(['log', '-z', '--no-walk=unsorted', '--no-color', '--no-show-signature', '--no-renames', '--diff-merges=first-parent', '--name-only', '--format=%x1e%H%x1f%P%x1f%ct%x1f%s', ...listed, '--'], repo.root);
+    const logged = listed.length === 0 ? null : await git(['log', '-z', '--no-walk=unsorted', '--no-color', '--no-show-signature', '--no-renames', '--diff-merges=first-parent', '--name-only', '--format=%x1e%H%x1f%P%x1f%at%x1f%ct%x1f%s', ...listed, '--'], repo.root);
     const infos =
       logged === null || logged.code !== 0
         ? []
@@ -748,10 +748,10 @@ export class PageStack {
             .filter((record) => record.trim() !== '')
             .map((record) => {
               const [head = '', ...paths] = record.split('\0');
-              const [sha = '', parents = '', time = '0', ...subject] = head.split('\x1f');
+              const [sha = '', parents = '', authored = '0', committed = '0', ...subject] = head.split('\x1f');
               const files = paths.map((path) => path.replace(/^\n/, '')).filter((path) => path !== '');
 
-              return { sha, parent: parents.split(' ')[0] || null, subject: subject.join('\x1f'), time: Number(time), files: files.slice(0, MAX_INFO_FILES) };
+              return { sha, parent: parents.split(' ')[0] || null, subject: subject.join('\x1f'), authored: Number(authored), committed: Number(committed), time: Number(committed), files: files.slice(0, MAX_INFO_FILES) };
             });
     const [behindMain, fetched] = await Promise.all([
       repo.baseRef === null ? null : git(['rev-list', '--count', `HEAD..${repo.baseRef}`, '--'], repo.root),

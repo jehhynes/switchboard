@@ -45,11 +45,14 @@ export interface ChangeRange {
 
 export const ALL_CHANGES: ChangeRange = { from: 'base', to: 'worktree' };
 
-/** A commit since the merge base, for the page's scope menu: its first parent, subject and commit time in seconds. */
+/** A commit since the merge base, for the page's scope menu: its first parent, subject, and author (`%at`) and committer (`%ct`) dates in seconds. */
 export interface CommitInfo {
   sha: string;
   parent: string | null;
   subject: string;
+  authored: number;
+  committed: number;
+  /** The committer date again, which a page of an earlier build reads until it reloads. */
   time: number;
 }
 
@@ -427,16 +430,16 @@ async function mergeBase(root: string, bases: readonly string[], git: Git): Prom
 
 /** The commits from `base` to HEAD, newest first, at most {@link MAX_COMMITS}; null when git cannot read them. */
 async function readCommits(root: string, base: string, git: Git): Promise<{ commits: CommitInfo[]; more: boolean } | null> {
-  const log = await git(['log', '-z', '--no-color', '--no-show-signature', '--format=%H%x1f%P%x1f%ct%x1f%s', `--max-count=${MAX_COMMITS + 1}`, `${base}..HEAD`, '--'], root);
+  const log = await git(['log', '-z', '--no-color', '--no-show-signature', '--format=%H%x1f%P%x1f%at%x1f%ct%x1f%s', `--max-count=${MAX_COMMITS + 1}`, `${base}..HEAD`, '--'], root);
 
   if (log.code !== 0) {
     return null;
   }
 
   const commits = fields(log.stdout).map((entry) => {
-    const [sha = '', parents = '', time = '0', ...subject] = entry.replace(/^\n/, '').split('\x1f');
+    const [sha = '', parents = '', authored = '0', committed = '0', ...subject] = entry.replace(/^\n/, '').split('\x1f');
 
-    return { sha, parent: parents.split(' ')[0] || null, subject: subject.join('\x1f'), time: Number(time) };
+    return { sha, parent: parents.split(' ')[0] || null, subject: subject.join('\x1f'), authored: Number(authored), committed: Number(committed), time: Number(committed) };
   });
 
   return { commits: commits.slice(0, MAX_COMMITS), more: commits.length > MAX_COMMITS };

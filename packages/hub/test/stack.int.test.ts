@@ -100,6 +100,27 @@ describe('PageStack from the reflog', gitTimeout, () => {
     expect(merge?.files).toEqual(['s1.txt']);
   });
 
+  it("gives each commit's author and committer dates, apart once a rebase rewrites the committer date", async () => {
+    const repo = stackRepo();
+
+    repo.commit('w1');
+    repo.commit('w2');
+
+    const before = await view(page(repo.root).stack);
+
+    // A rebase that rewrites the commits gives them the clock's later committer date and keeps their author dates.
+    repo.git('rebase', '-q', '--force-rebase', 'origin/main');
+    expect(before.infos.map((one) => [one.subject, one.authored === one.committed])).toEqual([['w2', true], ['w1', true]]);
+
+    const after = await view(page(repo.root).stack, true);
+
+    expect(after.infos.map((one) => [one.subject, one.authored])).toEqual(before.infos.map((one) => [one.subject, one.authored]));
+    expect(after.infos.every((one) => one.committed > one.authored)).toBe(true);
+    // A page of an earlier build reads `time`, the committer date, until it reloads.
+    expect(after.infos.every((one) => one.time === one.committed)).toBe(true);
+    expect(after.infos.map((one) => one.committed)).toEqual([Number(repo.git('log', '-1', '--format=%ct', 'HEAD').trim()), Number(repo.git('log', '-1', '--format=%ct', 'HEAD~1').trim())]);
+  });
+
   it('follows branches created from other branches, measuring each against HEAD', async () => {
     const repo = stackRepo();
 

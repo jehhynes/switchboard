@@ -34,7 +34,7 @@ const LIST: ChangesList = {
   head: HEAD,
   from: 'base',
   to: 'worktree',
-  commits: [{ sha: HEAD, parent: BASE, subject: 'Change', time: 1 }],
+  commits: [{ sha: HEAD, parent: BASE, subject: 'Change', authored: 1, committed: 1 }],
   commitsMore: false,
   rows: [
     { path: 'docs/a.md', status: 'M', stages: ['working'], additions: 1, deletions: 0, binary: false, hash: 'h-a', viewed: false },
