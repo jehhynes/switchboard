@@ -257,8 +257,9 @@ function detailsHtml(details: ContextDetails, now: number): string {
     limit === null
       ? ''
       : `<div class="context-line">${limit.kind === 'throttle' ? 'Rate limited' : 'Usage limit reached'} · ${limit.resetsAt === null ? 'reset time unknown' : `resets ${escape(clockTime(limit.resetsAt, now))}`}</div>`;
-  const windows = (details.windows ?? []).map((window) =>
-    row(windowName(window), `${Math.round(window.usedPercent)}%${window.resetsAt === null ? '' : ` · resets ${clockTime(window.resetsAt, now)}`}`),
+  // The reset time has a row of its own, since a dated one beside the window's name and share does not fit the menu on one line.
+  const windows = (details.windows ?? []).map(
+    (window) => row(windowName(window), `${Math.round(window.usedPercent)}%`) + (window.resetsAt === null ? '' : row('Resets', clockTime(window.resetsAt, now), true)),
   );
   const note =
     windows.length > 0 || limit !== null

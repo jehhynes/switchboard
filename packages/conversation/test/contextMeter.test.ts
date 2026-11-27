@@ -151,9 +151,13 @@ describe('renderContextMeter', () => {
         'Effort: medium',
         'Last compacted: by itself, 2 h ago',
         'Usage limit',
-        '5-hour: 79% · resets 9:50 PM',
-        'Weekly (Fable): 0% · resets Sat, Nov 28, 3:00 AM',
+        '5-hour: 79%',
+        'Resets: 9:50 PM',
+        'Weekly (Fable): 0%',
+        'Resets: Sat, Nov 28, 3:00 AM',
       ]);
+      // A window with no reset time has no Resets row.
+      expect(text(renderContextMeter(null, 'open', false, { state: 'shown', details: { ...claude, windows: [{ minutes: 300, limit: null, usedPercent: 79, resetsAt: null }] } }, now)).slice(-2)).toEqual(['Usage limit', '5-hour: 79%']);
     });
 
     it("leaves out each row without data, says a Codex thread's usage has not come yet, and shows the limit the session is stopped at", () => {

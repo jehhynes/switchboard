@@ -190,7 +190,13 @@ const longTitle = 'Call Center dialer stops receiving incoming calls when its re
 const scope = open && !loading ? { kind: 'page', key: 'k', folder: 'D:/w', title: longTitle, scopeGen: 3, conversations: [{ workItemId: 1, title: longTitle, primary: true, sessionId: 's', state: 'idle', conversation: 'full', unread: 0, sessionTitle: 'switchboard · dev:build · github 1' }], workItemId: 1, cwd: 'D:/w', sessionId: 's' } : null;
 const session = { id: 's', title: 'Task session s', state: 'idle', waitingFor: null, launch: 'L', current: true, conversation: 'full', reason: null, ...(view === 'limited' ? { limit: { until: now + 5_400_000, retry: false } } : {}), ...(view === 'context' ? { provider: 'claude', context: { used: 120000, window: 200000, compactAt: 167000, model: 'claude-opus-4-5' } } : { context: { used: 618_000, window: 1_000_000, compactAt: 967_000, model: 'claude-opus-5-5' } }) };
 // The context meter's details (architecture.md § Context meter), as the hub answers them for a Claude session.
-const contextDetails = { provider: 'claude', model: 'claude-opus-5-5', effort: 'medium', parts: { cacheRead: 598_000, cacheWrite: 14_000, input: 2_000, output: 4_000, reasoning: null }, compacted: { at: Date.now() - 7_200_000, trigger: 'auto' }, windows: [{ minutes: 300, limit: null, usedPercent: 79, resetsAt: Date.now() + 9_000_000 }, { minutes: 10_080, limit: null, usedPercent: 63, resetsAt: Date.now() + 120_000_000 }, { minutes: 10_080, limit: 'Fable', usedPercent: 4, resetsAt: Date.now() + 120_000_000 }], limit: null };
+// Reset times in each of timeAt's forms, whatever the day the check runs: today's (11:59 PM), another day's this year (Wednesday, September 30, or
+// the 29th on that day) and next year's, the longest.
+const today = new Date();
+const resetToday = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59).getTime();
+const resetThisYear = new Date(today.getFullYear(), 8, today.getMonth() === 8 && today.getDate() === 30 ? 29 : 30, 3, 32).getTime();
+const resetNextYear = new Date(today.getFullYear() + 1, 8, 30, 3, 32).getTime();
+const contextDetails = { provider: 'claude', model: 'claude-opus-5-5', effort: 'medium', parts: { cacheRead: 598_000, cacheWrite: 14_000, input: 2_000, output: 4_000, reasoning: null }, compacted: { at: Date.now() - 7_200_000, trigger: 'auto' }, windows: [{ minutes: 300, limit: null, usedPercent: 79, resetsAt: resetToday }, { minutes: 10_080, limit: null, usedPercent: 63, resetsAt: resetThisYear }, { minutes: 10_080, limit: 'Fable', usedPercent: 4, resetsAt: resetNextYear }], limit: null };
 const items = [];
 for (let i = 0; view !== 'empty' && open && !loading && i < 30; i++) {
   items.push({ type: 'message', id: 'm' + i, sessionId: 's', workItemId: 1, at: now - 100000 + i * 2000, ord: i * 2, provisional: false, withdrawn: false, origin: 'typed', text: 'Message ' + i, delivery: 'sent', error: null });
